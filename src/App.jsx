@@ -1,0 +1,1584 @@
+import React, { useState, useMemo } from "react";
+import {
+  Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus,
+  ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
+  Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
+  Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
+  ThumbsUp, ThumbsDown, Pencil, MessageSquare,
+  FolderOpen, Upload, FilePlus, PartyPopper,
+  Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, ClipboardCheck,
+} from "lucide-react";
+import { downloadDepartmentReport } from "./report.js";
+
+/* ------------------------------------------------------------------ */
+/*  Working title: THE DAYROOM  (name not final — easy to swap)        */
+/*  Volunteer Fire & EMS — Training, Recruitment & Operations          */
+/* ------------------------------------------------------------------ */
+const APP = "THE DAYROOM";
+
+const ROLES = ["Platform Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
+const LEADERSHIP = ["Platform Admin", "Department Admin", "Board Member", "Training Officer"];
+const isLeader = (role) => LEADERSHIP.includes(role);
+const canAssign = (role) => role === "Platform Admin" || role === "Department Admin";
+
+const TRACKS = {
+  Fire:        { label: "Fire",        accent: "#B11E2A", Icon: Flame },
+  EMS:         { label: "EMS",         accent: "#1F4E79", Icon: HeartPulse },
+  Leadership:  { label: "Leadership",  accent: "#3A4750", Icon: GraduationCap },
+  Operations:  { label: "Operations",  accent: "#54506B", Icon: Briefcase },
+};
+
+const DISCLAIMER =
+  "For training, discussion, and planning only. Your department is responsible for compliance with local protocols, medical direction, state requirements, agency policy, and applicable law. This platform does not provide medical direction, legal advice, or certification.";
+
+/* ---- training roadmap (department memory / gap detection) ---------- */
+const ROADMAP = [
+  { topic: "Mayday Operations",     track: "Fire", months: 18, target: 6 },
+  { topic: "Pediatric Emergencies", track: "EMS",  months: 9,  target: 6 },
+  { topic: "Search & Rescue",       track: "Fire", months: 6,  target: 6 },
+  { topic: "Stroke Recognition",    track: "EMS",  months: 5,  target: 6 },
+  { topic: "Water Supply",          track: "Fire", months: 3,  target: 6 },
+  { topic: "Vehicle Extrication",   track: "Fire", months: 2,  target: 6 },
+];
+function statusOf(m, t) {
+  if (m >= t * 2) return { label: "OVERDUE", color: "#B11E2A" };
+  if (m >= t) return { label: "DUE NOW", color: "#E0A100" };
+  return { label: "CURRENT", color: "#2E7D52" };
+}
+
+/* ---- library ------------------------------------------------------- */
+const SEED = [
+  { id: "fire-203", code: "FIRE-203", track: "Fire", title: "Primary Search & Rescue", level: "Intermediate", time: "90 min", updated: "May 2026",
+    objective: "Crews conduct a coordinated primary search with crew integrity, accountability, and a charged-line tie-in where required.",
+    equipment: ["Full PPE / SCBA", "Search rope / TIC if available", "Accountability board"],
+    instructorGuide: "Live fire is NOT part of this drill. Run cold or in a smoke-free prop. A qualified safety officer must be assigned for any heat evolution.",
+    steps: [{ t: "Briefing & accountability", d: "Set crew assignments and the accountability system.", m: 15 }, { t: "Search patterns", d: "Right/left-hand search, maintaining crew contact.", m: 20 }, { t: "Evolution", d: "Two-in/two-out, oriented search of the prop.", m: 35 }, { t: "Debrief", d: "Communication, air management, accountability gaps.", m: 20 }],
+    scenario: "Reported occupant in a single-story residence, moderate (simulated) smoke. Conduct primary search.",
+    discussion: ["Where did crew integrity break down?", "How was air management communicated?"],
+    safety: ["Assign a safety officer", "No live fire in this drill", "Confirm SCBA checks before entry", "RIT/two-out in place"],
+    evaluation: ["Maintains crew contact throughout", "Communicates air status", "Follows accountability system"],
+    debrief: ["Did everyone know who was where?", "What would you change on a real fireground?"] },
+  { id: "fire-118", code: "FIRE-118", track: "Fire", title: "Mayday Operations & Self-Survival", level: "Intermediate", time: "75 min", updated: "Mar 2026",
+    objective: "Members declare a Mayday correctly, perform self-survival actions, and practice the LUNAR sequence.",
+    equipment: ["Full PPE / SCBA", "Radios", "Reduced-profile prop"],
+    instructorGuide: "Keep it low-stress and repeatable. The goal is muscle memory, not a gauntlet. No fire.",
+    steps: [{ t: "Why Mayday early", d: "Discuss hesitation and the cost of delay.", m: 15 }, { t: "Declaration drill", d: "Radio Mayday with LUNAR information.", m: 20 }, { t: "Self-survival", d: "Reduced profile, SCBA emergency procedures.", m: 25 }, { t: "Debrief", d: "What made declaring hard?", m: 15 }],
+    scenario: "Firefighter disoriented and low on air during search. Declare and self-rescue.",
+    discussion: ["Why do firefighters delay calling Mayday?", "What does command need to hear first?"],
+    safety: ["Assign a safety officer", "No live fire", "Medical standby for strenuous evolutions"],
+    evaluation: ["Declares Mayday without prompting", "Transmits LUNAR clearly", "Performs self-survival steps"],
+    debrief: ["Did you hesitate? Why?", "Was your transmission clear under stress?"] },
+  { id: "ems-114", code: "EMS-114", track: "EMS", title: "Stroke Recognition (BE-FAST)", level: "All levels", time: "60 min", updated: "May 2026",
+    objective: "Members identify stroke signs using BE-FAST, document last-known-well time, and select the correct destination per regional protocol.",
+    equipment: ["Stroke scale cards", "Simulated patient", "Run report forms"],
+    instructorGuide: "Open with why time-to-treatment drives outcomes. Run two short scenarios, then debrief documentation.",
+    steps: [{ t: "Briefing", d: "Field-level stroke pathophysiology and why last-known-well matters.", m: 10 }, { t: "BE-FAST walkthrough", d: "Demonstrate each element; practice on a volunteer.", m: 15 }, { t: "Scenario A", d: "Posterior stroke presenting as dizziness.", m: 12 }, { t: "Scenario B", d: "Facial droop with uncertain onset.", m: 12 }, { t: "Debrief", d: "Documentation and destination decisions.", m: 11 }],
+    scenario: "Family reports a 71-year-old 'not acting right' since waking. Establish last-known-well and assess.",
+    discussion: ["What complicates establishing last-known-well?", "When does your region bypass to a stroke center?"],
+    safety: ["Confirm scene safety", "Standard BSI precautions"],
+    evaluation: ["Completes BE-FAST in order", "Documents last-known-well", "States correct destination"],
+    debrief: ["What slowed your assessment?", "Was destination selection clear?"] },
+  { id: "ems-203", code: "EMS-203", track: "EMS", title: "Pediatric Emergencies — Assessment Triangle", level: "All levels", time: "75 min", updated: "Apr 2026",
+    objective: "Members apply the Pediatric Assessment Triangle, size equipment correctly, and adjust communication for caregivers.",
+    equipment: ["Length-based tape", "Pediatric BVM", "Sim doll if available"],
+    instructorGuide: "Emphasize the from-the-doorway impression before touching the child. Practice sizing under time pressure.",
+    steps: [{ t: "PAT overview", d: "Appearance, work of breathing, circulation to skin.", m: 15 }, { t: "Equipment sizing", d: "Length-based tape drills, repeat for speed.", m: 20 }, { t: "Scenario", d: "Febrile seizure with anxious caregiver.", m: 20 }, { t: "Debrief", d: "Caregiver communication and transport.", m: 20 }],
+    scenario: "2-year-old post-seizure, now postictal. Caregiver is panicking.",
+    discussion: ["How does caregiver anxiety affect your assessment?", "When is rapid transport warranted?"],
+    safety: ["Scene safety", "BSI precautions", "Keep caregiver involved to reduce child distress"],
+    evaluation: ["Forms doorway impression first", "Sizes equipment correctly", "Communicates clearly"],
+    debrief: ["What was hardest under time pressure?", "Did you size gear right the first try?"] },
+  { id: "lead-140", code: "LEAD-140", track: "Leadership", title: "Volunteer Retention — Stay Conversations", level: "Officers", time: "60 min", updated: "Apr 2026",
+    objective: "Officers run a structured 'stay interview' and identify the top three drivers pushing members out.",
+    equipment: ["Stay-interview question sheet", "Whiteboard"],
+    instructorGuide: "Frame retention as cheaper than recruitment. Role-play the conversation; it's harder than it looks.",
+    steps: [{ t: "The cost of turnover", d: "What it takes to replace a trained member.", m: 10 }, { t: "Stay-interview structure", d: "Five questions that surface real friction.", m: 15 }, { t: "Role-play", d: "Pairs practice both sides.", m: 20 }, { t: "Action planning", d: "Each officer commits to two conversations.", m: 15 }],
+    scenario: "A reliable five-year member has quietly stopped showing up. Re-engage without guilt-tripping.",
+    discussion: ["What pushes good members out?", "Do you lose people in year one or year five?"],
+    safety: ["Keep conversations confidential and judgment-free"],
+    evaluation: ["Asks open questions", "Listens more than talks", "Leaves with a follow-up"],
+    debrief: ["What surprised you?", "Which driver shows up most here?"] },
+  { id: "ops-120", code: "OPS-120", track: "Operations", title: "Run It Like a Business — Annual Operating Plan", level: "Chiefs & Admin", time: "75 min", updated: "Jun 2026",
+    objective: "Leadership builds a one-page operating plan: budget, funding sources, staffing targets, and key metrics — mission-first, run with business discipline.",
+    equipment: ["Operating-plan template", "Prior-year budget", "Call volume data"],
+    instructorGuide: "Not about going corporate — about clarity: where money comes from, where people come from, and how you know it's working.",
+    steps: [{ t: "Money in, money out", d: "Map funding sources against costs.", m: 20 }, { t: "People plan", d: "Set staffing and a recruitment/retention number.", m: 20 }, { t: "Pick 3 metrics", d: "Three numbers leadership reviews monthly.", m: 15 }, { t: "Reporting cadence", d: "What the board / municipality sees, and when.", m: 20 }],
+    scenario: "The municipality asks for a one-page plan justifying next year's funding. Build it.",
+    discussion: ["What single number best shows your department is healthy?", "Where is funding most fragile?"],
+    safety: ["Keep financial and personnel records per agency policy and law"],
+    evaluation: ["Identifies all funding sources", "Sets staffing targets", "Names three review metrics"],
+    debrief: ["Where's your biggest financial risk?", "Who owns this plan after today?"] },
+];
+
+const ACTIVITY = [
+  { code: "OPS-120", who: "Chief Reyes", action: "downloaded", when: "08:42" },
+  { code: "EMS-114", who: "T/O Daniels", action: "assigned to crew", when: "07:15" },
+  { code: "FIRE-118", who: "Asst. Chief Okafor", action: "saved", when: "Yesterday" },
+];
+
+const NAV = [
+  { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
+  { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
+  { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Platform Admin", "Department Admin", "Training Officer"], premium: true },
+  { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
+  { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
+  { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
+  { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
+  { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
+  { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
+  { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
+  { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Platform Admin"] },
+];
+
+/* ================================================================== */
+export default function App() {
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [role, setRole] = useState("Training Officer");
+  const [screen, setScreen] = useState("dashboard");
+  const [packetId, setPacketId] = useState(null);
+  const [drawer, setDrawer] = useState(false);
+  const [library, setLibrary] = useState(SEED);
+  const [requests, setRequests] = useState([]);
+  const [feedback, setFeedback] = useState([]);
+  const [members, setMembers] = useState(MEMBERS);
+  const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
+  const S = baseStyles();
+
+  function go(k) { setScreen(k); setPacketId(null); setDrawer(false); }
+  function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
+  const visibleNav = NAV.filter((n) => n.roles.includes(role));
+  const packet = library.find((p) => p.id === packetId);
+
+  if (!loggedIn) return <Login S={S} role={role} setRole={setRole} onEnter={() => setLoggedIn(true)} />;
+
+  return (
+    <div style={S.app}>
+      <Fonts />
+      {drawer && <div style={S.scrim} onClick={() => setDrawer(false)} />}
+      <aside className={`dr-side${drawer ? " open" : ""}`} style={S.sidebar}>
+        <div style={S.brandRow}>
+          <Logo />
+          <div>
+            <div style={S.brandName}>{APP}</div>
+            <div style={S.brandSub}>WORKING TITLE</div>
+          </div>
+        </div>
+        <nav style={S.nav}>
+          {visibleNav.map((n) => {
+            const active = screen === n.key || (screen === "packet" && n.key === "library");
+            return (
+              <button key={n.key} onClick={() => go(n.key)} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
+                <n.Icon size={18} /><span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
+                {n.premium && <span style={S.premiumTag}>AI</span>}
+              </button>
+            );
+          })}
+        </nav>
+        <div style={S.deptCard}>
+          <div style={S.deptLabel}>DEPARTMENT</div>
+          <div style={S.deptName}>North Hood Country VFD</div>
+          <div style={S.deptMeta}>Premium · 14 members</div>
+        </div>
+      </aside>
+
+      <div style={S.main}>
+        <header style={S.topbar}>
+          <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
+          <div style={S.chevronBand} />
+          <div style={S.viewAs}>
+            <span style={S.viewAsLabel}>View as</span>
+            <select value={role} onChange={(e) => { setRole(e.target.value); setScreen("dashboard"); }} style={S.select}>
+              {ROLES.map((r) => <option key={r}>{r}</option>)}
+            </select>
+            <button style={S.logout} onClick={() => setLoggedIn(false)} aria-label="Sign out"><LogOut size={16} /></button>
+          </div>
+        </header>
+
+        <main style={S.content}>
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} />}
+          {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
+          {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
+          {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
+          {screen === "documents" && <Documents S={S} role={role} />}
+          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} />}
+          {screen === "apparatus" && <Apparatus S={S} role={role} />}
+          {screen === "recruit" && <Recruitment S={S} />}
+          {screen === "visibility" && <Visibility S={S} />}
+          {screen === "funding" && <Funding S={S} />}
+          {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
+          {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Login ---------------- */
+function Login({ S, role, setRole, onEnter }) {
+  return (
+    <div style={S.loginWrap}>
+      <Fonts />
+      <div style={S.loginChevron} />
+      <div style={S.loginCard}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+          <Logo /><div style={S.brandNameLg}>{APP}</div>
+        </div>
+        <p style={S.loginTag}>Training, recruitment, and operations support for volunteer fire and EMS — built by people who've stood in the bay.</p>
+        <label style={S.field}><span style={S.fieldLabel}>Department email</span><input style={S.input} defaultValue="to@cedarhollowvfd.org" /></label>
+        <label style={S.field}><span style={S.fieldLabel}>Password</span><input style={S.input} type="password" defaultValue="demo" /></label>
+        <label style={S.field}><span style={S.fieldLabel}>Sign in as (demo)</span>
+          <select style={S.input} value={role} onChange={(e) => setRole(e.target.value)}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
+        </label>
+        <button style={S.primaryBtn} onClick={onEnter}>Sign in</button>
+        <p style={S.loginNote}>Prototype — any credentials work. Switch roles anytime with "View as."</p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Dashboard ---------------- */
+function Dashboard({ S, role, members, library, openPacket, go }) {
+  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} />;
+  const featured = library.find((p) => p.id === "fire-118");
+  const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
+  const next = sorted[0];
+  const firstName = role === "Member" ? "Firefighter" : "Chief";
+  return (
+    <div>
+      <PageHead S={S} eyebrow="THIS WATCH" title={`Good morning, ${firstName}.`} sub="Here's where your crew stands this month." />
+
+      <div style={S.statRow}>
+        <Stat S={S} n="6" label="Topics tracked" />
+        <Stat S={S} n="2" label="Overdue for training" warn />
+        <Stat S={S} n="9" label="Packets in library" />
+        <Stat S={S} n="14" label="Active members" />
+      </div>
+
+      {/* Training roadmap — department memory / gap detection */}
+      <div style={S.roadCard}>
+        <div style={S.roadHead}>
+          <div><div style={S.cardEyebrow}><TrendingUp size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING ROADMAP</div>
+            <h3 style={S.roadTitle}>What your crew hasn't trained lately</h3></div>
+        </div>
+        <div style={S.roadRecommend}>
+          <Sparkles size={16} color="#E0A100" />
+          <span>Recommended next: <strong>{next.topic}</strong> — last trained {next.months} months ago.</span>
+        </div>
+        <div style={S.roadList}>
+          {sorted.map((r) => {
+            const st = statusOf(r.months, r.target); const T = TRACKS[r.track];
+            return (
+              <div key={r.topic} style={S.roadRow}>
+                <T.Icon size={15} color={T.accent} style={{ flexShrink: 0 }} />
+                <span style={S.roadTopic}>{r.topic}</span>
+                <span style={S.roadAgo}>{r.months} mo ago</span>
+                <span style={{ ...S.roadChip, color: st.color, borderColor: `${st.color}55`, background: `${st.color}12` }}>{st.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <QuickAccess S={S} role={role} go={go} />
+
+      <div style={S.dashGrid}>
+        <div style={S.featCard}>
+          <div style={S.featStripe} />
+          <div style={S.featInner}>
+            <div style={S.cardEyebrow}>BUILD THIS WEEK</div>
+            <h3 style={S.featTitle}>{featured.title}</h3>
+            <p style={S.featObj}>{featured.objective}</p>
+            <div style={S.metaRow}><Meta Icon={Clock} text={featured.time} /><Meta Icon={Users} text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
+            <button style={S.primaryBtn} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
+          </div>
+        </div>
+        <div style={S.logCard}>
+          <div style={S.cardEyebrow}>STATION LOG</div>
+          {ACTIVITY.map((a, i) => (
+            <div key={i} style={S.logRow}><span style={S.logTime}>{a.when}</span>
+              <span style={S.logText}><strong>{a.who}</strong> {a.action} <span style={S.logCode}>{a.code}</span></span></div>
+          ))}
+          <button style={S.ghostBtn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Quick access (home page doorways) ---------------- */
+const QUICK = {
+  library: { accent: "#1F4E79", blurb: "Ready-to-run packets for Fire, EMS, Leadership & Operations." },
+  ai:      { accent: "#54506B", blurb: "Describe your crew — get a full drill plan in seconds." },
+  documents: { accent: "#1F4E79", blurb: "Upload your SOPs and guidelines, or draft new ones with AI." },
+  roster: { accent: "#1F4E79", blurb: "Members, certifications, attendance, and the chief's reports." },
+  apparatus: { accent: "#B11E2A", blurb: "Log apparatus and equipment checks — know your rigs are ready." },
+  recruit: { accent: "#0E6B62", blurb: "Build a recruitment plan and find members on and off social." },
+  visibility: { accent: "#54506B", blurb: "A content calendar and ideas to keep your department seen." },
+  funding: { accent: "#9A6B12", blurb: "Plan fundraisers, draft appeals, and line up sponsors." },
+  request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
+  admin:   { accent: "#B11E2A", blurb: "Publish new monthly materials to the library." },
+};
+function QuickAccess({ S, role, go }) {
+  const items = NAV.filter((n) => n.key !== "dashboard" && n.roles.includes(role));
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={S.cardEyebrow}>EXPLORE THE PLATFORM</div>
+      <div style={S.quickGrid}>
+        {items.map((n) => {
+          const q = QUICK[n.key] || {};
+          return (
+            <button key={n.key} style={S.quickCard} onClick={() => go(n.key)}>
+              <span style={{ ...S.quickIcon, background: q.accent }}><n.Icon size={18} color="#fff" /></span>
+              <div style={{ flex: 1 }}>
+                <div style={S.quickTitle}>{n.label}{n.premium && <span style={S.quickAi}>AI</span>}</div>
+                <div style={S.quickBlurb}>{q.blurb}</div>
+              </div>
+              <ChevronRight size={16} color="#9AA1A9" style={{ flexShrink: 0, alignSelf: "center" }} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Member dashboard (personal view) ---------------- */
+function MemberDashboard({ S, role, members, go }) {
+  const me = members.find((m) => m.id === 4) || members[0];
+  return (
+    <div>
+      <PageHead S={S} eyebrow="MY STATION" title={`Welcome back, ${me.name.split(" ")[0]}.`} sub="Here's exactly where you stand — and what's coming up for you." />
+      <MyCerts S={S} me={me} />
+      <QuickAccess S={S} role={role} go={go} />
+    </div>
+  );
+}
+function MyCerts({ S, me }) {
+  const certs = me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
+  const expired = certs.filter((c) => c.st.rank === 0);
+  const expiring = certs.filter((c) => c.st.rank === 1);
+  const urgent = certs.filter((c) => c.st.rank < 2).map((c) => c.name);
+  const classes = CLASSES.map((cl) => ({ ...cl, forYou: cl.covers.some((n) => urgent.includes(n)) })).sort((a, b) => (b.forYou ? 1 : 0) - (a.forYou ? 1 : 0));
+  let al;
+  if (expired.length) al = { c: "#B11E2A", t: `Action needed: your ${expired[0].name} has expired — renew as soon as you can.` };
+  else if (expiring.length) al = { c: "#9A6B12", t: `Heads up: your ${expiring[0].name} ${expPhrase(expiring[0].exp)}.` };
+  else al = { c: "#2E7D52", t: "You're all current — nice work." };
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: "flex", gap: 9, alignItems: "center", background: `${al.c}12`, border: `1px solid ${al.c}44`, borderLeft: `4px solid ${al.c}`, borderRadius: 10, padding: "12px 15px", marginBottom: 16, fontSize: 14, color: "#2B3138", fontWeight: 500 }}>
+        <AlertTriangle size={16} color={al.c} style={{ flexShrink: 0 }} /> {al.t}
+      </div>
+      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MY CERTIFICATIONS</div>
+      <div style={S.opCard}>
+        {certs.map((c, i) => (
+          <div key={i} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom }}>
+            <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+            <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+          </div>
+        ))}
+      </div>
+      <div style={{ ...S.cardEyebrow, marginTop: 20 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPCOMING CLASSES</div>
+      <div style={S.opCard}>
+        {classes.map((cl, i) => (
+          <div key={i} style={{ ...S.certRow, borderBottom: i === classes.length - 1 ? "none" : S.certRow.borderBottom }}>
+            <Calendar size={15} color="#54506B" style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{cl.name}</span></div>
+            {cl.forYou && <span style={S.forYou}>FOR YOU</span>}
+            <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, color: "#6A7178" }}>{cl.date}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Library ---------------- */
+function Library({ S, library, openPacket }) {
+  const [q, setQ] = useState(""); const [track, setTrack] = useState("All");
+  const results = useMemo(() => library.filter((p) => {
+    const okT = track === "All" || p.track === track;
+    const okQ = !q || (p.title + p.code + p.objective).toLowerCase().includes(q.toLowerCase());
+    return okT && okQ;
+  }), [library, q, track]);
+  return (
+    <div>
+      <PageHead S={S} eyebrow="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight." />
+      <div style={S.searchBox}>
+        <Search size={18} color="#6A7178" />
+        <input style={S.searchInput} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {q && <button style={S.clearBtn} onClick={() => setQ("")}><X size={15} /></button>}
+      </div>
+      <div style={S.chipRow}>
+        <Chip S={S} active={track === "All"} onClick={() => setTrack("All")}>All</Chip>
+        {Object.keys(TRACKS).map((k) => <Chip key={k} S={S} active={track === k} accent={TRACKS[k].accent} onClick={() => setTrack(k)}>{TRACKS[k].label}</Chip>)}
+      </div>
+      {results.length === 0 ? (
+        <div style={S.empty}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</div>
+      ) : (
+        <div style={S.cardGrid}>{results.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} />)}</div>
+      )}
+    </div>
+  );
+}
+function RunCard({ S, p, onClick }) {
+  const T = TRACKS[p.track];
+  return (
+    <button style={{ ...S.runCard, borderLeft: `4px solid ${T.accent}` }} onClick={onClick}>
+      <div style={S.runTop}><span style={{ ...S.runCode, color: T.accent }}>{p.code}</span><T.Icon size={16} color={T.accent} /></div>
+      <h3 style={S.runTitle}>{p.title}</h3>
+      <p style={S.runObj}>{p.objective}</p>
+      <div style={S.runFoot}><span><Clock size={13} /> {p.time}</span><span style={S.runUpdated}>Updated {p.updated}</span></div>
+    </button>
+  );
+}
+
+/* ---------------- Packet ---------------- */
+function Packet({ S, packet, back }) {
+  const T = TRACKS[packet.track];
+  return (
+    <div>
+      <button style={S.backBtn} onClick={back}><ArrowLeft size={16} /> Back to library</button>
+      <div style={S.packetHead}>
+        <div style={{ ...S.packetStripe, background: T.accent }} />
+        <div style={S.packetHeadInner}>
+          <div style={S.metaRow}><span style={{ ...S.runCode, color: T.accent }}>{packet.code}</span><TrackPill S={S} track={packet.track} /></div>
+          <h1 style={S.packetTitle}>{packet.title}</h1>
+          <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} /><Meta Icon={Users} text={packet.level} /></div>
+          <button style={S.primaryBtn}><Download size={16} /> Download packet (PDF)</button>
+        </div>
+      </div>
+      <Disclaimer S={S} />
+      <Section S={S} Icon={ClipboardList} title="Objective"><p style={S.body}>{packet.objective}</p></Section>
+      <Section S={S} Icon={Wrench} title="Required equipment"><ul style={S.list}>{packet.equipment.map((e, i) => <li key={i}>{e}</li>)}</ul></Section>
+      <Section S={S} Icon={GraduationCap} title="Instructor guide"><p style={S.body}>{packet.instructorGuide}</p></Section>
+      <Section S={S} Icon={FileText} title="Step-by-step lesson plan">
+        <div style={S.steps}>{packet.steps.map((s, i) => (
+          <div key={i} style={S.step}><span style={S.stepNum}>{String(i + 1).padStart(2, "0")}</span>
+            <div style={{ flex: 1 }}><div style={S.stepTitle}>{s.t} <span style={S.stepMin}>{s.m} min</span></div><div style={S.stepDetail}>{s.d}</div></div></div>
+        ))}</div>
+      </Section>
+      <Section S={S} Icon={Flame} title="Scenario / drill setup"><p style={S.body}>{packet.scenario}</p></Section>
+      <div style={S.safetyBox}><div style={S.safetyHead}><ShieldAlert size={18} /> Safety considerations</div><ul style={S.list}>{packet.safety.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+      <Section S={S} Icon={Users} title="Discussion questions"><ul style={S.list}>{packet.discussion.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
+      <Section S={S} Icon={CheckCircle2} title="Evaluation checklist">
+        <div style={S.checklist}>{packet.evaluation.map((e, i) => <label key={i} style={S.check}><input type="checkbox" /> <span>{e}</span></label>)}</div>
+      </Section>
+      <Section S={S} Icon={ClipboardList} title="Debrief questions"><ul style={S.list}>{packet.debrief.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
+    </div>
+  );
+}
+
+/* ---------------- shared Claude call (via /api/claude) ---------------- */
+async function callClaude(system, user) {
+  const res = await fetch("/api/claude", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ system, user }),
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) throw new Error(data.error || "AI request failed");
+  return data.text || "";
+}
+
+/* ---------------- Plan feedback loop ---------------- */
+const CRITIQUE_TAGS = ["Too advanced", "Too basic", "Unsafe for our crew", "Wrong equipment", "Didn't fit the time", "Not realistic"];
+function PlanFeedback({ S, plan, topic, addFeedback }) {
+  const [rating, setRating] = useState(null);
+  const [tags, setTags] = useState([]);
+  const [notes, setNotes] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editedSummary, setEditedSummary] = useState(plan.summary || "");
+  const [sent, setSent] = useState(false);
+  const toggleTag = (t) => setTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]));
+  const changed = editing && editedSummary.trim() !== (plan.summary || "").trim();
+  function send() {
+    addFeedback({ topic, rating, tags, edited: changed, notes: notes.trim() });
+    setSent(true);
+  }
+  if (sent) return (
+    <div style={S.fbDone}>
+      <CheckCircle2 size={18} color="#1A6B3C" style={{ flexShrink: 0, marginTop: 1 }} />
+      <div><strong>Logged — thank you.</strong> Critiques like this are exactly what sharpen the next plan. Your team reviews them and tunes the system from them.</div>
+    </div>
+  );
+  return (
+    <div style={S.fbCard}>
+      <div style={S.fbHead}><MessageSquare size={15} color="#54506B" /> Help it get better</div>
+      <div style={S.fbRow}>
+        <span style={S.fbLabel}>Was this useful?</span>
+        <button style={{ ...S.fbThumb, ...(rating === "up" ? S.fbThumbUp : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
+        <button style={{ ...S.fbThumb, ...(rating === "down" ? S.fbThumbDown : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
+      </div>
+      <div style={S.fbLabel2}>What was off? (tap any)</div>
+      <div style={S.chipRow}>
+        {CRITIQUE_TAGS.map((t) => (
+          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, ...(tags.includes(t) ? S.fbTagOn : {}) }}>{t}</button>
+        ))}
+      </div>
+      {!editing ? (
+        <button style={S.fbEditBtn} onClick={() => setEditing(true)}><Pencil size={14} /> Edit the plan & save your version</button>
+      ) : (
+        <div style={{ marginTop: 12 }}>
+          <div style={S.fbLabel2}>Your corrected summary</div>
+          <textarea style={{ ...S.input, minHeight: 72, resize: "vertical" }} value={editedSummary} onChange={(e) => setEditedSummary(e.target.value)} />
+        </div>
+      )}
+      <div style={{ ...S.fbLabel2, marginTop: 12 }}>Anything else you'd change?</div>
+      <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. swap the prop, add an accountability check…" />
+      <button style={{ ...S.primaryBtn, marginTop: 12, opacity: (rating || tags.length || notes.trim() || changed) ? 1 : 0.55 }}
+        onClick={send} disabled={!(rating || tags.length || notes.trim() || changed)}>Send feedback</button>
+    </div>
+  );
+}
+
+/* ---------------- AI Training Assistant ---------------- */
+function AIAssistant({ S, addFeedback }) {
+  const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
+  const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
+  const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  async function generate() {
+    setLoading(true); setErr(""); setPlan(null);
+    const sys = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"detail\":string,\"minutes\":number}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Realistic for the stated staffing and apparatus.";
+    const user = `Department size: ${form.size} members\nApparatus/equipment: ${form.apparatus}\nTopic: ${form.topic}\nSkill level: ${form.level}\nTime: ${form.time} minutes\nRecent history: ${form.history}`;
+    try {
+      let t = (await callClaude(sys, user)).replace(/```json|```/g, "").trim();
+      let parsed; try { parsed = JSON.parse(t); } catch { const m = t.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : null; }
+      if (!parsed) throw new Error("parse"); setPlan(parsed); setGenId((g) => g + 1);
+    } catch { setErr("Couldn't generate a plan just now. Check the connection and try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="AI TRAINING ASSISTANT" title="Draft a drill plan" sub="Describe your crew and constraints. You'll get a starting plan to adapt — then review it against your protocols." />
+      <div style={S.aiGrid}>
+        <div style={S.aiForm}>
+          <AIField S={S} label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
+          <AIField S={S} label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
+          <AIField S={S} label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
+          <label style={S.field}><span style={S.fieldLabel}>Skill level</span>
+            <select style={S.input} value={form.level} onChange={(e) => up("level", e.target.value)}><option>New / probationary</option><option>Intermediate</option><option>Experienced</option><option>Mixed</option></select></label>
+          <AIField S={S} label="Time available (minutes)" value={form.time} onChange={(v) => up("time", v)} />
+          <label style={S.field}><span style={S.fieldLabel}>Recent training history</span>
+            <textarea style={{ ...S.input, minHeight: 66, resize: "vertical" }} value={form.history} onChange={(e) => up("history", e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate drill plan</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+        </div>
+        <div style={S.aiResult}>
+          {!plan && !loading && <div style={S.aiPlaceholder}><Sparkles size={28} color="#54506B" /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
+          {loading && <div style={S.aiPlaceholder}><Loader2 size={28} className="spin" color="#54506B" /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
+          {plan && (
+            <div>
+              <Disclaimer S={S} compact />
+              <h3 style={S.featTitle}>{form.topic}</h3>
+              <p style={S.body}>{plan.summary}</p>
+              {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} text={`${plan.durationMin} min`} /></div> : null}
+              <AIList S={S} Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
+              <AIList S={S} Icon={Wrench} title="Equipment" items={plan.equipment} />
+              {Array.isArray(plan.steps) && (
+                <div style={{ marginTop: 16 }}><div style={S.aiListHead}><FileText size={16} /> Drill steps</div>
+                  <div style={S.steps}>{plan.steps.map((s, i) => (
+                    <div key={i} style={S.step}><span style={S.stepNum}>{String(i + 1).padStart(2, "0")}</span>
+                      <div style={{ flex: 1 }}><div style={S.stepTitle}>{s.title} {s.minutes ? <span style={S.stepMin}>{s.minutes} min</span> : null}</div><div style={S.stepDetail}>{s.detail}</div></div></div>
+                  ))}</div></div>
+              )}
+              <AIList S={S} Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
+              <AIList S={S} Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
+              <AIList S={S} Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
+              <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function AIField({ S, label, value, onChange }) {
+  return <label style={S.field}><span style={S.fieldLabel}>{label}</span><input style={S.input} value={value} onChange={(e) => onChange(e.target.value)} /></label>;
+}
+function AIList({ S, Icon, title, items, warn }) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ ...S.aiListHead, color: warn ? "#8A1620" : "#191C20" }}><Icon size={16} /> {title}</div>
+      <ul style={S.list}>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
+    </div>
+  );
+}
+
+/* ---------------- shared: resource library + idea grid ---------------- */
+function ResourceLibrary({ S, items, verb }) {
+  return (
+    <div style={S.resGrid}>
+      {items.map((r) => (
+        <div key={r.name} style={S.resCard}>
+          <FileText size={16} color="#54506B" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={S.resName}>{r.name}</div>
+            <div style={S.resType}>{r.type}</div>
+          </div>
+          <span style={S.resDl}><Download size={13} /> {verb || "Download"}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+function IdeaGrid({ S, items }) {
+  return (
+    <div style={S.ideaGrid}>
+      {items.map((i) => (
+        <div key={i.h} style={S.ideaCard}><div style={S.ideaH}>{i.h}</div><div style={S.ideaP}>{i.p}</div></div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------- rich output formatter (markdown-lite → cards) ---------------- */
+function RichText({ text }) {
+  const parts = String(text).split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) =>
+    /^\*\*[^*]+\*\*$/.test(p) ? <strong key={i}>{p.slice(2, -2)}</strong> : <React.Fragment key={i}>{p}</React.Fragment>
+  );
+}
+function parseSections(text) {
+  const lines = String(text).replace(/\r/g, "").split("\n");
+  const sections = []; let cur = { title: null, blocks: [] }; let list = null;
+  const flushList = () => { if (list) { cur.blocks.push(list); list = null; } };
+  const pushCur = () => { flushList(); if (cur.title || cur.blocks.length) sections.push(cur); cur = { title: null, blocks: [] }; };
+  const header = (t) => {
+    if (/^#{1,6}\s+/.test(t)) return t.replace(/^#{1,6}\s+/, "").replace(/\*\*/g, "").trim();
+    const m = t.match(/^\*\*(.+?)\*\*:?$/); return m ? m[1].trim() : null;
+  };
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (t === "") { flushList(); continue; }
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flushList(); continue; }
+    const h = header(t); if (h) { pushCur(); cur.title = h; continue; }
+    const b = t.match(/^[-*•]\s+(.*)$/);
+    if (b) { if (!list || list.ordered) { flushList(); list = { ordered: false, items: [] }; } list.items.push(b[1]); continue; }
+    const o = t.match(/^\d+[.)]\s+(.*)$/);
+    if (o) { if (!list || !list.ordered) { flushList(); list = { ordered: true, items: [] }; } list.items.push(o[1]); continue; }
+    flushList(); cur.blocks.push({ para: t });
+  }
+  pushCur(); return sections;
+}
+function RichOutput({ S, text }) {
+  const sections = parseSections(text);
+  return (
+    <div style={S.richWrap}>
+      {sections.map((sec, i) => (
+        <div key={i} style={S.richCard}>
+          {sec.title && <div style={S.richTitle}>{sec.title}</div>}
+          {sec.blocks.map((b, j) => {
+            if (b.para != null) return <p key={j} style={S.richP}><RichText text={b.para} /></p>;
+            const Tag = b.ordered ? "ol" : "ul";
+            return <Tag key={j} style={S.richList}>{b.items.map((it, k) => <li key={k}><RichText text={it} /></li>)}</Tag>;
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------- Recruitment ---------------- */
+function Recruitment({ S }) {
+  const [town, setTown] = useState("North Hood Country");
+  const [size, setSize] = useState("14");
+  const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
+  const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
+  async function draft() {
+    setLoading(true); setErr(""); setPlan("");
+    const sys = "You are a recruitment advisor for volunteer fire/EMS departments. Draft a practical recruitment PLAN — not just a social post. Include: a clear goal, the best channels for a small department BEYOND social media (current-member referrals, local employers, schools/trade programs, community events, former members, an open house), 2-3 concrete first steps under each that suit a tiny volunteer crew, and one sample outreach line. Warm, honest, realistic, never desperate. Use short plain-text headers and bullets. Under 350 words.";
+    try { const t = await callClaude(sys, `Town: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}`); setPlan(t); }
+    catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media." />
+      <div style={S.phaseRow}>
+        <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent="#B11E2A" />
+        <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent="#1F4E79" />
+        <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent="#0E6B62" />
+      </div>
+
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER</div>
+          <h3 style={S.featTitle}>Draft a recruitment plan for your department</h3>
+          <div style={S.twoColForm}>
+            <AIField S={S} label="Your town" value={town} onChange={setTown} />
+            <AIField S={S} label="Department size" value={size} onChange={setSize} />
+          </div>
+          <label style={S.field}><span style={S.fieldLabel}>What you need</span>
+            <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={need} onChange={(e) => setNeed(e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {plan && <RichOutput S={S} text={plan} />}
+        </div>
+      </div>
+
+      <div style={S.cardEyebrow}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA</div>
+      <IdeaGrid S={S} items={[
+        { h: "Current-member referrals", p: "Your people's networks convert best. Give them a one-line script to forward." },
+        { h: "Local employers", p: "Release-time or support partnerships — many owners want the community goodwill." },
+        { h: "Schools & trade programs", p: "High schools, EMT classes, and fire-science programs build your pipeline." },
+        { h: "Community events", p: "Festivals, markets, ballgames — bring an apparatus and a sign-up sheet." },
+        { h: "Former members", p: "A warm 'we'd love to have you back' reopens more doors than you'd think." },
+        { h: "Open house", p: "Your highest-converting event — tour, demo, food, and fast follow-up." },
+      ]} />
+
+      <div style={S.cardEyebrow}>RECRUITMENT LIBRARY</div>
+      <ResourceLibrary S={S} items={[
+        { name: "Volunteer Recruitment Playbook", type: "PDF · 90-day plan + templates" },
+        { name: "Printable recruitment flyer", type: "PDF · fill-in-the-blank" },
+        { name: "Member-referral scripts", type: "Doc · copy & send" },
+        { name: "Employer & school outreach emails", type: "Doc · templates" },
+        { name: "Open-house checklist & funnel tracker", type: "PDF" },
+      ]} />
+    </div>
+  );
+}
+function Phase({ S, n, weeks, title, items, accent }) {
+  return (
+    <div style={{ ...S.phaseCard, borderTop: `3px solid ${accent}` }}>
+      <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={S.phaseWeeks}>{weeks}</span></div>
+      <div style={S.phaseTitle}>{title}</div>
+      <ul style={S.phaseList}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
+    </div>
+  );
+}
+
+/* ---------------- Station Documents (upload + create) ---------------- */
+function Documents({ S, role }) {
+  const leader = isLeader(role);
+  const [docs, setDocs] = useState([
+    { name: "North Hood Country VFD — Member Handbook 2026.pdf", type: "Handbook · all members" },
+    { name: "North Hood Country SOG — Apparatus Response.pdf", type: "Uploaded · SOG" },
+    { name: "Mutual Aid Agreement 2026.pdf", type: "Uploaded · Guideline" },
+  ]);
+  const [kind, setKind] = useState("SOP / SOG");
+  const [desc, setDesc] = useState("A standard operating guideline for responding to a structure fire with a single engine plus mutual aid.");
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  function onFiles(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setDocs((d) => [...files.map((f) => ({ name: f.name, type: "Uploaded · just now" })), ...d]);
+    e.target.value = "";
+  }
+  async function draft() {
+    setLoading(true); setErr(""); setOut("");
+    const sys = "You help a volunteer fire/EMS department draft an internal document (SOP/SOG, guideline, policy, or checklist). Write a clear, well-structured DRAFT in plain text with a title, a short note that it must be reviewed and adapted to the department's AHJ, local protocols, medical direction, and applicable law, then numbered sections. Practical and realistic for a small volunteer department. Under 450 words.";
+    try { const t = await callClaude(sys, `Document type: ${kind}\nWhat it should cover: ${desc}`); setOut(t); }
+    catch { setErr("Couldn't draft that just now. Try again in a moment."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place" sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."} />
+
+      {leader && (<>
+        <div style={S.cardEyebrow}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
+        <label style={S.docDrop}>
+          <Upload size={22} color="#54506B" />
+          <div style={S.docDropText}>Drop files here or <span style={{ color: "#1F4E79", fontWeight: 600 }}>browse</span></div>
+          <div style={S.docDropSub}>SOPs, SOGs, guidelines, agreements — PDF, Word, or images</div>
+          <input type="file" multiple style={{ display: "none" }} onChange={onFiles} />
+        </label>
+
+        <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FilePlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT</div>
+        <div style={S.aiBanner}>
+          <div style={{ flex: 1 }}>
+            <label style={S.field}><span style={S.fieldLabel}>Document type</span>
+              <select style={{ ...S.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option>SOP / SOG</option><option>Guideline</option><option>Policy</option><option>Checklist</option><option>Memo</option>
+              </select></label>
+            <label style={{ ...S.field, marginTop: 12 }}><span style={S.fieldLabel}>What should it cover?</span>
+              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+            <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+              {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><FilePlus size={16} /> Draft document</>}
+            </button>
+            {err && <div style={S.errBox}>{err}</div>}
+            {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact /><RichOutput S={S} text={out} /></div>}
+          </div>
+        </div>
+      </>)}
+
+      <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
+      <ResourceLibrary S={S} verb="Open" items={docs} />
+    </div>
+  );
+}
+
+/* ---------------- Visibility ---------------- */
+function Visibility({ S }) {
+  const cal = [
+    { wk: "Week 1", tag: "PEOPLE", c: "#B11E2A", t: "Member spotlight — why they serve" },
+    { wk: "Week 2", tag: "COMMUNITY", c: "#0E6B62", t: "Seasonal safety tip" },
+    { wk: "Week 3", tag: "BEHIND SCENES", c: "#1F4E79", t: "Training night photo or clip" },
+    { wk: "Week 4", tag: "THE ASK", c: "#9A6B12", t: "Thank a supporter / recap the month" },
+  ];
+  const [topic, setTopic] = useState("A Tuesday-night ladder drill");
+  const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
+  async function draft() {
+    setLoading(true); setErr(""); setPost("");
+    const sys = "You write short, warm social media captions for a volunteer fire/EMS department to build community visibility and trust — not recruitment. Plain, genuine, under 60 words, with a tasteful hashtag or two. Never graphic content or patient information. Return only the caption.";
+    try { const t = await callClaude(sys, `Post about: ${topic}`); setPost(t); }
+    catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="VISIBILITY" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week." />
+      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
+      <div style={S.calGrid}>
+        {cal.map((c) => (
+          <div key={c.wk} style={S.calCard}><div style={S.calWk}>{c.wk}</div>
+            <span style={{ ...S.calTag, background: c.c }}>{c.tag}</span><div style={S.calText}>{c.t}</div></div>
+        ))}
+      </div>
+
+      <div style={S.cardEyebrow}>IDEAS FOR THINGS TO MAKE</div>
+      <IdeaGrid S={S} items={[
+        { h: "60-second station tour", p: "Walk the bay on a phone camera. People love seeing inside." },
+        { h: "Member spotlight", p: "One photo + why they serve. Faces build trust the fastest." },
+        { h: "Safety tip card", p: "Smoke alarms, seasonal hazards — useful posts get shared." },
+        { h: "Training night clip", p: "A short drill video shows the work most people never see." },
+        { h: "Apparatus feature", p: "\u201CMeet Engine 1 — here's what it carries.\u201D" },
+        { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
+      ]} />
+
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI CAPTION HELPER</div>
+          <h3 style={S.featTitle}>Write a post for your station</h3>
+          <label style={S.field}><span style={S.fieldLabel}>What's the post about?</span>
+            <input style={S.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {post && <RichOutput S={S} text={post} />}
+        </div>
+      </div>
+
+      <div style={S.cardEyebrow}>VISIBILITY LIBRARY</div>
+      <ResourceLibrary S={S} items={[
+        { name: "Monthly content calendar template", type: "PDF · copy & repeat" },
+        { name: "Caption starters", type: "Doc · fill-in" },
+        { name: "Social Media Playbook", type: "PDF · the full guide" },
+      ]} />
+    </div>
+  );
+}
+
+/* ---------------- Funding ---------------- */
+function Funding({ S }) {
+  const [mode, setMode] = useState("Plan a fundraiser");
+  const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const tiers = [
+    { name: "Supporter", price: "$250", items: ["Name on event materials", "Social thank-you", "Window decal"] },
+    { name: "Partner", price: "$1,000", items: ["Banner at the event", "Logo on promo", "Stage / mic mention"], mid: true },
+    { name: "Presenting", price: "$2,500", items: ["\u201CPresented by\u201D billing", "Top logo placement", "Annual recognition"] },
+  ];
+  async function generate() {
+    setLoading(true); setErr(""); setOut("");
+    let sys;
+    if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their idea, return a practical plan in plain text: goal, a simple timeline/checklist, roles needed, promotion steps, and a realistic money target. Doable for a small volunteer crew. Under 350 words.";
+    else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
+    else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
+    try { const t = await callClaude(sys, `Department: North Hood Country VFD\nDetails: ${detail}`); setOut(t); }
+    catch { setErr("Couldn't generate that just now. Try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="FUNDING" title="Plan fundraisers, write the appeals, line up sponsors" sub="A hand to plan the event, draft the community ask, and format the letters — plus sponsor packages built for fundraisers." />
+
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
+          <div style={S.segRow}>
+            {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
+              <button key={m} onClick={() => { setMode(m); setOut(""); }} style={{ ...S.segBtn, ...(mode === m ? S.segBtnOn : {}) }}>{m}</button>
+            ))}
+          </div>
+          <label style={S.field}><span style={S.fieldLabel}>Tell us about it</span>
+            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Working…</> : <><Sparkles size={16} /> Generate</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
+
+      <div style={S.cardEyebrow}><DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER SPONSOR PACKAGES</div>
+      <p style={S.helpP}>Local businesses sponsor your fundraisers in exchange for recognition. Adjust the amounts to your community.</p>
+      <div style={S.tierRow}>
+        {tiers.map((t) => (
+          <div key={t.name} style={{ ...S.tier, ...(t.mid ? S.tierMid : {}) }}>
+            <div style={S.tierName}>{t.name}</div><div style={S.tierPrice}>{t.price}</div>
+            <ul style={S.tierList}>{t.items.map((i) => <li key={i}>{i}</li>)}</ul>
+          </div>
+        ))}
+      </div>
+
+      <div style={S.cardEyebrow}>FUNDING LIBRARY</div>
+      <ResourceLibrary S={S} items={[
+        { name: "Fundraising idea menu", type: "PDF" },
+        { name: "Sponsor package one-pager", type: "Doc · editable" },
+        { name: "Donor & business outreach letters", type: "Doc · templates" },
+        { name: "Fundraising plan & tracker", type: "PDF" },
+      ]} />
+    </div>
+  );
+}
+
+/* ---------------- Roster & Operations ---------------- */
+const MEMBERS = [
+  { id: 1, name: "Maria Reyes", role: "Chief", access: "Department Admin", status: "Active", phone: "(817) 555-0142", joined: "2014", participation: 96, certs: [{ name: "Firefighter II", exp: "2027-03" }, { name: "EMT-B", exp: "2026-08" }, { name: "Hazmat Ops", exp: "2027-01" }], notes: [{ text: "Completed officer development course. Strong candidate for deputy chief.", by: "Department Admin", when: "May 2026" }] },
+  { id: 2, name: "Tom Daniels", role: "Training Officer", access: "Training Officer", status: "Active", phone: "(817) 555-0188", joined: "2017", participation: 91, certs: [{ name: "Firefighter II", exp: "2026-09" }, { name: "EMT-B", exp: "2026-05" }, { name: "Fire Instructor I", exp: "2027-06" }], notes: [] },
+  { id: 3, name: "Janelle Okafor", role: "Asst. Chief", access: "Board Member", status: "Active", phone: "(817) 555-0119", joined: "2015", participation: 88, certs: [{ name: "Firefighter II", exp: "2027-02" }, { name: "Paramedic", exp: "2026-07" }], notes: [] },
+  { id: 4, name: "Cody Pearson", role: "Firefighter", access: "Member", status: "Active", phone: "(817) 555-0173", joined: "2021", participation: 76, certs: [{ name: "Firefighter I", exp: "2026-12" }, { name: "EMT-B", exp: "2026-04" }], notes: [{ text: "EMT-B lapsed — reminded to register for the July refresher.", by: "Training Officer", when: "Jun 2026" }] },
+  { id: 5, name: "Sam Whitfield", role: "Firefighter", access: "Member", status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Training Officer", when: "Jun 2026" }] },
+  { id: 6, name: "Dana Cole", role: "Firefighter / EMT", access: "Member", status: "Active", phone: "(817) 555-0150", joined: "2019", participation: 84, certs: [{ name: "Firefighter II", exp: "2026-08" }, { name: "EMT-B", exp: "2027-04" }], notes: [] },
+];
+const EVENTS = [
+  { id: 1, name: "Tuesday Drill — Ladder Throws", date: "Jun 17", type: "Drill", present: 11, total: 14 },
+  { id: 2, name: "Monthly Business Meeting", date: "Jun 10", type: "Meeting", present: 12, total: 14 },
+  { id: 3, name: "EMS Refresher — Stroke", date: "Jun 3", type: "Drill", present: 9, total: 14 },
+  { id: 4, name: "Structure Fire — Co. 2 mutual aid", date: "May 28", type: "Call", present: 7, total: 14 },
+];
+const APPARATUS_SEED = [
+  { id: 1, name: "Engine 1", type: "Pumper", lastCheck: "Jun 22", by: "Daniels", status: "Pass", note: "All systems good" },
+  { id: 2, name: "Brush 2", type: "Brush truck", lastCheck: "Jun 22", by: "Pearson", status: "Pass", note: "Water topped off" },
+  { id: 3, name: "Tanker 1", type: "Tender", lastCheck: "Jun 15", by: "Cole", status: "Needs attention", note: "Low on foam concentrate" },
+  { id: 4, name: "Rescue 1", type: "Rescue", lastCheck: "Jun 20", by: "Okafor", status: "Pass", note: "" },
+];
+function certStatus(exp) {
+  const [y, m] = exp.split("-").map(Number);
+  const diff = (y * 12 + m) - (2026 * 12 + 6);
+  if (diff < 0) return { label: "EXPIRED", color: "#B11E2A", rank: 0 };
+  if (diff <= 3) return { label: "EXPIRING", color: "#9A6B12", rank: 1 };
+  return { label: "CURRENT", color: "#2E7D52", rank: 2 };
+}
+const CLASSES = [
+  { name: "EMT-B Refresher", date: "Jul 12", covers: ["EMT-B", "Paramedic"] },
+  { name: "CPR / BLS Recert", date: "Jun 28", covers: ["EMT-B", "Paramedic"] },
+  { name: "Firefighter II Academy", date: "Aug 2", covers: ["Firefighter I", "Firefighter II"] },
+  { name: "Hazmat Ops", date: "Sep 9", covers: ["Hazmat Ops"] },
+  { name: "Fire Instructor I", date: "Oct 4", covers: ["Fire Instructor I"] },
+];
+function expPhrase(exp) {
+  const [y, m] = exp.split("-").map(Number);
+  const d = (y * 12 + m) - (2026 * 12 + 6);
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
+  if (d < 0) return `expired ${mon} ${y}`;
+  if (d === 0) return `expires this month`;
+  if (d <= 3) return `expires ${mon} ${y} — in ~${d} month${d > 1 ? "s" : ""}`;
+  return `expires ${mon} ${y}`;
+}
+function Pill({ S, color, children }) {
+  return <span style={{ ...S.opChip, color, borderColor: `${color}55`, background: `${color}14` }}>{children}</span>;
+}
+function Initials({ S, name }) {
+  const i = name.split(" ").map((w) => w[0]).slice(0, 2).join("");
+  return <span style={S.avatar}>{i}</span>;
+}
+
+function Roster({ S, role, members, setMembers }) {
+  const leader = isLeader(role);
+  const tabs = leader
+    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"]]
+    : [["members", "Members"]];
+  const [tab, setTab] = useState("members");
+  const [sel, setSel] = useState(null);
+  const selected = members.find((m) => m.id === sel);
+  const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
+  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} />;
+  return (
+    <div>
+      <PageHead S={S} eyebrow="ROSTER" title="Your people, all in one place" sub={leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."} />
+      <div style={S.segRow}>
+        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, ...(tab === k ? S.segBtnOn : {}) }}>{l}</button>)}
+      </div>
+      {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} />}
+      {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
+      {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
+      {tab === "reports" && leader && <RosterReports S={S} members={members} />}
+    </div>
+  );
+}
+function RosterMembers({ S, role, members, setMembers, onOpen }) {
+  const canAdd = canAssign(role);
+  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter");
+  const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
+  function add() { if (!nm.trim()) return; setMembers((m) => [...m, { id: Date.now(), name: nm, role: rl, access: "Member", status: "Probationary", phone: "—", joined: "2026", participation: 0, certs: [], notes: [] }]); setNm(""); setAdding(false); }
+  return (
+    <div>
+      {canAdd && (adding ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Name</span><input style={S.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Rank</span><select style={S.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
+          <button style={S.primaryBtn} onClick={add}><UserPlus size={15} /> Add</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      <div style={S.opGrid}>
+        {members.map((m) => (
+          <div key={m.id} style={{ ...S.opCard, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <Initials S={S} name={m.name} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={S.personName}>{m.name}</div>
+                <div style={S.personMeta}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
+              </div>
+              <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: "#6A7178" }}>
+              <Phone size={13} /> {m.phone}
+              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: "#1F4E79", fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
+                : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function MemberDetail({ S, member, role, back, onUpdate }) {
+  const assign = canAssign(role);
+  const [note, setNote] = useState("");
+  const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
+  const notes = member.notes || [];
+  function addNote() { if (!note.trim()) return; onUpdate({ ...member, notes: [{ text: note.trim(), by: role, when: "Just now" }, ...notes] }); setNote(""); }
+  return (
+    <div>
+      <button style={S.backBtn} onClick={back}><ArrowLeft size={16} /> Back to roster</button>
+      <div style={{ ...S.opCard, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <Initials S={S} name={member.name} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...S.personName, fontSize: 19 }}>{member.name}</div>
+            <div style={S.personMeta}>{member.role} · since {member.joined} · {member.phone}</div>
+          </div>
+          <Pill S={S} color={member.status === "Active" ? "#2E7D52" : member.status === "Probationary" ? "#9A6B12" : "#6A7178"}>{member.status.toUpperCase()}</Pill>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation}%</span></div>
+          <Bar S={S} pct={member.participation} color={member.participation >= 75 ? "#2E7D52" : member.participation >= 50 ? "#9A6B12" : "#B11E2A"} />
+        </div>
+        {assign && (
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid #ECEDEA` }}>
+            <label style={S.field}><span style={S.fieldLabel}>Station role &amp; access</span>
+              <select style={{ ...S.input, maxWidth: 260 }} value={member.access} onChange={(e) => onUpdate({ ...member, access: e.target.value })}>
+                <option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option>
+              </select></label>
+            <div style={{ fontSize: 12, color: "#6A7178", marginTop: 5 }}>Sets what this person can see and do across the platform.</div>
+          </div>
+        )}
+      </div>
+
+      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</div>
+      <div style={{ ...S.opCard, marginBottom: 16 }}>
+        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No certifications on file yet.</div> :
+          certs.map((c, i) => (
+            <div key={i} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom }}>
+              <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+              <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+            </div>
+          ))}
+      </div>
+
+      <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
+      <div style={S.opCard}>
+        <div style={{ display: "flex", gap: 8, marginBottom: notes.length ? 14 : 0 }}>
+          <input style={{ ...S.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button style={S.primaryBtn} onClick={addNote}>Add</button>
+        </div>
+        {notes.map((n, i) => (
+          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : S.certRow.borderBottom, alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: "#2B3138", lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: "#6A7178", marginTop: 3 }}>{n.by} · {n.when}</div></div>
+          </div>
+        ))}
+        {notes.length === 0 && <div style={{ fontSize: 13, color: "#6A7178" }}>No notes yet. Notes here are visible to leadership only — never to the member.</div>}
+      </div>
+    </div>
+  );
+}
+function RosterCerts({ S, members }) {
+  const rows = [];
+  members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, st: certStatus(c.exp) })));
+  rows.sort((a, b) => a.st.rank - b.st.rank);
+  const n = (r) => rows.filter((x) => x.st.rank === r).length;
+  return (
+    <div>
+      <div style={S.statRow}>
+        <Stat S={S} n={String(n(2))} label="Certs current" />
+        <Stat S={S} n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
+        <Stat S={S} n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
+      </div>
+      <div style={{ marginTop: 4 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={S.certRow}>
+            <Award size={15} color={r.st.color} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{r.cert}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {r.member}</span></div>
+            <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, color: "#6A7178" }}>exp {r.exp}</span>
+            <Pill S={S} color={r.st.color}>{r.st.label}</Pill>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function Bar({ S, pct, color }) {
+  return <div style={S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
+}
+function RosterAttendance({ S, members }) {
+  const people = [...members].sort((a, b) => b.participation - a.participation);
+  return (
+    <div>
+      <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
+      <div style={{ marginBottom: 22 }}>
+        {EVENTS.map((e) => {
+          const pct = Math.round((e.present / e.total) * 100);
+          return (
+            <div key={e.id} style={S.eventRow}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={S.personName}>{e.name}</div>
+                <div style={S.personMeta}>{e.type} · {e.date}</div>
+              </div>
+              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} color={pct >= 75 ? "#2E7D52" : "#9A6B12"} /></div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={S.cardEyebrow}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
+      <div>
+        {people.map((m) => (
+          <div key={m.id} style={S.eventRow}>
+            <Initials S={S} name={m.name} />
+            <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={S.personName}>{m.name}</div><div style={S.personMeta}>{m.role}</div></div>
+            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{m.participation}%</div><Bar S={S} pct={m.participation} color={m.participation >= 75 ? "#2E7D52" : (m.participation >= 50 ? "#9A6B12" : "#B11E2A")} /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function RosterReports({ S, members }) {
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const active = members.filter((m) => m.status === "Active").length;
+  const prob = members.filter((m) => m.status === "Probationary").length;
+  const certs = []; members.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
+  const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
+  const avgPart = Math.round(members.reduce((s, m) => s + m.participation, 0) / members.length);
+  const rigsReady = APPARATUS_SEED.filter((r) => r.status === "Pass").length;
+  function buildReportData() {
+    const flaggedCerts = [];
+    members.forEach((m) => m.certs.forEach((c) => {
+      const st = certStatus(c.exp);
+      if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
+    }));
+    return {
+      deptName: "North Hood Country Volunteer Fire Department",
+      station: "Station 20",
+      kpis: { active, total: members.length, certPct: Math.round((cur / (cur + expg + expd)) * 100), certWarn: expd > 0, avgPart, rigsReady, rigsTotal: APPARATUS_SEED.length },
+      counts: { active, prob, total: members.length, cur, expg, expd, avgPart },
+      members: members.map((m) => ({ name: m.name, role: m.role, participation: m.participation, status: m.status })),
+      flaggedCerts,
+      apparatus: APPARATUS_SEED.map((r) => ({ name: r.name, type: r.type, lastCheck: r.lastCheck, ready: r.status === "Pass", note: r.note })),
+      activity: EVENTS.map((e) => ({ name: e.name, date: e.date, type: e.type, present: e.present, total: e.total })),
+    };
+  }
+  async function draft() {
+    setLoading(true); setErr(""); setOut("");
+    const summary = `North Hood Country VFD snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average participation (90 days): ${avgPart}%\n- Apparatus ready: ${rigsReady} of ${APPARATUS_SEED.length}\n- Recent activity: ${EVENTS.length} events in the last 30 days (drills, a meeting, and a mutual-aid call)`;
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board. Use clear sections with bold titles and bullet points: an overview, training & certifications (flag the expiring/expired certs as an action item), participation, and apparatus readiness. Confident, factual tone. Under 350 words.";
+    try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <div style={S.statRow}>
+        <Stat S={S} n={`${active}/${members.length}`} label="Active members" />
+        <Stat S={S} n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
+        <Stat S={S} n={`${avgPart}%`} label="Avg participation" />
+        <Stat S={S} n={`${rigsReady}/${APPARATUS_SEED.length}`} label="Apparatus ready" />
+      </div>
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
+          <h3 style={S.featTitle}>Turn your numbers into a report — in one tap</h3>
+          <p style={{ ...S.helpP, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+              {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
+            </button>
+            <button
+              style={{ ...S.primaryBtn, background: "#fff", color: "#B11E2A", border: "1.5px solid #B11E2A" }}
+              onClick={() => downloadDepartmentReport(buildReportData())}>
+              <Download size={16} /> Download PDF
+            </button>
+          </div>
+          {err && <div style={S.errBox}>{err}</div>}
+          {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Apparatus ---------------- */
+function Apparatus({ S, role }) {
+  const [rigs, setRigs] = useState(APPARATUS_SEED);
+  const ready = rigs.filter((r) => r.status === "Pass").length;
+  const flagged = rigs.length - ready;
+  function logCheck(id) { setRigs((rs) => rs.map((r) => r.id === id ? { ...r, lastCheck: "Just now", by: "You", status: "Pass", note: "Checked — all good" } : r)); }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="APPARATUS & EQUIPMENT" title="Know your rigs are ready" sub="Log your apparatus and equipment checks so the whole crew can see what's good to roll." />
+      <div style={S.statRow}>
+        <Stat S={S} n={String(ready)} label="Ready to roll" />
+        <Stat S={S} n={String(flagged)} label="Needs attention" warn={flagged > 0} />
+        <Stat S={S} n={String(rigs.length)} label="Apparatus tracked" />
+      </div>
+      <div style={S.opGrid}>
+        {rigs.map((r) => {
+          const ok = r.status === "Pass"; const color = ok ? "#2E7D52" : "#B11E2A";
+          return (
+            <div key={r.id} style={S.opCard}>
+              <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
+                <Truck size={20} color="#54506B" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{r.name}</div><div style={S.personMeta}>{r.type}</div></div>
+                <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>
+              </div>
+              {r.note && <div style={{ fontSize: 13, color: ok ? "#3A4750" : "#8A1620", marginTop: 10 }}>{r.note}</div>}
+              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: "#6A7178" }}>
+                <span>Last check: {r.lastCheck} · {r.by}</span>
+                <button style={{ ...S.ghostBtn, marginTop: 0, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id)}><ClipboardCheck size={14} /> Log a check</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Request ---------------- */
+function RequestForm({ S, requests, setRequests }) {
+  const [topic, setTopic] = useState(""); const [notes, setNotes] = useState(""); const [done, setDone] = useState(false);
+  function submit() {
+    if (!topic.trim()) return;
+    setRequests([{ topic, notes, when: "Just now" }, ...requests]); setTopic(""); setNotes(""); setDone(true); setTimeout(() => setDone(false), 2500);
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="CUSTOM TRAINING" title="Request a custom packet" sub="Tell us what your crew needs. We build it into the next monthly drop." />
+      <div style={S.formCard}>
+        <label style={S.field}><span style={S.fieldLabel}>Topic or scenario</span><input style={S.input} placeholder="e.g. Rural water shuttle with one tender" value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+        <label style={S.field}><span style={S.fieldLabel}>Anything specific to your department?</span><textarea style={{ ...S.input, minHeight: 88, resize: "vertical" }} placeholder="Apparatus, member count, local hazards, constraints…" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        <button style={S.primaryBtn} onClick={submit}><Send size={16} /> Submit request</button>
+        {done && <div style={S.successBox}><CheckCircle2 size={16} /> Request received. We'll confirm by email.</div>}
+      </div>
+      {requests.length > 0 && (
+        <div style={{ marginTop: 24 }}><div style={S.cardEyebrow}>YOUR REQUESTS</div>
+          {requests.map((r, i) => <div key={i} style={S.reqRow}><div><strong>{r.topic}</strong>{r.notes ? <div style={S.reqNotes}>{r.notes}</div> : null}</div><span style={S.reqWhen}>{r.when}</span></div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Admin ---------------- */
+function Admin({ S, library, setLibrary, feedback }) {
+  const [title, setTitle] = useState(""); const [track, setTrack] = useState("Fire"); const [time, setTime] = useState("60 min"); const [objective, setObjective] = useState(""); const [done, setDone] = useState(false);
+  function publish() {
+    if (!title.trim()) return;
+    const np = { id: `new-${Date.now()}`, code: `${track.slice(0, 4).toUpperCase()}-${Math.floor(100 + Math.random() * 800)}`, track, title, level: "All levels", time,
+      objective: objective || "Objective to be finalized.", equipment: ["To be specified"], instructorGuide: "Draft — review before release.",
+      steps: [{ t: "Briefing", d: "Introduce the objective.", m: 10 }], scenario: "Scenario to be added.", discussion: ["Discussion question pending."],
+      safety: ["Review against local protocols before use."], evaluation: ["Evaluation criteria pending."], debrief: ["Debrief question pending."], updated: "Just now" };
+    setLibrary([np, ...library]); setTitle(""); setObjective(""); setDone(true); setTimeout(() => setDone(false), 2500);
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately." />
+      <div style={S.formCard}>
+        <label style={S.field}><span style={S.fieldLabel}>Packet title</span><input style={S.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Tanker Shuttle Operations" /></label>
+        <div style={S.twoColForm}>
+          <label style={S.field}><span style={S.fieldLabel}>Track</span><select style={S.input} value={track} onChange={(e) => setTrack(e.target.value)}>{Object.keys(TRACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label style={S.field}><span style={S.fieldLabel}>Estimated time</span><input style={S.input} value={time} onChange={(e) => setTime(e.target.value)} /></label>
+        </div>
+        <label style={S.field}><span style={S.fieldLabel}>Objective</span><textarea style={{ ...S.input, minHeight: 66, resize: "vertical" }} value={objective} onChange={(e) => setObjective(e.target.value)} /></label>
+        <button style={S.primaryBtn} onClick={publish}><Plus size={16} /> Publish to library</button>
+        {done && <div style={S.successBox}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
+      </div>
+
+      <div style={{ marginTop: 26 }}>
+        <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FIELD SIGNAL · WHAT WE'RE LEARNING</div>
+        <p style={{ ...S.pageSub, marginTop: 0, marginBottom: 14 }}>Ratings and critiques from departments on AI-generated plans. Review monthly, spot the patterns, and turn them into sharper prompt rules and better packets — that's how the system improves.</p>
+        {(!feedback || feedback.length === 0) ? (
+          <div style={S.empty}>No feedback yet. Generate a plan in the AI Training Assistant, rate it, and it'll show up here.</div>
+        ) : (
+          feedback.map((f, i) => (
+            <div key={i} style={S.fbItem}>
+              <span style={{ ...S.fbDot, background: f.rating === "up" ? "#2E7D52" : (f.rating === "down" ? "#B11E2A" : "#9AA1A9") }} />
+              <div style={{ flex: 1 }}>
+                <div style={S.fbItemTop}><strong>{f.topic}</strong>{f.edited && <span style={S.fbEdited}>EDITED</span>}</div>
+                {f.tags && f.tags.length > 0 && <div style={S.fbItemTags}>{f.tags.join(" · ")}</div>}
+                {f.notes && <div style={S.fbItemNotes}>"{f.notes}"</div>}
+              </div>
+              <span style={S.reqWhen}>{f.when}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- shared bits ---------------- */
+function PageHead({ S, eyebrow, title, sub }) {
+  return <div style={S.pageHead}><div style={S.cardEyebrow}>{eyebrow}</div><h1 style={S.pageTitle}>{title}</h1>{sub && <p style={S.pageSub}>{sub}</p>}</div>;
+}
+function Stat({ S, n, label, warn }) {
+  return <div style={S.stat}><div style={{ ...S.statN, color: warn ? "#B11E2A" : "#191C20" }}>{n}</div><div style={S.statLabel}>{label}</div></div>;
+}
+function Meta({ Icon, text }) {
+  return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "#6A7178" }}><Icon size={14} /> {text}</span>;
+}
+function TrackPill({ S, track }) {
+  const T = TRACKS[track];
+  return <span style={{ ...S.trackPill, background: `${T.accent}18`, color: T.accent }}><T.Icon size={12} /> {T.label}</span>;
+}
+function Chip({ S, active, accent, onClick, children }) {
+  return <button onClick={onClick} style={{ ...S.chip, background: active ? (accent || "#191C20") : "#fff", color: active ? "#fff" : "#3A4750", borderColor: active ? (accent || "#191C20") : "#D2D5D8" }}>{children}</button>;
+}
+function Section({ S, Icon, title, children }) {
+  return <div style={S.section}><div style={S.sectionHead}><Icon size={16} color="#54506B" /> {title}</div>{children}</div>;
+}
+function Disclaimer({ S, compact }) {
+  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}) }}><AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
+}
+function Logo() {
+  return <div style={{ width: 38, height: 38, borderRadius: 8, background: "#191C20", display: "grid", placeItems: "center", flexShrink: 0, border: "1.5px solid #B11E2A" }}><Flame size={20} color="#B11E2A" /></div>;
+}
+function Fonts() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+      * { box-sizing: border-box; } body { margin: 0; }
+      .spin { animation: spin .9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+      input:focus, select:focus, textarea:focus { outline: 2px solid #1F4E79; outline-offset: 1px; }
+      button:focus-visible { outline: 2px solid #1F4E79; outline-offset: 2px; }
+      @media (max-width: 900px) {
+        .dr-side { position: fixed; left: -290px; transition: left .22s ease; z-index: 40; height: 100%; }
+        .dr-side.open { left: 0; }
+        .dr-menu { display: inline-flex !important; }
+      }
+    `}</style>
+  );
+}
+
+/* ---------------- styles ---------------- */
+function baseStyles() {
+  const display = "'Oswald', system-ui, sans-serif", body = "'Public Sans', system-ui, sans-serif", mono = "'IBM Plex Mono', ui-monospace, monospace";
+  const INK = "#191C20", SLATE = "#3A4750", ENGINE = "#B11E2A", EMS = "#1F4E79", PAPER = "#E9EBEC", CARD = "#FFFFFF", LINE = "#D9DCDF", MUTED = "#6A7178";
+  const chevron = "repeating-linear-gradient(135deg, #B11E2A 0 14px, #191C20 14px 28px)";
+  return {
+    app: { display: "flex", minHeight: "100vh", background: PAPER, fontFamily: body, color: INK },
+    scrim: { position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 35 },
+    sidebar: { width: 262, background: INK, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, flexShrink: 0 },
+    brandRow: { display: "flex", alignItems: "center", gap: 11, paddingBottom: 18, borderBottom: "1px solid #2A2F35" },
+    brandName: { fontFamily: display, fontWeight: 700, fontSize: 19, letterSpacing: ".5px", lineHeight: 1 },
+    brandSub: { fontSize: 10, color: "#8A929B", letterSpacing: ".9px", marginTop: 3, fontFamily: mono },
+    nav: { display: "flex", flexDirection: "column", gap: 3, marginTop: 18, flex: 1 },
+    navItem: { display: "flex", alignItems: "center", gap: 11, padding: "11px 12px", borderRadius: 8, border: "none", background: "transparent", color: "#C3C8CE", fontSize: 14, fontFamily: body, cursor: "pointer", fontWeight: 500 },
+    navItemActive: { background: "#262B31", color: "#fff", boxShadow: "inset 3px 0 0 #B11E2A" },
+    premiumTag: { fontSize: 9, fontFamily: mono, background: "#54506B", color: "#fff", padding: "2px 6px", borderRadius: 3, letterSpacing: ".5px" },
+    deptCard: { background: "#262B31", borderRadius: 10, padding: 14, marginTop: 12 },
+    deptLabel: { fontSize: 9.5, fontFamily: mono, color: "#8A929B", letterSpacing: ".8px" },
+    deptName: { fontFamily: display, fontWeight: 600, fontSize: 16, marginTop: 4 },
+    deptMeta: { fontSize: 12, color: "#9AA1A9", marginTop: 2 },
+    main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0 },
+    topbar: { height: 60, background: CARD, borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", gap: 14, padding: "0 18px", position: "sticky", top: 0, zIndex: 20 },
+    menuBtn: { display: "none", alignItems: "center", justifyContent: "center", width: 38, height: 38, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: INK },
+    chevronBand: { flex: 1, height: 8, borderRadius: 2, background: chevron, opacity: .9 },
+    viewAs: { display: "flex", alignItems: "center", gap: 8 },
+    viewAsLabel: { fontSize: 11, color: MUTED, fontFamily: mono, letterSpacing: ".5px" },
+    select: { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: body, background: "#fff", color: INK },
+    logout: { width: 36, height: 36, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: SLATE, display: "grid", placeItems: "center" },
+    content: { padding: "26px clamp(18px, 4vw, 40px)", maxWidth: 1080, width: "100%", margin: "0 auto" },
+    pageHead: { marginBottom: 22 },
+    cardEyebrow: { fontFamily: mono, fontSize: 11, letterSpacing: "1.2px", color: ENGINE, fontWeight: 600, marginBottom: 8 },
+    pageTitle: { fontFamily: display, fontWeight: 700, fontSize: "clamp(26px, 4vw, 34px)", margin: 0, lineHeight: 1.05, letterSpacing: ".3px" },
+    pageSub: { color: MUTED, fontSize: 15, marginTop: 8, maxWidth: 640 },
+    statRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 18 },
+    stat: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "16px 18px" },
+    statN: { fontFamily: display, fontWeight: 700, fontSize: 28, lineHeight: 1 },
+    statLabel: { fontSize: 12.5, color: MUTED, marginTop: 6 },
+    /* roadmap */
+    roadCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 22, marginBottom: 20 },
+    roadHead: { marginBottom: 12 },
+    roadTitle: { fontFamily: display, fontWeight: 600, fontSize: 20, margin: "2px 0 0", letterSpacing: ".2px" },
+    roadRecommend: { display: "flex", alignItems: "center", gap: 9, background: "#FBF3E4", border: "1px solid #E6C77A", borderRadius: 9, padding: "11px 14px", fontSize: 14, color: "#5a4a22", marginBottom: 14 },
+    roadList: { display: "flex", flexDirection: "column", gap: 2 },
+    roadRow: { display: "flex", alignItems: "center", gap: 11, padding: "10px 4px", borderBottom: `1px solid ${PAPER}` },
+    roadTopic: { fontSize: 14.5, fontWeight: 500, color: INK, flex: 1 },
+    roadAgo: { fontFamily: mono, fontSize: 12, color: MUTED },
+    roadChip: { fontFamily: mono, fontSize: 9.5, fontWeight: 600, letterSpacing: ".5px", padding: "3px 9px", borderRadius: 999, border: "1px solid" },
+    dashGrid: { display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16, marginBottom: 12 },
+    quickGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: 12 },
+    quickCard: { display: "flex", alignItems: "flex-start", gap: 13, background: CARD, border: `1px solid ${LINE}`, borderRadius: 11, padding: "16px", cursor: "pointer", fontFamily: body, textAlign: "left", width: "100%" },
+    quickIcon: { width: 36, height: 36, borderRadius: 9, display: "grid", placeItems: "center", flexShrink: 0 },
+    quickTitle: { fontFamily: display, fontWeight: 600, fontSize: 15.5, color: INK, display: "flex", alignItems: "center", gap: 7 },
+    quickAi: { fontFamily: mono, fontSize: 8.5, background: "#54506B", color: "#fff", padding: "2px 5px", borderRadius: 3, letterSpacing: ".5px" },
+    quickBlurb: { fontSize: 12.5, color: MUTED, lineHeight: 1.45, marginTop: 3 },
+    featCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" },
+    featStripe: { height: 8, background: chevron },
+    featInner: { padding: 22 },
+    featTitle: { fontFamily: display, fontWeight: 700, fontSize: 22, margin: "6px 0 8px", letterSpacing: ".2px" },
+    featObj: { color: SLATE, fontSize: 14.5, lineHeight: 1.55, marginBottom: 14 },
+    logCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 20 },
+    logRow: { display: "flex", gap: 10, padding: "9px 0", borderBottom: `1px solid ${PAPER}`, fontSize: 13.5, color: SLATE },
+    logTime: { fontFamily: mono, fontSize: 11.5, color: MUTED, minWidth: 62 },
+    logText: { lineHeight: 1.4 },
+    logCode: { fontFamily: mono, color: ENGINE, fontWeight: 600 },
+    searchBox: { display: "flex", alignItems: "center", gap: 10, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, padding: "11px 14px", marginBottom: 14 },
+    searchInput: { border: "none", outline: "none", flex: 1, fontSize: 15, fontFamily: body, background: "transparent", color: INK },
+    clearBtn: { border: "none", background: "transparent", cursor: "pointer", color: MUTED, display: "grid", placeItems: "center" },
+    chipRow: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 },
+    chip: { padding: "7px 14px", borderRadius: 999, border: "1px solid", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: body },
+    cardGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 },
+    runCard: { textAlign: "left", background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: 18, cursor: "pointer", fontFamily: body, display: "flex", flexDirection: "column", gap: 8 },
+    runTop: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+    runCode: { fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: ".5px" },
+    runTitle: { fontFamily: display, fontWeight: 600, fontSize: 17.5, margin: 0, lineHeight: 1.15, color: INK },
+    runObj: { fontSize: 13, color: MUTED, lineHeight: 1.5, margin: 0, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" },
+    runFoot: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: MUTED, marginTop: 2 },
+    runUpdated: { fontFamily: mono, fontSize: 11 },
+    empty: { background: CARD, border: `1px dashed ${LINE}`, borderRadius: 12, padding: 36, textAlign: "center", color: MUTED },
+    backBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: SLATE, fontSize: 13.5, cursor: "pointer", fontFamily: body, fontWeight: 600, marginBottom: 14, padding: 0 },
+    packetHead: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, overflow: "hidden", display: "flex", marginBottom: 16 },
+    packetStripe: { width: 8, flexShrink: 0 },
+    packetHeadInner: { padding: 24 },
+    packetTitle: { fontFamily: display, fontWeight: 700, fontSize: "clamp(24px,3.5vw,32px)", margin: "8px 0", lineHeight: 1.05 },
+    metaRow: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, margin: "10px 0 16px" },
+    trackPill: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, padding: "4px 10px", borderRadius: 999, fontFamily: body },
+    section: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 20, marginBottom: 14 },
+    sectionHead: { display: "flex", alignItems: "center", gap: 8, fontFamily: display, fontWeight: 600, fontSize: 15.5, letterSpacing: ".3px", marginBottom: 12, textTransform: "uppercase", color: INK },
+    body: { fontSize: 14.5, lineHeight: 1.6, color: SLATE, margin: 0 },
+    list: { margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.7, color: SLATE },
+    steps: { display: "flex", flexDirection: "column", gap: 10 },
+    step: { display: "flex", gap: 14, alignItems: "flex-start" },
+    stepNum: { fontFamily: mono, fontSize: 13, fontWeight: 600, color: "#fff", background: INK, borderRadius: 6, padding: "3px 8px", flexShrink: 0 },
+    stepTitle: { fontFamily: display, fontWeight: 600, fontSize: 15, color: INK },
+    stepMin: { fontFamily: mono, fontSize: 11, color: MUTED, fontWeight: 500, marginLeft: 6 },
+    stepDetail: { fontSize: 13.5, color: SLATE, lineHeight: 1.5, marginTop: 2 },
+    safetyBox: { background: "#FBF3E4", border: "1px solid #E6C77A", borderRadius: 12, padding: 20, marginBottom: 14 },
+    safetyHead: { display: "flex", alignItems: "center", gap: 8, fontFamily: display, fontWeight: 700, fontSize: 15.5, color: "#8A1620", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 10 },
+    checklist: { display: "flex", flexDirection: "column", gap: 9 },
+    check: { display: "flex", alignItems: "flex-start", gap: 9, fontSize: 14, color: SLATE, lineHeight: 1.4, cursor: "pointer" },
+    disclaimer: { display: "flex", gap: 9, background: "#F3F1EC", border: `1px solid ${LINE}`, borderLeft: "3px solid #E0A100", borderRadius: 8, padding: "12px 14px", fontSize: 12.5, color: SLATE, lineHeight: 1.5, marginBottom: 16 },
+    /* AI */
+    aiGrid: { display: "grid", gridTemplateColumns: "360px 1fr", gap: 18, alignItems: "start" },
+    aiForm: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 },
+    aiResult: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 22, minHeight: 320 },
+    aiPlaceholder: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, height: "100%", minHeight: 280, color: MUTED, textAlign: "center", fontSize: 14, padding: 20 },
+    aiListHead: { display: "flex", alignItems: "center", gap: 7, fontFamily: display, fontWeight: 600, fontSize: 14.5, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 8 },
+    errBox: { background: "#FCEBEC", border: "1px solid #E8A6AB", color: "#8A1620", borderRadius: 8, padding: "10px 12px", fontSize: 13 },
+    field: { display: "flex", flexDirection: "column", gap: 6 },
+    fieldLabel: { fontSize: 12.5, fontWeight: 600, color: SLATE, fontFamily: body },
+    input: { border: `1px solid ${LINE}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: body, background: "#fff", color: INK, width: "100%" },
+    twoColForm: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+    /* recruitment */
+    phaseRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 },
+    phaseCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 11, padding: "16px 18px" },
+    phaseTop: { display: "flex", alignItems: "baseline", justifyContent: "space-between" },
+    phaseNum: { fontFamily: mono, fontWeight: 600, fontSize: 16 },
+    phaseWeeks: { fontFamily: mono, fontSize: 10.5, color: MUTED, letterSpacing: ".4px" },
+    phaseTitle: { fontFamily: display, fontWeight: 600, fontSize: 17, margin: "6px 0 8px" },
+    phaseList: { margin: 0, paddingLeft: 17, fontSize: 13, lineHeight: 1.6, color: SLATE },
+    aiBanner: { background: "#F6F4F8", border: "1px solid #D8D2E0", borderLeft: "4px solid #54506B", borderRadius: 12, padding: 22, marginBottom: 22, display: "flex" },
+    postOut: { marginTop: 14, background: "#fff", border: `1px dashed ${LINE}`, borderRadius: 8, padding: "14px 16px", fontSize: 14, color: "#2B3138", lineHeight: 1.55, whiteSpace: "pre-wrap" },
+    toolGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 },
+    toolItem: { display: "flex", alignItems: "center", gap: 9, background: CARD, border: `1px solid ${LINE}`, borderRadius: 9, padding: "12px 14px", fontSize: 13.5, color: SLATE },
+    /* funding */
+    calGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 11, marginBottom: 22 },
+    calCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: 15 },
+    calWk: { fontFamily: display, fontWeight: 600, fontSize: 14, marginBottom: 8 },
+    calTag: { fontFamily: mono, fontSize: 9, color: "#fff", padding: "3px 7px", borderRadius: 4, letterSpacing: ".4px" },
+    calText: { fontSize: 13, color: SLATE, marginTop: 9, lineHeight: 1.45 },
+    tierRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 22 },
+    tier: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "18px 17px" },
+    tierMid: { border: "1.5px solid #9A6B12", boxShadow: "0 8px 24px rgba(154,107,18,.10)" },
+    tierName: { fontFamily: display, fontWeight: 600, fontSize: 16 },
+    tierPrice: { fontFamily: display, fontWeight: 700, fontSize: 27, margin: "6px 0 2px", lineHeight: 1 },
+    tierYr: { fontFamily: mono, fontSize: 11, fontWeight: 500, color: MUTED },
+    tierList: { margin: "10px 0 0", paddingLeft: 17, fontSize: 12.5, lineHeight: 1.55, color: SLATE },
+    formCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 620 },
+    successBox: { display: "flex", alignItems: "center", gap: 8, background: "#E7F4EC", border: "1px solid #A6D6BA", color: "#1A6B3C", borderRadius: 8, padding: "10px 12px", fontSize: 13.5 },
+    reqRow: { display: "flex", justifyContent: "space-between", gap: 12, background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "14px 16px", marginBottom: 8, fontSize: 14 },
+    reqNotes: { fontSize: 13, color: MUTED, marginTop: 3 },
+    reqWhen: { fontFamily: mono, fontSize: 11.5, color: MUTED, flexShrink: 0 },
+    fbCard: { background: "#F6F4F8", border: "1px solid #D8D2E0", borderRadius: 12, padding: 18, marginTop: 18 },
+    fbHead: { display: "flex", alignItems: "center", gap: 8, fontFamily: display, fontWeight: 600, fontSize: 15, color: INK, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 12 },
+    fbRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" },
+    fbLabel: { fontSize: 13.5, fontWeight: 600, color: SLATE },
+    fbLabel2: { fontSize: 12.5, fontWeight: 600, color: SLATE, marginBottom: 7 },
+    fbThumb: { display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 13px", fontSize: 13.5, fontWeight: 600, color: SLATE, cursor: "pointer", fontFamily: body },
+    fbThumbUp: { background: "#E7F4EC", borderColor: "#A6D6BA", color: "#1A6B3C" },
+    fbThumbDown: { background: "#FCEBEC", borderColor: "#E8A6AB", color: "#8A1620" },
+    fbTag: { padding: "6px 12px", borderRadius: 999, border: `1px solid ${LINE}`, background: "#fff", color: SLATE, fontSize: 12.5, fontWeight: 500, cursor: "pointer", fontFamily: body },
+    fbTagOn: { background: "#54506B", borderColor: "#54506B", color: "#fff" },
+    fbEditBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "#fff", color: SLATE, border: `1px solid ${LINE}`, borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: body, marginTop: 13 },
+    fbDone: { display: "flex", gap: 11, background: "#E7F4EC", border: "1px solid #A6D6BA", borderRadius: 11, padding: "16px 18px", marginTop: 18, fontSize: 14, color: "#1A6B3C", lineHeight: 1.5 },
+    fbItem: { display: "flex", gap: 12, alignItems: "flex-start", background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "13px 15px", marginBottom: 8 },
+    fbDot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0, marginTop: 6 },
+    fbItemTop: { fontSize: 14.5, color: INK, display: "flex", alignItems: "center", gap: 8 },
+    fbEdited: { fontFamily: mono, fontSize: 8.5, background: "#54506B", color: "#fff", padding: "2px 6px", borderRadius: 3, letterSpacing: ".5px" },
+    fbItemTags: { fontSize: 12.5, color: "#8A1620", marginTop: 3 },
+    fbItemNotes: { fontSize: 13, color: SLATE, fontStyle: "italic", marginTop: 4 },
+    resGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, marginBottom: 8 },
+    resCard: { display: "flex", gap: 11, alignItems: "flex-start", background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "13px 15px" },
+    resName: { fontSize: 13.5, fontWeight: 600, color: INK, lineHeight: 1.3 },
+    resType: { fontFamily: mono, fontSize: 10.5, color: MUTED, marginTop: 3, letterSpacing: ".3px" },
+    resDl: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: EMS, flexShrink: 0, alignSelf: "center" },
+    ideaGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 11, marginBottom: 22 },
+    ideaCard: { background: "#F6F7F8", border: `1px solid ${LINE}`, borderRadius: 10, padding: "14px 16px" },
+    ideaH: { fontFamily: display, fontWeight: 600, fontSize: 14.5, color: INK },
+    ideaP: { fontSize: 12.5, color: MUTED, lineHeight: 1.5, marginTop: 4 },
+    docDrop: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, background: "#F6F7F8", border: `2px dashed #C2C6CB`, borderRadius: 12, padding: "30px 20px", marginBottom: 6, cursor: "pointer", textAlign: "center" },
+    docDropText: { fontSize: 14.5, color: SLATE, fontWeight: 500 },
+    docDropSub: { fontSize: 12, color: MUTED },
+    segRow: { display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 14 },
+    segBtn: { padding: "8px 14px", borderRadius: 999, border: `1px solid ${LINE}`, background: "#fff", color: SLATE, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: body },
+    segBtnOn: { background: "#54506B", borderColor: "#54506B", color: "#fff" },
+    helpP: { fontSize: 13.5, color: MUTED, marginTop: -2, marginBottom: 12, maxWidth: 620 },
+    richWrap: { display: "flex", flexDirection: "column", gap: 10, marginTop: 14 },
+    richCard: { background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, padding: "15px 17px" },
+    richTitle: { fontFamily: display, fontWeight: 600, fontSize: 15.5, color: INK, letterSpacing: ".2px", marginBottom: 9, paddingBottom: 8, borderBottom: `1px solid ${PAPER}` },
+    richP: { fontSize: 14, color: SLATE, lineHeight: 1.6, margin: "0 0 8px" },
+    richList: { margin: "2px 0 8px", paddingLeft: 20, fontSize: 14, color: SLATE, lineHeight: 1.7 },
+    opGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: 12 },
+    opCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 11, padding: "15px 16px" },
+    avatar: { width: 38, height: 38, borderRadius: "50%", background: "#262B31", color: "#fff", display: "grid", placeItems: "center", fontFamily: display, fontWeight: 600, fontSize: 14, flexShrink: 0 },
+    personName: { fontFamily: display, fontWeight: 600, fontSize: 15.5, color: INK, lineHeight: 1.2 },
+    personMeta: { fontSize: 12.5, color: MUTED, marginTop: 2 },
+    opChip: { fontFamily: mono, fontSize: 9.5, fontWeight: 600, letterSpacing: ".5px", padding: "3px 9px", borderRadius: 999, border: "1px solid", flexShrink: 0 },
+    certRow: { display: "flex", alignItems: "center", gap: 11, padding: "11px 4px", borderBottom: `1px solid ${PAPER}` },
+    eventRow: { display: "flex", alignItems: "center", gap: 4, padding: "11px 4px", borderBottom: `1px solid ${PAPER}` },
+    bar: { height: 7, borderRadius: 99, background: "#E4E6E8", overflow: "hidden", marginTop: 5 },
+    barFill: { height: "100%", borderRadius: 99, background: EMS },
+    forYou: { fontFamily: mono, fontSize: 9, fontWeight: 600, letterSpacing: ".5px", color: "#fff", background: ENGINE, padding: "2px 7px", borderRadius: 4, flexShrink: 0 },
+    primaryBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: ENGINE, color: "#fff", border: "none", borderRadius: 9, padding: "12px 20px", fontSize: 14.5, fontWeight: 600, fontFamily: body, cursor: "pointer", alignSelf: "flex-start" },
+    ghostBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "#fff", color: SLATE, border: `1px solid ${LINE}`, borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 600, fontFamily: body, cursor: "pointer", alignSelf: "flex-start", marginTop: 4 },
+    loginWrap: { minHeight: "100vh", background: INK, display: "grid", placeItems: "center", padding: 20, fontFamily: body, position: "relative", overflow: "hidden" },
+    loginChevron: { position: "absolute", top: 0, left: 0, right: 0, height: 12, background: chevron },
+    loginCard: { background: "#fff", borderRadius: 16, padding: "34px 30px", width: "100%", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,.35)" },
+    brandNameLg: { fontFamily: display, fontWeight: 700, fontSize: 24, letterSpacing: ".5px", color: INK },
+    loginTag: { fontSize: 14, color: MUTED, lineHeight: 1.55, margin: "4px 0 22px" },
+    loginNote: { fontSize: 11.5, color: MUTED, textAlign: "center", marginTop: 14, fontFamily: mono },
+  };
+}
