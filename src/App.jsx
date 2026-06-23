@@ -4,6 +4,9 @@ import {
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
   Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
+  ThumbsUp, ThumbsDown, Pencil, MessageSquare,
+  FolderOpen, Upload, FilePlus, PartyPopper,
+  Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, ClipboardCheck,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -12,7 +15,10 @@ import {
 /* ------------------------------------------------------------------ */
 const APP = "THE DAYROOM";
 
-const ROLES = ["Platform Admin", "Department Admin", "Training Officer", "Member"];
+const ROLES = ["Platform Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
+const LEADERSHIP = ["Platform Admin", "Department Admin", "Board Member", "Training Officer"];
+const isLeader = (role) => LEADERSHIP.includes(role);
+const canAssign = (role) => role === "Platform Admin" || role === "Department Admin";
 
 const TRACKS = {
   Fire:        { label: "Fire",        accent: "#B11E2A", Icon: Flame },
@@ -113,8 +119,12 @@ const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Platform Admin", "Department Admin", "Training Officer"], premium: true },
-  { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
-  { key: "funding", label: "Visibility & Funding", Icon: DollarSign, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
+  { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
+  { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
+  { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
+  { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
+  { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
+  { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Platform Admin"] },
 ];
@@ -128,6 +138,9 @@ export default function App() {
   const [drawer, setDrawer] = useState(false);
   const [library, setLibrary] = useState(SEED);
   const [requests, setRequests] = useState([]);
+  const [feedback, setFeedback] = useState([]);
+  const [members, setMembers] = useState(MEMBERS);
+  const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
   const S = baseStyles();
 
   function go(k) { setScreen(k); setPacketId(null); setDrawer(false); }
@@ -181,14 +194,18 @@ export default function App() {
         </header>
 
         <main style={S.content}>
-          {screen === "dashboard" && <Dashboard S={S} role={role} library={library} openPacket={openPacket} go={go} />}
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
-          {screen === "ai" && <AIAssistant S={S} />}
+          {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
+          {screen === "documents" && <Documents S={S} role={role} />}
+          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} />}
+          {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} />}
+          {screen === "visibility" && <Visibility S={S} />}
           {screen === "funding" && <Funding S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
-          {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} />}
+          {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
         </main>
       </div>
     </div>
@@ -219,7 +236,8 @@ function Login({ S, role, setRole, onEnter }) {
 }
 
 /* ---------------- Dashboard ---------------- */
-function Dashboard({ S, role, library, openPacket, go }) {
+function Dashboard({ S, role, members, library, openPacket, go }) {
+  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -290,8 +308,12 @@ function Dashboard({ S, role, library, openPacket, go }) {
 const QUICK = {
   library: { accent: "#1F4E79", blurb: "Ready-to-run packets for Fire, EMS, Leadership & Operations." },
   ai:      { accent: "#54506B", blurb: "Describe your crew — get a full drill plan in seconds." },
-  recruit: { accent: "#0E6B62", blurb: "A 90-day plan, ready-to-send templates, and a printable flyer." },
-  funding: { accent: "#9A6B12", blurb: "Content calendar, sponsor packages, and fundraising tools." },
+  documents: { accent: "#1F4E79", blurb: "Upload your SOPs and guidelines, or draft new ones with AI." },
+  roster: { accent: "#1F4E79", blurb: "Members, certifications, attendance, and the chief's reports." },
+  apparatus: { accent: "#B11E2A", blurb: "Log apparatus and equipment checks — know your rigs are ready." },
+  recruit: { accent: "#0E6B62", blurb: "Build a recruitment plan and find members on and off social." },
+  visibility: { accent: "#54506B", blurb: "A content calendar and ideas to keep your department seen." },
+  funding: { accent: "#9A6B12", blurb: "Plan fundraisers, draft appeals, and line up sponsors." },
   request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
   admin:   { accent: "#B11E2A", blurb: "Publish new monthly materials to the library." },
 };
@@ -314,6 +336,57 @@ function QuickAccess({ S, role, go }) {
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Member dashboard (personal view) ---------------- */
+function MemberDashboard({ S, role, members, go }) {
+  const me = members.find((m) => m.id === 4) || members[0];
+  return (
+    <div>
+      <PageHead S={S} eyebrow="MY STATION" title={`Welcome back, ${me.name.split(" ")[0]}.`} sub="Here's exactly where you stand — and what's coming up for you." />
+      <MyCerts S={S} me={me} />
+      <QuickAccess S={S} role={role} go={go} />
+    </div>
+  );
+}
+function MyCerts({ S, me }) {
+  const certs = me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
+  const expired = certs.filter((c) => c.st.rank === 0);
+  const expiring = certs.filter((c) => c.st.rank === 1);
+  const urgent = certs.filter((c) => c.st.rank < 2).map((c) => c.name);
+  const classes = CLASSES.map((cl) => ({ ...cl, forYou: cl.covers.some((n) => urgent.includes(n)) })).sort((a, b) => (b.forYou ? 1 : 0) - (a.forYou ? 1 : 0));
+  let al;
+  if (expired.length) al = { c: "#B11E2A", t: `Action needed: your ${expired[0].name} has expired — renew as soon as you can.` };
+  else if (expiring.length) al = { c: "#9A6B12", t: `Heads up: your ${expiring[0].name} ${expPhrase(expiring[0].exp)}.` };
+  else al = { c: "#2E7D52", t: "You're all current — nice work." };
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: "flex", gap: 9, alignItems: "center", background: `${al.c}12`, border: `1px solid ${al.c}44`, borderLeft: `4px solid ${al.c}`, borderRadius: 10, padding: "12px 15px", marginBottom: 16, fontSize: 14, color: "#2B3138", fontWeight: 500 }}>
+        <AlertTriangle size={16} color={al.c} style={{ flexShrink: 0 }} /> {al.t}
+      </div>
+      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MY CERTIFICATIONS</div>
+      <div style={S.opCard}>
+        {certs.map((c, i) => (
+          <div key={i} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom }}>
+            <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+            <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+          </div>
+        ))}
+      </div>
+      <div style={{ ...S.cardEyebrow, marginTop: 20 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPCOMING CLASSES</div>
+      <div style={S.opCard}>
+        {classes.map((cl, i) => (
+          <div key={i} style={{ ...S.certRow, borderBottom: i === classes.length - 1 ? "none" : S.certRow.borderBottom }}>
+            <Calendar size={15} color="#54506B" style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{cl.name}</span></div>
+            {cl.forYou && <span style={S.forYou}>FOR YOU</span>}
+            <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, color: "#6A7178" }}>{cl.date}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -406,10 +479,61 @@ async function callClaude(system, user) {
   return data.text || "";
 }
 
+/* ---------------- Plan feedback loop ---------------- */
+const CRITIQUE_TAGS = ["Too advanced", "Too basic", "Unsafe for our crew", "Wrong equipment", "Didn't fit the time", "Not realistic"];
+function PlanFeedback({ S, plan, topic, addFeedback }) {
+  const [rating, setRating] = useState(null);
+  const [tags, setTags] = useState([]);
+  const [notes, setNotes] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editedSummary, setEditedSummary] = useState(plan.summary || "");
+  const [sent, setSent] = useState(false);
+  const toggleTag = (t) => setTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]));
+  const changed = editing && editedSummary.trim() !== (plan.summary || "").trim();
+  function send() {
+    addFeedback({ topic, rating, tags, edited: changed, notes: notes.trim() });
+    setSent(true);
+  }
+  if (sent) return (
+    <div style={S.fbDone}>
+      <CheckCircle2 size={18} color="#1A6B3C" style={{ flexShrink: 0, marginTop: 1 }} />
+      <div><strong>Logged — thank you.</strong> Critiques like this are exactly what sharpen the next plan. Your team reviews them and tunes the system from them.</div>
+    </div>
+  );
+  return (
+    <div style={S.fbCard}>
+      <div style={S.fbHead}><MessageSquare size={15} color="#54506B" /> Help it get better</div>
+      <div style={S.fbRow}>
+        <span style={S.fbLabel}>Was this useful?</span>
+        <button style={{ ...S.fbThumb, ...(rating === "up" ? S.fbThumbUp : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
+        <button style={{ ...S.fbThumb, ...(rating === "down" ? S.fbThumbDown : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
+      </div>
+      <div style={S.fbLabel2}>What was off? (tap any)</div>
+      <div style={S.chipRow}>
+        {CRITIQUE_TAGS.map((t) => (
+          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, ...(tags.includes(t) ? S.fbTagOn : {}) }}>{t}</button>
+        ))}
+      </div>
+      {!editing ? (
+        <button style={S.fbEditBtn} onClick={() => setEditing(true)}><Pencil size={14} /> Edit the plan & save your version</button>
+      ) : (
+        <div style={{ marginTop: 12 }}>
+          <div style={S.fbLabel2}>Your corrected summary</div>
+          <textarea style={{ ...S.input, minHeight: 72, resize: "vertical" }} value={editedSummary} onChange={(e) => setEditedSummary(e.target.value)} />
+        </div>
+      )}
+      <div style={{ ...S.fbLabel2, marginTop: 12 }}>Anything else you'd change?</div>
+      <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. swap the prop, add an accountability check…" />
+      <button style={{ ...S.primaryBtn, marginTop: 12, opacity: (rating || tags.length || notes.trim() || changed) ? 1 : 0.55 }}
+        onClick={send} disabled={!(rating || tags.length || notes.trim() || changed)}>Send feedback</button>
+    </div>
+  );
+}
+
 /* ---------------- AI Training Assistant ---------------- */
-function AIAssistant({ S }) {
+function AIAssistant({ S, addFeedback }) {
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
-  const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null);
+  const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null);
@@ -418,7 +542,7 @@ function AIAssistant({ S }) {
     try {
       let t = (await callClaude(sys, user)).replace(/```json|```/g, "").trim();
       let parsed; try { parsed = JSON.parse(t); } catch { const m = t.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : null; }
-      if (!parsed) throw new Error("parse"); setPlan(parsed);
+      if (!parsed) throw new Error("parse"); setPlan(parsed); setGenId((g) => g + 1);
     } catch { setErr("Couldn't generate a plan just now. Check the connection and try again."); } finally { setLoading(false); }
   }
   return (
@@ -460,6 +584,7 @@ function AIAssistant({ S }) {
               <AIList S={S} Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
               <AIList S={S} Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
               <AIList S={S} Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
+              <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
             </div>
           )}
         </div>
@@ -480,49 +605,137 @@ function AIList({ S, Icon, title, items, warn }) {
   );
 }
 
+/* ---------------- shared: resource library + idea grid ---------------- */
+function ResourceLibrary({ S, items, verb }) {
+  return (
+    <div style={S.resGrid}>
+      {items.map((r) => (
+        <div key={r.name} style={S.resCard}>
+          <FileText size={16} color="#54506B" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={S.resName}>{r.name}</div>
+            <div style={S.resType}>{r.type}</div>
+          </div>
+          <span style={S.resDl}><Download size={13} /> {verb || "Download"}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+function IdeaGrid({ S, items }) {
+  return (
+    <div style={S.ideaGrid}>
+      {items.map((i) => (
+        <div key={i.h} style={S.ideaCard}><div style={S.ideaH}>{i.h}</div><div style={S.ideaP}>{i.p}</div></div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------- rich output formatter (markdown-lite → cards) ---------------- */
+function RichText({ text }) {
+  const parts = String(text).split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) =>
+    /^\*\*[^*]+\*\*$/.test(p) ? <strong key={i}>{p.slice(2, -2)}</strong> : <React.Fragment key={i}>{p}</React.Fragment>
+  );
+}
+function parseSections(text) {
+  const lines = String(text).replace(/\r/g, "").split("\n");
+  const sections = []; let cur = { title: null, blocks: [] }; let list = null;
+  const flushList = () => { if (list) { cur.blocks.push(list); list = null; } };
+  const pushCur = () => { flushList(); if (cur.title || cur.blocks.length) sections.push(cur); cur = { title: null, blocks: [] }; };
+  const header = (t) => {
+    if (/^#{1,6}\s+/.test(t)) return t.replace(/^#{1,6}\s+/, "").replace(/\*\*/g, "").trim();
+    const m = t.match(/^\*\*(.+?)\*\*:?$/); return m ? m[1].trim() : null;
+  };
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (t === "") { flushList(); continue; }
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flushList(); continue; }
+    const h = header(t); if (h) { pushCur(); cur.title = h; continue; }
+    const b = t.match(/^[-*•]\s+(.*)$/);
+    if (b) { if (!list || list.ordered) { flushList(); list = { ordered: false, items: [] }; } list.items.push(b[1]); continue; }
+    const o = t.match(/^\d+[.)]\s+(.*)$/);
+    if (o) { if (!list || !list.ordered) { flushList(); list = { ordered: true, items: [] }; } list.items.push(o[1]); continue; }
+    flushList(); cur.blocks.push({ para: t });
+  }
+  pushCur(); return sections;
+}
+function RichOutput({ S, text }) {
+  const sections = parseSections(text);
+  return (
+    <div style={S.richWrap}>
+      {sections.map((sec, i) => (
+        <div key={i} style={S.richCard}>
+          {sec.title && <div style={S.richTitle}>{sec.title}</div>}
+          {sec.blocks.map((b, j) => {
+            if (b.para != null) return <p key={j} style={S.richP}><RichText text={b.para} /></p>;
+            const Tag = b.ordered ? "ol" : "ul";
+            return <Tag key={j} style={S.richList}>{b.items.map((it, k) => <li key={k}><RichText text={it} /></li>)}</Tag>;
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ---------------- Recruitment ---------------- */
 function Recruitment({ S }) {
   const [town, setTown] = useState("Cedar Hollow");
-  const [need, setNeed] = useState("We need a few younger volunteers and people who can run daytime calls.");
-  const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
+  const [size, setSize] = useState("14");
+  const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
+  const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
   async function draft() {
-    setLoading(true); setErr(""); setPost("");
-    const sys = "You write warm, honest recruitment social posts for a volunteer fire/EMS department. Lead with purpose and 'we train you,' name the real objection, keep it under 80 words, plain and genuine — never desperate or guilt-tripping. Return only the post text.";
-    try { const t = await callClaude(sys, `Town: ${town}\nWhat the department needs: ${need}`); setPost(t); }
-    catch { setErr("Couldn't draft a post just now. Try again in a moment."); } finally { setLoading(false); }
+    setLoading(true); setErr(""); setPlan("");
+    const sys = "You are a recruitment advisor for volunteer fire/EMS departments. Draft a practical recruitment PLAN — not just a social post. Include: a clear goal, the best channels for a small department BEYOND social media (current-member referrals, local employers, schools/trade programs, community events, former members, an open house), 2-3 concrete first steps under each that suit a tiny volunteer crew, and one sample outreach line. Warm, honest, realistic, never desperate. Use short plain-text headers and bullets. Under 350 words.";
+    try { const t = await callClaude(sys, `Town: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}`); setPlan(t); }
+    catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
     <div>
-      <PageHead S={S} eyebrow="RECRUITMENT" title="The hardest problem, handed to you ready to use" sub="A 90-day plan, ready-to-send templates, a printable flyer — and an assistant that tailors them to your town." />
+      <PageHead S={S} eyebrow="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media." />
       <div style={S.phaseRow}>
         <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent="#B11E2A" />
-        <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Launch social posts", "Run a 'bring a friend' drive", "Employer + school outreach", "Pick an open-house date"]} accent="#1F4E79" />
+        <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent="#1F4E79" />
         <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent="#0E6B62" />
       </div>
 
       <div style={S.aiBanner}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT ASSISTANT</div>
-          <h3 style={S.featTitle}>Draft a recruitment post for your town</h3>
+          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER</div>
+          <h3 style={S.featTitle}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
             <AIField S={S} label="Your town" value={town} onChange={setTown} />
-            <label style={S.field}><span style={S.fieldLabel}>What you need</span>
-              <textarea style={{ ...S.input, minHeight: 44, resize: "vertical" }} value={need} onChange={(e) => setNeed(e.target.value)} /></label>
+            <AIField S={S} label="Department size" value={size} onChange={setSize} />
           </div>
-          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
-            {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a post</>}
+          <label style={S.field}><span style={S.fieldLabel}>What you need</span>
+            <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={need} onChange={(e) => setNeed(e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
           </button>
           {err && <div style={S.errBox}>{err}</div>}
-          {post && <div style={S.postOut}>{post}</div>}
+          {plan && <RichOutput S={S} text={plan} />}
         </div>
       </div>
 
-      <div style={S.cardEyebrow}>INCLUDED IN THE TOOLKIT</div>
-      <div style={S.toolGrid}>
-        {["90-day recruitment plan", "Social post templates", "Member-referral scripts", "Employer & school outreach emails", "Printable recruitment flyer", "Open-house checklist & funnel tracker"].map((t) => (
-          <div key={t} style={S.toolItem}><CheckCircle2 size={15} color="#0E6B62" /> <span>{t}</span></div>
-        ))}
-      </div>
+      <div style={S.cardEyebrow}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA</div>
+      <IdeaGrid S={S} items={[
+        { h: "Current-member referrals", p: "Your people's networks convert best. Give them a one-line script to forward." },
+        { h: "Local employers", p: "Release-time or support partnerships — many owners want the community goodwill." },
+        { h: "Schools & trade programs", p: "High schools, EMT classes, and fire-science programs build your pipeline." },
+        { h: "Community events", p: "Festivals, markets, ballgames — bring an apparatus and a sign-up sheet." },
+        { h: "Former members", p: "A warm 'we'd love to have you back' reopens more doors than you'd think." },
+        { h: "Open house", p: "Your highest-converting event — tour, demo, food, and fast follow-up." },
+      ]} />
+
+      <div style={S.cardEyebrow}>RECRUITMENT LIBRARY</div>
+      <ResourceLibrary S={S} items={[
+        { name: "Volunteer Recruitment Playbook", type: "PDF · 90-day plan + templates" },
+        { name: "Printable recruitment flyer", type: "PDF · fill-in-the-blank" },
+        { name: "Member-referral scripts", type: "Doc · copy & send" },
+        { name: "Employer & school outreach emails", type: "Doc · templates" },
+        { name: "Open-house checklist & funnel tracker", type: "PDF" },
+      ]} />
     </div>
   );
 }
@@ -536,22 +749,85 @@ function Phase({ S, n, weeks, title, items, accent }) {
   );
 }
 
-/* ---------------- Funding ---------------- */
-function Funding({ S }) {
+/* ---------------- Station Documents (upload + create) ---------------- */
+function Documents({ S, role }) {
+  const leader = isLeader(role);
+  const [docs, setDocs] = useState([
+    { name: "Cedar Hollow VFD — Member Handbook 2026.pdf", type: "Handbook · all members" },
+    { name: "Cedar Hollow SOG — Apparatus Response.pdf", type: "Uploaded · SOG" },
+    { name: "Mutual Aid Agreement 2026.pdf", type: "Uploaded · Guideline" },
+  ]);
+  const [kind, setKind] = useState("SOP / SOG");
+  const [desc, setDesc] = useState("A standard operating guideline for responding to a structure fire with a single engine plus mutual aid.");
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  function onFiles(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setDocs((d) => [...files.map((f) => ({ name: f.name, type: "Uploaded · just now" })), ...d]);
+    e.target.value = "";
+  }
+  async function draft() {
+    setLoading(true); setErr(""); setOut("");
+    const sys = "You help a volunteer fire/EMS department draft an internal document (SOP/SOG, guideline, policy, or checklist). Write a clear, well-structured DRAFT in plain text with a title, a short note that it must be reviewed and adapted to the department's AHJ, local protocols, medical direction, and applicable law, then numbered sections. Practical and realistic for a small volunteer department. Under 450 words.";
+    try { const t = await callClaude(sys, `Document type: ${kind}\nWhat it should cover: ${desc}`); setOut(t); }
+    catch { setErr("Couldn't draft that just now. Try again in a moment."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place" sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."} />
+
+      {leader && (<>
+        <div style={S.cardEyebrow}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
+        <label style={S.docDrop}>
+          <Upload size={22} color="#54506B" />
+          <div style={S.docDropText}>Drop files here or <span style={{ color: "#1F4E79", fontWeight: 600 }}>browse</span></div>
+          <div style={S.docDropSub}>SOPs, SOGs, guidelines, agreements — PDF, Word, or images</div>
+          <input type="file" multiple style={{ display: "none" }} onChange={onFiles} />
+        </label>
+
+        <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FilePlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT</div>
+        <div style={S.aiBanner}>
+          <div style={{ flex: 1 }}>
+            <label style={S.field}><span style={S.fieldLabel}>Document type</span>
+              <select style={{ ...S.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option>SOP / SOG</option><option>Guideline</option><option>Policy</option><option>Checklist</option><option>Memo</option>
+              </select></label>
+            <label style={{ ...S.field, marginTop: 12 }}><span style={S.fieldLabel}>What should it cover?</span>
+              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+            <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+              {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><FilePlus size={16} /> Draft document</>}
+            </button>
+            {err && <div style={S.errBox}>{err}</div>}
+            {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact /><RichOutput S={S} text={out} /></div>}
+          </div>
+        </div>
+      </>)}
+
+      <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
+      <ResourceLibrary S={S} verb="Open" items={docs} />
+    </div>
+  );
+}
+
+/* ---------------- Visibility ---------------- */
+function Visibility({ S }) {
   const cal = [
     { wk: "Week 1", tag: "PEOPLE", c: "#B11E2A", t: "Member spotlight — why they serve" },
     { wk: "Week 2", tag: "COMMUNITY", c: "#0E6B62", t: "Seasonal safety tip" },
-    { wk: "Week 3", tag: "THE ASK", c: "#9A6B12", t: "Fundraiser promo + link" },
-    { wk: "Week 4", tag: "BEHIND SCENES", c: "#1F4E79", t: "Training night photo" },
+    { wk: "Week 3", tag: "BEHIND SCENES", c: "#1F4E79", t: "Training night photo or clip" },
+    { wk: "Week 4", tag: "THE ASK", c: "#9A6B12", t: "Thank a supporter / recap the month" },
   ];
-  const tiers = [
-    { name: "Supporter", price: "$250", items: ["Name on website", "Social thank-you", "Window decal"] },
-    { name: "Partner", price: "$1,000", items: ["Banner at events", "Logo on website", "Quarterly shout-outs"], mid: true },
-    { name: "Champion", price: "$2,500", items: ["Event sponsor", "Apparatus signage", "Annual recognition"] },
-  ];
+  const [topic, setTopic] = useState("A Tuesday-night ladder drill");
+  const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
+  async function draft() {
+    setLoading(true); setErr(""); setPost("");
+    const sys = "You write short, warm social media captions for a volunteer fire/EMS department to build community visibility and trust — not recruitment. Plain, genuine, under 60 words, with a tasteful hashtag or two. Never graphic content or patient information. Return only the caption.";
+    try { const t = await callClaude(sys, `Post about: ${topic}`); setPost(t); }
+    catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
+  }
   return (
     <div>
-      <PageHead S={S} eyebrow="VISIBILITY & FUNDING" title="Get seen. Get funded. Get staffed." sub="The same 20 minutes a week of showing your work feeds recruitment and funding both." />
+      <PageHead S={S} eyebrow="VISIBILITY" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week." />
       <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
       <div style={S.calGrid}>
         {cal.map((c) => (
@@ -559,20 +835,406 @@ function Funding({ S }) {
             <span style={{ ...S.calTag, background: c.c }}>{c.tag}</span><div style={S.calText}>{c.t}</div></div>
         ))}
       </div>
-      <div style={S.cardEyebrow}><DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SPONSOR PACKAGES</div>
+
+      <div style={S.cardEyebrow}>IDEAS FOR THINGS TO MAKE</div>
+      <IdeaGrid S={S} items={[
+        { h: "60-second station tour", p: "Walk the bay on a phone camera. People love seeing inside." },
+        { h: "Member spotlight", p: "One photo + why they serve. Faces build trust the fastest." },
+        { h: "Safety tip card", p: "Smoke alarms, seasonal hazards — useful posts get shared." },
+        { h: "Training night clip", p: "A short drill video shows the work most people never see." },
+        { h: "Apparatus feature", p: "\u201CMeet Engine 1 — here's what it carries.\u201D" },
+        { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
+      ]} />
+
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI CAPTION HELPER</div>
+          <h3 style={S.featTitle}>Write a post for your station</h3>
+          <label style={S.field}><span style={S.fieldLabel}>What's the post about?</span>
+            <input style={S.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {post && <RichOutput S={S} text={post} />}
+        </div>
+      </div>
+
+      <div style={S.cardEyebrow}>VISIBILITY LIBRARY</div>
+      <ResourceLibrary S={S} items={[
+        { name: "Monthly content calendar template", type: "PDF · copy & repeat" },
+        { name: "Caption starters", type: "Doc · fill-in" },
+        { name: "Social Media Playbook", type: "PDF · the full guide" },
+      ]} />
+    </div>
+  );
+}
+
+/* ---------------- Funding ---------------- */
+function Funding({ S }) {
+  const [mode, setMode] = useState("Plan a fundraiser");
+  const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const tiers = [
+    { name: "Supporter", price: "$250", items: ["Name on event materials", "Social thank-you", "Window decal"] },
+    { name: "Partner", price: "$1,000", items: ["Banner at the event", "Logo on promo", "Stage / mic mention"], mid: true },
+    { name: "Presenting", price: "$2,500", items: ["\u201CPresented by\u201D billing", "Top logo placement", "Annual recognition"] },
+  ];
+  async function generate() {
+    setLoading(true); setErr(""); setOut("");
+    let sys;
+    if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their idea, return a practical plan in plain text: goal, a simple timeline/checklist, roles needed, promotion steps, and a realistic money target. Doable for a small volunteer crew. Under 350 words.";
+    else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
+    else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
+    try { const t = await callClaude(sys, `Department: Cedar Hollow VFD\nDetails: ${detail}`); setOut(t); }
+    catch { setErr("Couldn't generate that just now. Try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="FUNDING" title="Plan fundraisers, write the appeals, line up sponsors" sub="A hand to plan the event, draft the community ask, and format the letters — plus sponsor packages built for fundraisers." />
+
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
+          <div style={S.segRow}>
+            {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
+              <button key={m} onClick={() => { setMode(m); setOut(""); }} style={{ ...S.segBtn, ...(mode === m ? S.segBtnOn : {}) }}>{m}</button>
+            ))}
+          </div>
+          <label style={S.field}><span style={S.fieldLabel}>Tell us about it</span>
+            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Working…</> : <><Sparkles size={16} /> Generate</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
+
+      <div style={S.cardEyebrow}><DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER SPONSOR PACKAGES</div>
+      <p style={S.helpP}>Local businesses sponsor your fundraisers in exchange for recognition. Adjust the amounts to your community.</p>
       <div style={S.tierRow}>
         {tiers.map((t) => (
           <div key={t.name} style={{ ...S.tier, ...(t.mid ? S.tierMid : {}) }}>
-            <div style={S.tierName}>{t.name}</div><div style={S.tierPrice}>{t.price}<span style={S.tierYr}>/yr</span></div>
+            <div style={S.tierName}>{t.name}</div><div style={S.tierPrice}>{t.price}</div>
             <ul style={S.tierList}>{t.items.map((i) => <li key={i}>{i}</li>)}</ul>
           </div>
         ))}
       </div>
-      <div style={S.cardEyebrow}>ALSO INCLUDED</div>
-      <div style={S.toolGrid}>
-        {["Fundraising idea menu", "Donor & business outreach templates", "Recruitment campaign calendar", "Fundraising plan & tracker"].map((t) => (
-          <div key={t} style={S.toolItem}><CheckCircle2 size={15} color="#0E6B62" /> <span>{t}</span></div>
+
+      <div style={S.cardEyebrow}>FUNDING LIBRARY</div>
+      <ResourceLibrary S={S} items={[
+        { name: "Fundraising idea menu", type: "PDF" },
+        { name: "Sponsor package one-pager", type: "Doc · editable" },
+        { name: "Donor & business outreach letters", type: "Doc · templates" },
+        { name: "Fundraising plan & tracker", type: "PDF" },
+      ]} />
+    </div>
+  );
+}
+
+/* ---------------- Roster & Operations ---------------- */
+const MEMBERS = [
+  { id: 1, name: "Maria Reyes", role: "Chief", access: "Department Admin", status: "Active", phone: "(817) 555-0142", joined: "2014", participation: 96, certs: [{ name: "Firefighter II", exp: "2027-03" }, { name: "EMT-B", exp: "2026-08" }, { name: "Hazmat Ops", exp: "2027-01" }], notes: [{ text: "Completed officer development course. Strong candidate for deputy chief.", by: "Department Admin", when: "May 2026" }] },
+  { id: 2, name: "Tom Daniels", role: "Training Officer", access: "Training Officer", status: "Active", phone: "(817) 555-0188", joined: "2017", participation: 91, certs: [{ name: "Firefighter II", exp: "2026-09" }, { name: "EMT-B", exp: "2026-05" }, { name: "Fire Instructor I", exp: "2027-06" }], notes: [] },
+  { id: 3, name: "Janelle Okafor", role: "Asst. Chief", access: "Board Member", status: "Active", phone: "(817) 555-0119", joined: "2015", participation: 88, certs: [{ name: "Firefighter II", exp: "2027-02" }, { name: "Paramedic", exp: "2026-07" }], notes: [] },
+  { id: 4, name: "Cody Pearson", role: "Firefighter", access: "Member", status: "Active", phone: "(817) 555-0173", joined: "2021", participation: 76, certs: [{ name: "Firefighter I", exp: "2026-12" }, { name: "EMT-B", exp: "2026-04" }], notes: [{ text: "EMT-B lapsed — reminded to register for the July refresher.", by: "Training Officer", when: "Jun 2026" }] },
+  { id: 5, name: "Sam Whitfield", role: "Firefighter", access: "Member", status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Training Officer", when: "Jun 2026" }] },
+  { id: 6, name: "Dana Cole", role: "Firefighter / EMT", access: "Member", status: "Active", phone: "(817) 555-0150", joined: "2019", participation: 84, certs: [{ name: "Firefighter II", exp: "2026-08" }, { name: "EMT-B", exp: "2027-04" }], notes: [] },
+];
+const EVENTS = [
+  { id: 1, name: "Tuesday Drill — Ladder Throws", date: "Jun 17", type: "Drill", present: 11, total: 14 },
+  { id: 2, name: "Monthly Business Meeting", date: "Jun 10", type: "Meeting", present: 12, total: 14 },
+  { id: 3, name: "EMS Refresher — Stroke", date: "Jun 3", type: "Drill", present: 9, total: 14 },
+  { id: 4, name: "Structure Fire — Co. 2 mutual aid", date: "May 28", type: "Call", present: 7, total: 14 },
+];
+const APPARATUS_SEED = [
+  { id: 1, name: "Engine 1", type: "Pumper", lastCheck: "Jun 22", by: "Daniels", status: "Pass", note: "All systems good" },
+  { id: 2, name: "Brush 2", type: "Brush truck", lastCheck: "Jun 22", by: "Pearson", status: "Pass", note: "Water topped off" },
+  { id: 3, name: "Tanker 1", type: "Tender", lastCheck: "Jun 15", by: "Cole", status: "Needs attention", note: "Low on foam concentrate" },
+  { id: 4, name: "Rescue 1", type: "Rescue", lastCheck: "Jun 20", by: "Okafor", status: "Pass", note: "" },
+];
+function certStatus(exp) {
+  const [y, m] = exp.split("-").map(Number);
+  const diff = (y * 12 + m) - (2026 * 12 + 6);
+  if (diff < 0) return { label: "EXPIRED", color: "#B11E2A", rank: 0 };
+  if (diff <= 3) return { label: "EXPIRING", color: "#9A6B12", rank: 1 };
+  return { label: "CURRENT", color: "#2E7D52", rank: 2 };
+}
+const CLASSES = [
+  { name: "EMT-B Refresher", date: "Jul 12", covers: ["EMT-B", "Paramedic"] },
+  { name: "CPR / BLS Recert", date: "Jun 28", covers: ["EMT-B", "Paramedic"] },
+  { name: "Firefighter II Academy", date: "Aug 2", covers: ["Firefighter I", "Firefighter II"] },
+  { name: "Hazmat Ops", date: "Sep 9", covers: ["Hazmat Ops"] },
+  { name: "Fire Instructor I", date: "Oct 4", covers: ["Fire Instructor I"] },
+];
+function expPhrase(exp) {
+  const [y, m] = exp.split("-").map(Number);
+  const d = (y * 12 + m) - (2026 * 12 + 6);
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
+  if (d < 0) return `expired ${mon} ${y}`;
+  if (d === 0) return `expires this month`;
+  if (d <= 3) return `expires ${mon} ${y} — in ~${d} month${d > 1 ? "s" : ""}`;
+  return `expires ${mon} ${y}`;
+}
+function Pill({ S, color, children }) {
+  return <span style={{ ...S.opChip, color, borderColor: `${color}55`, background: `${color}14` }}>{children}</span>;
+}
+function Initials({ S, name }) {
+  const i = name.split(" ").map((w) => w[0]).slice(0, 2).join("");
+  return <span style={S.avatar}>{i}</span>;
+}
+
+function Roster({ S, role, members, setMembers }) {
+  const leader = isLeader(role);
+  const tabs = leader
+    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"]]
+    : [["members", "Members"]];
+  const [tab, setTab] = useState("members");
+  const [sel, setSel] = useState(null);
+  const selected = members.find((m) => m.id === sel);
+  const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
+  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} />;
+  return (
+    <div>
+      <PageHead S={S} eyebrow="ROSTER" title="Your people, all in one place" sub={leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."} />
+      <div style={S.segRow}>
+        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, ...(tab === k ? S.segBtnOn : {}) }}>{l}</button>)}
+      </div>
+      {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} />}
+      {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
+      {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
+      {tab === "reports" && leader && <RosterReports S={S} members={members} />}
+    </div>
+  );
+}
+function RosterMembers({ S, role, members, setMembers, onOpen }) {
+  const canAdd = canAssign(role);
+  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter");
+  const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
+  function add() { if (!nm.trim()) return; setMembers((m) => [...m, { id: Date.now(), name: nm, role: rl, access: "Member", status: "Probationary", phone: "—", joined: "2026", participation: 0, certs: [], notes: [] }]); setNm(""); setAdding(false); }
+  return (
+    <div>
+      {canAdd && (adding ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Name</span><input style={S.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Rank</span><select style={S.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
+          <button style={S.primaryBtn} onClick={add}><UserPlus size={15} /> Add</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      <div style={S.opGrid}>
+        {members.map((m) => (
+          <div key={m.id} style={{ ...S.opCard, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <Initials S={S} name={m.name} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={S.personName}>{m.name}</div>
+                <div style={S.personMeta}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
+              </div>
+              <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: "#6A7178" }}>
+              <Phone size={13} /> {m.phone}
+              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: "#1F4E79", fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
+                : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
+            </div>
+          </div>
         ))}
+      </div>
+    </div>
+  );
+}
+function MemberDetail({ S, member, role, back, onUpdate }) {
+  const assign = canAssign(role);
+  const [note, setNote] = useState("");
+  const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
+  const notes = member.notes || [];
+  function addNote() { if (!note.trim()) return; onUpdate({ ...member, notes: [{ text: note.trim(), by: role, when: "Just now" }, ...notes] }); setNote(""); }
+  return (
+    <div>
+      <button style={S.backBtn} onClick={back}><ArrowLeft size={16} /> Back to roster</button>
+      <div style={{ ...S.opCard, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <Initials S={S} name={member.name} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...S.personName, fontSize: 19 }}>{member.name}</div>
+            <div style={S.personMeta}>{member.role} · since {member.joined} · {member.phone}</div>
+          </div>
+          <Pill S={S} color={member.status === "Active" ? "#2E7D52" : member.status === "Probationary" ? "#9A6B12" : "#6A7178"}>{member.status.toUpperCase()}</Pill>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation}%</span></div>
+          <Bar S={S} pct={member.participation} color={member.participation >= 75 ? "#2E7D52" : member.participation >= 50 ? "#9A6B12" : "#B11E2A"} />
+        </div>
+        {assign && (
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid #ECEDEA` }}>
+            <label style={S.field}><span style={S.fieldLabel}>Station role &amp; access</span>
+              <select style={{ ...S.input, maxWidth: 260 }} value={member.access} onChange={(e) => onUpdate({ ...member, access: e.target.value })}>
+                <option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option>
+              </select></label>
+            <div style={{ fontSize: 12, color: "#6A7178", marginTop: 5 }}>Sets what this person can see and do across the platform.</div>
+          </div>
+        )}
+      </div>
+
+      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</div>
+      <div style={{ ...S.opCard, marginBottom: 16 }}>
+        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No certifications on file yet.</div> :
+          certs.map((c, i) => (
+            <div key={i} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom }}>
+              <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+              <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+            </div>
+          ))}
+      </div>
+
+      <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
+      <div style={S.opCard}>
+        <div style={{ display: "flex", gap: 8, marginBottom: notes.length ? 14 : 0 }}>
+          <input style={{ ...S.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button style={S.primaryBtn} onClick={addNote}>Add</button>
+        </div>
+        {notes.map((n, i) => (
+          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : S.certRow.borderBottom, alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: "#2B3138", lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: "#6A7178", marginTop: 3 }}>{n.by} · {n.when}</div></div>
+          </div>
+        ))}
+        {notes.length === 0 && <div style={{ fontSize: 13, color: "#6A7178" }}>No notes yet. Notes here are visible to leadership only — never to the member.</div>}
+      </div>
+    </div>
+  );
+}
+function RosterCerts({ S, members }) {
+  const rows = [];
+  members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, st: certStatus(c.exp) })));
+  rows.sort((a, b) => a.st.rank - b.st.rank);
+  const n = (r) => rows.filter((x) => x.st.rank === r).length;
+  return (
+    <div>
+      <div style={S.statRow}>
+        <Stat S={S} n={String(n(2))} label="Certs current" />
+        <Stat S={S} n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
+        <Stat S={S} n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
+      </div>
+      <div style={{ marginTop: 4 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={S.certRow}>
+            <Award size={15} color={r.st.color} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{r.cert}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {r.member}</span></div>
+            <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, color: "#6A7178" }}>exp {r.exp}</span>
+            <Pill S={S} color={r.st.color}>{r.st.label}</Pill>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function Bar({ S, pct, color }) {
+  return <div style={S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
+}
+function RosterAttendance({ S, members }) {
+  const people = [...members].sort((a, b) => b.participation - a.participation);
+  return (
+    <div>
+      <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
+      <div style={{ marginBottom: 22 }}>
+        {EVENTS.map((e) => {
+          const pct = Math.round((e.present / e.total) * 100);
+          return (
+            <div key={e.id} style={S.eventRow}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={S.personName}>{e.name}</div>
+                <div style={S.personMeta}>{e.type} · {e.date}</div>
+              </div>
+              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} color={pct >= 75 ? "#2E7D52" : "#9A6B12"} /></div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={S.cardEyebrow}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
+      <div>
+        {people.map((m) => (
+          <div key={m.id} style={S.eventRow}>
+            <Initials S={S} name={m.name} />
+            <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={S.personName}>{m.name}</div><div style={S.personMeta}>{m.role}</div></div>
+            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{m.participation}%</div><Bar S={S} pct={m.participation} color={m.participation >= 75 ? "#2E7D52" : (m.participation >= 50 ? "#9A6B12" : "#B11E2A")} /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function RosterReports({ S, members }) {
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const active = members.filter((m) => m.status === "Active").length;
+  const prob = members.filter((m) => m.status === "Probationary").length;
+  const certs = []; members.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
+  const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
+  const avgPart = Math.round(members.reduce((s, m) => s + m.participation, 0) / members.length);
+  const rigsReady = APPARATUS_SEED.filter((r) => r.status === "Pass").length;
+  async function draft() {
+    setLoading(true); setErr(""); setOut("");
+    const summary = `Cedar Hollow VFD snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average participation (90 days): ${avgPart}%\n- Apparatus ready: ${rigsReady} of ${APPARATUS_SEED.length}\n- Recent activity: ${EVENTS.length} events in the last 30 days (drills, a meeting, and a mutual-aid call)`;
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board. Use clear sections with bold titles and bullet points: an overview, training & certifications (flag the expiring/expired certs as an action item), participation, and apparatus readiness. Confident, factual tone. Under 350 words.";
+    try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <div style={S.statRow}>
+        <Stat S={S} n={`${active}/${members.length}`} label="Active members" />
+        <Stat S={S} n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
+        <Stat S={S} n={`${avgPart}%`} label="Avg participation" />
+        <Stat S={S} n={`${rigsReady}/${APPARATUS_SEED.length}`} label="Apparatus ready" />
+      </div>
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
+          <h3 style={S.featTitle}>Turn your numbers into a report — in one tap</h3>
+          <p style={{ ...S.helpP, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
+          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Apparatus ---------------- */
+function Apparatus({ S, role }) {
+  const [rigs, setRigs] = useState(APPARATUS_SEED);
+  const ready = rigs.filter((r) => r.status === "Pass").length;
+  const flagged = rigs.length - ready;
+  function logCheck(id) { setRigs((rs) => rs.map((r) => r.id === id ? { ...r, lastCheck: "Just now", by: "You", status: "Pass", note: "Checked — all good" } : r)); }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="APPARATUS & EQUIPMENT" title="Know your rigs are ready" sub="Log your apparatus and equipment checks so the whole crew can see what's good to roll." />
+      <div style={S.statRow}>
+        <Stat S={S} n={String(ready)} label="Ready to roll" />
+        <Stat S={S} n={String(flagged)} label="Needs attention" warn={flagged > 0} />
+        <Stat S={S} n={String(rigs.length)} label="Apparatus tracked" />
+      </div>
+      <div style={S.opGrid}>
+        {rigs.map((r) => {
+          const ok = r.status === "Pass"; const color = ok ? "#2E7D52" : "#B11E2A";
+          return (
+            <div key={r.id} style={S.opCard}>
+              <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
+                <Truck size={20} color="#54506B" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{r.name}</div><div style={S.personMeta}>{r.type}</div></div>
+                <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>
+              </div>
+              {r.note && <div style={{ fontSize: 13, color: ok ? "#3A4750" : "#8A1620", marginTop: 10 }}>{r.note}</div>}
+              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: "#6A7178" }}>
+                <span>Last check: {r.lastCheck} · {r.by}</span>
+                <button style={{ ...S.ghostBtn, marginTop: 0, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id)}><ClipboardCheck size={14} /> Log a check</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -604,7 +1266,7 @@ function RequestForm({ S, requests, setRequests }) {
 }
 
 /* ---------------- Admin ---------------- */
-function Admin({ S, library, setLibrary }) {
+function Admin({ S, library, setLibrary, feedback }) {
   const [title, setTitle] = useState(""); const [track, setTrack] = useState("Fire"); const [time, setTime] = useState("60 min"); const [objective, setObjective] = useState(""); const [done, setDone] = useState(false);
   function publish() {
     if (!title.trim()) return;
@@ -626,6 +1288,26 @@ function Admin({ S, library, setLibrary }) {
         <label style={S.field}><span style={S.fieldLabel}>Objective</span><textarea style={{ ...S.input, minHeight: 66, resize: "vertical" }} value={objective} onChange={(e) => setObjective(e.target.value)} /></label>
         <button style={S.primaryBtn} onClick={publish}><Plus size={16} /> Publish to library</button>
         {done && <div style={S.successBox}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
+      </div>
+
+      <div style={{ marginTop: 26 }}>
+        <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FIELD SIGNAL · WHAT WE'RE LEARNING</div>
+        <p style={{ ...S.pageSub, marginTop: 0, marginBottom: 14 }}>Ratings and critiques from departments on AI-generated plans. Review monthly, spot the patterns, and turn them into sharper prompt rules and better packets — that's how the system improves.</p>
+        {(!feedback || feedback.length === 0) ? (
+          <div style={S.empty}>No feedback yet. Generate a plan in the AI Training Assistant, rate it, and it'll show up here.</div>
+        ) : (
+          feedback.map((f, i) => (
+            <div key={i} style={S.fbItem}>
+              <span style={{ ...S.fbDot, background: f.rating === "up" ? "#2E7D52" : (f.rating === "down" ? "#B11E2A" : "#9AA1A9") }} />
+              <div style={{ flex: 1 }}>
+                <div style={S.fbItemTop}><strong>{f.topic}</strong>{f.edited && <span style={S.fbEdited}>EDITED</span>}</div>
+                {f.tags && f.tags.length > 0 && <div style={S.fbItemTags}>{f.tags.join(" · ")}</div>}
+                {f.notes && <div style={S.fbItemNotes}>"{f.notes}"</div>}
+              </div>
+              <span style={S.reqWhen}>{f.when}</span>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -815,6 +1497,56 @@ function baseStyles() {
     reqRow: { display: "flex", justifyContent: "space-between", gap: 12, background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "14px 16px", marginBottom: 8, fontSize: 14 },
     reqNotes: { fontSize: 13, color: MUTED, marginTop: 3 },
     reqWhen: { fontFamily: mono, fontSize: 11.5, color: MUTED, flexShrink: 0 },
+    fbCard: { background: "#F6F4F8", border: "1px solid #D8D2E0", borderRadius: 12, padding: 18, marginTop: 18 },
+    fbHead: { display: "flex", alignItems: "center", gap: 8, fontFamily: display, fontWeight: 600, fontSize: 15, color: INK, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 12 },
+    fbRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" },
+    fbLabel: { fontSize: 13.5, fontWeight: 600, color: SLATE },
+    fbLabel2: { fontSize: 12.5, fontWeight: 600, color: SLATE, marginBottom: 7 },
+    fbThumb: { display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 13px", fontSize: 13.5, fontWeight: 600, color: SLATE, cursor: "pointer", fontFamily: body },
+    fbThumbUp: { background: "#E7F4EC", borderColor: "#A6D6BA", color: "#1A6B3C" },
+    fbThumbDown: { background: "#FCEBEC", borderColor: "#E8A6AB", color: "#8A1620" },
+    fbTag: { padding: "6px 12px", borderRadius: 999, border: `1px solid ${LINE}`, background: "#fff", color: SLATE, fontSize: 12.5, fontWeight: 500, cursor: "pointer", fontFamily: body },
+    fbTagOn: { background: "#54506B", borderColor: "#54506B", color: "#fff" },
+    fbEditBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "#fff", color: SLATE, border: `1px solid ${LINE}`, borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: body, marginTop: 13 },
+    fbDone: { display: "flex", gap: 11, background: "#E7F4EC", border: "1px solid #A6D6BA", borderRadius: 11, padding: "16px 18px", marginTop: 18, fontSize: 14, color: "#1A6B3C", lineHeight: 1.5 },
+    fbItem: { display: "flex", gap: 12, alignItems: "flex-start", background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "13px 15px", marginBottom: 8 },
+    fbDot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0, marginTop: 6 },
+    fbItemTop: { fontSize: 14.5, color: INK, display: "flex", alignItems: "center", gap: 8 },
+    fbEdited: { fontFamily: mono, fontSize: 8.5, background: "#54506B", color: "#fff", padding: "2px 6px", borderRadius: 3, letterSpacing: ".5px" },
+    fbItemTags: { fontSize: 12.5, color: "#8A1620", marginTop: 3 },
+    fbItemNotes: { fontSize: 13, color: SLATE, fontStyle: "italic", marginTop: 4 },
+    resGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, marginBottom: 8 },
+    resCard: { display: "flex", gap: 11, alignItems: "flex-start", background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "13px 15px" },
+    resName: { fontSize: 13.5, fontWeight: 600, color: INK, lineHeight: 1.3 },
+    resType: { fontFamily: mono, fontSize: 10.5, color: MUTED, marginTop: 3, letterSpacing: ".3px" },
+    resDl: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: EMS, flexShrink: 0, alignSelf: "center" },
+    ideaGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 11, marginBottom: 22 },
+    ideaCard: { background: "#F6F7F8", border: `1px solid ${LINE}`, borderRadius: 10, padding: "14px 16px" },
+    ideaH: { fontFamily: display, fontWeight: 600, fontSize: 14.5, color: INK },
+    ideaP: { fontSize: 12.5, color: MUTED, lineHeight: 1.5, marginTop: 4 },
+    docDrop: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, background: "#F6F7F8", border: `2px dashed #C2C6CB`, borderRadius: 12, padding: "30px 20px", marginBottom: 6, cursor: "pointer", textAlign: "center" },
+    docDropText: { fontSize: 14.5, color: SLATE, fontWeight: 500 },
+    docDropSub: { fontSize: 12, color: MUTED },
+    segRow: { display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 14 },
+    segBtn: { padding: "8px 14px", borderRadius: 999, border: `1px solid ${LINE}`, background: "#fff", color: SLATE, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: body },
+    segBtnOn: { background: "#54506B", borderColor: "#54506B", color: "#fff" },
+    helpP: { fontSize: 13.5, color: MUTED, marginTop: -2, marginBottom: 12, maxWidth: 620 },
+    richWrap: { display: "flex", flexDirection: "column", gap: 10, marginTop: 14 },
+    richCard: { background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, padding: "15px 17px" },
+    richTitle: { fontFamily: display, fontWeight: 600, fontSize: 15.5, color: INK, letterSpacing: ".2px", marginBottom: 9, paddingBottom: 8, borderBottom: `1px solid ${PAPER}` },
+    richP: { fontSize: 14, color: SLATE, lineHeight: 1.6, margin: "0 0 8px" },
+    richList: { margin: "2px 0 8px", paddingLeft: 20, fontSize: 14, color: SLATE, lineHeight: 1.7 },
+    opGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: 12 },
+    opCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 11, padding: "15px 16px" },
+    avatar: { width: 38, height: 38, borderRadius: "50%", background: "#262B31", color: "#fff", display: "grid", placeItems: "center", fontFamily: display, fontWeight: 600, fontSize: 14, flexShrink: 0 },
+    personName: { fontFamily: display, fontWeight: 600, fontSize: 15.5, color: INK, lineHeight: 1.2 },
+    personMeta: { fontSize: 12.5, color: MUTED, marginTop: 2 },
+    opChip: { fontFamily: mono, fontSize: 9.5, fontWeight: 600, letterSpacing: ".5px", padding: "3px 9px", borderRadius: 999, border: "1px solid", flexShrink: 0 },
+    certRow: { display: "flex", alignItems: "center", gap: 11, padding: "11px 4px", borderBottom: `1px solid ${PAPER}` },
+    eventRow: { display: "flex", alignItems: "center", gap: 4, padding: "11px 4px", borderBottom: `1px solid ${PAPER}` },
+    bar: { height: 7, borderRadius: 99, background: "#E4E6E8", overflow: "hidden", marginTop: 5 },
+    barFill: { height: "100%", borderRadius: 99, background: EMS },
+    forYou: { fontFamily: mono, fontSize: 9, fontWeight: 600, letterSpacing: ".5px", color: "#fff", background: ENGINE, padding: "2px 7px", borderRadius: 4, flexShrink: 0 },
     primaryBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: ENGINE, color: "#fff", border: "none", borderRadius: 9, padding: "12px 20px", fontSize: 14.5, fontWeight: 600, fontFamily: body, cursor: "pointer", alignSelf: "flex-start" },
     ghostBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "#fff", color: SLATE, border: `1px solid ${LINE}`, borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 600, fontFamily: body, cursor: "pointer", alignSelf: "flex-start", marginTop: 4 },
     loginWrap: { minHeight: "100vh", background: INK, display: "grid", placeItems: "center", padding: 20, fontFamily: body, position: "relative", overflow: "hidden" },
