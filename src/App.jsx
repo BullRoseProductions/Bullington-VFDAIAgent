@@ -811,13 +811,115 @@ function Documents({ S, role }) {
 }
 
 /* ---------------- Visibility ---------------- */
+const POST_THEMES = [
+  { tag: "PEOPLE", c: "#B11E2A", t: "Member spotlight — why they serve" },
+  { tag: "COMMUNITY", c: "#0E6B62", t: "Seasonal safety tip" },
+  { tag: "BEHIND SCENES", c: "#1F4E79", t: "Training night photo or clip" },
+  { tag: "THE ASK", c: "#9A6B12", t: "Thank a supporter / recap the month" },
+  { tag: "SAFETY", c: "#54506B", t: "Quick home-safety reminder" },
+];
+const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function ContentCalendar({ S }) {
+  const today = new Date();
+  const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [posts, setPosts] = useState(() => {
+    const y = today.getFullYear(), m = today.getMonth();
+    const dim = new Date(y, m + 1, 0).getDate();
+    return [
+      { id: 1, y, m, d: Math.min(3, dim), ...POST_THEMES[0] },
+      { id: 2, y, m, d: Math.min(10, dim), ...POST_THEMES[4], t: "Smoke-alarm check reminder" },
+      { id: 3, y, m, d: Math.min(17, dim), ...POST_THEMES[2], t: "Tuesday drill clip" },
+      { id: 4, y, m, d: Math.min(24, dim), ...POST_THEMES[3], t: "Thank-you to our supporters" },
+    ];
+  });
+  const [show, setShow] = useState(false);
+  const [fd, setFd] = useState(today.getDate());
+  const [fi, setFi] = useState(0);
+  const [ft, setFt] = useState("");
+
+  const dim = new Date(cur.y, cur.m + 1, 0).getDate();
+  const firstDow = new Date(cur.y, cur.m, 1).getDay();
+  const monthPosts = posts.filter((p) => p.y === cur.y && p.m === cur.m);
+  const isToday = (d) => cur.y === today.getFullYear() && cur.m === today.getMonth() && d === today.getDate();
+  function shift(n) { let m = cur.m + n, y = cur.y; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } setCur({ y, m }); }
+  function quickAdd(i) { setFi(i); setFt(POST_THEMES[i].t); setFd(Math.min(fd, dim)); setShow(true); }
+  function add() {
+    const th = POST_THEMES[fi];
+    setPosts((p) => [...p, { id: Date.now(), y: cur.y, m: cur.m, d: Number(fd), tag: th.tag, c: th.c, t: ft.trim() || th.t }]);
+    setShow(false); setFt("");
+  }
+  function remove(id, t) { if (window.confirm(`Remove “${t}” from the calendar?`)) setPosts((p) => p.filter((x) => x.id !== id)); }
+
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= dim; d++) cells.push(d);
+
+  const st = {
+    wrap: { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
+    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EFEEF3" },
+    mlabel: { fontWeight: 700, fontSize: 15, color: "#211C2B" },
+    nav: { border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center" },
+    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: "#F7F6FA" },
+    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4 },
+    grid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)" },
+    cell: { minHeight: 74, borderTop: "1px solid #EFEEF3", borderLeft: "1px solid #EFEEF3", padding: 5, display: "flex", flexDirection: "column", gap: 3 },
+    dnum: { fontSize: 11, color: "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
+    dtoday: { background: "#B11E2A", color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
+    chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
+        {POST_THEMES.map((th, i) => (
+          <button key={th.tag} onClick={() => quickAdd(i)}
+            style={{ border: `1.5px solid ${th.c}`, color: th.c, background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <Plus size={13} /> {th.tag}
+          </button>
+        ))}
+      </div>
+
+      {show && (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
+            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span>
+            <select style={S.input} value={fi} onChange={(e) => { setFi(Number(e.target.value)); setFt(POST_THEMES[Number(e.target.value)].t); }}>{POST_THEMES.map((th, i) => <option key={th.tag} value={i}>{th.tag}</option>)}</select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Post idea</span>
+            <input style={S.input} value={ft} onChange={(e) => setFt(e.target.value)} placeholder="What's the post?" /></label>
+          <button style={S.primaryBtn} onClick={add}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+        </div>
+      )}
+
+      <div style={st.wrap}>
+        <div style={st.bar}>
+          <button style={st.nav} onClick={() => shift(-1)} title="Previous month"><ArrowLeft size={15} /></button>
+          <div style={st.mlabel}>{CAL_MONTHS[cur.m]} {cur.y}</div>
+          <button style={st.nav} onClick={() => shift(1)} title="Next month"><ChevronRight size={15} /></button>
+          <button style={{ ...st.nav, marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setFi(0); setFt(POST_THEMES[0].t); setShow(true); }}><Plus size={14} /> Add a post</button>
+        </div>
+        <div style={st.dow}>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={st.dowc}>{d.toUpperCase()}</div>)}</div>
+        <div style={st.grid}>
+          {cells.map((d, i) => (
+            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
+              {d != null && (<>
+                <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
+                {monthPosts.filter((p) => p.d === d).slice(0, 3).map((p) => (
+                  <div key={p.id} style={{ ...st.chip, background: p.c }} title={`${p.tag} — ${p.t} (tap to remove)`} onClick={() => remove(p.id, p.t)}>{p.t}</div>
+                ))}
+              </>)}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+        {monthPosts.length} post{monthPosts.length === 1 ? "" : "s"} scheduled in {CAL_MONTHS[cur.m]} · tap a colored post to remove it, or use a category chip to add one.
+      </div>
+    </div>
+  );
+}
 function Visibility({ S }) {
-  const cal = [
-    { wk: "Week 1", tag: "PEOPLE", c: "#B11E2A", t: "Member spotlight — why they serve" },
-    { wk: "Week 2", tag: "COMMUNITY", c: "#0E6B62", t: "Seasonal safety tip" },
-    { wk: "Week 3", tag: "BEHIND SCENES", c: "#1F4E79", t: "Training night photo or clip" },
-    { wk: "Week 4", tag: "THE ASK", c: "#9A6B12", t: "Thank a supporter / recap the month" },
-  ];
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
   const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
   async function draft() {
@@ -830,12 +932,7 @@ function Visibility({ S }) {
     <div>
       <PageHead S={S} eyebrow="VISIBILITY" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week." />
       <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
-      <div style={S.calGrid}>
-        {cal.map((c) => (
-          <div key={c.wk} style={S.calCard}><div style={S.calWk}>{c.wk}</div>
-            <span style={{ ...S.calTag, background: c.c }}>{c.tag}</span><div style={S.calText}>{c.t}</div></div>
-        ))}
-      </div>
+      <ContentCalendar S={S} />
 
       <div style={S.cardEyebrow}>IDEAS FOR THINGS TO MAKE</div>
       <IdeaGrid S={S} items={[
@@ -1014,6 +1111,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter");
   const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
   function add() { if (!nm.trim()) return; setMembers((m) => [...m, { id: Date.now(), name: nm, role: rl, access: "Member", status: "Probationary", phone: "—", joined: "2026", participation: 0, certs: [], notes: [] }]); setNm(""); setAdding(false); }
+  function remove(id, name) { if (window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) setMembers((m) => m.filter((x) => x.id !== id)); }
   return (
     <div>
       {canAdd && (adding ? (
@@ -1033,6 +1131,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
                 <div style={S.personMeta}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
               </div>
               <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill>
+              {canAdd && <button title="Remove from roster" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", marginLeft: 4, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} /></button>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: "#6A7178" }}>
               <Phone size={13} /> {m.phone}
@@ -1229,19 +1328,48 @@ function RosterReports({ S, members }) {
 }
 
 /* ---------------- Apparatus ---------------- */
+const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "Ladder / Aerial", "Squad", "Command", "Ambulance", "Other"];
 function Apparatus({ S, role }) {
   const [rigs, setRigs] = useState(APPARATUS_SEED);
+  const canManage = canAssign(role);
+  const [adding, setAdding] = useState(false);
+  const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
   const ready = rigs.filter((r) => r.status === "Pass").length;
   const flagged = rigs.length - ready;
   function logCheck(id) { setRigs((rs) => rs.map((r) => r.id === id ? { ...r, lastCheck: "Just now", by: "You", status: "Pass", note: "Checked — all good" } : r)); }
+  function addRig() {
+    if (!nm.trim()) return;
+    setRigs((rs) => [...rs, { id: Date.now(), name: nm.trim(), type: tp, lastCheck: "—", by: "—", status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check" }]);
+    setNm(""); setTp("Pumper"); setRd("Ready"); setAdding(false);
+  }
+  function removeRig(id, name) {
+    if (window.confirm(`Take "${name}" out of the station? This removes it from the apparatus list.`)) {
+      setRigs((rs) => rs.filter((r) => r.id !== id));
+    }
+  }
   return (
     <div>
-      <PageHead S={S} eyebrow="APPARATUS & EQUIPMENT" title="Know your rigs are ready" sub="Log your apparatus and equipment checks so the whole crew can see what's good to roll." />
+      <PageHead S={S} eyebrow="APPARATUS & EQUIPMENT" title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."} />
       <div style={S.statRow}>
         <Stat S={S} n={String(ready)} label="Ready to roll" />
         <Stat S={S} n={String(flagged)} label="Needs attention" warn={flagged > 0} />
-        <Stat S={S} n={String(rigs.length)} label="Apparatus tracked" />
+        <Stat S={S} n={String(rigs.length)} label="Apparatus in station" />
       </div>
+      {canManage && (adding ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={S.fieldLabel}>Name / unit</span><input style={S.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Type</span><select style={S.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>Status</span><select style={S.input} value={rd} onChange={(e) => setRd(e.target.value)}><option>Ready</option><option>Needs attention</option></select></label>
+          <button style={S.primaryBtn} onClick={addRig}><Plus size={15} /> Add to station</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setAdding(false); setNm(""); }}>Cancel</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
+      {rigs.length === 0 ? (
+        <div style={{ ...S.opCard, textAlign: "center", color: "#6A7178", fontSize: 14 }}>
+          <Truck size={22} color="#9AA1AB" style={{ marginBottom: 6 }} />
+          <div>No apparatus in the station yet.{canManage ? " Use “Add apparatus” to build your list." : ""}</div>
+        </div>
+      ) : (
       <div style={S.opGrid}>
         {rigs.map((r) => {
           const ok = r.status === "Pass"; const color = ok ? "#2E7D52" : "#B11E2A";
@@ -1251,6 +1379,7 @@ function Apparatus({ S, role }) {
                 <Truck size={20} color="#54506B" style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{r.name}</div><div style={S.personMeta}>{r.type}</div></div>
                 <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>
+                {canManage && <button title="Take out of station" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", marginLeft: 4, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeRig(r.id, r.name)}><X size={14} /></button>}
               </div>
               {r.note && <div style={{ fontSize: 13, color: ok ? "#3A4750" : "#8A1620", marginTop: 10 }}>{r.note}</div>}
               <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: "#6A7178" }}>
@@ -1261,6 +1390,7 @@ function Apparatus({ S, role }) {
           );
         })}
       </div>
+      )}
     </div>
   );
 }
