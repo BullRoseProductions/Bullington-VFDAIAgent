@@ -8,6 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, ClipboardCheck,
 } from "lucide-react";
+import { downloadDepartmentReport } from "./report.js";
 
 /* ------------------------------------------------------------------ */
 /*  Working title: THE DAYROOM  (name not final — easy to swap)        */
@@ -175,7 +176,7 @@ export default function App() {
         </nav>
         <div style={S.deptCard}>
           <div style={S.deptLabel}>DEPARTMENT</div>
-          <div style={S.deptName}>Cedar Hollow VFD</div>
+          <div style={S.deptName}>North Hood Country VFD</div>
           <div style={S.deptMeta}>Premium · 14 members</div>
         </div>
       </aside>
@@ -681,7 +682,7 @@ function RichOutput({ S, text }) {
 
 /* ---------------- Recruitment ---------------- */
 function Recruitment({ S }) {
-  const [town, setTown] = useState("Cedar Hollow");
+  const [town, setTown] = useState("North Hood Country");
   const [size, setSize] = useState("14");
   const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
   const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
@@ -753,8 +754,8 @@ function Phase({ S, n, weeks, title, items, accent }) {
 function Documents({ S, role }) {
   const leader = isLeader(role);
   const [docs, setDocs] = useState([
-    { name: "Cedar Hollow VFD — Member Handbook 2026.pdf", type: "Handbook · all members" },
-    { name: "Cedar Hollow SOG — Apparatus Response.pdf", type: "Uploaded · SOG" },
+    { name: "North Hood Country VFD — Member Handbook 2026.pdf", type: "Handbook · all members" },
+    { name: "North Hood Country SOG — Apparatus Response.pdf", type: "Uploaded · SOG" },
     { name: "Mutual Aid Agreement 2026.pdf", type: "Uploaded · Guideline" },
   ]);
   const [kind, setKind] = useState("SOP / SOG");
@@ -886,7 +887,7 @@ function Funding({ S }) {
     if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their idea, return a practical plan in plain text: goal, a simple timeline/checklist, roles needed, promotion steps, and a realistic money target. Doable for a small volunteer crew. Under 350 words.";
     else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
     else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
-    try { const t = await callClaude(sys, `Department: Cedar Hollow VFD\nDetails: ${detail}`); setOut(t); }
+    try { const t = await callClaude(sys, `Department: North Hood Country VFD\nDetails: ${detail}`); setOut(t); }
     catch { setErr("Couldn't generate that just now. Try again."); } finally { setLoading(false); }
   }
   return (
@@ -1173,9 +1174,26 @@ function RosterReports({ S, members }) {
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
   const avgPart = Math.round(members.reduce((s, m) => s + m.participation, 0) / members.length);
   const rigsReady = APPARATUS_SEED.filter((r) => r.status === "Pass").length;
+  function buildReportData() {
+    const flaggedCerts = [];
+    members.forEach((m) => m.certs.forEach((c) => {
+      const st = certStatus(c.exp);
+      if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
+    }));
+    return {
+      deptName: "North Hood Country Volunteer Fire Department",
+      station: "Station 20",
+      kpis: { active, total: members.length, certPct: Math.round((cur / (cur + expg + expd)) * 100), certWarn: expd > 0, avgPart, rigsReady, rigsTotal: APPARATUS_SEED.length },
+      counts: { active, prob, total: members.length, cur, expg, expd, avgPart },
+      members: members.map((m) => ({ name: m.name, role: m.role, participation: m.participation, status: m.status })),
+      flaggedCerts,
+      apparatus: APPARATUS_SEED.map((r) => ({ name: r.name, type: r.type, lastCheck: r.lastCheck, ready: r.status === "Pass", note: r.note })),
+      activity: EVENTS.map((e) => ({ name: e.name, date: e.date, type: e.type, present: e.present, total: e.total })),
+    };
+  }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
-    const summary = `Cedar Hollow VFD snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average participation (90 days): ${avgPart}%\n- Apparatus ready: ${rigsReady} of ${APPARATUS_SEED.length}\n- Recent activity: ${EVENTS.length} events in the last 30 days (drills, a meeting, and a mutual-aid call)`;
+    const summary = `North Hood Country VFD snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average participation (90 days): ${avgPart}%\n- Apparatus ready: ${rigsReady} of ${APPARATUS_SEED.length}\n- Recent activity: ${EVENTS.length} events in the last 30 days (drills, a meeting, and a mutual-aid call)`;
     const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board. Use clear sections with bold titles and bullet points: an overview, training & certifications (flag the expiring/expired certs as an action item), participation, and apparatus readiness. Confident, factual tone. Under 350 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
@@ -1192,9 +1210,16 @@ function RosterReports({ S, members }) {
           <div style={S.cardEyebrow}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
           <h3 style={S.featTitle}>Turn your numbers into a report — in one tap</h3>
           <p style={{ ...S.helpP, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
-          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
-            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+              {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
+            </button>
+            <button
+              style={{ ...S.primaryBtn, background: "#fff", color: "#B11E2A", border: "1.5px solid #B11E2A" }}
+              onClick={() => downloadDepartmentReport(buildReportData())}>
+              <Download size={16} /> Download PDF
+            </button>
+          </div>
           {err && <div style={S.errBox}>{err}</div>}
           {out && <RichOutput S={S} text={out} />}
         </div>
