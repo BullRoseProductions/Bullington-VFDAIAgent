@@ -122,10 +122,12 @@ const NAV = [
   { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Platform Admin", "Department Admin", "Training Officer"], premium: true },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
+  { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: LEADERSHIP },
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
+  { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Platform Admin"] },
 ];
@@ -201,10 +203,12 @@ export default function App() {
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
           {screen === "documents" && <Documents S={S} role={role} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} />}
+          {screen === "onboarding" && <Onboarding S={S} members={members} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} />}
           {screen === "visibility" && <Visibility S={S} />}
           {screen === "funding" && <Funding S={S} />}
+          {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
         </main>
@@ -311,10 +315,12 @@ const QUICK = {
   ai:      { accent: "#54506B", blurb: "Describe your crew — get a full drill plan in seconds." },
   documents: { accent: "#1F4E79", blurb: "Upload your SOPs and guidelines, or draft new ones with AI." },
   roster: { accent: "#1F4E79", blurb: "Members, certifications, attendance, and the chief's reports." },
+  onboarding: { accent: "#0E6B62", blurb: "Guided checklist + AI welcome plan for every new volunteer." },
   apparatus: { accent: "#B11E2A", blurb: "Log apparatus and equipment checks — know your rigs are ready." },
   recruit: { accent: "#0E6B62", blurb: "Build a recruitment plan and find members on and off social." },
   visibility: { accent: "#54506B", blurb: "A content calendar and ideas to keep your department seen." },
   funding: { accent: "#9A6B12", blurb: "Plan fundraisers, draft appeals, and line up sponsors." },
+  minutes: { accent: "#3A4750", blurb: "Turn rough notes into clean minutes and track every action item." },
   request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
   admin:   { accent: "#B11E2A", blurb: "Publish new monthly materials to the library." },
 };
@@ -1210,6 +1216,20 @@ function RosterCerts({ S, members }) {
   members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, st: certStatus(c.exp) })));
   rows.sort((a, b) => a.st.rank - b.st.rank);
   const n = (r) => rows.filter((x) => x.st.rank === r).length;
+  const nextClassFor = (cert) => CLASSES.find((cl) => cl.covers.includes(cert));
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  async function draftReminders() {
+    const flagged = rows.filter((r) => r.st.rank < 2);
+    if (!flagged.length) { setOut(""); setErr("Nothing expiring — no reminders needed right now."); return; }
+    setLoading(true); setErr(""); setOut("");
+    const lines = flagged.map((r) => {
+      const cl = nextClassFor(r.cert);
+      return `- ${r.member}: ${r.cert} (${expPhrase(r.exp)})${cl ? ` — next class: ${cl.name} on ${cl.date}` : ""}`;
+    }).join("\n");
+    const sys = "You draft short, friendly certification-renewal reminder messages for a volunteer fire/EMS department to send to members. One brief message per member (2-3 sentences), warm and practical, naming the cert, when it lapses, and the suggested class/date if given. Never scold. These are DRAFTS for a human officer to review and send. Use the member's name as a short header.";
+    try { const t = await callClaude(sys, `Draft renewal reminders for:\n${lines}`); setOut(t); }
+    catch { setErr("Couldn't draft reminders just now. Try again."); } finally { setLoading(false); }
+  }
   return (
     <div>
       <div style={S.statRow}>
@@ -1217,15 +1237,33 @@ function RosterCerts({ S, members }) {
         <Stat S={S} n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
         <Stat S={S} n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
       </div>
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</div>
+          <h3 style={S.featTitle}>Stay ahead of every renewal</h3>
+          <p style={{ ...S.helpP, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
+          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
       <div style={{ marginTop: 4 }}>
-        {rows.map((r, i) => (
-          <div key={i} style={S.certRow}>
-            <Award size={15} color={r.st.color} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{r.cert}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {r.member}</span></div>
-            <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, color: "#6A7178" }}>exp {r.exp}</span>
-            <Pill S={S} color={r.st.color}>{r.st.label}</Pill>
-          </div>
-        ))}
+        {rows.map((r, i) => {
+          const cl = r.st.rank < 2 ? nextClassFor(r.cert) : null;
+          return (
+            <div key={i} style={{ ...S.certRow, flexWrap: "wrap" }}>
+              <Award size={15} color={r.st.color} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 600, color: "#191C20" }}>{r.cert}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {r.member}</span>
+                <div style={{ fontSize: 12, color: r.st.color, marginTop: 1 }}>{expPhrase(r.exp)}</div>
+                {cl && <div style={{ fontSize: 12, color: "#0E6B62", marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
+              </div>
+              <Pill S={S} color={r.st.color}>{r.st.label}</Pill>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1391,6 +1429,217 @@ function Apparatus({ S, role }) {
         })}
       </div>
       )}
+      <MaintenancePanel S={S} role={role} rigs={rigs} />
+    </div>
+  );
+}
+
+/* ---------------- Maintenance reminders + checklists ---------------- */
+const MAINT_SEED = [
+  { id: 1, unit: "Engine 1", task: "Pump & water-tank check", cadence: "Weekly", last: "Jun 22", status: "Current" },
+  { id: 2, unit: "Engine 1", task: "Annual pump service test", cadence: "Annual", last: "Aug 2025", status: "Due soon" },
+  { id: 3, unit: "Brush 2", task: "Equipment & PPE check", cadence: "Weekly", last: "Jun 22", status: "Current" },
+  { id: 4, unit: "Tanker 1", task: "Foam concentrate level", cadence: "Monthly", last: "May 10", status: "Overdue" },
+  { id: 5, unit: "Rescue 1", task: "SCBA flow test", cadence: "Annual", last: "Sep 2025", status: "Due soon" },
+  { id: 6, unit: "All units", task: "Registration & insurance", cadence: "Annual", last: "Jan 2026", status: "Current" },
+];
+const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
+function MaintenancePanel({ S, role, rigs }) {
+  const canManage = canAssign(role);
+  const [items, setItems] = useState(MAINT_SEED);
+  const [adding, setAdding] = useState(false);
+  const [u, setU] = useState(rigs[0]?.name || "All units"); const [t, setT] = useState(""); const [cad, setCad] = useState("Monthly");
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const order = { Overdue: 0, "Due soon": 1, Current: 2 };
+  const sorted = [...items].sort((a, b) => order[a.status] - order[b.status]);
+  const due = items.filter((i) => i.status !== "Current").length;
+  function markDone(id) { setItems((xs) => xs.map((x) => x.id === id ? { ...x, status: "Current", last: "Just now" } : x)); }
+  function addItem() { if (!t.trim()) return; setItems((xs) => [...xs, { id: Date.now(), unit: u, task: t.trim(), cadence: cad, last: "—", status: "Due soon" }]); setT(""); setAdding(false); }
+  function removeItem(id) { setItems((xs) => xs.filter((x) => x.id !== id)); }
+  async function draftChecklist() {
+    setLoading(true); setErr(""); setOut("");
+    const fleet = rigs.map((r) => `${r.name} (${r.type})`).join(", ") || "the department's apparatus";
+    const sys = "You draft a practical preventive-maintenance checklist for a small volunteer fire department's apparatus, grouped by cadence (Weekly, Monthly, Annual). Keep it realistic for a volunteer crew and note that a qualified person should perform and sign off each item, and that manufacturer and NFPA intervals govern. This is a DRAFT to review and adapt. Under 320 words, plain headers and bullets.";
+    try { const x = await callClaude(sys, `Apparatus: ${fleet}. Draft a maintenance checklist.`); setOut(x); }
+    catch { setErr("Couldn't draft the checklist just now. Try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div style={S.cardEyebrow}><Wrench size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAINTENANCE & REMINDERS</div>
+      <div style={{ fontSize: 13, color: due > 0 ? "#8A1620" : "#2E7D52", margin: "2px 0 12px", fontWeight: 600 }}>
+        {due > 0 ? `${due} maintenance item${due === 1 ? "" : "s"} need attention` : "All maintenance up to date"}
+      </div>
+      {canManage && (adding ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Unit</span><select style={S.input} value={u} onChange={(e) => setU(e.target.value)}>{[...rigs.map((r) => r.name), "All units"].map((nm) => <option key={nm}>{nm}</option>)}</select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Task</span><input style={S.input} value={t} placeholder="e.g. Hose pressure test" onChange={(e) => setT(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Cadence</span><select style={S.input} value={cad} onChange={(e) => setCad(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
+          <button style={S.primaryBtn} onClick={addItem}><Plus size={15} /> Add</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAdding(false)}>Cancel</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add maintenance item</button>)}
+      <div>
+        {sorted.map((i) => (
+          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
+            <Wrench size={15} color={MAINT_COLOR[i.status]} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, color: "#191C20" }}>{i.task}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {i.unit}</span>
+              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{i.cadence} · last done {i.last}</div>
+            </div>
+            <Pill S={S} color={MAINT_COLOR[i.status]}>{i.status.toUpperCase()}</Pill>
+            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
+            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeItem(i.id)}><X size={14} /></button>}
+          </div>
+        ))}
+      </div>
+      {canManage && (
+        <div style={{ ...S.aiBanner, marginTop: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
+            <h3 style={S.featTitle}>Draft a preventive-maintenance checklist</h3>
+            <p style={{ ...S.helpP, marginBottom: 10 }}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
+            <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftChecklist} disabled={loading}>
+              {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Wrench size={16} /> Draft a checklist</>}
+            </button>
+            {err && <div style={S.errBox}>{err}</div>}
+            {out && <RichOutput S={S} text={out} />}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+/* ---------------- Meeting Minutes + Action Items ---------------- */
+function Minutes({ S }) {
+  const [title, setTitle] = useState("Monthly Business Meeting");
+  const [date, setDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [actions, setActions] = useState([
+    { id: 1, text: "Get vendor quote for Engine 2 pump repair", owner: "Chief Reyes", due: "Jun 30", done: false },
+    { id: 2, text: "Confirm July EMT-B refresher seats", owner: "T.O. Daniels", due: "Jul 1", done: false },
+    { id: 3, text: "Post open-house recap to socials", owner: "Okafor", due: "Jun 20", done: true },
+  ]);
+  const [at, setAt] = useState(""); const [ao, setAo] = useState(""); const [ad, setAd] = useState("");
+  const open = actions.filter((a) => !a.done).length;
+  async function draft() {
+    if (!notes.trim()) { setErr("Add a few rough notes first and I'll shape them into minutes."); return; }
+    setLoading(true); setErr(""); setOut("");
+    const sys = "You turn a volunteer fire department's rough meeting notes into clean, structured DRAFT minutes for the secretary and board to review and approve. Use plain headers: Attendees, Old Business, New Business, Decisions, and Action Items (each action with an owner and a due date if implied). Keep it factual to the notes — never invent attendance, votes, or decisions that aren't there. Under 350 words.";
+    try { const t = await callClaude(sys, `Meeting: ${title}${date ? ` on ${date}` : ""}\nRough notes:\n${notes}`); setOut(t); }
+    catch { setErr("Couldn't draft the minutes just now. Try again."); } finally { setLoading(false); }
+  }
+  function addAction() { if (!at.trim()) return; setActions((a) => [...a, { id: Date.now(), text: at.trim(), owner: ao.trim() || "Unassigned", due: ad.trim() || "—", done: false }]); setAt(""); setAo(""); setAd(""); }
+  function toggle(id) { setActions((a) => a.map((x) => x.id === id ? { ...x, done: !x.done } : x)); }
+  function removeA(id) { setActions((a) => a.filter((x) => x.id !== id)); }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="MEETING MINUTES" title="From rough notes to clean minutes" sub="Type your notes, get a structured draft to approve, and carry every action item to the next meeting." />
+      <div style={S.aiBanner}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Meeting</span><input style={S.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+            <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>Date</span><input style={S.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
+          </div>
+          <label style={{ ...S.field, marginTop: 10 }}><span style={S.fieldLabel}>Rough notes</span>
+            <textarea style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} value={notes} placeholder={"Who was there, what came up, what was decided, what people agreed to do…"} onChange={(e) => setNotes(e.target.value)} /></label>
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><ClipboardList size={16} /> Draft the minutes</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
+
+      <div style={S.cardEyebrow}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
+      <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Action</span><input style={S.input} value={at} placeholder="What needs to happen?" onChange={(e) => setAt(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Owner</span><input style={S.input} value={ao} placeholder="Who?" onChange={(e) => setAo(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Due</span><input style={S.input} value={ad} placeholder="When?" onChange={(e) => setAd(e.target.value)} /></label>
+        <button style={S.primaryBtn} onClick={addAction}><Plus size={15} /> Add</button>
+      </div>
+      <div>
+        {actions.map((a) => (
+          <div key={a.id} style={S.certRow}>
+            <button onClick={() => toggle(a.id)} title={a.done ? "Mark open" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+              {a.done ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, color: a.done ? "#9A96A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.text}</span>
+              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{a.owner} · due {a.due}</div>
+            </div>
+            <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeA(a.id)}><X size={14} /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- New-member Onboarding ---------------- */
+const ONBOARD_TEMPLATE = [
+  { group: "Paperwork", items: ["Application & emergency contact on file", "Background / driving-record consent signed", "Medical clearance / physical complete", "SOG & policy acknowledgment signed"] },
+  { group: "Gear", items: ["Turnout gear sized & issued", "Helmet, boots, and gloves issued", "SCBA fit test completed"] },
+  { group: "Training", items: ["Station orientation & safety walk-through", "SOG / policy review session", "Firefighter I enrollment (if applicable)", "CPR / BLS scheduled"] },
+  { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
+];
+function Onboarding({ S, members }) {
+  const candidates = members.length ? members : [{ id: 0, name: "New member", role: "Firefighter" }];
+  const probI = candidates.findIndex((m) => m.status === "Probationary");
+  const [who, setWho] = useState(candidates[probI >= 0 ? probI : 0].name);
+  const [checks, setChecks] = useState({});
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const all = ONBOARD_TEMPLATE.flatMap((g) => g.items.map((_, i) => `${who}::${g.group}::${i}`));
+  const doneCount = all.filter((k) => checks[k]).length;
+  const pct = Math.round((doneCount / all.length) * 100);
+  const person = candidates.find((m) => m.name === who);
+  function toggle(key) { setChecks((c) => ({ ...c, [key]: !c[key] })); }
+  async function draftPlan() {
+    setLoading(true); setErr(""); setOut("");
+    const sys = "You write a warm welcome note and a practical first-30-days onboarding plan for a new volunteer firefighter/EMT joining a small department. Friendly and concrete: a short welcome, then week-by-week steps covering paperwork, gear, orientation, shadowing/mentor, and first trainings. This is a DRAFT for an officer to review and send. Under 320 words, plain headers and bullets.";
+    try { const t = await callClaude(sys, `New member: ${who}${person?.role ? `, joining as ${person.role}` : ""}.`); setOut(t); }
+    catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan." />
+      <div style={{ ...S.opCard, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ ...S.field, minWidth: 200 }}><span style={S.fieldLabel}>Onboarding</span>
+          <select style={S.input} value={who} onChange={(e) => { setWho(e.target.value); }}>{candidates.map((m) => <option key={m.id}>{m.name}</option>)}</select></label>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Onboarding progress</span><span>{pct}%</span></div>
+          <Bar S={S} pct={pct} color={pct >= 100 ? "#2E7D52" : pct >= 50 ? "#9A6B12" : "#B11E2A"} />
+        </div>
+      </div>
+      {ONBOARD_TEMPLATE.map((g) => (
+        <div key={g.group} style={{ marginBottom: 6 }}>
+          <div style={S.cardEyebrow}>{g.group.toUpperCase()}</div>
+          {g.items.map((it, i) => {
+            const key = `${who}::${g.group}::${i}`; const done = !!checks[key];
+            return (
+              <div key={i} style={S.certRow}>
+                <button onClick={() => toggle(key)} title={done ? "Undo" : "Mark complete"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                  {done ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                </button>
+                <div style={{ flex: 1, minWidth: 0, color: done ? "#9A96A6" : "#191C20", textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <div style={{ ...S.aiBanner, marginTop: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI WELCOME & 30-DAY PLAN</div>
+          <h3 style={S.featTitle}>Draft a welcome for {who}</h3>
+          <p style={{ ...S.helpP, marginBottom: 10 }}>A friendly welcome note and a week-by-week first-month plan. You review and send.</p>
+          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftPlan} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><UserPlus size={16} /> Draft welcome & plan</>}
+          </button>
+          {err && <div style={S.errBox}>{err}</div>}
+          {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
     </div>
   );
 }
