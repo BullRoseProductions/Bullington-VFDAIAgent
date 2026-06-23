@@ -122,7 +122,7 @@ const NAV = [
   { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Platform Admin", "Department Admin", "Training Officer"], premium: true },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
-  { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: LEADERSHIP },
+  { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Platform Admin", "Department Admin"] },
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
