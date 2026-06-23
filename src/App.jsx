@@ -975,15 +975,39 @@ function Visibility({ S }) {
 }
 
 /* ---------------- Funding ---------------- */
+const FUNDRAISER_IDEAS = [
+  { title: "Pancake / community breakfast", key: "pancake", p: "Low cost, high turnout — great around a holiday." },
+  { title: "Fill-the-boot drive", key: "boot", p: "Members collect at a busy corner or event. Quick and visible." },
+  { title: "BBQ or chili cook-off", key: "bbq", p: "Sell plates; a local meat sponsor cuts your costs." },
+  { title: "Open house / touch-a-truck", key: "open house", p: "Family day that doubles as recruitment and visibility." },
+  { title: "Golf scramble", key: "golf", p: "More effort, but strong sponsor tie-ins and bigger checks." },
+  { title: "Spaghetti or fish-fry dinner", key: "spaghetti", p: "Cheap to run and a reliable repeat earner." },
+  { title: "Department calendar / merch", key: "calendar", p: "Member photos plus paid sponsor ad space." },
+  { title: "5K or fun run", key: "5k", p: "Community-friendly; sponsors can buy per-bib or per-mile." },
+  { title: "Bingo or game night", key: "bingo", p: "Recurring revenue if you can host it monthly." },
+  { title: "Prize raffle", key: "raffle", p: "Strong earner — but check your state's raffle/gaming rules first." },
+];
 function Funding({ S }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [log, setLog] = useState([
+    { id: 1, name: "Pancake Breakfast", date: "May 2026", amount: 2150 },
+    { id: 2, name: "Fill-the-Boot Drive", date: "Apr 2026", amount: 980 },
+    { id: 3, name: "Spaghetti Dinner", date: "Feb 2026", amount: 1420 },
+  ]);
+  const [addingLog, setAddingLog] = useState(false);
+  const [ln, setLn] = useState(""); const [ld, setLd] = useState(""); const [la, setLa] = useState("");
   const tiers = [
     { name: "Supporter", price: "$250", items: ["Name on event materials", "Social thank-you", "Window decal"] },
     { name: "Partner", price: "$1,000", items: ["Banner at the event", "Logo on promo", "Stage / mic mention"], mid: true },
     { name: "Presenting", price: "$2,500", items: ["\u201CPresented by\u201D billing", "Top logo placement", "Annual recognition"] },
   ];
+  const totalRaised = log.reduce((s, e) => s + (e.amount || 0), 0);
+  const recentFor = (idea) => log.find((e) => e.name.toLowerCase().includes(idea.key) || idea.title.toLowerCase().includes(e.name.toLowerCase().split(" ")[0]));
+  function planThis(idea) { setMode("Plan a fundraiser"); setDetail(`A ${idea.title.toLowerCase()} to raise money for the department.`); setOut(""); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function addLog() { if (!ln.trim()) return; setLog((l) => [{ id: Date.now(), name: ln.trim(), date: ld.trim() || "Recent", amount: Number(String(la).replace(/[^0-9.]/g, "")) || 0 }, ...l]); setLn(""); setLd(""); setLa(""); setAddingLog(false); }
+  function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
   async function generate() {
     setLoading(true); setErr(""); setOut("");
     let sys;
@@ -995,7 +1019,7 @@ function Funding({ S }) {
   }
   return (
     <div>
-      <PageHead S={S} eyebrow="FUNDING" title="Plan fundraisers, write the appeals, line up sponsors" sub="A hand to plan the event, draft the community ask, and format the letters — plus sponsor packages built for fundraisers." />
+      <PageHead S={S} eyebrow="FUNDING" title="Plan fundraisers, write the appeals, line up sponsors" sub="Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident." />
 
       <div style={S.aiBanner}>
         <div style={{ flex: 1 }}>
@@ -1013,6 +1037,55 @@ function Funding({ S }) {
           {err && <div style={S.errBox}>{err}</div>}
           {out && <RichOutput S={S} text={out} />}
         </div>
+      </div>
+
+      <div style={S.cardEyebrow}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EVENT IDEAS</div>
+      <p style={S.helpP}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
+      <div style={S.opGrid}>
+        {FUNDRAISER_IDEAS.map((idea) => {
+          const recent = recentFor(idea);
+          return (
+            <div key={idea.title} style={S.opCard}>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{idea.title}</div></div>
+                {recent && <Pill S={S} color="#9A6B12">DONE {recent.date}</Pill>}
+              </div>
+              <div style={{ fontSize: 13, color: "#3A4750", marginTop: 7 }}>{idea.p}</div>
+              <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+                <button style={{ ...S.ghostBtn, marginTop: 0, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => planThis(idea)}><Sparkles size={14} /> Plan this</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}>
+        <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
+        {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: "#2E7D52", fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
+      </div>
+      <p style={S.helpP}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
+      {addingLog ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Event</span><input style={S.input} value={ln} placeholder="e.g. Chili Cook-Off" onChange={(e) => setLn(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>When</span><input style={S.input} value={ld} placeholder="e.g. Jun 2026" onChange={(e) => setLd(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Raised ($)</span><input style={S.input} value={la} placeholder="e.g. 1500" onChange={(e) => setLa(e.target.value)} /></label>
+          <button style={S.primaryBtn} onClick={addLog}><Plus size={15} /> Log it</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingLog(false)}>Cancel</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingLog(true)}><Plus size={15} /> Log a fundraiser</button>}
+      <div style={{ marginBottom: 6 }}>
+        {log.length === 0 ? <div style={{ ...S.opCard, fontSize: 13, color: "#6A7178" }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
+          log.map((e) => (
+            <div key={e.id} style={S.certRow}>
+              <PartyPopper size={15} color="#9A6B12" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 600, color: "#191C20" }}>{e.name}</span>
+                <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{e.date}</div>
+              </div>
+              {e.amount > 0 && <span style={{ fontWeight: 700, color: "#2E7D52", fontSize: 13.5 }}>${e.amount.toLocaleString()}</span>}
+              <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeLog(e.id)}><X size={14} /></button>
+            </div>
+          ))}
       </div>
 
       <div style={S.cardEyebrow}><DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER SPONSOR PACKAGES</div>
