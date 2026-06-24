@@ -129,7 +129,8 @@ const NAV = [
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
-  { key: "brand", label: "Brand Kit", Icon: Palette, roles: LEADERSHIP },
+  { key: "brand", label: "Media Builder", Icon: ImageIcon, roles: LEADERSHIP },
+  { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
@@ -241,6 +242,7 @@ export default function App() {
           {screen === "recruit" && <Recruitment S={S} brand={brand} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
+          {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={MY_MEMBER_ID} />}
           {screen === "funding" && <Funding S={S} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
@@ -354,7 +356,8 @@ const QUICK = {
   apparatus: { accent: "#B11E2A", blurb: "Log apparatus and equipment checks — know your rigs are ready." },
   recruit: { accent: "#0E6B62", blurb: "Build a recruitment plan and find members on and off social." },
   visibility: { accent: "#54506B", blurb: "A content calendar and ideas to keep your department seen." },
-  brand: { accent: "#54506B", blurb: "Set your colors, logo, font, and voice — then make on-brand graphics." },
+  brand: { accent: "#54506B", blurb: "Colors, logo, font, guidelines — then build on-brand graphics." },
+  duties: { accent: "#1F4E79", blurb: "Who does what around the station, and a log of who did it." },
   funding: { accent: "#9A6B12", blurb: "Plan fundraisers, draft appeals, and line up sponsors." },
   minutes: { accent: "#3A4750", blurb: "Turn rough notes into clean minutes and track every action item." },
   request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
@@ -2103,7 +2106,7 @@ const DEFAULT_BRAND = {
   primary: "#B11E2A", accent: "#1F4E79", font: "Condensed (bold)",
   tagline: "Neighbors helping neighbors.",
   voice: "Warm, plain-spoken, proud but never boastful — we talk like neighbors, not a corporation.",
-  logo: null,
+  logo: null, guidelines: [],
 };
 function BrandKit({ S, role, brand, setBrand }) {
   const canManage = canAssign(role);
@@ -2119,7 +2122,7 @@ function BrandKit({ S, role, brand, setBrand }) {
   );
   return (
     <div>
-      <PageHead S={S} eyebrow="BRAND KIT" title="Your department's look and voice" sub="Set your colors, logo, font, and voice once — the recruitment and visibility tools use them to draft on-brand posts and graphics." />
+      <PageHead S={S} eyebrow="MEDIA BUILDER" title="Build on-brand media" sub="Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too." />
       {!canManage && <div style={{ ...S.opCard, marginBottom: 14, fontSize: 13, color: "#6A7178" }}>You can view the brand kit. Editing is limited to department admins.</div>}
       <div style={S.opCard}>
         <div style={S.cardEyebrow}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
@@ -2157,6 +2160,27 @@ function BrandKit({ S, role, brand, setBrand }) {
         <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: "#16181C" }}>{brand.name}</div>
         <div style={{ fontSize: 13, color: "#6A7178", flex: 1, minWidth: 140 }}>{brand.tagline}</div>
       </div>
+
+      <div style={{ ...S.opCard, marginTop: 12 }}>
+        <div style={S.cardEyebrow}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DEPARTMENT GUIDELINES</div>
+        <p style={{ ...S.helpP, marginTop: 0 }}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
+        {canManage && (
+          <label style={{ ...S.ghostBtn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload guideline
+            <input type="file" accept=".pdf,.doc,.docx,image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; set("guidelines", [...(brand.guidelines || []), { id: Date.now(), name: f.name }]); e.target.value = ""; }} /></label>
+        )}
+        <div style={{ marginTop: 10 }}>
+          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: "#6A7178" }}>No guidelines uploaded yet.</div> :
+            (brand.guidelines || []).map((g) => (
+              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid #F1EFF5" }}>
+                <FileText size={15} color="#54506B" style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13.5, color: "#191C20" }}>{g.name}</span>
+                {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => set("guidelines", (brand.guidelines || []).filter((x) => x.id !== g.id))}><X size={13} /></button>}
+              </div>
+            ))}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18 }}><GraphicStudio S={S} brand={brand} /></div>
     </div>
   );
 }
@@ -2293,6 +2317,83 @@ function GraphicStudio({ S, brand }) {
           <img src={dataUrl} alt="graphic preview" style={{ width: "100%", borderRadius: 12, border: "1px solid #E7E5EE", display: "block" }} />
           <button style={{ ...S.primaryBtn, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download PNG</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Station Duties ---------------- */
+const DUTY_SEED = [
+  { id: 1, duty: "SCBA & air bottles", who: "Tom Daniels", cadence: "Weekly" },
+  { id: 2, duty: "Hose testing & records", who: "Janelle Okafor", cadence: "Annual" },
+  { id: 3, duty: "Apparatus fuel & fluids", who: "Cody Pearson", cadence: "Weekly" },
+  { id: 4, duty: "Station cleaning", who: "Rotating crew", cadence: "Weekly" },
+  { id: 5, duty: "Social media & community", who: "Dana Cole", cadence: "Ongoing" },
+  { id: 6, duty: "Supply & PPE inventory", who: "Maria Reyes", cadence: "Monthly" },
+];
+const DUTYLOG_SEED = [
+  { id: 1, what: "Refilled air bottles, logged 6", who: "Tom Daniels", when: "Jun 22" },
+  { id: 2, what: "Washed Engine 1, restocked EMS bags", who: "Cody Pearson", when: "Jun 21" },
+  { id: 3, what: "Posted open-house recap", who: "Dana Cole", when: "Jun 20" },
+];
+function StationDuties({ S, role, members, meId }) {
+  const canManage = isLeader(role); // board members + officers + admins assign duties
+  const me = members.find((m) => m.id === meId);
+  const [assigns, setAssigns] = useState(DUTY_SEED);
+  const [log, setLog] = useState(DUTYLOG_SEED);
+  const [addingA, setAddingA] = useState(false);
+  const [ad, setAd] = useState(""); const [aw, setAw] = useState(""); const [ac, setAc] = useState("Weekly");
+  const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
+  function addAssign() { if (!ad.trim()) return; setAssigns((a) => [...a, { id: Date.now(), duty: ad.trim(), who: aw.trim() || "Unassigned", cadence: ac }]); setAd(""); setAw(""); setAc("Weekly"); setAddingA(false); }
+  function removeAssign(id) { setAssigns((a) => a.filter((x) => x.id !== id)); }
+  function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
+  function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
+  return (
+    <div>
+      <PageHead S={S} eyebrow="STATION DUTIES" title="Who does what — and who did it" sub="Leadership assigns the standing duties; anyone can log what they got done. Everyone can see how the work is shared." />
+
+      <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DUTY ASSIGNMENTS{!canManage && <span style={{ marginLeft: "auto", fontSize: 10.5, color: "#9A96A6", fontWeight: 600 }}>LEADERSHIP ASSIGNS</span>}</div>
+      {canManage && (addingA ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Assigned to</span><input style={S.input} value={aw} placeholder="Name or “Rotating”" onChange={(e) => setAw(e.target.value)} list="dutymembers" /><datalist id="dutymembers">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={ac} onChange={(e) => setAc(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option><option>Ongoing</option></select></label>
+          <button style={S.primaryBtn} onClick={addAssign}><Plus size={15} /> Assign</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>)}
+      <div style={{ marginBottom: 8 }}>
+        {assigns.map((a) => (
+          <div key={a.id} style={S.certRow}>
+            <ClipboardCheck size={15} color="#54506B" style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, color: "#191C20" }}>{a.duty}</span>
+              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{a.who}</div>
+            </div>
+            <Pill S={S} color="#1F4E79">{a.cadence.toUpperCase()}</Pill>
+            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeAssign(a.id)}><X size={14} /></button>}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />WHO DID WHAT</div>
+      <p style={S.helpP}>Got something done around the station? Log it so it's on the record — anyone can add here.</p>
+      <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>What got done</span><input style={S.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Who</span><input style={S.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
+        <button style={S.primaryBtn} onClick={addLog}><Plus size={15} /> Log it</button>
+      </div>
+      <div>
+        {log.map((e) => (
+          <div key={e.id} style={S.certRow}>
+            <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, color: "#191C20" }}>{e.what}</span>
+              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{e.who} · {e.when}</div>
+            </div>
+            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeLog(e.id)}><X size={14} /></button>}
+          </div>
+        ))}
       </div>
     </div>
   );
