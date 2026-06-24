@@ -7,6 +7,7 @@ import {
   ThumbsUp, ThumbsDown, Pencil, MessageSquare,
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, ClipboardCheck,
+  Palette, Image as ImageIcon, Wand2,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 
@@ -119,6 +120,7 @@ const ACTIVITY = [
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
+  { key: "training", label: "Training Plan", Icon: GraduationCap, roles: ROLES },
   { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Platform Admin", "Department Admin", "Training Officer"], premium: true },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
@@ -126,6 +128,7 @@ const NAV = [
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
+  { key: "brand", label: "Brand Kit", Icon: Palette, roles: LEADERSHIP },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
@@ -143,6 +146,9 @@ export default function App() {
   const [requests, setRequests] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [members, setMembers] = useState(MEMBERS);
+  const [brand, setBrand] = useState(DEFAULT_BRAND);
+  const [trainingPlan, setTrainingPlan] = useState(TRAIN_PLAN_SEED);
+  const [trainingSessions, setTrainingSessions] = useState(trainSessionsSeed);
   const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
   const S = baseStyles();
 
@@ -199,14 +205,16 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} members={members} meId={MY_MEMBER_ID} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
           {screen === "documents" && <Documents S={S} role={role} />}
-          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} />}
+          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
-          {screen === "recruit" && <Recruitment S={S} />}
-          {screen === "visibility" && <Visibility S={S} />}
+          {screen === "recruit" && <Recruitment S={S} brand={brand} />}
+          {screen === "visibility" && <Visibility S={S} brand={brand} />}
+          {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "funding" && <Funding S={S} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
@@ -312,6 +320,7 @@ function Dashboard({ S, role, members, library, openPacket, go }) {
 /* ---------------- Quick access (home page doorways) ---------------- */
 const QUICK = {
   library: { accent: "#1F4E79", blurb: "Ready-to-run packets for Fire, EMS, Leadership & Operations." },
+  training: { accent: "#1F4E79", blurb: "A recurring training plan + calendar that flags what's coming and overdue." },
   ai:      { accent: "#54506B", blurb: "Describe your crew — get a full drill plan in seconds." },
   documents: { accent: "#1F4E79", blurb: "Upload your SOPs and guidelines, or draft new ones with AI." },
   roster: { accent: "#1F4E79", blurb: "Members, certifications, attendance, and the chief's reports." },
@@ -319,6 +328,7 @@ const QUICK = {
   apparatus: { accent: "#B11E2A", blurb: "Log apparatus and equipment checks — know your rigs are ready." },
   recruit: { accent: "#0E6B62", blurb: "Build a recruitment plan and find members on and off social." },
   visibility: { accent: "#54506B", blurb: "A content calendar and ideas to keep your department seen." },
+  brand: { accent: "#54506B", blurb: "Set your colors, logo, font, and voice — then make on-brand graphics." },
   funding: { accent: "#9A6B12", blurb: "Plan fundraisers, draft appeals, and line up sponsors." },
   minutes: { accent: "#3A4750", blurb: "Turn rough notes into clean minutes and track every action item." },
   request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
@@ -687,15 +697,15 @@ function RichOutput({ S, text }) {
 }
 
 /* ---------------- Recruitment ---------------- */
-function Recruitment({ S }) {
+function Recruitment({ S, brand }) {
   const [town, setTown] = useState("North Hood Country");
   const [size, setSize] = useState("14");
   const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
   const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
   async function draft() {
     setLoading(true); setErr(""); setPlan("");
-    const sys = "You are a recruitment advisor for volunteer fire/EMS departments. Draft a practical recruitment PLAN — not just a social post. Include: a clear goal, the best channels for a small department BEYOND social media (current-member referrals, local employers, schools/trade programs, community events, former members, an open house), 2-3 concrete first steps under each that suit a tiny volunteer crew, and one sample outreach line. Warm, honest, realistic, never desperate. Use short plain-text headers and bullets. Under 350 words.";
-    try { const t = await callClaude(sys, `Town: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}`); setPlan(t); }
+    const sys = "You are a recruitment advisor for a volunteer fire/EMS department. Build a practical recruitment plan that uses ONLY three channels: (1) community events and an open house, (2) recruiting in person at local places — employers, schools/trade programs, churches, community spots, and (3) social media calls-to-action. Weight the plan HEAVILY toward social media calls-to-action: give it the most space, several specific sample posts, each with a clear ask, a concrete next step, and a tie to a real need. For each of the three channels, give 2-3 concrete steps a tiny crew can actually do, written in the department's voice. Do NOT suggest any other channels. Warm, honest, never desperate. Plain-text headers and bullets. Under 350 words.";
+    try { const t = await callClaude(sys, `Town: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}\nDepartment voice: ${brand?.voice || ""}\nTagline: ${brand?.tagline || ""}`); setPlan(t); }
     catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
@@ -734,6 +744,8 @@ function Recruitment({ S }) {
         { h: "Former members", p: "A warm 'we'd love to have you back' reopens more doors than you'd think." },
         { h: "Open house", p: "Your highest-converting event — tour, demo, food, and fast follow-up." },
       ]} />
+
+      <GraphicStudio S={S} brand={brand} />
 
       <div style={S.cardEyebrow}>RECRUITMENT LIBRARY</div>
       <ResourceLibrary S={S} items={[
@@ -925,13 +937,13 @@ function ContentCalendar({ S }) {
     </div>
   );
 }
-function Visibility({ S }) {
+function Visibility({ S, brand }) {
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
   const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
   async function draft() {
     setLoading(true); setErr(""); setPost("");
-    const sys = "You write short, warm social media captions for a volunteer fire/EMS department to build community visibility and trust — not recruitment. Plain, genuine, under 60 words, with a tasteful hashtag or two. Never graphic content or patient information. Return only the caption.";
-    try { const t = await callClaude(sys, `Post about: ${topic}`); setPost(t); }
+    const sys = "You write short, warm social media captions for a volunteer fire/EMS department to build community visibility and trust — not recruitment. Match the department's voice. Plain, genuine, under 60 words, with a tasteful hashtag or two. Never graphic content or patient information. Return only the caption.";
+    try { const t = await callClaude(sys, `Post about: ${topic}\nDepartment voice: ${brand?.voice || ""}`); setPost(t); }
     catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
   }
   return (
@@ -963,6 +975,8 @@ function Visibility({ S }) {
           {post && <RichOutput S={S} text={post} />}
         </div>
       </div>
+
+      <GraphicStudio S={S} brand={brand} />
 
       <div style={S.cardEyebrow}>VISIBILITY LIBRARY</div>
       <ResourceLibrary S={S} items={[
@@ -1011,7 +1025,7 @@ function Funding({ S }) {
   async function generate() {
     setLoading(true); setErr(""); setOut("");
     let sys;
-    if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their idea, return a practical plan in plain text: goal, a simple timeline/checklist, roles needed, promotion steps, and a realistic money target. Doable for a small volunteer crew. Under 350 words.";
+    if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their idea, return a practical plan in plain text: goal, a simple timeline/checklist, roles needed, promotion steps, and a realistic money target — doable for a small volunteer crew. ALWAYS finish with a 'Sponsorship' section: 2-3 sponsor levels with suggested dollar amounts and exactly what each sponsor gets (recognition, banner, logo placement, shout-outs), plus one short sponsor-outreach line they can send to a local business. Under 380 words.";
     else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
     else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
     try { const t = await callClaude(sys, `Department: North Hood Country VFD\nDetails: ${detail}`); setOut(t); }
@@ -1162,7 +1176,7 @@ function Initials({ S, name }) {
   return <span style={S.avatar}>{i}</span>;
 }
 
-function Roster({ S, role, members, setMembers }) {
+function Roster({ S, role, members, setMembers, sessions }) {
   const leader = isLeader(role);
   const tabs = leader
     ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"]]
@@ -1171,7 +1185,7 @@ function Roster({ S, role, members, setMembers }) {
   const [sel, setSel] = useState(null);
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
-  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} />;
+  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} />;
   return (
     <div>
       <PageHead S={S} eyebrow="ROSTER" title="Your people, all in one place" sub={leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."} />
@@ -1223,7 +1237,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
     </div>
   );
 }
-function MemberDetail({ S, member, role, back, onUpdate }) {
+function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
   const assign = canAssign(role);
   const [note, setNote] = useState("");
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
@@ -1267,6 +1281,31 @@ function MemberDetail({ S, member, role, back, onUpdate }) {
             </div>
           ))}
       </div>
+
+      {(() => {
+        const done = (sessions || []).filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
+        const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
+        return (
+          <>
+            <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</div>
+            <div style={{ ...S.opCard, marginBottom: 16 }}>
+              {done.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No training sessions recorded yet.</div> : (<>
+                <div style={{ fontSize: 13, color: "#3A4750", marginBottom: 8 }}>Attended <b>{went}</b> of <b>{done.length}</b> recorded sessions.</div>
+                {done.map((s, i) => {
+                  const present = (s.attendance || []).includes(member.id);
+                  return (
+                    <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : S.certRow.borderBottom }}>
+                      <CalendarCheck size={15} color={present ? "#2E7D52" : "#B11E2A"} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {fmtSess(s)}</span></div>
+                      <Pill S={S} color={present ? "#2E7D52" : "#B11E2A"}>{present ? "PRESENT" : "ABSENT"}</Pill>
+                    </div>
+                  );
+                })}
+              </>)}
+            </div>
+          </>
+        );
+      })()}
 
       <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
       <div style={S.opCard}>
@@ -1711,6 +1750,454 @@ function Onboarding({ S, members }) {
           </button>
           {err && <div style={S.errBox}>{err}</div>}
           {out && <RichOutput S={S} text={out} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Training Plan + Calendar ---------------- */
+const CADENCE_DAYS = { Weekly: 7, Monthly: 30, Quarterly: 90, "Semi-annual": 182, Annual: 365, Biennial: 730 };
+const CADENCES = ["Weekly", "Monthly", "Quarterly", "Semi-annual", "Annual", "Biennial"];
+const TRAIN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function dueInfo(item) {
+  const days = CADENCE_DAYS[item.cadence] || 30;
+  if (!item.lastISO) return { label: "Not logged", color: "#B11E2A", rel: "never logged", nextLabel: "—", urgent: true };
+  const last = new Date(item.lastISO + "T00:00:00");
+  const next = new Date(last.getTime() + days * 86400000);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((next - today) / 86400000);
+  const nextLabel = next.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  if (diff < 0) return { label: "Overdue", color: "#B11E2A", rel: `${-diff} day${-diff === 1 ? "" : "s"} overdue`, nextLabel, next, urgent: true };
+  const window = Math.min(Math.round(days * 0.25), 30);
+  if (diff <= window) return { label: "Due soon", color: "#9A6B12", rel: `in ${diff} day${diff === 1 ? "" : "s"}`, nextLabel, next };
+  return { label: "On track", color: "#2E7D52", rel: `due ${nextLabel}`, nextLabel, next };
+}
+const MY_MEMBER_ID = 4; // demo: the signed-in member is Cody Pearson
+const TRAIN_PLAN_SEED = [
+  { id: 1, name: "SCBA refresher", cadence: "Quarterly", lastISO: "2026-04-10" },
+  { id: 2, name: "Pump operations drill", cadence: "Monthly", lastISO: "2026-05-20" },
+  { id: 3, name: "EMS continuing education", cadence: "Monthly", lastISO: "2026-06-02" },
+  { id: 4, name: "Live fire / RIT drill", cadence: "Annual", lastISO: "2025-09-15" },
+  { id: 5, name: "CPR / BLS", cadence: "Biennial", lastISO: "2025-03-01" },
+  { id: 6, name: "Hazmat awareness refresher", cadence: "Annual", lastISO: "2025-11-12" },
+  { id: 7, name: "Driver / Operator (EVOC)", cadence: "Annual", lastISO: "2025-08-01" },
+];
+function trainSessionsSeed() {
+  const t = new Date(), y = t.getFullYear(), m = t.getMonth(), dim = new Date(y, m + 1, 0).getDate(), d = t.getDate();
+  const back = (off) => { let yy = y, mm = m, dd = d - off; while (dd < 1) { mm--; if (mm < 0) { mm = 11; yy--; } dd += new Date(yy, mm + 1, 0).getDate(); } return { y: yy, m: mm, d: dd }; };
+  const fwd = (off) => Math.min(d + off, dim);
+  return [
+    { id: 101, planId: 4, title: "Live fire / RIT drill", ...back(34), done: true, attendance: [1, 2, 3, 4, 5, 6] },
+    { id: 102, planId: 2, title: "Pump operations drill", ...back(20), done: true, attendance: [1, 2, 3, 6] },
+    { id: 103, planId: 3, title: "EMS con-ed: Stroke", ...back(13), done: true, attendance: [1, 2, 3, 4, 6] },
+    { id: 104, planId: 1, title: "SCBA refresher night", ...back(6), done: true, attendance: [2, 3, 4, 5, 6] },
+    { id: 105, planId: 2, title: "Pump operations drill", y, m, d: fwd(5), done: false, attendance: [] },
+    { id: 106, planId: null, title: "Ladder throws drill", y, m, d: fwd(9), done: false, attendance: [] },
+  ];
+}
+const sessDate = (s) => new Date(s.y, s.m, s.d);
+const fmtSess = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId }) {
+  const canManage = canAssign(role);
+  const today = new Date();
+  const me = members.find((m) => m.id === meId);
+  const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [addingPlan, setAddingPlan] = useState(false);
+  const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly");
+  const [showSess, setShowSess] = useState(false);
+  const [openAtt, setOpenAtt] = useState(null);
+  const dim = new Date(cur.y, cur.m + 1, 0).getDate();
+  const [sd, setSd] = useState(Math.min(today.getDate(), dim));
+  const [spid, setSpid] = useState(plan[0]?.id || 0);
+  const [stitle, setStitle] = useState("");
+  function toggleAttend(sid, mid) { setSessions((ss) => ss.map((s) => { if (s.id !== sid) return s; const a = s.attendance || []; return { ...s, attendance: a.includes(mid) ? a.filter((x) => x !== mid) : [...a, mid] }; })); }
+
+  const rank = (l) => (l === "Overdue" || l === "Not logged") ? 0 : l === "Due soon" ? 1 : 2;
+  const planView = plan.map((p) => ({ p, info: dueInfo(p) })).sort((a, b) => rank(a.info.label) - rank(b.info.label));
+  const over = planView.filter((x) => x.info.urgent).length;
+  const soon = planView.filter((x) => x.info.label === "Due soon").length;
+  const ok = planView.length - over - soon;
+
+  function logDone(id) { setPlan((ps) => ps.map((x) => x.id === id ? { ...x, lastISO: toISO(new Date()) } : x)); }
+  function addPlan() { if (!pn.trim()) return; setPlan((ps) => [...ps, { id: Date.now(), name: pn.trim(), cadence: pc, lastISO: null }]); setPn(""); setPc("Monthly"); setAddingPlan(false); }
+  function removePlan(id) { if (!window.confirm("Remove this training from the plan?")) return; setPlan((ps) => ps.filter((x) => x.id !== id)); setSessions((ss) => ss.map((s) => s.planId === id ? { ...s, planId: null } : s)); }
+  function scheduleFor(p) {
+    const info = dueInfo(p); setSpid(p.id); setStitle("");
+    if (info.next) { const nd = info.next; setCur({ y: nd.getFullYear(), m: nd.getMonth() }); setSd(Math.min(nd.getDate(), new Date(nd.getFullYear(), nd.getMonth() + 1, 0).getDate())); }
+    setShowSess(true);
+  }
+  function addSession() {
+    const pItem = plan.find((p) => p.id === Number(spid));
+    const title = stitle.trim() || pItem?.name || "Training session";
+    setSessions((ss) => [...ss, { id: Date.now(), planId: pItem ? pItem.id : null, title, y: cur.y, m: cur.m, d: Number(sd), done: false, attendance: [] }]);
+    setShowSess(false); setStitle("");
+  }
+  function completeSession(s) {
+    setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, done: true } : x));
+    if (s.planId) { const iso = toISO(new Date(s.y, s.m, s.d)); setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p)); }
+  }
+  function removeSession(id) { setSessions((ss) => ss.filter((x) => x.id !== id)); }
+
+  const firstDow = new Date(cur.y, cur.m, 1).getDay();
+  const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
+  const cells = []; for (let i = 0; i < firstDow; i++) cells.push(null); for (let d = 1; d <= dim; d++) cells.push(d);
+  const isToday = (d) => cur.y === today.getFullYear() && cur.m === today.getMonth() && d === today.getDate();
+  function shift(n) { let m = cur.m + n, y = cur.y; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } setCur({ y, m }); }
+
+  const st = {
+    wrap: { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
+    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EFEEF3" },
+    nav: { border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center" },
+    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: "#F7F6FA" },
+    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4 },
+    grid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)" },
+    cell: { minHeight: 74, borderTop: "1px solid #EFEEF3", borderLeft: "1px solid #EFEEF3", padding: 5, display: "flex", flexDirection: "column", gap: 3 },
+    dnum: { fontSize: 11, color: "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
+    dtoday: { background: "#1F4E79", color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
+    chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  };
+
+  return (
+    <div>
+      <PageHead S={S} eyebrow="TRAINING PLAN" title="Keep training on schedule" sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance." />
+      <div style={S.statRow}>
+        <Stat S={S} n={String(over)} label="Overdue / unlogged" warn={over > 0} />
+        <Stat S={S} n={String(soon)} label="Due soon" warn={soon > 0} />
+        <Stat S={S} n={String(ok)} label="On track" />
+      </div>
+      {over > 0 && (
+        <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+          <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
+        </div>
+      )}
+
+      {role === "Member" && me && (() => {
+        const mine = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
+        const went = mine.filter((s) => (s.attendance || []).includes(me.id)).length;
+        return (
+          <div style={{ marginBottom: 22 }}>
+            <div style={S.cardEyebrow}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MY TRAINING HISTORY</div>
+            <div style={{ fontSize: 13, color: "#3A4750", margin: "2px 0 8px" }}>You attended <b>{went}</b> of <b>{mine.length}</b> recorded sessions.</div>
+            {mine.length === 0 ? <div style={{ fontSize: 13, color: "#6A7178" }}>No training sessions recorded yet.</div> :
+              mine.map((s) => {
+                const present = (s.attendance || []).includes(me.id);
+                return (
+                  <div key={s.id} style={S.certRow}>
+                    <CalendarCheck size={15} color={present ? "#2E7D52" : "#B11E2A"} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span>
+                      <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{fmtSess(s)}</div>
+                    </div>
+                    <Pill S={S} color={present ? "#2E7D52" : "#B11E2A"}>{present ? "PRESENT" : "ABSENT"}</Pill>
+                  </div>
+                );
+              })}
+          </div>
+        );
+      })()}
+
+      <div style={S.cardEyebrow}><GraduationCap size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING PLAN</div>
+      {canManage && (addingPlan ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+          <button style={S.primaryBtn} onClick={addPlan}><Plus size={15} /> Add to plan</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingPlan(false)}>Cancel</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} /> Add a training</button>)}
+      <div>
+        {planView.map(({ p, info }) => (
+          <div key={p.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
+            <GraduationCap size={15} color={info.color} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, color: "#191C20" }}>{p.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {p.cadence}</span>
+              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "never logged"} · <span style={{ color: info.color }}>{info.rel}</span></div>
+            </div>
+            <Pill S={S} color={info.color}>{info.label.toUpperCase()}</Pill>
+            {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => logDone(p.id)}><ClipboardCheck size={14} /> Log done</button>}
+            {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => scheduleFor(p)}><CalendarCheck size={14} /> Schedule</button>}
+            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removePlan(p.id)}><X size={14} /></button>}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING CALENDAR</div>
+      {canManage && (showSess ? (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span><select style={S.input} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><select style={S.input} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={S.fieldLabel}>Title (optional)</span><input style={S.input} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
+          <button style={S.primaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShowSess(false)}>Cancel</button>
+        </div>
+      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} /> Schedule a session</button>)}
+
+      <div style={st.wrap}>
+        <div style={st.bar}>
+          <button style={st.nav} onClick={() => shift(-1)} title="Previous month"><ArrowLeft size={15} /></button>
+          <div style={{ fontWeight: 700, fontSize: 15, color: "#211C2B" }}>{TRAIN_MONTHS[cur.m]} {cur.y}</div>
+          <button style={st.nav} onClick={() => shift(1)} title="Next month"><ChevronRight size={15} /></button>
+        </div>
+        <div style={st.dow}>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={st.dowc}>{d.toUpperCase()}</div>)}</div>
+        <div style={st.grid}>
+          {cells.map((d, i) => (
+            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
+              {d != null && (<>
+                <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
+                {monthSessions.filter((s) => s.d === d).slice(0, 3).map((s) => (
+                  <div key={s.id} style={{ ...st.chip, background: s.done ? "#2E7D52" : "#1F4E79" }} title={`${s.title}${s.done ? " (completed)" : ""}`}>{s.done ? "✓ " : ""}{s.title}</div>
+                ))}
+              </>)}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#6A7178" }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
+          monthSessions.map((s) => {
+            const att = s.attendance || [];
+            const open = openAtt === s.id;
+            return (
+              <div key={s.id}>
+                <div style={S.certRow}>
+                  <CalendarCheck size={15} color={s.done ? "#2E7D52" : "#1F4E79"} style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span>
+                    <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
+                  </div>
+                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} /> Attendance {att.length}/{members.length}</button>
+                  {s.done ? <Pill S={S} color="#2E7D52">DONE</Pill> : canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => completeSession(s)}><ClipboardCheck size={14} /> Mark complete</button>}
+                  {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeSession(s.id)}><X size={14} /></button>}
+                </div>
+                {open && (
+                  <div style={{ ...S.opCard, margin: "2px 0 10px", padding: 12 }}>
+                    <div style={{ fontSize: 12, color: "#6A7178", marginBottom: 8 }}>{canManage ? "Tap a name to mark who attended." : "Who attended this session."}</div>
+                    {members.map((m) => {
+                      const present = att.includes(m.id);
+                      return (
+                        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "1px solid #F1EFF5" }}>
+                          {canManage
+                            ? <button onClick={() => toggleAttend(s.id, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}</button>
+                            : (present ? <CheckCircle2 size={18} color="#2E7D52" /> : <X size={16} color="#B11E2A" />)}
+                          <span style={{ flex: 1, fontSize: 13.5, color: present ? "#191C20" : "#6A7178" }}>{m.name}{m.id === meId ? " (you)" : ""}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#2E7D52" : "#B11E2A" }}>{present ? "PRESENT" : "ABSENT"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Brand Kit ---------------- */
+const FONT_STACKS = {
+  "Condensed (bold)": "'Oswald','Arial Narrow','Helvetica Neue',Arial,sans-serif",
+  "Modern sans": "'Inter','Helvetica Neue',Arial,sans-serif",
+  "Classic serif": "Georgia,'Times New Roman',serif",
+};
+const DEFAULT_BRAND = {
+  name: "North Hood Country VFD", station: "Station 20",
+  primary: "#B11E2A", accent: "#1F4E79", font: "Condensed (bold)",
+  tagline: "Neighbors helping neighbors.",
+  voice: "Warm, plain-spoken, proud but never boastful — we talk like neighbors, not a corporation.",
+  logo: null,
+};
+function BrandKit({ S, role, brand, setBrand }) {
+  const canManage = canAssign(role);
+  const set = (k, v) => setBrand((b) => ({ ...b, [k]: v }));
+  function onLogo(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => set("logo", r.result); r.readAsDataURL(file); }
+  const swatch = (k, label) => (
+    <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>{label}</span>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: "1px solid #E0DEE8", borderRadius: 8, background: "#fff", padding: 2, cursor: canManage ? "pointer" : "default" }} />
+        <input style={{ ...S.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
+      </div>
+    </label>
+  );
+  return (
+    <div>
+      <PageHead S={S} eyebrow="BRAND KIT" title="Your department's look and voice" sub="Set your colors, logo, font, and voice once — the recruitment and visibility tools use them to draft on-brand posts and graphics." />
+      {!canManage && <div style={{ ...S.opCard, marginBottom: 14, fontSize: 13, color: "#6A7178" }}>You can view the brand kit. Editing is limited to department admins.</div>}
+      <div style={S.opCard}>
+        <div style={S.cardEyebrow}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={S.fieldLabel}>Department name</span><input style={S.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Station</span><input style={S.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+          {swatch("primary", "Primary color")}
+          {swatch("accent", "Accent color")}
+          <label style={{ ...S.field, minWidth: 170 }}><span style={S.fieldLabel}>Headline font</span><select style={S.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
+        </div>
+      </div>
+      <div style={{ ...S.opCard, marginTop: 12 }}>
+        <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />LOGO</div>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ width: 84, height: 84, borderRadius: 12, border: "1px solid #E7E5EE", background: "#F7F6FA", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color="#B6B2C0" />}
+          </div>
+          {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <label style={{ ...S.ghostBtn, marginTop: 0, cursor: "pointer" }}><Upload size={15} /> Upload logo<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
+            {brand.logo && <button style={{ ...S.ghostBtn, marginTop: 0, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => set("logo", null)}><X size={14} /> Remove</button>}
+          </div>}
+        </div>
+        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0 }}>PNG with a transparent background works best. The logo is stored in this session for the prototype.</p>
+      </div>
+      <div style={{ ...S.opCard, marginTop: 12 }}>
+        <div style={S.cardEyebrow}>VOICE & TAGLINE</div>
+        <label style={S.field}><span style={S.fieldLabel}>Tagline</span><input style={S.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
+        <label style={{ ...S.field, marginTop: 8 }}><span style={S.fieldLabel}>How the department sounds</span><textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
+        <p style={{ ...S.helpP, marginBottom: 0 }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
+      </div>
+      <div style={{ ...S.opCard, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.primary }} /><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.accent }} /></div>
+        <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: "#16181C" }}>{brand.name}</div>
+        <div style={{ fontSize: 13, color: "#6A7178", flex: 1, minWidth: 140 }}>{brand.tagline}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Graphics Studio (on-brand templates) ---------------- */
+function escX(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function initialsOf(name) { return (String(name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase()) || "VF"; }
+function wrapLines(text, max) { const words = String(text || "").split(/\s+/); const lines = []; let cur = ""; words.forEach((w) => { if ((cur + " " + w).trim().length > max) { if (cur) lines.push(cur); cur = w; } else cur = (cur + " " + w).trim(); }); if (cur) lines.push(cur); return lines.length ? lines : [""]; }
+function tspans(lines, x, y, lh) { return lines.map((ln, i) => `<tspan x="${x}" y="${y + i * lh}">${escX(ln)}</tspan>`).join(""); }
+function buildGraphicSVG(tk, brand, f, photo, bg) {
+  const W = 1080, H = 1080, ff = FONT_STACKS[brand.font] || FONT_STACKS["Modern sans"];
+  const P = brand.primary || "#B11E2A", A = brand.accent || "#1F4E79";
+  const darkBg = !!bg || tk === "post" || tk === "stat";
+  const ink = darkBg ? "#ffffff" : "#16181C", sub = darkBg ? "rgba(255,255,255,0.86)" : "#3A4750";
+  const logo = brand.logo;
+  const bgLayer = bg
+    ? `<image href="${bg}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/><rect width="${W}" height="${H}" fill="${P}" opacity="0.6"/>`
+    : `<rect width="${W}" height="${H}" fill="${darkBg ? P : "#ffffff"}"/>`;
+  const emblem = (x, y, s, light) => logo
+    ? `<image href="${logo}" x="${x}" y="${y}" width="${s}" height="${s}" preserveAspectRatio="xMidYMid meet"/>`
+    : `<g><circle cx="${x + s / 2}" cy="${y + s / 2}" r="${s / 2 - 2}" fill="none" stroke="${light ? "#fff" : P}" stroke-width="${s * 0.07}"/><rect x="${x + s / 2 - s * 0.06}" y="${y + s * 0.22}" width="${s * 0.12}" height="${s * 0.56}" fill="${light ? "#fff" : P}"/><rect x="${x + s * 0.22}" y="${y + s / 2 - s * 0.06}" width="${s * 0.56}" height="${s * 0.12}" fill="${light ? "#fff" : P}"/></g>`;
+  let body = "";
+  if (tk === "flyer") {
+    const hl = wrapLines(f.l2, 16);
+    body = `<rect x="0" y="0" width="${W}" height="150" fill="${P}"/>${emblem(48, 33, 84, true)}
+      <text x="${W - 48}" y="98" text-anchor="end" font-family="${ff}" font-size="40" font-weight="700" fill="#fff">${escX(brand.name)}</text>
+      <text x="64" y="298" font-family="${ff}" font-size="44" font-weight="700" letter-spacing="3" fill="${A}">${escX((f.l1 || "").toUpperCase())}</text>
+      <text font-family="${ff}" font-size="96" font-weight="800" fill="${ink}">${tspans(hl, 64, 400, 104)}</text>
+      <text font-family="${ff}" font-size="42" fill="${sub}">${tspans(wrapLines(f.l3, 42), 64, 410 + hl.length * 104, 50)}</text>
+      <text x="64" y="900" font-family="${ff}" font-size="30" fill="${sub}">${escX(brand.tagline)}</text>
+      <rect x="0" y="930" width="${W}" height="150" fill="${A}"/>
+      <text x="${W / 2}" y="1018" text-anchor="middle" font-family="${ff}" font-size="40" font-weight="700" fill="#fff">${escX(f.l4)}</text>`;
+  } else if (tk === "post") {
+    const hl = wrapLines(f.l2, 18);
+    body = `${emblem(64, 64, 90, true)}<text x="180" y="125" font-family="${ff}" font-size="40" font-weight="700" fill="#fff">${escX(brand.name)}</text>
+      <rect x="64" y="250" width="${Math.min(560, 60 + (f.l1 || "").length * 19)}" height="64" rx="32" fill="rgba(255,255,255,0.18)"/>
+      <text x="86" y="293" font-family="${ff}" font-size="32" font-weight="700" letter-spacing="2" fill="#fff">${escX((f.l1 || "").toUpperCase())}</text>
+      <text font-family="${ff}" font-size="104" font-weight="800" fill="#fff">${tspans(hl, 64, 440, 112)}</text>
+      <text font-family="${ff}" font-size="44" fill="rgba(255,255,255,0.9)">${tspans(wrapLines(f.l3, 34), 64, 450 + hl.length * 112, 54)}</text>
+      <rect x="64" y="978" width="${W - 128}" height="2" fill="rgba(255,255,255,0.3)"/>
+      <text x="64" y="1035" font-family="${ff}" font-size="34" fill="rgba(255,255,255,0.85)">${escX(f.l4)}</text>`;
+  } else if (tk === "spotlight") {
+    const r = 168, cx = W / 2, cy = 318;
+    const pic = photo
+      ? `<defs><clipPath id="cc"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath></defs><image href="${photo}" x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" preserveAspectRatio="xMidYMid slice" clip-path="url(#cc)"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${P}" stroke-width="10"/>`
+      : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${A}"/><text x="${cx}" y="${cy + 34}" text-anchor="middle" font-family="${ff}" font-size="120" font-weight="800" fill="#fff">${escX(initialsOf(f.l2))}</text>`;
+    const q = wrapLines(f.l4, 40);
+    body = `<rect x="0" y="0" width="16" height="${H}" fill="${P}"/>${pic}
+      <text x="${cx}" y="596" text-anchor="middle" font-family="${ff}" font-size="40" font-weight="700" letter-spacing="3" fill="${A}">${escX((f.l1 || "MEMBER SPOTLIGHT").toUpperCase())}</text>
+      <text x="${cx}" y="688" text-anchor="middle" font-family="${ff}" font-size="84" font-weight="800" fill="${ink}">${escX(f.l2)}</text>
+      <text x="${cx}" y="744" text-anchor="middle" font-family="${ff}" font-size="40" fill="${sub}">${escX(f.l3)}</text>
+      <text text-anchor="middle" font-family="${ff}" font-size="40" font-style="italic" fill="${sub}">${q.map((ln, i) => `<tspan x="${cx}" y="${848 + i * 54}">${escX("\u201C" + ln + (i === q.length - 1 ? "\u201D" : ""))}</tspan>`).join("")}</text>
+      ${emblem(cx - 35, 998, 70, false)}`;
+  } else {
+    body = `${emblem(64, 64, 86, true)}<text x="174" y="122" font-family="${ff}" font-size="38" font-weight="700" fill="#fff">${escX(brand.name)}</text>
+      <text x="64" y="332" font-family="${ff}" font-size="40" font-weight="700" letter-spacing="3" fill="rgba(255,255,255,0.85)">${escX((f.l1 || "").toUpperCase())}</text>
+      <text x="60" y="600" font-family="${ff}" font-size="300" font-weight="800" fill="#fff">${escX(f.l2)}</text>
+      <text x="64" y="688" font-family="${ff}" font-size="50" fill="rgba(255,255,255,0.92)">${escX(f.l3)}</text>
+      <rect x="64" y="752" width="120" height="10" fill="${A}"/>
+      <text font-family="${ff}" font-size="56" font-weight="700" fill="#fff">${tspans(wrapLines(f.l4, 30), 64, 880, 66)}</text>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${bgLayer}${body}</svg>`;
+}
+const GFX_TEMPLATES = [
+  { key: "flyer", name: "Recruitment flyer", labels: ["Eyebrow", "Headline", "Subline", "Call to action"], def: { l1: "Now recruiting volunteers", l2: "We need you on the crew", l3: "No experience needed — we train you.", l4: "Stop by the station Tuesdays at 7pm" } },
+  { key: "post", name: "Social announcement", labels: ["Label", "Headline", "Details", "Footer / link"], def: { l1: "Community update", l2: "Open house this Saturday", l3: "Food, trucks, and meet your local crew · 10am–2pm.", l4: "North Hood Country VFD · Station 20" } },
+  { key: "spotlight", name: "Member spotlight", labels: ["Eyebrow", "Member name", "Role / years", "Quote"], def: { l1: "Member spotlight", l2: "Maria Reyes", l3: "Chief · 12 years of service", l4: "This town is worth showing up for." } },
+  { key: "stat", name: "Stat card", labels: ["Eyebrow", "Big number", "What it measures", "Call to action"], def: { l1: "Last month", l2: "41", l3: "calls answered by your volunteers", l4: "Your neighbors need you. Join the crew." } },
+];
+function GraphicStudio({ S, brand }) {
+  const [tk, setTk] = useState("flyer");
+  const tmpl = GFX_TEMPLATES.find((t) => t.key === tk);
+  const [f, setF] = useState(tmpl.def);
+  const [photo, setPhoto] = useState(null);
+  const [bg, setBg] = useState(null); const [useBg, setUseBg] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false); const [aiPrompt, setAiPrompt] = useState("a red fire engine outside a small-town station at golden hour, cinematic");
+  const [aiLoading, setAiLoading] = useState(false); const [aiErr, setAiErr] = useState("");
+  function pick(k) { const t = GFX_TEMPLATES.find((x) => x.key === k); setTk(k); setF(t.def); setPhoto(null); }
+  function onPhoto(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(file); }
+  const svg = buildGraphicSVG(tk, brand, f, photo, useBg ? bg : null);
+  const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  function download() {
+    const img = new window.Image();
+    img.onload = () => { const c = document.createElement("canvas"); c.width = 1080; c.height = 1080; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 1080, 1080); ctx.drawImage(img, 0, 0, 1080, 1080); c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `${tk}-graphic.png`; a.click(); }); };
+    img.src = dataUrl;
+  }
+  async function genAI() {
+    setAiLoading(true); setAiErr("");
+    try {
+      const res = await fetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt }) });
+      const data = await res.json();
+      if (!res.ok || data.error) setAiErr(data.error || "AI image isn't available right now.");
+      else if (data.image) { setBg(data.image); setUseBg(true); }
+    } catch { setAiErr("Couldn't reach the image service."); } finally { setAiLoading(false); }
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAKE A GRAPHIC</div>
+      <p style={S.helpP}>On-brand graphics using your Brand Kit colors and logo. Pick a template, edit the text, download a square PNG for socials.</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
+        {GFX_TEMPLATES.map((t) => (
+          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          {[0, 1, 2, 3].map((i) => {
+            const key = `l${i + 1}`;
+            return (
+              <label key={i} style={{ ...S.field, marginBottom: 8 }}><span style={S.fieldLabel}>{tmpl.labels[i]}</span>
+                <input style={S.input} value={f[key] || ""} onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))} /></label>
+            );
+          })}
+          {tk === "spotlight" && (
+            <label style={{ ...S.ghostBtn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
+          )}
+          <div style={{ marginTop: 14, padding: 12, border: "1px dashed #D9D5E2", borderRadius: 10, background: "#FBFAFC" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#54506B", display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={14} /> AI BACKGROUND <span style={{ fontSize: 10, background: "#EDEBF2", color: "#7A7488", padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
+              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
+            </div>
+            {aiOpen && <div style={{ marginTop: 10 }}>
+              <p style={{ fontSize: 12, color: "#6A7178", marginTop: 0, marginBottom: 8 }}>Generates a background image to sit behind your text. Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
+              <textarea style={{ ...S.input, minHeight: 54, resize: "vertical", fontFamily: "inherit" }} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                <button style={{ ...S.primaryBtn, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
+                {bg && <label style={{ fontSize: 12.5, color: "#3A4750", display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use as background</label>}
+              </div>
+              {aiErr && <div style={{ ...S.errBox, marginTop: 8 }}>{aiErr}</div>}
+            </div>}
+          </div>
+        </div>
+        <div style={{ width: 300, maxWidth: "100%" }}>
+          <img src={dataUrl} alt="graphic preview" style={{ width: "100%", borderRadius: 12, border: "1px solid #E7E5EE", display: "block" }} />
+          <button style={{ ...S.primaryBtn, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download PNG</button>
         </div>
       </div>
     </div>
