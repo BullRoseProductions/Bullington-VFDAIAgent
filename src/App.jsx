@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
@@ -7,9 +7,10 @@ import {
   ThumbsUp, ThumbsDown, Pencil, MessageSquare,
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, ClipboardCheck,
-  Palette, Image as ImageIcon, Wand2,
+  Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
+import { QRCodeCanvas } from "qrcode.react";
 
 /* ------------------------------------------------------------------ */
 /*  Working title: THE DAYROOM  (name not final — easy to swap)        */
@@ -149,6 +150,30 @@ export default function App() {
   const [brand, setBrand] = useState(DEFAULT_BRAND);
   const [trainingPlan, setTrainingPlan] = useState(TRAIN_PLAN_SEED);
   const [trainingSessions, setTrainingSessions] = useState(trainSessionsSeed);
+  const [checkinResult, setCheckinResult] = useState(null);
+  function doCheckIn(sessionId, token, memberId) {
+    const s = trainingSessions.find((x) => x.id === Number(sessionId));
+    if (!s) return { ok: false, reason: "That training session wasn't found." };
+    const sg = s.signin;
+    if (!sg || !sg.open) return { ok: false, reason: "Sign-in is closed for this session.", title: s.title };
+    if (sg.token !== token) return { ok: false, reason: "This code has expired — ask the training officer for the current one.", title: s.title };
+    const att = s.attendance || [];
+    if (att.includes(memberId)) return { ok: true, already: true, at: (s.times || {})[memberId], title: s.title };
+    const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    setTrainingSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), memberId], times: { ...(x.times || {}), [memberId]: now } } : x));
+    return { ok: true, at: now, title: s.title };
+  }
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const cid = p.get("checkin");
+    if (cid) {
+      setLoggedIn(true);
+      setCheckinResult(doCheckIn(cid, p.get("t"), MY_MEMBER_ID));
+      setScreen("checkin");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
   const S = baseStyles();
 
@@ -205,7 +230,8 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} members={members} meId={MY_MEMBER_ID} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} members={members} meId={MY_MEMBER_ID} checkIn={doCheckIn} />}
+          {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={MY_MEMBER_ID} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
           {screen === "documents" && <Documents S={S} role={role} />}
@@ -1799,7 +1825,25 @@ function trainSessionsSeed() {
 }
 const sessDate = (s) => new Date(s.y, s.m, s.d);
 const fmtSess = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId }) {
+function CheckinConfirm({ S, result, members, meId, go }) {
+  const me = members.find((m) => m.id === meId);
+  const ok = result?.ok;
+  return (
+    <div style={{ maxWidth: 520, margin: "0 auto" }}>
+      <div style={{ ...S.opCard, textAlign: "center", padding: "34px 22px" }}>
+        {ok ? <CheckCircle2 size={48} color="#2E7D52" /> : <AlertTriangle size={48} color="#B11E2A" />}
+        <h2 style={{ ...S.featTitle, marginTop: 14 }}>{ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
+        <p style={{ color: "#3A4750", fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
+          {ok
+            ? <>{me ? me.name : "You"} {result.already ? "were already signed in to" : "signed in to"} <b>{result.title}</b>{result.at ? ` at ${result.at}` : ""}.</>
+            : (result?.reason || "Something went wrong.")}
+        </p>
+        <button style={{ ...S.primaryBtn, marginTop: 18 }} onClick={() => go("training")}><GraduationCap size={16} /> Go to my training</button>
+      </div>
+    </div>
+  );
+}
+function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId, checkIn }) {
   const canManage = canAssign(role);
   const memberView = !isLeader(role);
   const today = new Date();
@@ -1809,6 +1853,12 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
   const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly");
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
+  const [openSignin, setOpenSignin] = useState(null);
+  const genToken = () => Math.random().toString(36).slice(2, 7).toUpperCase();
+  function openSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { open: true, token: genToken(), ts: Date.now() } } : x)); setOpenSignin(s.id); }
+  function rotateSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { ...(x.signin || {}), open: true, token: genToken(), ts: Date.now() } } : x)); }
+  function closeSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { ...(x.signin || {}), open: false } } : x)); }
+  const checkinURL = (s) => `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?checkin=${s.id}&t=${s.signin?.token || ""}`;
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
@@ -1975,6 +2025,7 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
                     <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
                   </div>
                   <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} /> Attendance {att.length}/{members.length}</button>
+                  {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5, ...(s.signin?.open ? { color: "#2E7D52", borderColor: "#BFE3CC" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} /> QR sign-in{s.signin?.open ? " · open" : ""}</button>}
                   {s.done ? <Pill S={S} color="#2E7D52">DONE</Pill> : canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => completeSession(s)}><ClipboardCheck size={14} /> Mark complete</button>}
                   {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeSession(s.id)}><X size={14} /></button>}
                 </div>
@@ -1993,6 +2044,44 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
                         </div>
                       );
                     })}
+                  </div>
+                )}
+                {canManage && openSignin === s.id && (
+                  <div style={{ ...S.opCard, margin: "2px 0 10px", padding: 14 }}>
+                    {!s.signin?.open ? (
+                      <div>
+                        <div style={{ fontSize: 13, color: "#3A4750", marginBottom: 10 }}>Open a QR sign-in for <b>{s.title}</b>. Volunteers scan it to check themselves in — each scan is stamped with the time.</div>
+                        <button style={S.primaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> Open sign-in</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                        <div style={{ textAlign: "center" }}>
+                          <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
+                            <QRCodeCanvas value={checkinURL(s)} size={172} />
+                          </div>
+                          <div style={{ marginTop: 8, fontSize: 12, color: "#6A7178" }}>This week's code: <b style={{ letterSpacing: 2, color: "#191C20" }}>{s.signin.token}</b></div>
+                          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
+                            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => rotateSI(s)}><RefreshCw size={14} /> Rotate code</button>
+                            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => closeSI(s)}><X size={14} /> Close</button>
+                          </div>
+                          <button style={{ ...S.ghostBtn, marginTop: 8, padding: "6px 10px", fontSize: 12 }} onClick={() => checkIn && checkIn(s.id, s.signin.token, meId)}>Simulate a scan (check me in)</button>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 190 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#54506B", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
+                          {(s.attendance || []).length === 0 ? <div style={{ fontSize: 12.5, color: "#6A7178" }}>No one's scanned in yet.</div> :
+                            (s.attendance || []).map((id) => { const mm = members.find((x) => x.id === id); const tt = (s.times || {})[id];
+                              return (
+                                <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
+                                  <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
+                                  <span style={{ flex: 1, color: "#191C20" }}>{mm ? mm.name : `Member #${id}`}{id === meId ? " (you)" : ""}</span>
+                                  <span style={{ fontSize: 11.5, color: "#6A7178" }}>{tt || "added"}</span>
+                                </div>
+                              );
+                            })}
+                          <div style={{ fontSize: 11, color: "#9A96A6", marginTop: 12, lineHeight: 1.5 }}>Each week's session gets its own code; rotate it if it leaks. <i>Prototype note: a production build ties each scan to the volunteer's own login and stores it server-side so it can't be spoofed.</i></div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
