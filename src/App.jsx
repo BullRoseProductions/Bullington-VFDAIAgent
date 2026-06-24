@@ -243,7 +243,7 @@ export default function App() {
           {screen === "visibility" && <Visibility S={S} brand={brand} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={MY_MEMBER_ID} />}
-          {screen === "funding" && <Funding S={S} role={role} />}
+          {screen === "funding" && <Funding S={S} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
@@ -1030,36 +1030,7 @@ const FUNDRAISER_IDEAS = [
   { title: "Bingo or game night", key: "bingo", p: "Recurring revenue if you can host it monthly." },
   { title: "Prize raffle", key: "raffle", p: "Strong earner — but check your state's raffle/gaming rules first." },
 ];
-const SPONSOR_CATS = ["Headline packages", "Signage & visibility", "Food & drink", "Activities & family", "Media & announcements", "In-kind"];
-const SPONSOR_SEED = [
-  { id: "sp1", cat: "Headline packages", name: "Title / Presenting Sponsor", price: 2500, sponsor: null, benefits: "Event billed as presented by [you]. Top logo on every banner, shirt, flyer and the program; named in all press and social posts; repeated PA shout-outs; and a thank-you from the chief." },
-  { id: "sp2", cat: "Headline packages", name: "Gold Sponsor", price: 1000, sponsor: null, benefits: "Large logo on the main banner, the event shirt and the program. Several PA mentions and a dedicated social media post." },
-  { id: "sp3", cat: "Headline packages", name: "Silver Sponsor", price: 500, sponsor: null, benefits: "Logo on the shared sponsor banner and in the program, a PA mention, and a social media shout-out." },
-  { id: "sp4", cat: "Headline packages", name: "Bronze / Friend of the Department", price: 250, sponsor: null, benefits: "Name listed in the program, on the website, and in a group social thank-you." },
-  { id: "sp5", cat: "Signage & visibility", name: "Banner Sponsor", price: 150, sponsor: null, benefits: "Your own printed banner displayed in a high-traffic spot at the event." },
-  { id: "sp6", cat: "Signage & visibility", name: "Apparatus Display Sponsor", price: 300, sponsor: null, benefits: "Your banner on the fire engine on display, the most-photographed spot at the event." },
-  { id: "sp7", cat: "Signage & visibility", name: "Tent / Shade Sponsor", price: 250, sponsor: null, benefits: "Logo on the main tent or shade structure where people gather and rest." },
-  { id: "sp8", cat: "Signage & visibility", name: "Yard Sign Sponsor", price: 75, sponsor: null, benefits: "Your logo added to the event yard signs posted around town in the weeks beforehand." },
-  { id: "sp9", cat: "Signage & visibility", name: "Parking Sponsor", price: 150, sponsor: null, benefits: "Parking courtesy of [you] signage at the entrance and the lot." },
-  { id: "sp10", cat: "Signage & visibility", name: "Program Ad", price: 150, sponsor: null, benefits: "A printed ad in the event program; full or half page." },
-  { id: "sp11", cat: "Food & drink", name: "Meal / Food Sponsor", price: 400, sponsor: null, benefits: "Meal provided by [you] on the serving-line signage and the menu, plus your logo at the food area." },
-  { id: "sp12", cat: "Food & drink", name: "Beverage / Drink Station Sponsor", price: 300, sponsor: null, benefits: "Logo on the drink station signage and on the cups." },
-  { id: "sp13", cat: "Food & drink", name: "Coffee & Water Station Sponsor", price: 150, sponsor: null, benefits: "Signage at the hydration and coffee station." },
-  { id: "sp14", cat: "Food & drink", name: "Dessert Sponsor", price: 150, sponsor: null, benefits: "Logo at the dessert table; dessert provided by [you]." },
-  { id: "sp15", cat: "Activities & family", name: "Kids' Zone / Bounce House Sponsor", price: 250, sponsor: null, benefits: "Banner and signage at the kids' area, with a family-friendly thank-you." },
-  { id: "sp16", cat: "Activities & family", name: "Photo Booth Sponsor", price: 200, sponsor: null, benefits: "Your logo printed on every photo strip guests take home." },
-  { id: "sp17", cat: "Activities & family", name: "Trophy / Award Sponsor", price: 200, sponsor: null, benefits: "Awards presented by [you]; logo on trophies, medals or certificates." },
-  { id: "sp18", cat: "Activities & family", name: "Hole Sponsor (golf events)", price: 100, sponsor: null, benefits: "A tee sign with your logo at one hole." },
-  { id: "sp19", cat: "Activities & family", name: "Raffle Sponsor", price: 150, sponsor: null, benefits: "Recognized as the raffle sponsor on signage and during the drawing." },
-  { id: "sp20", cat: "Media & announcements", name: "PA / Radio Announcement Sponsor", price: 200, sponsor: null, benefits: "Live brought to you by [you] shout-outs over the PA throughout the event." },
-  { id: "sp21", cat: "Media & announcements", name: "Event T-Shirt Sponsor", price: 500, sponsor: null, benefits: "Your logo on the back of every event shirt; walking advertising long after the day." },
-  { id: "sp22", cat: "Media & announcements", name: "Swag Bag / Giveaway Sponsor", price: 250, sponsor: null, benefits: "Logo on the bags or giveaway items handed to every attendee." },
-  { id: "sp23", cat: "Media & announcements", name: "Social Media Shout-out", price: 100, sponsor: null, benefits: "A dedicated sponsored post on the department pages tagging your business." },
-  { id: "sp24", cat: "Media & announcements", name: "Live Stream Sponsor", price: 250, sponsor: null, benefits: "Your logo as an overlay on the event live stream." },
-  { id: "sp25", cat: "In-kind", name: "In-Kind Goods / Services", price: 0, sponsor: null, benefits: "Donate food, supplies, printing, equipment or services; recognized at the matching sponsor level for the retail value." },
-  { id: "sp26", cat: "In-kind", name: "Raffle Prize Donation", price: 0, sponsor: null, benefits: "Donate a prize for the raffle; recognized as a prize sponsor on signage and social." },
-];
-function Funding({ S, role }) {
+function Funding({ S }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
@@ -1070,35 +1041,15 @@ function Funding({ S, role }) {
   ]);
   const [addingLog, setAddingLog] = useState(false);
   const [ln, setLn] = useState(""); const [ld, setLd] = useState(""); const [la, setLa] = useState("");
-  const tiers = [
-    { name: "Supporter", price: "$250", items: ["Name on event materials", "Social thank-you", "Window decal"] },
-    { name: "Partner", price: "$1,000", items: ["Banner at the event", "Logo on promo", "Stage / mic mention"], mid: true },
-    { name: "Presenting", price: "$2,500", items: ["\u201CPresented by\u201D billing", "Top logo placement", "Annual recognition"] },
-  ];
   const totalRaised = log.reduce((s, e) => s + (e.amount || 0), 0);
   const recentFor = (idea) => log.find((e) => e.name.toLowerCase().includes(idea.key) || idea.title.toLowerCase().includes(e.name.toLowerCase().split(" ")[0]));
   function planThis(idea) { setMode("Plan a fundraiser"); setDetail(`A ${idea.title.toLowerCase()} to raise money for the department.`); setOut(""); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); }
   function addLog() { if (!ln.trim()) return; setLog((l) => [{ id: Date.now(), name: ln.trim(), date: ld.trim() || "Recent", amount: Number(String(la).replace(/[^0-9.]/g, "")) || 0 }, ...l]); setLn(""); setLd(""); setLa(""); setAddingLog(false); }
   function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
-  const [sp, setSp] = useState(SPONSOR_SEED);
-  const [selling, setSelling] = useState(null); const [spName, setSpName] = useState("");
-  const [editing, setEditing] = useState(null); const [ef, setEf] = useState({ name: "", price: "", benefits: "", cat: "" });
-  const [addingSp, setAddingSp] = useState(false); const [nf, setNf] = useState({ name: "", price: "", cat: SPONSOR_CATS[0], catNew: "", benefits: "" });
-  const canEdit = isLeader(role);
-  const spCats = [...SPONSOR_CATS, ...[...new Set(sp.map((i) => i.cat))].filter((c) => !SPONSOR_CATS.includes(c))];
-  const potential = sp.reduce((s, i) => s + (i.price || 0), 0);
-  const committed = sp.reduce((s, i) => s + (i.sponsor ? (i.price || 0) : 0), 0);
-  const soldCount = sp.filter((i) => i.sponsor).length;
-  function doSold(id) { if (!spName.trim()) return; setSp((xs) => xs.map((i) => (i.id === id ? { ...i, sponsor: spName.trim() } : i))); setSelling(null); setSpName(""); }
-  function clearSold(id) { setSp((xs) => xs.map((i) => (i.id === id ? { ...i, sponsor: null } : i))); }
-  function startEdit(i) { setEditing(i.id); setEf({ name: i.name, price: String(i.price), benefits: i.benefits, cat: i.cat }); }
-  function saveEdit(id) { setSp((xs) => xs.map((i) => (i.id === id ? { ...i, name: ef.name.trim() || i.name, price: Number(String(ef.price).replace(/[^0-9.]/g, "")) || 0, benefits: ef.benefits.trim() || i.benefits, cat: ef.cat } : i))); setEditing(null); }
-  function removeSp(id) { setSp((xs) => xs.filter((i) => i.id !== id)); }
-  function addSp() { if (!nf.name.trim()) return; const cat = nf.cat === "__new__" ? (nf.catNew.trim() || "Other") : nf.cat; setSp((xs) => [...xs, { id: "sp" + Date.now(), cat, name: nf.name.trim(), price: Number(String(nf.price).replace(/[^0-9.]/g, "")) || 0, benefits: nf.benefits.trim() || "Custom sponsorship.", sponsor: null }]); setNf({ name: "", price: "", cat: SPONSOR_CATS[0], catNew: "", benefits: "" }); setAddingSp(false); }
   async function generate() {
     setLoading(true); setErr(""); setOut("");
     let sys;
-    if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their idea, return a practical plan in plain text: goal, a simple timeline/checklist, roles needed, promotion steps, and a realistic money target — doable for a small volunteer crew. ALWAYS finish with a 'Sponsorship' section: 2-3 sponsor levels with suggested dollar amounts and exactly what each sponsor gets (recognition, banner, logo placement, shout-outs), plus one short sponsor-outreach line they can send to a local business. Under 380 words.";
+    if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
     else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
     else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
     try { const t = await callClaude(sys, `Department: North Hood Country VFD\nDetails: ${detail}`); setOut(t); }
@@ -1174,89 +1125,6 @@ function Funding({ S, role }) {
             </div>
           ))}
       </div>
-
-      <div style={S.cardEyebrow}><DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SPONSORSHIP PACKAGES</div>
-      <p style={S.helpP}>A ready-to-sell menu of everything a local business can put a logo on at your events. {canEdit ? "Adjust prices and benefits to your community, mark packages sold as you lock sponsors in, and add your own." : "Browse what the department offers sponsors."}</p>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-        <div style={{ flex: "1 1 200px", background: "#FBF5F2", border: "1px solid #F0DAD2", borderRadius: 10, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9A6A5A", letterSpacing: 0.3 }}>POTENTIAL IF FULLY SOLD</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#B11E2A" }}>${potential.toLocaleString()}</div>
-          <div style={{ fontSize: 11.5, color: "#8A7A74" }}>{sp.length} packages on the menu</div>
-        </div>
-        <div style={{ flex: "1 1 200px", background: "#F1F7F2", border: "1px solid #CFE6D5", borderRadius: 10, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#3E7A52", letterSpacing: 0.3 }}>COMMITTED SO FAR</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#2E7D52" }}>${committed.toLocaleString()}</div>
-          <div style={{ fontSize: 11.5, color: "#6A8A74" }}>{soldCount} sponsor{soldCount === 1 ? "" : "s"} locked in</div>
-        </div>
-      </div>
-      {canEdit && !addingSp && <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingSp(true)}><Plus size={15} /> Add a package</button>}
-      {canEdit && addingSp && (
-        <div style={{ ...S.opCard, marginBottom: 12 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ ...S.field, flex: "2 1 220px" }}><span style={S.fieldLabel}>Package name</span><input style={S.input} value={nf.name} onChange={(e) => setNf({ ...nf, name: e.target.value })} placeholder="e.g. Stage Sponsor" /></label>
-            <label style={{ ...S.field, width: 130 }}><span style={S.fieldLabel}>Price ($)</span><input style={S.input} value={nf.price} onChange={(e) => setNf({ ...nf, price: e.target.value })} placeholder="0 = in-kind" /></label>
-            <label style={{ ...S.field, minWidth: 160 }}><span style={S.fieldLabel}>Category</span><select style={S.input} value={nf.cat} onChange={(e) => setNf({ ...nf, cat: e.target.value })}>{spCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
-            {nf.cat === "__new__" && <label style={{ ...S.field, minWidth: 160 }}><span style={S.fieldLabel}>New category</span><input style={S.input} value={nf.catNew} onChange={(e) => setNf({ ...nf, catNew: e.target.value })} /></label>}
-          </div>
-          <label style={{ ...S.field, marginTop: 8 }}><span style={S.fieldLabel}>What the sponsor gets</span><textarea style={{ ...S.input, minHeight: 52, resize: "vertical", fontFamily: "inherit" }} value={nf.benefits} onChange={(e) => setNf({ ...nf, benefits: e.target.value })} /></label>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button style={{ ...S.primaryBtn, marginTop: 0 }} onClick={addSp}>Add package</button>
-            <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingSp(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-      {spCats.filter((c) => sp.some((i) => i.cat === c)).map((cat) => (
-        <div key={cat} style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: "#54506B", letterSpacing: 0.3, marginBottom: 8, paddingBottom: 5, borderBottom: "2px solid #EFEDF3" }}>{cat}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(248px, 1fr))", gap: 10 }}>
-            {sp.filter((i) => i.cat === cat).map((i) => (
-              <div key={i.id} style={{ border: "1px solid " + (i.sponsor ? "#CFE6D5" : "#E7E5EE"), background: i.sponsor ? "#F6FBF7" : "#fff", borderRadius: 12, padding: 13, display: "flex", flexDirection: "column" }}>
-                {editing === i.id ? (
-                  <>
-                    <label style={S.field}><span style={S.fieldLabel}>Name</span><input style={S.input} value={ef.name} onChange={(e) => setEf({ ...ef, name: e.target.value })} /></label>
-                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                      <label style={{ ...S.field, width: 110 }}><span style={S.fieldLabel}>Price ($)</span><input style={S.input} value={ef.price} onChange={(e) => setEf({ ...ef, price: e.target.value })} /></label>
-                      <label style={{ ...S.field, flex: 1 }}><span style={S.fieldLabel}>Category</span><select style={S.input} value={ef.cat} onChange={(e) => setEf({ ...ef, cat: e.target.value })}>{spCats.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
-                    </div>
-                    <label style={{ ...S.field, marginTop: 6 }}><span style={S.fieldLabel}>Benefits</span><textarea style={{ ...S.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }} value={ef.benefits} onChange={(e) => setEf({ ...ef, benefits: e.target.value })} /></label>
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      <button style={{ ...S.primaryBtn, marginTop: 0, padding: "7px 12px" }} onClick={() => saveEdit(i.id)}>Save</button>
-                      <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setEditing(null)}>Cancel</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14.5, color: "#16181C" }}>{i.name}</div>
-                      <div style={{ fontWeight: 800, fontSize: 15, color: "#B11E2A", whiteSpace: "nowrap" }}>{i.price > 0 ? "$" + i.price.toLocaleString() : "In-kind"}</div>
-                    </div>
-                    <div style={{ fontSize: 12.5, color: "#3A4750", marginTop: 6, lineHeight: 1.4, flex: 1 }}>{i.benefits}</div>
-                    <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      {i.sponsor ? (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#2E7D52", background: "#E6F4EA", padding: "3px 9px", borderRadius: 999 }}><CheckCircle2 size={13} /> Sold · {i.sponsor}{canEdit && <button onClick={() => clearSold(i.id)} title="Mark available" style={{ background: "none", border: "none", cursor: "pointer", color: "#2E7D52", padding: 0, display: "inline-flex" }}><X size={13} /></button>}</span>
-                      ) : canEdit && selling === i.id ? (
-                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                          <input autoFocus style={{ ...S.input, width: 150, padding: "5px 8px" }} placeholder="Sponsor name" value={spName} onChange={(e) => setSpName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doSold(i.id)} />
-                          <button style={{ ...S.primaryBtn, padding: "5px 10px", marginTop: 0 }} onClick={() => doSold(i.id)}>Save</button>
-                          <button style={{ ...S.ghostBtn, padding: "5px 8px", marginTop: 0 }} onClick={() => { setSelling(null); setSpName(""); }}>Cancel</button>
-                        </div>
-                      ) : canEdit ? (
-                        <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => { setSelling(i.id); setSpName(""); }}>Mark sold</button>
-                      ) : null}
-                      {canEdit && editing !== i.id && selling !== i.id && (
-                        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 2 }}>
-                          <button style={{ background: "none", border: "none", cursor: "pointer", color: "#8A8696", padding: 4 }} title="Edit" onClick={() => startEdit(i)}><Pencil size={14} /></button>
-                          <button style={{ background: "none", border: "none", cursor: "pointer", color: "#B0848A", padding: 4 }} title="Remove" onClick={() => removeSp(i.id)}><Trash2 size={14} /></button>
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
 
       <div style={S.cardEyebrow}>FUNDING LIBRARY</div>
       <ResourceLibrary S={S} items={[
