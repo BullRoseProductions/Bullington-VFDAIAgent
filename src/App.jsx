@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
@@ -2324,6 +2324,8 @@ function GraphicStudio({ S, brand }) {
 
 /* ---------------- Station Duties ---------------- */
 const DUTY_LEVELS = ["Everyone", "Probationary", "Firefighters", "EMS", "Officers"];
+const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function weekStartOf(date, startDay) { const d = new Date(date); d.setHours(0, 0, 0, 0); const diff = (d.getDay() - startDay + 7) % 7; d.setDate(d.getDate() - diff); return d; }
 const DUTY_SEED = [
   { id: 1, duty: "Station cleaning — common areas & bays", level: "Everyone", done: false, doneBy: null, doneAt: null },
   { id: 2, duty: "Check & stow your assigned PPE", level: "Everyone", done: true, doneBy: "Sam Whitfield", doneAt: "Mon 6:30 PM" },
@@ -2350,8 +2352,19 @@ function StationDuties({ S, role, members, meId }) {
   const [addingA, setAddingA] = useState(false);
   const [ad, setAd] = useState(""); const [al, setAl] = useState("Everyone");
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
+  const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
+  const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
+  const [weekLabel, setWeekLabel] = useState(() => isoWeek(1));
+  const weekRef = useRef(weekLabel);
+  function setStartDay(day) { setWeekStartDay(Number(day)); const w = isoWeek(day); weekRef.current = w; setWeekLabel(w); }
+  useEffect(() => {
+    const tick = () => { const cur = isoWeek(weekStartDay); if (cur !== weekRef.current) { weekRef.current = cur; setWeekLabel(cur); setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); } };
+    const id = setInterval(tick, 60000); return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStartDay]);
+  const fmtWeek = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
   function toggleDone(id) { setDuties((ds) => ds.map((x) => { if (x.id !== id) return x; if (x.done) return { ...x, done: false, doneBy: null, doneAt: null }; return { ...x, done: true, doneBy: me?.name || "A member", doneAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) }; })); }
-  function resetWeek() { if (!window.confirm("Start a new week? This clears every checkmark.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
+  function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
   function addDuty() { if (!ad.trim()) return; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), level: al, done: false, doneBy: null, doneAt: null }]); setAd(""); setAl("Everyone"); setAddingA(false); }
   function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
   function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
@@ -2361,13 +2374,24 @@ function StationDuties({ S, role, members, meId }) {
     <div>
       <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The week's station duties, organized by level so every member knows their part. Tap the check when it's done — it logs who did it and when." />
 
-      <div style={{ ...S.opCard, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#3A4750", marginBottom: 4 }}><span>This week's duties</span><span><b style={{ color: "#191C20" }}>{doneCount}</b> of {duties.length} done</span></div>
-          <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color="#2E7D52" />
+      <div style={{ ...S.opCard, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#3A4750", marginBottom: 4 }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: "#191C20" }}>{doneCount}</b> of {duties.length} done</span></div>
+            <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color="#2E7D52" />
+          </div>
+          {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={resetWeek}><RefreshCw size={14} /> Reset now</button>}
+          {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>}
         </div>
-        {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={resetWeek}><RefreshCw size={14} /> New week</button>}
-        {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>}
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F1EFF5", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: "#6A7178" }}>
+          <RefreshCw size={13} style={{ flexShrink: 0 }} />
+          <span>Duties roll over automatically each week — no need to re-add them.</span>
+          {canManage
+            ? <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>Week starts on
+                <select style={{ ...S.input, width: "auto", padding: "5px 8px" }} value={weekStartDay} onChange={(e) => setStartDay(e.target.value)}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select>
+              </label>
+            : <span style={{ marginLeft: "auto" }}>Resets every {DOW[weekStartDay]}</span>}
+        </div>
       </div>
 
       {canManage && addingA && (
