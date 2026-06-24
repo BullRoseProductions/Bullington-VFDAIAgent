@@ -1801,6 +1801,7 @@ const sessDate = (s) => new Date(s.y, s.m, s.d);
 const fmtSess = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId }) {
   const canManage = canAssign(role);
+  const memberView = !isLeader(role);
   const today = new Date();
   const me = members.find((m) => m.id === meId);
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -1861,18 +1862,20 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
 
   return (
     <div>
-      <PageHead S={S} eyebrow="TRAINING PLAN" title="Keep training on schedule" sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance." />
-      <div style={S.statRow}>
-        <Stat S={S} n={String(over)} label="Overdue / unlogged" warn={over > 0} />
-        <Stat S={S} n={String(soon)} label="Due soon" warn={soon > 0} />
-        <Stat S={S} n={String(ok)} label="On track" />
-      </div>
-      {over > 0 && (
-        <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
-          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
+      <PageHead S={S} eyebrow={memberView ? "MY TRAINING" : "TRAINING PLAN"} title={memberView ? "Your training calendar" : "Keep training on schedule"} sub={memberView ? "See what's scheduled, who came to each session, and your own attendance record." : "Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance."} />
+      {!memberView && (<>
+        <div style={S.statRow}>
+          <Stat S={S} n={String(over)} label="Overdue / unlogged" warn={over > 0} />
+          <Stat S={S} n={String(soon)} label="Due soon" warn={soon > 0} />
+          <Stat S={S} n={String(ok)} label="On track" />
         </div>
-      )}
+        {over > 0 && (
+          <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+            <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
+          </div>
+        )}
+      </>)}
 
       {role === "Member" && me && (() => {
         const mine = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
@@ -1899,6 +1902,7 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
         );
       })()}
 
+      {!memberView && (<>
       <div style={S.cardEyebrow}><GraduationCap size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING PLAN</div>
       {canManage && (addingPlan ? (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -1924,6 +1928,7 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
         ))}
       </div>
 
+      </>)}
       <div style={{ ...S.cardEyebrow, marginTop: 22 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING CALENDAR</div>
       {canManage && (showSess ? (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
