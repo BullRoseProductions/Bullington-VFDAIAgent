@@ -2323,21 +2323,28 @@ function GraphicStudio({ S, brand }) {
 }
 
 /* ---------------- Station Duties ---------------- */
-const DUTY_LEVELS = ["Everyone", "Probationary", "Firefighters", "EMS", "Officers"];
+const DUTY_CATEGORIES = ["Cleanup", "Station", "Equipment", "Apparatus", "EMS", "Admin"];
+const RECUR = ["Weekly", "Monthly", "Quarterly", "One-time"];
 const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 function weekStartOf(date, startDay) { const d = new Date(date); d.setHours(0, 0, 0, 0); const diff = (d.getDay() - startDay + 7) % 7; d.setDate(d.getDate() - diff); return d; }
+const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()}`; };
+const quarterKey = () => { const d = new Date(); return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3)}`; };
 const DUTY_SEED = [
-  { id: 1, duty: "Station cleaning — common areas & bays", level: "Everyone", done: false, doneBy: null, doneAt: null },
-  { id: 2, duty: "Check & stow your assigned PPE", level: "Everyone", done: true, doneBy: "Sam Whitfield", doneAt: "Mon 6:30 PM" },
-  { id: 3, duty: "Knots & tools review", level: "Probationary", done: false, doneBy: null, doneAt: null },
-  { id: 4, duty: "Wash & check apparatus after calls", level: "Probationary", done: true, doneBy: "Sam Whitfield", doneAt: "Tue 7:10 PM" },
-  { id: 5, duty: "SCBA & air bottles check", level: "Firefighters", done: true, doneBy: "Tom Daniels", doneAt: "Mon 6:45 PM" },
-  { id: 6, duty: "Hose & nozzle inspection", level: "Firefighters", done: false, doneBy: null, doneAt: null },
-  { id: 7, duty: "Apparatus fuel & fluid levels", level: "Firefighters", done: false, doneBy: null, doneAt: null },
-  { id: 8, duty: "Restock EMS / first-aid bags", level: "EMS", done: false, doneBy: null, doneAt: null },
-  { id: 9, duty: "Check O2 levels & med expirations", level: "EMS", done: false, doneBy: null, doneAt: null },
-  { id: 10, duty: "Review training schedule & coverage", level: "Officers", done: false, doneBy: null, doneAt: null },
-  { id: 11, duty: "Sign off the week's completed duties", level: "Officers", done: false, doneBy: null, doneAt: null },
+  { id: 1, duty: "Sweep & mop the apparatus bay", category: "Cleanup", recurrence: "Weekly", done: true, doneBy: "Sam Whitfield", doneAt: "Mon 6:30 PM" },
+  { id: 2, duty: "Kitchen & dayroom wipe-down", category: "Cleanup", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
+  { id: 3, duty: "Trash & recycling to the curb", category: "Cleanup", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
+  { id: 4, duty: "Test alarms, lights & bay doors", category: "Station", recurrence: "Monthly", done: false, doneBy: null, doneAt: null },
+  { id: 5, duty: "Restock supplies — paper, soap, water", category: "Station", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
+  { id: 6, duty: "Generator fuel & fluid check", category: "Station", recurrence: "Monthly", done: false, doneBy: null, doneAt: null },
+  { id: 7, duty: "SCBA & air bottles check", category: "Equipment", recurrence: "Weekly", done: true, doneBy: "Tom Daniels", doneAt: "Mon 6:45 PM" },
+  { id: 8, duty: "Hose & nozzle inspection", category: "Equipment", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
+  { id: 9, duty: "Check & stow assigned PPE", category: "Equipment", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
+  { id: 10, duty: "Hose testing & flow records", category: "Equipment", recurrence: "Quarterly", done: false, doneBy: null, doneAt: null },
+  { id: 11, duty: "Wash apparatus after calls", category: "Apparatus", recurrence: "Weekly", done: true, doneBy: "Cody Pearson", doneAt: "Tue 7:10 PM" },
+  { id: 12, duty: "Fuel & fluid levels on every rig", category: "Apparatus", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
+  { id: 13, duty: "Restock EMS / first-aid bags", category: "EMS", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
+  { id: 14, duty: "Check O2 levels & med expirations", category: "EMS", recurrence: "Monthly", done: false, doneBy: null, doneAt: null },
+  { id: 15, duty: "Update run & incident logs", category: "Admin", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
 ];
 const DUTYLOG_SEED = [
   { id: 1, what: "Refilled air bottles, logged 6", who: "Tom Daniels", when: "Jun 22" },
@@ -2350,29 +2357,40 @@ function StationDuties({ S, role, members, meId }) {
   const [duties, setDuties] = useState(DUTY_SEED);
   const [log, setLog] = useState(DUTYLOG_SEED);
   const [addingA, setAddingA] = useState(false);
-  const [ad, setAd] = useState(""); const [al, setAl] = useState("Everyone");
+  const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [arec, setArec] = useState("Weekly");
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
   const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
   const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
   const [weekLabel, setWeekLabel] = useState(() => isoWeek(1));
   const weekRef = useRef(weekLabel);
+  const monthRef = useRef(monthKey());
+  const quarterRef = useRef(quarterKey());
   function setStartDay(day) { setWeekStartDay(Number(day)); const w = isoWeek(day); weekRef.current = w; setWeekLabel(w); }
   useEffect(() => {
-    const tick = () => { const cur = isoWeek(weekStartDay); if (cur !== weekRef.current) { weekRef.current = cur; setWeekLabel(cur); setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); } };
+    const tick = () => {
+      const cw = isoWeek(weekStartDay), cm = monthKey(), cq = quarterKey();
+      const kinds = [];
+      if (cw !== weekRef.current) { weekRef.current = cw; setWeekLabel(cw); kinds.push("Weekly"); }
+      if (cm !== monthRef.current) { monthRef.current = cm; kinds.push("Monthly"); }
+      if (cq !== quarterRef.current) { quarterRef.current = cq; kinds.push("Quarterly"); }
+      if (kinds.length) setDuties((ds) => ds.map((x) => kinds.includes(x.recurrence) ? { ...x, done: false, doneBy: null, doneAt: null } : x));
+    };
     const id = setInterval(tick, 60000); return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStartDay]);
   const fmtWeek = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const categories = [...DUTY_CATEGORIES.filter((c) => duties.some((d) => d.category === c)), ...[...new Set(duties.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
+  const allCats = [...new Set([...DUTY_CATEGORIES, ...duties.map((d) => d.category)])];
   function toggleDone(id) { setDuties((ds) => ds.map((x) => { if (x.id !== id) return x; if (x.done) return { ...x, done: false, doneBy: null, doneAt: null }; return { ...x, done: true, doneBy: me?.name || "A member", doneAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) }; })); }
   function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
-  function addDuty() { if (!ad.trim()) return; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), level: al, done: false, doneBy: null, doneAt: null }]); setAd(""); setAl("Everyone"); setAddingA(false); }
+  function addDuty() { if (!ad.trim()) return; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), category: acat.trim() || "Cleanup", recurrence: arec, done: false, doneBy: null, doneAt: null }]); setAd(""); setAcat("Cleanup"); setArec("Weekly"); setAddingA(false); }
   function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
   function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
   function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
   const doneCount = duties.filter((d) => d.done).length;
   return (
     <div>
-      <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The week's station duties, organized by level so every member knows their part. Tap the check when it's done — it logs who did it and when." />
+      <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own." />
 
       <div style={{ ...S.opCard, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
@@ -2385,7 +2403,7 @@ function StationDuties({ S, role, members, meId }) {
         </div>
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F1EFF5", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: "#6A7178" }}>
           <RefreshCw size={13} style={{ flexShrink: 0 }} />
-          <span>Duties roll over automatically each week — no need to re-add them.</span>
+          <span>Recurring duties roll over on their own — weekly, monthly, or quarterly. One-time duties stay until done.</span>
           {canManage
             ? <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>Week starts on
                 <select style={{ ...S.input, width: "auto", padding: "5px 8px" }} value={weekStartDay} onChange={(e) => setStartDay(e.target.value)}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select>
@@ -2397,19 +2415,21 @@ function StationDuties({ S, role, members, meId }) {
       {canManage && addingA && (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Level</span><select style={S.input} value={al} onChange={(e) => setAl(e.target.value)}>{DUTY_LEVELS.map((l) => <option key={l}>{l}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span><input style={S.input} value={acat} placeholder="Pick or type a new one" onChange={(e) => setAcat(e.target.value)} list="dutycats" /><datalist id="dutycats">{allCats.map((c) => <option key={c} value={c} />)}</datalist></label>
+          <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Recurs</span><select style={S.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
           <button style={S.primaryBtn} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
           <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
         </div>
       )}
+      {canManage && <p style={{ ...S.helpP, marginTop: -2 }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
-      {DUTY_LEVELS.map((level) => {
-        const items = duties.filter((d) => d.level === level);
+      {categories.map((cat) => {
+        const items = duties.filter((d) => d.category === cat);
         if (!items.length) return null;
         const dn = items.filter((d) => d.done).length;
         return (
-          <div key={level} style={{ marginBottom: 16 }}>
-            <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{level.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? "#2E7D52" : "#9A96A6" }}>{dn}/{items.length}</span></div>
+          <div key={cat} style={{ marginBottom: 16 }}>
+            <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? "#2E7D52" : "#9A96A6" }}>{dn}/{items.length}</span></div>
             {items.map((a) => (
               <div key={a.id} style={S.certRow}>
                 <button onClick={() => toggleDone(a.id)} title={a.done ? "Mark not done" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
@@ -2419,6 +2439,7 @@ function StationDuties({ S, role, members, meId }) {
                   <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
                   {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {a.doneBy} · {a.doneAt}</div>}
                 </div>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: a.recurrence === "One-time" ? "#9A6B12" : "#6A7178", background: a.recurrence === "One-time" ? "#FBF1DC" : "#F1EFF5", borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
                 {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
               </div>
             ))}
