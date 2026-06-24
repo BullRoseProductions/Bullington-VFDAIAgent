@@ -2323,13 +2323,19 @@ function GraphicStudio({ S, brand }) {
 }
 
 /* ---------------- Station Duties ---------------- */
+const DUTY_LEVELS = ["Everyone", "Probationary", "Firefighters", "EMS", "Officers"];
 const DUTY_SEED = [
-  { id: 1, duty: "SCBA & air bottles", who: "Tom Daniels", cadence: "Weekly" },
-  { id: 2, duty: "Hose testing & records", who: "Janelle Okafor", cadence: "Annual" },
-  { id: 3, duty: "Apparatus fuel & fluids", who: "Cody Pearson", cadence: "Weekly" },
-  { id: 4, duty: "Station cleaning", who: "Rotating crew", cadence: "Weekly" },
-  { id: 5, duty: "Social media & community", who: "Dana Cole", cadence: "Ongoing" },
-  { id: 6, duty: "Supply & PPE inventory", who: "Maria Reyes", cadence: "Monthly" },
+  { id: 1, duty: "Station cleaning — common areas & bays", level: "Everyone", done: false, doneBy: null, doneAt: null },
+  { id: 2, duty: "Check & stow your assigned PPE", level: "Everyone", done: true, doneBy: "Sam Whitfield", doneAt: "Mon 6:30 PM" },
+  { id: 3, duty: "Knots & tools review", level: "Probationary", done: false, doneBy: null, doneAt: null },
+  { id: 4, duty: "Wash & check apparatus after calls", level: "Probationary", done: true, doneBy: "Sam Whitfield", doneAt: "Tue 7:10 PM" },
+  { id: 5, duty: "SCBA & air bottles check", level: "Firefighters", done: true, doneBy: "Tom Daniels", doneAt: "Mon 6:45 PM" },
+  { id: 6, duty: "Hose & nozzle inspection", level: "Firefighters", done: false, doneBy: null, doneAt: null },
+  { id: 7, duty: "Apparatus fuel & fluid levels", level: "Firefighters", done: false, doneBy: null, doneAt: null },
+  { id: 8, duty: "Restock EMS / first-aid bags", level: "EMS", done: false, doneBy: null, doneAt: null },
+  { id: 9, duty: "Check O2 levels & med expirations", level: "EMS", done: false, doneBy: null, doneAt: null },
+  { id: 10, duty: "Review training schedule & coverage", level: "Officers", done: false, doneBy: null, doneAt: null },
+  { id: 11, duty: "Sign off the week's completed duties", level: "Officers", done: false, doneBy: null, doneAt: null },
 ];
 const DUTYLOG_SEED = [
   { id: 1, what: "Refilled air bottles, logged 6", who: "Tom Daniels", when: "Jun 22" },
@@ -2339,45 +2345,65 @@ const DUTYLOG_SEED = [
 function StationDuties({ S, role, members, meId }) {
   const canManage = isLeader(role); // board members + officers + admins assign duties
   const me = members.find((m) => m.id === meId);
-  const [assigns, setAssigns] = useState(DUTY_SEED);
+  const [duties, setDuties] = useState(DUTY_SEED);
   const [log, setLog] = useState(DUTYLOG_SEED);
   const [addingA, setAddingA] = useState(false);
-  const [ad, setAd] = useState(""); const [aw, setAw] = useState(""); const [ac, setAc] = useState("Weekly");
+  const [ad, setAd] = useState(""); const [al, setAl] = useState("Everyone");
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
-  function addAssign() { if (!ad.trim()) return; setAssigns((a) => [...a, { id: Date.now(), duty: ad.trim(), who: aw.trim() || "Unassigned", cadence: ac }]); setAd(""); setAw(""); setAc("Weekly"); setAddingA(false); }
-  function removeAssign(id) { setAssigns((a) => a.filter((x) => x.id !== id)); }
+  function toggleDone(id) { setDuties((ds) => ds.map((x) => { if (x.id !== id) return x; if (x.done) return { ...x, done: false, doneBy: null, doneAt: null }; return { ...x, done: true, doneBy: me?.name || "A member", doneAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) }; })); }
+  function resetWeek() { if (!window.confirm("Start a new week? This clears every checkmark.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
+  function addDuty() { if (!ad.trim()) return; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), level: al, done: false, doneBy: null, doneAt: null }]); setAd(""); setAl("Everyone"); setAddingA(false); }
+  function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
   function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
   function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
+  const doneCount = duties.filter((d) => d.done).length;
   return (
     <div>
-      <PageHead S={S} eyebrow="STATION DUTIES" title="Who does what — and who did it" sub="Leadership assigns the standing duties; anyone can log what they got done. Everyone can see how the work is shared." />
+      <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The week's station duties, organized by level so every member knows their part. Tap the check when it's done — it logs who did it and when." />
 
-      <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DUTY ASSIGNMENTS{!canManage && <span style={{ marginLeft: "auto", fontSize: 10.5, color: "#9A96A6", fontWeight: 600 }}>LEADERSHIP ASSIGNS</span>}</div>
-      {canManage && (addingA ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Assigned to</span><input style={S.input} value={aw} placeholder="Name or “Rotating”" onChange={(e) => setAw(e.target.value)} list="dutymembers" /><datalist id="dutymembers">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={ac} onChange={(e) => setAc(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option><option>Ongoing</option></select></label>
-          <button style={S.primaryBtn} onClick={addAssign}><Plus size={15} /> Assign</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
+      <div style={{ ...S.opCard, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#3A4750", marginBottom: 4 }}><span>This week's duties</span><span><b style={{ color: "#191C20" }}>{doneCount}</b> of {duties.length} done</span></div>
+          <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color="#2E7D52" />
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>)}
-      <div style={{ marginBottom: 8 }}>
-        {assigns.map((a) => (
-          <div key={a.id} style={S.certRow}>
-            <ClipboardCheck size={15} color="#54506B" style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: "#191C20" }}>{a.duty}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{a.who}</div>
-            </div>
-            <Pill S={S} color="#1F4E79">{a.cadence.toUpperCase()}</Pill>
-            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeAssign(a.id)}><X size={14} /></button>}
-          </div>
-        ))}
+        {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={resetWeek}><RefreshCw size={14} /> New week</button>}
+        {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>}
       </div>
 
-      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />WHO DID WHAT</div>
-      <p style={S.helpP}>Got something done around the station? Log it so it's on the record — anyone can add here.</p>
+      {canManage && addingA && (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Level</span><select style={S.input} value={al} onChange={(e) => setAl(e.target.value)}>{DUTY_LEVELS.map((l) => <option key={l}>{l}</option>)}</select></label>
+          <button style={S.primaryBtn} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
+        </div>
+      )}
+
+      {DUTY_LEVELS.map((level) => {
+        const items = duties.filter((d) => d.level === level);
+        if (!items.length) return null;
+        const dn = items.filter((d) => d.done).length;
+        return (
+          <div key={level} style={{ marginBottom: 16 }}>
+            <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{level.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? "#2E7D52" : "#9A96A6" }}>{dn}/{items.length}</span></div>
+            {items.map((a) => (
+              <div key={a.id} style={S.certRow}>
+                <button onClick={() => toggleDone(a.id)} title={a.done ? "Mark not done" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                  {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
+                  {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {a.doneBy} · {a.doneAt}</div>}
+                </div>
+                {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />OTHER WORK LOGGED</div>
+      <p style={S.helpP}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
       <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>What got done</span><input style={S.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
         <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Who</span><input style={S.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
