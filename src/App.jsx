@@ -2190,59 +2190,127 @@ function escX(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "
 function initialsOf(name) { return (String(name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase()) || "VF"; }
 function wrapLines(text, max) { const words = String(text || "").split(/\s+/); const lines = []; let cur = ""; words.forEach((w) => { if ((cur + " " + w).trim().length > max) { if (cur) lines.push(cur); cur = w; } else cur = (cur + " " + w).trim(); }); if (cur) lines.push(cur); return lines.length ? lines : [""]; }
 function tspans(lines, x, y, lh) { return lines.map((ln, i) => `<tspan x="${x}" y="${y + i * lh}">${escX(ln)}</tspan>`).join(""); }
-function buildGraphicSVG(tk, brand, f, photo, bg) {
-  const W = 1080, H = 1080, ff = FONT_STACKS[brand.font] || FONT_STACKS["Modern sans"];
-  const P = brand.primary || "#B11E2A", A = brand.accent || "#1F4E79";
-  const darkBg = !!bg || tk === "post" || tk === "stat";
+const GFX_SIZES = [
+  { key: "square", name: "Square 1:1", w: 1080, h: 1080, hint: "Instagram / Facebook feed" },
+  { key: "portrait", name: "Portrait 4:5", w: 1080, h: 1350, hint: "Taller feed post" },
+  { key: "story", name: "Story 9:16", w: 1080, h: 1920, hint: "Stories / Reels / TikTok" },
+  { key: "landscape", name: "Landscape 16:9", w: 1200, h: 675, hint: "Facebook / X / website header" },
+];
+function stackRows(rows, x, anchor, top, bottom) {
+  let total = 0;
+  rows.forEach((r, i) => { total += r.lines.length * r.lh + (i < rows.length - 1 ? (r.gap ?? 18) : 0); });
+  let y = top + Math.max(0, (bottom - top - total) / 2);
+  let out = "";
+  rows.forEach((r, idx) => {
+    r.lines.forEach((ln, i) => { out += `<text x="${x}" y="${Math.round(y + r.size + i * r.lh)}" text-anchor="${anchor}" font-family="${r.ff}" font-size="${r.size}" font-weight="${r.weight || 400}"${r.italic ? ' font-style="italic"' : ''}${r.spacing ? ` letter-spacing="${r.spacing}"` : ''} fill="${r.fill}">${escX(ln)}</text>`; });
+    y += r.lines.length * r.lh + (idx < rows.length - 1 ? (r.gap ?? 18) : 0);
+  });
+  return out;
+}
+const STYLES = [
+  { key: "bold", name: "Bold" },
+  { key: "badge", name: "Badge" },
+  { key: "checker", name: "Checkered" },
+  { key: "classic", name: "Classic" },
+];
+function shade(hex, p) {
+  let h = (hex || "#000000").replace("#", ""); if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  let r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const t = p < 0 ? 0 : 255, a = Math.abs(p);
+  r = Math.round((1 - a) * r + a * t); g = Math.round((1 - a) * g + a * t); b = Math.round((1 - a) * b + a * t);
+  return `#${[r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+}
+function maltesePath(cx, cy, R) {
+  const ri = R * 0.18, ro = R, rn = R * 0.58, aOut = 40 * Math.PI / 180, aIn = 33 * Math.PI / 180;
+  const pt = (r, a) => `${(cx + r * Math.sin(a)).toFixed(1)} ${(cy - r * Math.cos(a)).toFixed(1)}`;
+  const dirs = [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]; let d = "";
+  dirs.forEach((dir, k) => { d += (k === 0 ? "M " : "L ") + pt(ri, dir - aIn) + " L " + pt(ro, dir - aOut) + " L " + pt(rn, dir) + " L " + pt(ro, dir + aOut) + " L " + pt(ri, dir + aIn) + " "; });
+  return d + "Z";
+}
+function buildGraphicSVG(tk, brand, f, photo, bg, size, style) {
+  const W = size?.w || 1080, H = size?.h || 1080;
+  const ff = FONT_STACKS[brand.font] || FONT_STACKS["Modern sans"];
+  const P = brand.primary || "#B11E2A", A = brand.accent || "#1F4E79", GOLD = "#E5B53C";
+  const st = style || "bold";
+  const darkBase = tk === "post" || tk === "stat";
+  const darkBg = !!bg || darkBase;
   const ink = darkBg ? "#ffffff" : "#16181C", sub = darkBg ? "rgba(255,255,255,0.86)" : "#3A4750";
-  const logo = brand.logo;
-  const bgLayer = bg
-    ? `<image href="${bg}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/><rect width="${W}" height="${H}" fill="${P}" opacity="0.6"/>`
-    : `<rect width="${W}" height="${H}" fill="${darkBg ? P : "#ffffff"}"/>`;
+  const logo = brand.logo, M = 64, sc = H < 820 ? 0.78 : 1, Z = (n) => Math.round(n * sc);
+  const defs = `<defs>
+    <linearGradient id="gp" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="${shade(P, 0.16)}"/><stop offset="1" stop-color="${shade(P, -0.28)}"/></linearGradient>
+    <linearGradient id="ga" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shade(A, 0.12)}"/><stop offset="1" stop-color="${shade(A, -0.30)}"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#EFEEF3"/></linearGradient>
+  </defs>`;
+  const pFill = st === "classic" ? P : "url(#gp)";
+  const aFill = st === "classic" ? A : "url(#ga)";
+  let bgLayer;
+  if (bg) bgLayer = `<image href="${bg}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/><rect width="${W}" height="${H}" fill="${pFill}" opacity="0.62"/>`;
+  else if (darkBg) bgLayer = `<rect width="${W}" height="${H}" fill="${pFill}"/>`;
+  else bgLayer = `<rect width="${W}" height="${H}" fill="${st === "classic" ? "#ffffff" : "url(#gl)"}"/>`;
+  let deco = "";
+  if ((st === "bold" || st === "badge") && !bg) {
+    const R = Math.min(W, H) * 0.5;
+    deco += `<path d="${maltesePath(W * 0.9, H * 0.88, R)}" fill="${darkBg ? "#ffffff" : P}" opacity="${darkBg ? 0.07 : 0.05}"/>`;
+  }
+  if (st === "checker") {
+    const sq = 30, n = Math.ceil(W / sq);
+    for (let i = 0; i < n; i++) deco += `<rect x="${i * sq}" y="0" width="${sq}" height="18" fill="${i % 2 ? "#ffffff" : A}"/>`;
+  }
   const emblem = (x, y, s, light) => logo
     ? `<image href="${logo}" x="${x}" y="${y}" width="${s}" height="${s}" preserveAspectRatio="xMidYMid meet"/>`
-    : `<g><circle cx="${x + s / 2}" cy="${y + s / 2}" r="${s / 2 - 2}" fill="none" stroke="${light ? "#fff" : P}" stroke-width="${s * 0.07}"/><rect x="${x + s / 2 - s * 0.06}" y="${y + s * 0.22}" width="${s * 0.12}" height="${s * 0.56}" fill="${light ? "#fff" : P}"/><rect x="${x + s * 0.22}" y="${y + s / 2 - s * 0.06}" width="${s * 0.56}" height="${s * 0.12}" fill="${light ? "#fff" : P}"/></g>`;
+    : `<path d="${maltesePath(x + s / 2, y + s / 2, s * 0.5)}" fill="${light ? "#ffffff" : P}"/>`;
+  const ring = st === "classic" ? P : "url(#ga)";
   let body = "";
   if (tk === "flyer") {
-    const hl = wrapLines(f.l2, 16);
-    body = `<rect x="0" y="0" width="${W}" height="150" fill="${P}"/>${emblem(48, 33, 84, true)}
-      <text x="${W - 48}" y="98" text-anchor="end" font-family="${ff}" font-size="40" font-weight="700" fill="#fff">${escX(brand.name)}</text>
-      <text x="64" y="298" font-family="${ff}" font-size="44" font-weight="700" letter-spacing="3" fill="${A}">${escX((f.l1 || "").toUpperCase())}</text>
-      <text font-family="${ff}" font-size="96" font-weight="800" fill="${ink}">${tspans(hl, 64, 400, 104)}</text>
-      <text font-family="${ff}" font-size="42" fill="${sub}">${tspans(wrapLines(f.l3, 42), 64, 410 + hl.length * 104, 50)}</text>
-      <text x="64" y="900" font-family="${ff}" font-size="30" fill="${sub}">${escX(brand.tagline)}</text>
-      <rect x="0" y="930" width="${W}" height="150" fill="${A}"/>
-      <text x="${W / 2}" y="1018" text-anchor="middle" font-family="${ff}" font-size="40" font-weight="700" fill="#fff">${escX(f.l4)}</text>`;
+    const bandH = Math.max(92, Math.min(160, Math.round(H * 0.135)));
+    const center = stackRows([
+      { lines: [(f.l1 || "").toUpperCase()], size: Z(44), lh: Z(54), weight: 700, spacing: 3, fill: A, ff, gap: 14 },
+      { lines: wrapLines(f.l2, 16), size: Z(90), lh: Z(100), weight: 800, fill: ink, ff, gap: 22 },
+      { lines: wrapLines(f.l3, 40), size: Z(40), lh: Z(50), weight: 400, fill: sub, ff },
+    ], M, "start", bandH + 10, H - bandH - 56);
+    body = `<rect x="0" y="0" width="${W}" height="${bandH}" fill="${pFill}"/>${emblem(48, (bandH - 78) / 2, 78, true)}
+      <text x="${W - 48}" y="${bandH / 2 + 13}" text-anchor="end" font-family="${ff}" font-size="38" font-weight="700" fill="#fff">${escX(brand.name)}</text>
+      ${center}
+      <text x="${M}" y="${H - bandH - 22}" font-family="${ff}" font-size="28" fill="${sub}">${escX(brand.tagline)}</text>
+      <rect x="0" y="${H - bandH}" width="${W}" height="${bandH}" fill="${aFill}"/>
+      <text x="${W / 2}" y="${H - bandH / 2 + 13}" text-anchor="middle" font-family="${ff}" font-size="${Z(40)}" font-weight="700" fill="#fff">${escX(f.l4)}</text>`;
   } else if (tk === "post") {
-    const hl = wrapLines(f.l2, 18);
-    body = `${emblem(64, 64, 90, true)}<text x="180" y="125" font-family="${ff}" font-size="40" font-weight="700" fill="#fff">${escX(brand.name)}</text>
-      <rect x="64" y="250" width="${Math.min(560, 60 + (f.l1 || "").length * 19)}" height="64" rx="32" fill="rgba(255,255,255,0.18)"/>
-      <text x="86" y="293" font-family="${ff}" font-size="32" font-weight="700" letter-spacing="2" fill="#fff">${escX((f.l1 || "").toUpperCase())}</text>
-      <text font-family="${ff}" font-size="104" font-weight="800" fill="#fff">${tspans(hl, 64, 440, 112)}</text>
-      <text font-family="${ff}" font-size="44" fill="rgba(255,255,255,0.9)">${tspans(wrapLines(f.l3, 34), 64, 450 + hl.length * 112, 54)}</text>
-      <rect x="64" y="978" width="${W - 128}" height="2" fill="rgba(255,255,255,0.3)"/>
-      <text x="64" y="1035" font-family="${ff}" font-size="34" fill="rgba(255,255,255,0.85)">${escX(f.l4)}</text>`;
+    const center = stackRows([
+      { lines: [(f.l1 || "").toUpperCase()], size: Z(34), lh: Z(44), weight: 700, spacing: 2, fill: "rgba(255,255,255,0.92)", ff, gap: 16 },
+      { lines: wrapLines(f.l2, 18), size: Z(98), lh: Z(108), weight: 800, fill: "#fff", ff, gap: 20 },
+      { lines: wrapLines(f.l3, 34), size: Z(42), lh: Z(52), weight: 400, fill: "rgba(255,255,255,0.9)", ff },
+    ], M, "start", 168, H - 96);
+    body = `${emblem(M, 56, 80, true)}<text x="${M + 100}" y="109" font-family="${ff}" font-size="38" font-weight="700" fill="#fff">${escX(brand.name)}</text>
+      <rect x="${M}" y="148" width="${Z(70)}" height="6" rx="3" fill="${GOLD}"/>
+      ${center}
+      <rect x="${M}" y="${H - 86}" width="${W - 2 * M}" height="2" fill="rgba(255,255,255,0.3)"/>
+      <text x="${M}" y="${H - 42}" font-family="${ff}" font-size="32" fill="rgba(255,255,255,0.85)">${escX(f.l4)}</text>`;
   } else if (tk === "spotlight") {
-    const r = 168, cx = W / 2, cy = 318;
+    const r = Math.round(Math.min(W, H) * 0.16), cx = W / 2, cy = Math.round(H * (H < 820 ? 0.24 : 0.27));
     const pic = photo
-      ? `<defs><clipPath id="cc"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath></defs><image href="${photo}" x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" preserveAspectRatio="xMidYMid slice" clip-path="url(#cc)"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${P}" stroke-width="10"/>`
-      : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${A}"/><text x="${cx}" y="${cy + 34}" text-anchor="middle" font-family="${ff}" font-size="120" font-weight="800" fill="#fff">${escX(initialsOf(f.l2))}</text>`;
-    const q = wrapLines(f.l4, 40);
-    body = `<rect x="0" y="0" width="16" height="${H}" fill="${P}"/>${pic}
-      <text x="${cx}" y="596" text-anchor="middle" font-family="${ff}" font-size="40" font-weight="700" letter-spacing="3" fill="${A}">${escX((f.l1 || "MEMBER SPOTLIGHT").toUpperCase())}</text>
-      <text x="${cx}" y="688" text-anchor="middle" font-family="${ff}" font-size="84" font-weight="800" fill="${ink}">${escX(f.l2)}</text>
-      <text x="${cx}" y="744" text-anchor="middle" font-family="${ff}" font-size="40" fill="${sub}">${escX(f.l3)}</text>
-      <text text-anchor="middle" font-family="${ff}" font-size="40" font-style="italic" fill="${sub}">${q.map((ln, i) => `<tspan x="${cx}" y="${848 + i * 54}">${escX("\u201C" + ln + (i === q.length - 1 ? "\u201D" : ""))}</tspan>`).join("")}</text>
-      ${emblem(cx - 35, 998, 70, false)}`;
+      ? `<defs><clipPath id="cc"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath></defs><image href="${photo}" x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" preserveAspectRatio="xMidYMid slice" clip-path="url(#cc)"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${ring}" stroke-width="12"/>`
+      : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${st === "classic" ? A : "url(#ga)"}"/><text x="${cx}" y="${cy + r * 0.22}" text-anchor="middle" font-family="${ff}" font-size="${r * 0.8}" font-weight="800" fill="#fff">${escX(initialsOf(f.l2))}</text>`;
+    const ql = wrapLines(f.l4, 38), qLines = ql.map((ln, i) => (i === 0 ? "\u201C" : "") + ln + (i === ql.length - 1 ? "\u201D" : ""));
+    const center = stackRows([
+      { lines: [(f.l1 || "MEMBER SPOTLIGHT").toUpperCase()], size: Z(38), lh: Z(46), weight: 700, spacing: 3, fill: A, ff, gap: 10 },
+      { lines: [f.l2], size: Z(80), lh: Z(88), weight: 800, fill: ink, ff, gap: 6 },
+      { lines: [f.l3], size: Z(38), lh: Z(46), weight: 400, fill: sub, ff, gap: 22 },
+      { lines: qLines, size: Z(38), lh: Z(50), weight: 400, italic: true, fill: sub, ff },
+    ], cx, "middle", cy + r + 22, H - 92);
+    body = `<rect x="0" y="0" width="14" height="${H}" fill="${pFill}"/>${pic}<rect x="${cx - 34}" y="${cy + r + 8}" width="68" height="5" rx="2.5" fill="${GOLD}"/>${center}${emblem(cx - 32, H - 86, 64, false)}`;
   } else {
-    body = `${emblem(64, 64, 86, true)}<text x="174" y="122" font-family="${ff}" font-size="38" font-weight="700" fill="#fff">${escX(brand.name)}</text>
-      <text x="64" y="332" font-family="${ff}" font-size="40" font-weight="700" letter-spacing="3" fill="rgba(255,255,255,0.85)">${escX((f.l1 || "").toUpperCase())}</text>
-      <text x="60" y="600" font-family="${ff}" font-size="300" font-weight="800" fill="#fff">${escX(f.l2)}</text>
-      <text x="64" y="688" font-family="${ff}" font-size="50" fill="rgba(255,255,255,0.92)">${escX(f.l3)}</text>
-      <rect x="64" y="752" width="120" height="10" fill="${A}"/>
-      <text font-family="${ff}" font-size="56" font-weight="700" fill="#fff">${tspans(wrapLines(f.l4, 30), 64, 880, 66)}</text>`;
+    const big = Math.round(Math.min(W * 0.52, H * (H < 820 ? 0.34 : 0.44)));
+    const center = stackRows([
+      { lines: [(f.l1 || "").toUpperCase()], size: Z(40), lh: Z(48), weight: 700, spacing: 3, fill: "rgba(255,255,255,0.85)", ff, gap: 4 },
+      { lines: [f.l2], size: big, lh: big, weight: 800, fill: "#fff", ff, gap: 2 },
+      { lines: wrapLines(f.l3, 26), size: Z(48), lh: Z(56), weight: 400, fill: "rgba(255,255,255,0.92)", ff, gap: 26 },
+      { lines: wrapLines(f.l4, 30), size: Z(52), lh: Z(62), weight: 700, fill: "#fff", ff },
+    ], M, "start", 150, H - 78);
+    body = `${emblem(M, 56, 78, true)}<text x="${M + 96}" y="107" font-family="${ff}" font-size="36" font-weight="700" fill="#fff">${escX(brand.name)}</text>${center}`;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${bgLayer}${body}</svg>`;
+  let frame = "";
+  if (st === "badge") frame = `<rect x="22" y="22" width="${W - 44}" height="${H - 44}" fill="none" stroke="${GOLD}" stroke-width="3"/><rect x="31" y="31" width="${W - 62}" height="${H - 62}" fill="none" stroke="${GOLD}" stroke-width="1.5" opacity="0.55"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}${bgLayer}${deco}${body}${frame}</svg>`;
 }
 const GFX_TEMPLATES = [
   { key: "flyer", name: "Recruitment flyer", labels: ["Eyebrow", "Headline", "Subline", "Call to action"], def: { l1: "Now recruiting volunteers", l2: "We need you on the crew", l3: "No experience needed — we train you.", l4: "Stop by the station Tuesdays at 7pm" } },
@@ -2256,15 +2324,19 @@ function GraphicStudio({ S, brand }) {
   const [f, setF] = useState(tmpl.def);
   const [photo, setPhoto] = useState(null);
   const [bg, setBg] = useState(null); const [useBg, setUseBg] = useState(false);
+  const [sizeKey, setSizeKey] = useState("square");
+  const size = GFX_SIZES.find((s) => s.key === sizeKey) || GFX_SIZES[0];
+  const [styleKey, setStyleKey] = useState("bold");
   const [aiOpen, setAiOpen] = useState(false); const [aiPrompt, setAiPrompt] = useState("a red fire engine outside a small-town station at golden hour, cinematic");
   const [aiLoading, setAiLoading] = useState(false); const [aiErr, setAiErr] = useState("");
   function pick(k) { const t = GFX_TEMPLATES.find((x) => x.key === k); setTk(k); setF(t.def); setPhoto(null); }
   function onPhoto(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(file); }
-  const svg = buildGraphicSVG(tk, brand, f, photo, useBg ? bg : null);
+  function onUploadBg(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => { setBg(r.result); setUseBg(true); }; r.readAsDataURL(file); e.target.value = ""; }
+  const svg = buildGraphicSVG(tk, brand, f, photo, useBg ? bg : null, size, styleKey);
   const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   function download() {
     const img = new window.Image();
-    img.onload = () => { const c = document.createElement("canvas"); c.width = 1080; c.height = 1080; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 1080, 1080); ctx.drawImage(img, 0, 0, 1080, 1080); c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `${tk}-graphic.png`; a.click(); }); };
+    img.onload = () => { const c = document.createElement("canvas"); c.width = size.w; c.height = size.h; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size.w, size.h); ctx.drawImage(img, 0, 0, size.w, size.h); c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `${tk}-${size.key}.png`; a.click(); }); };
     img.src = dataUrl;
   }
   async function genAI() {
@@ -2279,11 +2351,27 @@ function GraphicStudio({ S, brand }) {
   return (
     <div style={{ marginTop: 8 }}>
       <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAKE A GRAPHIC</div>
-      <p style={S.helpP}>On-brand graphics using your Brand Kit colors and logo. Pick a template, edit the text, download a square PNG for socials.</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
+      <p style={S.helpP}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {GFX_TEMPLATES.map((t) => (
           <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
         ))}
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {GFX_SIZES.map((sz) => (
+            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, ...(sizeKey === sz.key ? S.segBtnOn : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4, marginBottom: 6 }}>STYLE</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {STYLES.map((sy) => (
+            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, ...(styleKey === sy.key ? S.segBtnOn : {}) }}>{sy.name}</button>
+          ))}
+        </div>
       </div>
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ flex: 1, minWidth: 240 }}>
@@ -2298,24 +2386,34 @@ function GraphicStudio({ S, brand }) {
             <label style={{ ...S.ghostBtn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
           )}
           <div style={{ marginTop: 14, padding: 12, border: "1px dashed #D9D5E2", borderRadius: 10, background: "#FBFAFC" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#54506B", display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={14} /> AI BACKGROUND <span style={{ fontSize: 10, background: "#EDEBF2", color: "#7A7488", padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
-              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#54506B", display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ImageIcon size={14} /> BACKGROUND IMAGE</div>
+            <p style={{ fontSize: 12, color: "#6A7178", marginTop: 0, marginBottom: 8 }}>Add a photo behind your text — your text stays readable over it. Optional.</p>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ ...S.ghostBtn, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
+              {bg && <label style={{ fontSize: 12.5, color: "#3A4750", display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use it</label>}
+              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
             </div>
-            {aiOpen && <div style={{ marginTop: 10 }}>
-              <p style={{ fontSize: 12, color: "#6A7178", marginTop: 0, marginBottom: 8 }}>Generates a background image to sit behind your text. Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
-              <textarea style={{ ...S.input, minHeight: 54, resize: "vertical", fontFamily: "inherit" }} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                <button style={{ ...S.primaryBtn, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
-                {bg && <label style={{ fontSize: 12.5, color: "#3A4750", display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use as background</label>}
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #ECEAF1" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#7A7488", display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: "#EDEBF2", color: "#7A7488", padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
+                <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
               </div>
-              {aiErr && <div style={{ ...S.errBox, marginTop: 8 }}>{aiErr}</div>}
-            </div>}
+              {aiOpen && <div style={{ marginTop: 10 }}>
+                <p style={{ fontSize: 12, color: "#6A7178", marginTop: 0, marginBottom: 8 }}>Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
+                <textarea style={{ ...S.input, minHeight: 54, resize: "vertical", fontFamily: "inherit" }} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                  <button style={{ ...S.primaryBtn, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
+                </div>
+                {aiErr && <div style={{ ...S.errBox, marginTop: 8 }}>{aiErr}</div>}
+              </div>}
+            </div>
           </div>
         </div>
         <div style={{ width: 300, maxWidth: "100%" }}>
-          <img src={dataUrl} alt="graphic preview" style={{ width: "100%", borderRadius: 12, border: "1px solid #E7E5EE", display: "block" }} />
-          <button style={{ ...S.primaryBtn, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download PNG</button>
+          <div style={{ display: "flex", justifyContent: "center", background: "#F4F3F7", borderRadius: 12, border: "1px solid #E7E5EE", padding: 10 }}>
+            <img src={dataUrl} alt="graphic preview" style={{ maxWidth: "100%", maxHeight: 420, borderRadius: 6, display: "block" }} />
+          </div>
+          <button style={{ ...S.primaryBtn, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
         </div>
       </div>
     </div>
@@ -2357,7 +2455,7 @@ function StationDuties({ S, role, members, meId }) {
   const [duties, setDuties] = useState(DUTY_SEED);
   const [log, setLog] = useState(DUTYLOG_SEED);
   const [addingA, setAddingA] = useState(false);
-  const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [arec, setArec] = useState("Weekly");
+  const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [acatNew, setAcatNew] = useState(""); const [arec, setArec] = useState("Weekly");
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
   const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
   const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
@@ -2381,9 +2479,15 @@ function StationDuties({ S, role, members, meId }) {
   const fmtWeek = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const categories = [...DUTY_CATEGORIES.filter((c) => duties.some((d) => d.category === c)), ...[...new Set(duties.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
   const allCats = [...new Set([...DUTY_CATEGORIES, ...duties.map((d) => d.category)])];
-  function toggleDone(id) { setDuties((ds) => ds.map((x) => { if (x.id !== id) return x; if (x.done) return { ...x, done: false, doneBy: null, doneAt: null }; return { ...x, done: true, doneBy: me?.name || "A member", doneAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) }; })); }
+  function toggleDone(id) {
+    setDuties((ds) => ds.map((x) => {
+      if (x.id !== id) return x;
+      if (x.done) { if (!canManage && x.doneBy !== me?.name) return x; return { ...x, done: false, doneBy: null, doneAt: null }; }
+      return { ...x, done: true, doneBy: me?.name || "A member", doneAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) };
+    }));
+  }
   function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
-  function addDuty() { if (!ad.trim()) return; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), category: acat.trim() || "Cleanup", recurrence: arec, done: false, doneBy: null, doneAt: null }]); setAd(""); setAcat("Cleanup"); setArec("Weekly"); setAddingA(false); }
+  function addDuty() { if (!ad.trim()) return; const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), category: cat, recurrence: arec, done: false, doneBy: null, doneAt: null }]); setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAddingA(false); }
   function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
   function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
   function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
@@ -2415,7 +2519,8 @@ function StationDuties({ S, role, members, meId }) {
       {canManage && addingA && (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span><input style={S.input} value={acat} placeholder="Pick or type a new one" onChange={(e) => setAcat(e.target.value)} list="dutycats" /><datalist id="dutycats">{allCats.map((c) => <option key={c} value={c} />)}</datalist></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span><select style={S.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
+          {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>New category name</span><input style={S.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
           <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Recurs</span><select style={S.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
           <button style={S.primaryBtn} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
           <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
@@ -2432,9 +2537,15 @@ function StationDuties({ S, role, members, meId }) {
             <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? "#2E7D52" : "#9A96A6" }}>{dn}/{items.length}</span></div>
             {items.map((a) => (
               <div key={a.id} style={S.certRow}>
-                <button onClick={() => toggleDone(a.id)} title={a.done ? "Mark not done" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                  {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
-                </button>
+                {(() => {
+                  const canUncheck = canManage || a.doneBy === me?.name;
+                  if (a.done && !canUncheck) return <span title={`Completed by ${a.doneBy} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
+                  return (
+                    <button onClick={() => toggleDone(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                      {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                    </button>
+                  );
+                })()}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
                   {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {a.doneBy} · {a.doneAt}</div>}
