@@ -1246,8 +1246,8 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
     const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: "Member", status: "Probationary", phone: ph.trim() || "—", email: em.trim() || null, joined: "2026", participation: 0 };
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
     if (error || !data) { alert("Could not add to the database: " + (error ? error.message : "unknown error")); return; }
-    setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
-    setNm(""); setAdding(false);
+    setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
+    setNm(""); setPh(""); setEm(""); setAdding(false);
   }
   async function remove(id, name) {
     if (!window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) return;
