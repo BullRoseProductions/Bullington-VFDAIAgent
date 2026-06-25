@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { QRCodeCanvas } from "qrcode.react";
+import { supabase } from "./supabaseClient";
 
 /* ------------------------------------------------------------------ */
 /*  Working title: THE DAYROOM  (name not final — easy to swap)        */
@@ -148,6 +149,29 @@ export default function App() {
   const [requests, setRequests] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [members, setMembers] = useState(MEMBERS);
+  useEffect(() => {
+    supabase
+      .from("members")
+      .select("*")
+      .then(({ data, error }) => {
+        if (!error && data && data.length) {
+          setMembers(
+            data.map((m) => ({
+              id: m.id,
+              name: m.name,
+              role: m.role,
+              access: m.access,
+              status: m.status,
+              phone: m.phone,
+              joined: m.joined,
+              participation: m.participation,
+              certs: [],
+              notes: [],
+            }))
+          );
+        }
+      });
+  }, []);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
   const [trainingPlan, setTrainingPlan] = useState(TRAIN_PLAN_SEED);
   const [trainingSessions, setTrainingSessions] = useState(trainSessionsSeed);
