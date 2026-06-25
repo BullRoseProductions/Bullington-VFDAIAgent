@@ -1247,6 +1247,8 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
     const { error } = await supabase.from("members").delete().eq("id", id);
     if (error) { alert("Could not remove from the database: " + error.message); }
   }
+  return (
+    <div>
       {canAdd && (adding ? (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Name</span><input style={S.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
