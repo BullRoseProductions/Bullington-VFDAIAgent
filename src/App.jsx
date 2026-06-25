@@ -1243,7 +1243,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
   async function add() {
     if (!nm.trim()) return;
     const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
-    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: "Member", status: "Probationary", phone: "—", joined: "2026", participation: 0 };
+    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: "Member", status: "Probationary", phone: ph.trim() || "—", email: em.trim() || null, joined: "2026", participation: 0 };
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
     if (error || !data) { alert("Could not add to the database: " + (error ? error.message : "unknown error")); return; }
     setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
