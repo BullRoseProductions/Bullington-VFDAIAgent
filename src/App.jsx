@@ -1238,7 +1238,7 @@ function Roster({ S, role, members, setMembers, sessions }) {
 }
 function RosterMembers({ S, role, members, setMembers, onOpen }) {
   const canAdd = canAssign(role);
-  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter");
+  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState("");
   const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
   async function add() {
     if (!nm.trim()) return;
