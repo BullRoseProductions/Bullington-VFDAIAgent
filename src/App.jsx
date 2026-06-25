@@ -1240,7 +1240,15 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
   const canAdd = canAssign(role);
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter");
   const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
-  function add() { if (!nm.trim()) return; setMembers((m) => [...m, { id: Date.now(), name: nm, role: rl, access: "Member", status: "Probationary", phone: "—", joined: "2026", participation: 0, certs: [], notes: [] }]); setNm(""); setAdding(false); }
+  async function add() {
+    if (!nm.trim()) return;
+    const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
+    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: "Member", status: "Probationary", phone: "—", joined: "2026", participation: 0 };
+    const { data, error } = await supabase.from("members").insert(newRow).select().single();
+    if (error || !data) { alert("Could not add to the database: " + (error ? error.message : "unknown error")); return; }
+    setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
+    setNm(""); setAdding(false);
+  }
   async function remove(id, name) {
     if (!window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) return;
     setMembers((m) => m.filter((x) => x.id !== id));
