@@ -1241,9 +1241,12 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter");
   const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
   function add() { if (!nm.trim()) return; setMembers((m) => [...m, { id: Date.now(), name: nm, role: rl, access: "Member", status: "Probationary", phone: "—", joined: "2026", participation: 0, certs: [], notes: [] }]); setNm(""); setAdding(false); }
-  function remove(id, name) { if (window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) setMembers((m) => m.filter((x) => x.id !== id)); }
-  return (
-    <div>
+  async function remove(id, name) {
+    if (!window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) return;
+    setMembers((m) => m.filter((x) => x.id !== id));
+    const { error } = await supabase.from("members").delete().eq("id", id);
+    if (error) { alert("Could not remove from the database: " + error.message); }
+  }
       {canAdd && (adding ? (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Name</span><input style={S.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
