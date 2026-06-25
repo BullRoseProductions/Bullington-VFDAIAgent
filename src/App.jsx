@@ -1261,7 +1261,8 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Name</span><input style={S.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Rank</span><select style={S.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
-          <button style={S.primaryBtn} onClick={add}><UserPlus size={15} /> Add</button>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Phone</span><input style={S.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 180 }}><span style={S.fieldLabel}>Email</span><input style={S.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
         </div>
       ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
       <div style={S.opGrid}>
