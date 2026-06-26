@@ -143,6 +143,8 @@ export default function App() {
   const [role, setRole] = useState("Member");
   const [realRole, setRealRole] = useState("Member");
   const [authEmail, setAuthEmail] = useState(null);
+  const [myMemberId, setMyMemberId] = useState(null);
+  const [identityChecked, setIdentityChecked] = useState(false);
   const [screen, setScreen] = useState("dashboard");
   const [packetId, setPacketId] = useState(null);
   const [drawer, setDrawer] = useState(false);
@@ -183,20 +185,24 @@ export default function App() {
     });
     return () => sub.subscription.unsubscribe();
   }, []);
-  // Load the real permission tier from the user's members row (access column).
+  // Load the real member id + permission tier from the signed-in user's row (authoritative base table).
   useEffect(() => {
-    if (!authEmail) { setRealRole("Member"); setRole("Member"); return; }
+    if (!authEmail) { setRealRole("Member"); setRole("Member"); setMyMemberId(null); setIdentityChecked(false); return; }
     let cancelled = false;
+    setIdentityChecked(false);
     supabase
       .from("members")
-      .select("access")
+      .select("id, access")
       .eq("email", authEmail)
       .single()
       .then(({ data, error }) => {
         if (cancelled) return;
-        const access = !error && data && ROLES.includes(data.access) ? data.access : "Member";
+        const ok = !error && !!data;
+        const access = ok && ROLES.includes(data.access) ? data.access : "Member";
         setRealRole(access);
         setRole(access);
+        setMyMemberId(ok ? data.id : null);
+        setIdentityChecked(true);
       });
     return () => { cancelled = true; };
   }, [authEmail]);
@@ -204,6 +210,7 @@ export default function App() {
   const [trainingPlan, setTrainingPlan] = useState(TRAIN_PLAN_SEED);
   const [trainingSessions, setTrainingSessions] = useState(trainSessionsSeed);
   const [checkinResult, setCheckinResult] = useState(null);
+  const [pendingCheckin, setPendingCheckin] = useState(null);
   function doCheckIn(sessionId, token, memberId) {
     const s = trainingSessions.find((x) => x.id === Number(sessionId));
     if (!s) return { ok: false, reason: "That training session wasn't found." };
@@ -216,16 +223,29 @@ export default function App() {
     setTrainingSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), memberId], times: { ...(x.times || {}), [memberId]: now } } : x));
     return { ok: true, at: now, title: s.title };
   }
+  // Capture a QR/deep-link check-in on mount; don't act until we know who's signed in.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const cid = p.get("checkin");
     if (cid) {
-      setCheckinResult(doCheckIn(cid, p.get("t"), MY_MEMBER_ID));
+      setPendingCheckin({ cid, token: p.get("t") });
+      setCheckinResult({ pending: true });
       setScreen("checkin");
       window.history.replaceState({}, "", window.location.pathname);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Perform the check-in for the REAL signed-in member — never a fallback person.
+  useEffect(() => {
+    if (!pendingCheckin) return;
+    if (!identityChecked) return; // wait until the authoritative lookup has resolved
+    if (myMemberId == null) {
+      setCheckinResult({ ok: false, reason: "We couldn't match your sign-in to a member record, so no attendance was recorded. Please see your training officer." });
+    } else {
+      setCheckinResult(doCheckIn(pendingCheckin.cid, pendingCheckin.token, myMemberId));
+    }
+    setPendingCheckin(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCheckin, identityChecked, myMemberId]);
   const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
   const S = baseStyles();
 
@@ -282,10 +302,10 @@ export default function App() {
         </header>
 
         <main style={S.content}>
-          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} />}
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} members={members} meId={MY_MEMBER_ID} checkIn={doCheckIn} />}
-          {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={MY_MEMBER_ID} go={go} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} members={members} meId={myMemberId} checkIn={doCheckIn} />}
+          {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
           {screen === "documents" && <Documents S={S} role={role} />}
@@ -295,7 +315,7 @@ export default function App() {
           {screen === "recruit" && <Recruitment S={S} brand={brand} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
-          {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={MY_MEMBER_ID} />}
+          {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} />}
           {screen === "funding" && <Funding S={S} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
@@ -307,8 +327,8 @@ export default function App() {
 }
 
 /* ---------------- Dashboard ---------------- */
-function Dashboard({ S, role, members, library, openPacket, go }) {
-  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} />;
+function Dashboard({ S, role, members, library, openPacket, go, meId }) {
+  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -418,12 +438,12 @@ function QuickAccess({ S, role, go }) {
 }
 
 /* ---------------- Member dashboard (personal view) ---------------- */
-function MemberDashboard({ S, role, members, go }) {
-  const me = members.find((m) => m.id === 4) || members[0];
+function MemberDashboard({ S, role, members, go, meId }) {
+  const me = members.find((m) => m.id === meId) || null;
   return (
     <div>
-      <PageHead S={S} eyebrow="MY STATION" title={`Welcome back, ${me.name.split(" ")[0]}.`} sub="Here's exactly where you stand — and what's coming up for you." />
-      <MyCerts S={S} me={me} />
+      <PageHead S={S} eyebrow="MY STATION" title={`Welcome back, ${me ? me.name.split(" ")[0] : "Firefighter"}.`} sub="Here's exactly where you stand — and what's coming up for you." />
+      {me && <MyCerts S={S} me={me} />}
       <QuickAccess S={S} role={role} go={go} />
     </div>
   );
@@ -1833,7 +1853,6 @@ function dueInfo(item) {
   if (diff <= window) return { label: "Due soon", color: "#9A6B12", rel: `in ${diff} day${diff === 1 ? "" : "s"}`, nextLabel, next };
   return { label: "On track", color: "#2E7D52", rel: `due ${nextLabel}`, nextLabel, next };
 }
-const MY_MEMBER_ID = 4; // demo: the signed-in member is Cody Pearson
 const TRAIN_PLAN_SEED = [
   { id: 1, name: "SCBA refresher", cadence: "Quarterly", lastISO: "2026-04-10" },
   { id: 2, name: "Pump operations drill", cadence: "Monthly", lastISO: "2026-05-20" },
@@ -1861,13 +1880,16 @@ const fmtSess = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short",
 function CheckinConfirm({ S, result, members, meId, go }) {
   const me = members.find((m) => m.id === meId);
   const ok = result?.ok;
+  const pending = result?.pending;
   return (
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
       <div style={{ ...S.opCard, textAlign: "center", padding: "34px 22px" }}>
-        {ok ? <CheckCircle2 size={48} color="#2E7D52" /> : <AlertTriangle size={48} color="#B11E2A" />}
-        <h2 style={{ ...S.featTitle, marginTop: 14 }}>{ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
+        {pending ? <Loader2 size={48} color="#6A7178" /> : ok ? <CheckCircle2 size={48} color="#2E7D52" /> : <AlertTriangle size={48} color="#B11E2A" />}
+        <h2 style={{ ...S.featTitle, marginTop: 14 }}>{pending ? "Checking you in…" : ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
         <p style={{ color: "#3A4750", fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
-          {ok
+          {pending
+            ? "One moment while we confirm your sign-in."
+            : ok
             ? <>{me ? me.name : "You"} {result.already ? "were already signed in to" : "signed in to"} <b>{result.title}</b>{result.at ? ` at ${result.at}` : ""}.</>
             : (result?.reason || "Something went wrong.")}
         </p>
@@ -2097,7 +2119,7 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
                             <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => rotateSI(s)}><RefreshCw size={14} /> Rotate code</button>
                             <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => closeSI(s)}><X size={14} /> Close</button>
                           </div>
-                          <button style={{ ...S.ghostBtn, marginTop: 8, padding: "6px 10px", fontSize: 12 }} onClick={() => checkIn && checkIn(s.id, s.signin.token, meId)}>Simulate a scan (check me in)</button>
+                          <button style={{ ...S.ghostBtn, marginTop: 8, padding: "6px 10px", fontSize: 12 }} onClick={() => checkIn && meId != null && checkIn(s.id, s.signin.token, meId)}>Simulate a scan (check me in)</button>
                         </div>
                         <div style={{ flex: 1, minWidth: 190 }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: "#54506B", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
