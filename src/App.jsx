@@ -140,7 +140,6 @@ const NAV = [
 
 /* ================================================================== */
 export default function App() {
-  const [loggedIn, setLoggedIn] = useState(false);
   const [role, setRole] = useState("Training Officer");
   const [screen, setScreen] = useState("dashboard");
   const [packetId, setPacketId] = useState(null);
@@ -192,7 +191,6 @@ export default function App() {
     const p = new URLSearchParams(window.location.search);
     const cid = p.get("checkin");
     if (cid) {
-      setLoggedIn(true);
       setCheckinResult(doCheckIn(cid, p.get("t"), MY_MEMBER_ID));
       setScreen("checkin");
       window.history.replaceState({}, "", window.location.pathname);
@@ -206,8 +204,6 @@ export default function App() {
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
   const visibleNav = NAV.filter((n) => n.roles.includes(role));
   const packet = library.find((p) => p.id === packetId);
-
-  if (!loggedIn) return <Login S={S} role={role} setRole={setRole} onEnter={() => setLoggedIn(true)} />;
 
   return (
     <div style={S.app}>
@@ -248,7 +244,7 @@ export default function App() {
             <select value={role} onChange={(e) => { setRole(e.target.value); setScreen("dashboard"); }} style={S.select}>
               {ROLES.map((r) => <option key={r}>{r}</option>)}
             </select>
-            <button style={S.logout} onClick={() => setLoggedIn(false)} aria-label="Sign out"><LogOut size={16} /></button>
+            <button style={S.logout} onClick={() => supabase.auth.signOut()} aria-label="Sign out"><LogOut size={16} /></button>
           </div>
         </header>
 
@@ -272,29 +268,6 @@ export default function App() {
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
         </main>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- Login ---------------- */
-function Login({ S, role, setRole, onEnter }) {
-  return (
-    <div style={S.loginWrap}>
-      <Fonts />
-      <div style={S.loginChevron} />
-      <div style={S.loginCard}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-          <Logo /><div style={S.brandNameLg}>{APP}</div>
-        </div>
-        <p style={S.loginTag}>Training, recruitment, and operations support for volunteer fire and EMS — built by people who've stood in the bay.</p>
-        <label style={S.field}><span style={S.fieldLabel}>Department email</span><input style={S.input} defaultValue="to@cedarhollowvfd.org" /></label>
-        <label style={S.field}><span style={S.fieldLabel}>Password</span><input style={S.input} type="password" defaultValue="demo" /></label>
-        <label style={S.field}><span style={S.fieldLabel}>Sign in as (demo)</span>
-          <select style={S.input} value={role} onChange={(e) => setRole(e.target.value)}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
-        </label>
-        <button style={S.primaryBtn} onClick={onEnter}>Sign in</button>
-        <p style={S.loginNote}>Prototype — any credentials work. Switch roles anytime with "View as."</p>
       </div>
     </div>
   );
