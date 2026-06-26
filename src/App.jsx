@@ -152,7 +152,7 @@ export default function App() {
   const [members, setMembers] = useState(MEMBERS);
   useEffect(() => {
     supabase
-      .from("members")
+      .from("members_view")
       .select("*")
       .then(({ data, error }) => {
         if (!error && data && data.length) {
@@ -1314,8 +1314,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
           <Pill S={S} color={member.status === "Active" ? "#2E7D52" : member.status === "Probationary" ? "#9A6B12" : "#6A7178"}>{member.status.toUpperCase()}</Pill>
         </div>
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation}%</span></div>
-          <Bar S={S} pct={member.participation} color={member.participation >= 75 ? "#2E7D52" : member.participation >= 50 ? "#9A6B12" : "#B11E2A"} />
+          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation == null ? "—" : `${member.participation}%`}</span></div>
+          {member.participation != null && <Bar S={S} pct={member.participation} color={member.participation >= 75 ? "#2E7D52" : member.participation >= 50 ? "#9A6B12" : "#B11E2A"} />}
         </div>
         {assign && (
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid #ECEDEA` }}>
@@ -1442,7 +1442,7 @@ function Bar({ S, pct, color }) {
   return <div style={S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
 }
 function RosterAttendance({ S, members }) {
-  const people = [...members].sort((a, b) => b.participation - a.participation);
+  const people = [...members].sort((a, b) => (b.participation ?? -1) - (a.participation ?? -1));
   return (
     <div>
       <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
@@ -1466,7 +1466,7 @@ function RosterAttendance({ S, members }) {
           <div key={m.id} style={S.eventRow}>
             <Initials S={S} name={m.name} />
             <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={S.personName}>{m.name}</div><div style={S.personMeta}>{m.role}</div></div>
-            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{m.participation}%</div><Bar S={S} pct={m.participation} color={m.participation >= 75 ? "#2E7D52" : (m.participation >= 50 ? "#9A6B12" : "#B11E2A")} /></div>
+            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{m.participation == null ? "—" : `${m.participation}%`}</div>{m.participation != null && <Bar S={S} pct={m.participation} color={m.participation >= 75 ? "#2E7D52" : (m.participation >= 50 ? "#9A6B12" : "#B11E2A")} />}</div>
           </div>
         ))}
       </div>
@@ -1479,7 +1479,8 @@ function RosterReports({ S, members }) {
   const prob = members.filter((m) => m.status === "Probationary").length;
   const certs = []; members.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
-  const avgPart = Math.round(members.reduce((s, m) => s + m.participation, 0) / members.length);
+  const rated = members.filter((m) => m.participation != null);
+  const avgPart = rated.length ? Math.round(rated.reduce((s, m) => s + m.participation, 0) / rated.length) : 0;
   const rigsReady = APPARATUS_SEED.filter((r) => r.status === "Pass").length;
   function buildReportData() {
     const flaggedCerts = [];
