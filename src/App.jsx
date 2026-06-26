@@ -19,10 +19,10 @@ import { supabase } from "./supabaseClient";
 /* ------------------------------------------------------------------ */
 const APP = "THE DAYROOM";
 
-const ROLES = ["Platform Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
-const LEADERSHIP = ["Platform Admin", "Department Admin", "Board Member", "Training Officer"];
+const ROLES = ["Project Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
+const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Training Officer"];
 const isLeader = (role) => LEADERSHIP.includes(role);
-const canAssign = (role) => role === "Platform Admin" || role === "Department Admin";
+const canAssign = (role) => role === "Project Admin" || role === "Department Admin";
 
 const TRACKS = {
   Fire:        { label: "Fire",        accent: "#B11E2A", Icon: Flame },
@@ -123,10 +123,10 @@ const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training Plan", Icon: GraduationCap, roles: ROLES },
-  { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Platform Admin", "Department Admin", "Training Officer"], premium: true },
+  { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Project Admin", "Department Admin", "Training Officer"], premium: true },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
-  { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Platform Admin", "Department Admin"] },
+  { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
@@ -134,13 +134,15 @@ const NAV = [
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
-  { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Platform Admin", "Department Admin", "Training Officer"] },
-  { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Platform Admin"] },
+  { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Training Officer"] },
+  { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
 ];
 
 /* ================================================================== */
 export default function App() {
-  const [role, setRole] = useState("Training Officer");
+  const [role, setRole] = useState("Member");
+  const [realRole, setRealRole] = useState("Member");
+  const [authEmail, setAuthEmail] = useState(null);
   const [screen, setScreen] = useState("dashboard");
   const [packetId, setPacketId] = useState(null);
   const [drawer, setDrawer] = useState(false);
@@ -171,6 +173,33 @@ export default function App() {
         }
       });
   }, []);
+  // Self-contained auth tracking (main.jsx still gates the session; this only reads it).
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthEmail(data.session?.user?.email ?? null);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthEmail(session?.user?.email ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  // Load the real permission tier from the user's members row (access column).
+  useEffect(() => {
+    if (!authEmail) { setRealRole("Member"); setRole("Member"); return; }
+    let cancelled = false;
+    supabase
+      .from("members")
+      .select("access")
+      .eq("email", authEmail)
+      .single()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        const access = !error && data && ROLES.includes(data.access) ? data.access : "Member";
+        setRealRole(access);
+        setRole(access);
+      });
+    return () => { cancelled = true; };
+  }, [authEmail]);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
   const [trainingPlan, setTrainingPlan] = useState(TRAIN_PLAN_SEED);
   const [trainingSessions, setTrainingSessions] = useState(trainSessionsSeed);
@@ -240,10 +269,14 @@ export default function App() {
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={S.chevronBand} />
           <div style={S.viewAs}>
-            <span style={S.viewAsLabel}>View as</span>
-            <select value={role} onChange={(e) => { setRole(e.target.value); setScreen("dashboard"); }} style={S.select}>
-              {ROLES.map((r) => <option key={r}>{r}</option>)}
-            </select>
+            {isLeader(realRole) && (
+              <>
+                <span style={S.viewAsLabel}>View as</span>
+                <select value={role} onChange={(e) => { setRole(e.target.value); setScreen("dashboard"); }} style={S.select}>
+                  {ROLES.map((r) => <option key={r}>{r}</option>)}
+                </select>
+              </>
+            )}
             <button style={S.logout} onClick={() => supabase.auth.signOut()} aria-label="Sign out"><LogOut size={16} /></button>
           </div>
         </header>
