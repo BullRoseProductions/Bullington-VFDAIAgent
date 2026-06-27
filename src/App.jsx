@@ -2776,6 +2776,25 @@ function StationDuties({ S, role, members, meId }) {
     return [...byWeek.keys()].sort((a, b) => (a < b ? 1 : -1)).map((wk) => ({ wk, entries: byWeek.get(wk) }));
   })();
   const currentWeek = historyWeeks.length ? historyWeeks[Math.min(weekOffset, historyWeeks.length - 1)] : null;
+  const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  function exportCsv() {
+    if (!currentWeek) return;
+    const header = ["Duty", "Completed by", "Date & time"];
+    const rows = currentWeek.entries.map((e) => {
+      const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
+      const d = e.doneAt ? new Date(e.doneAt) : null;
+      const when = d && !isNaN(d.getTime()) ? d.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+      return [e.dutyName, names, when];
+    });
+    const csv = [header, ...rows].map((r) => r.map(csvField).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `duty-log-week-of-${currentWeek.wk}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <div>
       <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own." />
@@ -2914,6 +2933,7 @@ function StationDuties({ S, role, members, meId }) {
               <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset >= historyWeeks.length - 1} onClick={() => setWeekOffset((o) => Math.min(o + 1, historyWeeks.length - 1))}>◀</button>
               <div style={{ flex: 1, textAlign: "center", fontWeight: 600, color: "#191C20" }}>Week of {fmtWeek(currentWeek.wk)}</div>
               <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset <= 0} onClick={() => setWeekOffset((o) => Math.max(o - 1, 0))}>▶</button>
+              {currentWeek && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} /> Download CSV</button>}
             </div>
             <div>
               {currentWeek.entries.map((e) => {
