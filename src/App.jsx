@@ -323,7 +323,7 @@ export default function App() {
           {screen === "onboarding" && <Onboarding S={S} members={members} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} />}
-          {screen === "visibility" && <Visibility S={S} brand={brand} />}
+          {screen === "visibility" && <Visibility S={S} brand={brand} role={role} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} />}
           {screen === "funding" && <Funding S={S} />}
@@ -934,6 +934,7 @@ const POST_THEMES = [
   { tag: "SAFETY", c: "#54506B", t: "Quick home-safety reminder" },
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const CATEGORY_COLORS = ["#B11E2A", "#1F4E79", "#0E6B62", "#9A6B12", "#54506B", "#2E7D52", "#C15512", "#3A4A5A"];
 function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel }) {
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
@@ -986,7 +987,7 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
     </div>
   );
 }
-function ContentCalendar({ S }) {
+function ContentCalendar({ S, role }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [posts, setPosts] = useState(() => {
@@ -1000,27 +1001,35 @@ function ContentCalendar({ S }) {
     ];
   });
   const [categories, setCategories] = useState(
-    POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, t: th.t }))
+    POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, t: th.t, isDefault: true, sortOrder: i }))
   );
-  useEffect(() => {
+  function loadCategories(isInitial) {
     supabase.from("post_categories")
-      .select("id, label, color, default_text, sort_order")
+      .select("id, label, color, default_text, sort_order, is_default")
       .order("sort_order", { ascending: true })
       .then(({ data, error }) => {
         if (error || !data || data.length === 0) return;   // keep fallback if empty/error
-        setCategories(data.map((r) => ({ id: r.id, tag: r.label, c: r.color, t: r.default_text || "" })));
-        const first = data[0];
-        setFi(first.id);
-        setFt(first.default_text || "");
+        setCategories(data.map((r) => ({ id: r.id, tag: r.label, c: r.color, t: r.default_text || "", isDefault: r.is_default, sortOrder: r.sort_order })));
+        if (isInitial) {                       // only the mount load seeds the form selection;
+          const first = data[0];               // refetches after add/delete must NOT clobber an open form
+          setFi(first.id);
+          setFt(first.default_text || "");
+        }
       });
-  }, []);
+  }
+  useEffect(() => { loadCategories(true); }, []);
   const [show, setShow] = useState(false);
   const [fd, setFd] = useState(today.getDate());
   const [fi, setFi] = useState(categories[0]?.id ?? null);   // fi is now a category ID, not an array index
   const [ft, setFt] = useState("");
+  const [showCat, setShowCat] = useState(false);
+  const [catLabel, setCatLabel] = useState("");
+  const [catColor, setCatColor] = useState(CATEGORY_COLORS[0]);
+  const [catText, setCatText] = useState("");
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthPosts = posts.filter((p) => p.y === cur.y && p.m === cur.m);
+  const canEditCategories = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   function quickAdd(catId) {
     const cat = categories.find((c) => c.id === catId);
     setFi(catId); setFt(cat ? cat.t : ""); setFd(Math.min(fd, dim)); setShow(true);
@@ -1032,17 +1041,68 @@ function ContentCalendar({ S }) {
     setShow(false); setFt("");
   }
   function remove(id, t) { if (window.confirm(`Remove “${t}” from the calendar?`)) setPosts((p) => p.filter((x) => x.id !== id)); }
+  async function addCat() {
+    const label = catLabel.trim();
+    if (!label) { alert("Give the category a label."); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    const sortOrder = categories.reduce((mx, c) => Math.max(mx, c.sortOrder ?? 0), 0) + 1;
+    const row = { department_id: deptId, label, color: catColor, default_text: catText.trim() || null, is_default: false, sort_order: sortOrder };
+    const { data, error } = await supabase.from("post_categories").insert(row).select().single();
+    if (error || !data) { alert("Could not add the category: " + (error?.message ?? "unknown error")); return; }   // keep form open on error
+    setShowCat(false); setCatLabel(""); setCatColor(CATEGORY_COLORS[0]); setCatText("");
+    loadCategories(false);                                   // refresh chips; do NOT reset the form selection
+  }
+  async function deleteCat(cat) {
+    if (!window.confirm(`Delete the “${cat.tag}” category? Posts already on the calendar keep their color and won't change.`)) return;
+    const { error } = await supabase.from("post_categories").delete().eq("id", cat.id);
+    if (error) { alert("Could not delete the category: " + error.message); return; }
+    loadCategories(false);                                   // NOTE: posts state is intentionally untouched here
+  }
 
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {categories.map((cat) => (
-          <button key={cat.id} onClick={() => quickAdd(cat.id)}
-            style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <Plus size={13} /> {cat.tag}
-          </button>
+          <span key={cat.id} style={{ position: "relative", display: "inline-flex" }}>
+            <button onClick={() => quickAdd(cat.id)}
+              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <Plus size={13} /> {cat.tag}
+            </button>
+            {canEditCategories && !cat.isDefault && (
+              <button title={`Delete ${cat.tag}`} onClick={(e) => { e.stopPropagation(); deleteCat(cat); }}
+                style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 999, border: `1px solid ${cat.c}`, background: "#fff", color: cat.c, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
+                <X size={10} />
+              </button>
+            )}
+          </span>
         ))}
+        {canEditCategories && (
+          <button onClick={() => setShowCat((v) => !v)}
+            style={{ border: "1.5px dashed #B9B5C4", color: "#6A7178", background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <Plus size={13} /> New
+          </button>
+        )}
       </div>
+
+      {showCat && (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Label</span>
+            <input style={S.input} value={catLabel} onChange={(e) => setCatLabel(e.target.value)} placeholder="e.g. EVENTS" /></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+              {CATEGORY_COLORS.map((col) => (
+                <button key={col} title={col} onClick={() => setCatColor(col)}
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+              ))}
+            </div>
+          </div>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Post idea (optional)</span>
+            <input style={S.input} value={catText} onChange={(e) => setCatText(e.target.value)} placeholder="Default text for this category" /></label>
+          <button style={S.primaryBtn} onClick={addCat}><Plus size={15} /> Save category</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setShowCat(false); setCatLabel(""); setCatColor(CATEGORY_COLORS[0]); setCatText(""); }}>Cancel</button>
+        </div>
+      )}
 
       {show && (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -1073,7 +1133,7 @@ function ContentCalendar({ S }) {
     </div>
   );
 }
-function Visibility({ S, brand }) {
+function Visibility({ S, brand, role }) {
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
   const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
   async function draft() {
@@ -1086,7 +1146,7 @@ function Visibility({ S, brand }) {
     <div>
       <PageHead S={S} eyebrow="VISIBILITY" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week." />
       <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
-      <ContentCalendar S={S} />
+      <ContentCalendar S={S} role={role} />
 
       <div style={S.cardEyebrow}>IDEAS FOR THINGS TO MAKE</div>
       <IdeaGrid S={S} items={[
