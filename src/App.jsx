@@ -170,6 +170,7 @@ export default function App() {
         setMembers(
           data.map((m) => ({
             id: m.id,
+            department_id: m.department_id,
             name: m.name,
             role: m.role,
             access: m.access,
@@ -1259,7 +1260,7 @@ function Initials({ S, name }) {
 function Roster({ S, role, members, setMembers, sessions }) {
   const leader = isLeader(role);
   const tabs = leader
-    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"]]
+    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"], ...(canAssign(role) ? [["pending", "Pending Items"]] : [])]
     : [["members", "Members"]];
   const [tab, setTab] = useState("members");
   const [sel, setSel] = useState(null);
@@ -1276,6 +1277,7 @@ function Roster({ S, role, members, setMembers, sessions }) {
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
       {tab === "reports" && leader && <RosterReports S={S} members={members} />}
+      {tab === "pending" && canAssign(role) && <RosterPending S={S} members={members} />}
     </div>
   );
 }
@@ -1377,6 +1379,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
           ))}
       </div>
 
+      <ProposeCert S={S} role={role} member={member} />
+
       {(() => {
         const done = (sessions || []).filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
         const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
@@ -1418,6 +1422,51 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
     </div>
   );
 }
+function ProposeCert({ S, role, member }) {
+  const canPropose = isLeader(role);
+  const [open, setOpen] = useState(false);
+  const [cName, setCName] = useState("");
+  const [cExp, setCExp] = useState("");        // "YYYY-MM" string, matches certs.exp
+  const [cNote, setCNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function propose() {
+    if (!cName.trim()) return;
+    const exp = cExp.trim();
+    if (exp && !/^\d{4}-\d{2}$/.test(exp)) { alert("Expiration must be YYYY-MM (e.g. 2027-06)"); return; }
+    setBusy(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { alert("Not signed in."); setBusy(false); return; }
+    const row = {
+      department_id: member.department_id,
+      member_id: member.id,
+      name: cName.trim(),
+      exp: exp || null,
+      source: "manual",
+      note: cNote.trim() || null,
+      proposed_by: user.id,
+      // status omitted → defaults to 'pending'
+    };
+    const { data, error } = await supabase.from("cert_submissions").insert(row).select().single();
+    setBusy(false);
+    if (error || !data) { alert("Could not submit: " + (error?.message ?? "unknown error")); return; }
+    setCName(""); setCExp(""); setCNote(""); setOpen(false);
+    alert("Submitted for review.");
+  }
+
+  if (!canPropose || !member) return null;
+  return open ? (
+    <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Certification</span><input style={S.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
+      <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Expires (YYYY-MM)</span><input style={S.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
+      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Note (optional)</span><input style={S.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
+      <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} disabled={busy} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
+    </div>
+  ) : (
+    <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setOpen(true)}>+ Propose certification</button>
+  );
+}
+
 function RosterCerts({ S, members }) {
   const rows = [];
   members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, st: certStatus(c.exp) })));
@@ -1472,6 +1521,56 @@ function RosterCerts({ S, members }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+function RosterPending({ S, members }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const nameFor = (id) => { const m = members.find((x) => x.id === id); return m ? m.name : "Unknown member"; };
+
+  async function loadPending() {
+    setLoading(true);
+    const { data, error } = await supabase.from("cert_submissions").select("*").eq("status", "pending");
+    setLoading(false);
+    if (error) { alert("Could not load pending items: " + error.message); return; }
+    setRows(data || []);
+  }
+  useEffect(() => { loadPending(); }, []);
+
+  async function approve(row) {
+    setBusyId(row.id);
+    const { error } = await supabase.rpc("approve_cert_submission", { submission_id: row.id });
+    setBusyId(null);
+    if (error) { alert("Could not approve: " + error.message); return; }
+    loadPending();
+  }
+  async function reject(row) {
+    const reason = window.prompt("Reason for rejecting (optional):", "");
+    if (reason === null) return; // user cancelled the prompt
+    setBusyId(row.id);
+    const { error } = await supabase.rpc("reject_cert_submission", { submission_id: row.id, reason: reason.trim() || null });
+    setBusyId(null);
+    if (error) { alert("Could not reject: " + error.message); return; }
+    loadPending();
+  }
+
+  if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: "#6A7178", marginTop: 4 }}>Loading…</div>;
+  if (rows.length === 0) return <div style={{ fontSize: 13.5, color: "#6A7178", marginTop: 4 }}>No pending items.</div>;
+  return (
+    <div style={{ marginTop: 4 }}>
+      {rows.map((r) => (
+        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
+          <Award size={15} color="#9A6B12" style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontWeight: 600, color: "#191C20" }}>{r.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {nameFor(r.member_id)}</span>
+            <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
+          </div>
+          <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#2E7D52", borderColor: "#BFE3CC" }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
+        </div>
+      ))}
     </div>
   );
 }
