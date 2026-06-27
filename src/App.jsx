@@ -2673,8 +2673,10 @@ function StationDuties({ S, role, members, meId }) {
   };
   const [duties, setDuties] = useState([]);
   const [log, setLog] = useState(DUTYLOG_SEED);
+  const [pickerForDutyId, setPickerForDutyId] = useState(null); // which duty's picker is open
+  const [selectedHelpers, setSelectedHelpers] = useState([]);   // member ids
   useEffect(() => {
-    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at").then(({ data, error }) => {
+    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids").then(({ data, error }) => {
       if (error || !data) return;
       setDuties(data.map((d) => ({
         id: d.id,
@@ -2684,6 +2686,7 @@ function StationDuties({ S, role, members, meId }) {
         done: d.done,
         doneBy: d.done_by,   // raw member UUID (or null) for now — name resolution is a later slice
         doneAt: d.done_at,   // raw timestamptz string for now — formatting is a later slice
+        helperIds: d.helper_ids ?? [],
       })));
     });
   }, []);
@@ -2712,20 +2715,25 @@ function StationDuties({ S, role, members, meId }) {
   const fmtWeek = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const categories = [...DUTY_CATEGORIES.filter((c) => duties.some((d) => d.category === c)), ...[...new Set(duties.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
   const allCats = [...new Set([...DUTY_CATEGORIES, ...duties.map((d) => d.category)])];
-  async function toggleDone(id) {
+  function openPicker(id) {
+    setPickerForDutyId(id);
+    setSelectedHelpers([]);
+  }
+  async function confirmComplete(id) {
+    const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: selectedHelpers });
+    if (error) { alert("Could not mark done: " + error.message); return; }
+    setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: true, doneBy: me?.id ?? null, doneAt: new Date().toISOString(), helperIds: selectedHelpers } : x)));
+    setPickerForDutyId(null);
+    setSelectedHelpers([]);
+  }
+  async function uncompleteDuty(id) {
     const duty = duties.find((x) => x.id === id);
     if (!duty) return;
-    if (!duty.done) {
-      const { error } = await supabase.rpc("complete_duty", { p_duty_id: id });
-      if (error) { alert("Could not mark done: " + error.message); return; }
-      setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: true, doneBy: me?.id ?? null, doneAt: new Date().toISOString() } : x)));
-    } else {
-      // client-side guard mirrors the server rule (doer or leader)
-      if (!canManage && duty.doneBy !== me?.id) return;
-      const { error } = await supabase.rpc("uncomplete_duty", { p_duty_id: id });
-      if (error) { alert("Could not undo: " + error.message); return; }
-      setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: false, doneBy: null, doneAt: null } : x)));
-    }
+    // client-side guard mirrors the server rule (doer or leader)
+    if (!canManage && duty.doneBy !== me?.id) return;
+    const { error } = await supabase.rpc("uncomplete_duty", { p_duty_id: id });
+    if (error) { alert("Could not undo: " + error.message); return; }
+    setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: false, doneBy: null, doneAt: null, helperIds: [] } : x)));
   }
   function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
   function addDuty() { if (!ad.trim()) return; const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), category: cat, recurrence: arec, done: false, doneBy: null, doneAt: null }]); setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAddingA(false); }
@@ -2776,25 +2784,50 @@ function StationDuties({ S, role, members, meId }) {
         return (
           <div key={cat} style={{ marginBottom: 16 }}>
             <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? "#2E7D52" : "#9A96A6" }}>{dn}/{items.length}</span></div>
-            {items.map((a) => (
-              <div key={a.id} style={S.certRow}>
-                {(() => {
-                  const canUncheck = canManage || a.doneBy === me?.id;
-                  if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
-                  return (
-                    <button onClick={() => toggleDone(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                      {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
-                    </button>
-                  );
-                })()}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
-                  {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {nameById.get(a.doneBy) ?? "A member"} · {fmtDoneAt(a.doneAt)}</div>}
+            {items.map((a) => {
+              const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
+              return (
+              <div key={a.id}>
+                <div style={S.certRow}>
+                  {(() => {
+                    const canUncheck = canManage || a.doneBy === me?.id;
+                    if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
+                    return (
+                      <button onClick={() => a.done ? uncompleteDuty(a.id) : openPicker(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                        {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                      </button>
+                    );
+                  })()}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
+                    {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: a.recurrence === "One-time" ? "#9A6B12" : "#6A7178", background: a.recurrence === "One-time" ? "#FBF1DC" : "#F1EFF5", borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                  {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
                 </div>
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: a.recurrence === "One-time" ? "#9A6B12" : "#6A7178", background: a.recurrence === "One-time" ? "#FBF1DC" : "#F1EFF5", borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
-                {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
+                {pickerForDutyId === a.id && (
+                  <div style={{ ...S.opCard, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                    <span style={S.fieldLabel}>Who helped? (optional)</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {members.filter((m) => m.id !== me?.id).map((m) => {
+                        const sel = selectedHelpers.includes(m.id);
+                        return (
+                          <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
+                            style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: "#2E7D52", borderColor: "#2E7D52", background: "#EAF5EE" } : { color: "#6A7178", borderColor: "#E3E0EA", background: "transparent" }) }}>
+                            {m.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
+                      <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}
