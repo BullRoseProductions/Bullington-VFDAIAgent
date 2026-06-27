@@ -2,13 +2,13 @@
 -- The Dayroom — Database Schema Reference
 -- Project: BullRoseProductions/Bullington-VFDAIAgent
 -- Supabase project: ifeptqnlucmvhlvadcpj
--- Refreshed: 2026-06-27 (includes the full Station Duties feature)
+-- Refreshed: 2026-06-27 (adds the station-editable post category system)
 -- =============================================================================
 --
 -- WHAT THIS IS
 --   A human-readable snapshot of the Supabase backend: table structures, all
 --   Row-Level Security (RLS) policies, and all custom Postgres functions
---   (security helpers + the certification and duty pipelines).
+--   (security helpers + the certification, duty, and category pipelines).
 --
 --   This file exists because the entire backend lives only inside the live
 --   Supabase project. This snapshot makes the security architecture
@@ -32,34 +32,44 @@
 --   lower(auth.email()). Helpers resolve the signed-in user's member id
 --   (my_member_id) and department (my_department_id).
 --
--- STATION DUTIES (added 2026-06-27)
---   - duties: the live checklist. done/done_by(uuid)/done_at + helper_ids (the
---     current completion's participants, for display). Resets weekly.
+-- STATION DUTIES (2026-06-27)
+--   - duties: the live checklist (done/done_by/done_at + helper_ids). Resets weekly.
 --   - duty_log: permanent, append-only completion history (the accountability
---     trail). One row per completion: duty_name snapshot, done_by, helper_ids,
---     done_at. Never wiped by the weekly reset.
+--     trail). duty_name is a SNAPSHOT so history survives renames/deletes.
 --   - Writes go ONLY through complete_duty / uncomplete_duty (SECURITY DEFINER,
---     server-stamped identity + time, tamper-resistant). complete_duty also
---     writes the duty_log history record atomically.
+--     server-stamped identity + time). complete_duty also writes the duty_log
+--     record atomically.
+--
+-- POST CATEGORIES (2026-06-27) — station-editable social-calendar categories
+--   - post_categories: per-department category list for the Visibility content
+--     calendar (label, color, default_text suggestion, sort_order, is_default).
+--   - Read: any department member. Write (INSERT/UPDATE): Board Member /
+--     Department Admin / Training Officer ONLY (NOT Project Admin — they are
+--     platform support, not station operators; this is enforced by inline role
+--     checks in the policies). DELETE: same three roles AND is_default = false
+--     (the 5 seeded defaults are protected and cannot be deleted, enforced at
+--     the DB level).
+--   - Posts on the calendar are denormalized (each post copies its category's
+--     color/label/text), so deleting a category never affects existing posts.
 --
 -- KNOWN GAPS / FOLLOW-UPS
 --   - profiles : table exists but had no RLS policy in the capture — review
---     before pilot (confirm intended access / whether it's in use).
---   - Calendar write policies: events, content_calendar, etc. have SELECT only,
---     no write policies — needed for the upcoming "Training Officer / Board /
---     Dept Admin can edit calendars" feature.
+--     before pilot.
+--   - Calendar POSTS not yet persisted: content_calendar / events tables have
+--     SELECT-only RLS and are not yet read/written by the app (the Visibility
+--     posts and Training sessions still run on local/seed state). Categories ARE
+--     now persisted (post_categories); posts are the next slice.
 --   - members / cert_submissions write policies are leader-gated but NOT yet
 --     department-scoped — fine for one station; scope before a 2nd department.
---   - certs is mutated ONLY through SECURITY DEFINER functions; the duties
---     tables ONLY through complete_duty / uncomplete_duty (+ the duties UPDATE
---     policy backing optimistic UI). No DELETE policy on duty_log (audit trail
---     is not casually deletable).
+--   - The "Board/Dept Admin/Training Officer minus Project Admin" group is now
+--     inlined in 3 post_categories policies. If reused again (e.g. calendar edit
+--     permissions), consider a can_edit_calendars() helper to define it once.
 -- =============================================================================
 
 
 -- =============================================================================
 -- SECTION 1 — TABLE STRUCTURES
--- (columns / types / nullability / defaults — for reference)
+-- (columns / types / nullability / defaults — for reference; _uuid = uuid[])
 -- =============================================================================
 
 CREATE TABLE public.action_items (
@@ -261,6 +271,20 @@ CREATE TABLE public.onboarding_progress (
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
+-- Station-editable category list for the Visibility content calendar.
+-- is_default = true marks the 5 seeded defaults (protected from deletion).
+-- default_text is a suggested post idea pre-filled when the category is picked.
+CREATE TABLE public.post_categories (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  department_id uuid NOT NULL,
+  label text NOT NULL,
+  color text NOT NULL DEFAULT '#54506B'::text,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  default_text text,
+  is_default boolean NOT NULL DEFAULT false
+);
+
 -- NOTE: profiles had no RLS policy in the capture — review before pilot.
 CREATE TABLE public.profiles (
   id uuid NOT NULL,
@@ -303,6 +327,7 @@ CREATE TABLE public.training_sessions (
 -- =============================================================================
 -- SECTION 2 — CUSTOM FUNCTIONS
 -- Security helpers + certification pipeline + duty pipeline. All SECURITY DEFINER.
+-- (No new functions added for the category system — it reuses my_department_id.)
 -- =============================================================================
 
 -- --- Security helpers -------------------------------------------------------
@@ -470,8 +495,6 @@ $function$;
 -- --- Duty pipeline (the ONLY write path for duty completions) ----------------
 
 -- Mark a duty done WITH optional helpers, server-stamped, atomic.
--- Writes done/done_by/done_at + helper_ids to the live duties row AND a
--- permanent completion record to duty_log.
 CREATE OR REPLACE FUNCTION public.complete_duty(p_duty_id uuid, p_helper_ids uuid[] DEFAULT '{}'::uuid[])
  RETURNS void
  LANGUAGE plpgsql
@@ -570,6 +593,7 @@ ALTER TABLE public.meetings            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.member_notes        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.members             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.onboarding_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.post_categories     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_attendance  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.training_plans      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.training_sessions   ENABLE ROW LEVEL SECURITY;
@@ -654,17 +678,15 @@ CREATE POLICY "Dept admins read cert submissions" ON public.cert_submissions FOR
   USING (is_department_admin());
 
 -- --- DUTIES write (members mark done in their dept; backs optimistic UI) -----
--- The authoritative write path is complete_duty/uncomplete_duty (SECURITY
--- DEFINER); this UPDATE policy permits the member-facing optimistic update.
+-- Authoritative write path is complete_duty/uncomplete_duty (SECURITY DEFINER).
 
 CREATE POLICY "members update duties in their dept" ON public.duties FOR UPDATE TO authenticated
   USING ((department_id = my_department_id()))
   WITH CHECK ((department_id = my_department_id()));
 
 -- --- DUTY_LOG (the accountability trail) ------------------------------------
--- INSERT: any dept member, but only as themselves (done_by = my_member_id()).
--- SELECT: leadership only (Board/Training Officer/Dept Admin/Project Admin).
--- UPDATE: Department Admin only (amend a record). No DELETE policy (trail kept).
+-- INSERT: any dept member, only as themselves. SELECT: leadership. UPDATE: Dept
+-- Admin only. No DELETE policy (trail is not casually deletable).
 
 CREATE POLICY "members log completions as themselves" ON public.duty_log FOR INSERT TO authenticated
   WITH CHECK (((department_id = my_department_id()) AND (done_by = my_member_id())));
@@ -675,6 +697,33 @@ CREATE POLICY "leaders read duty_log" ON public.duty_log FOR SELECT TO authentic
 CREATE POLICY "dept admins edit duty_log" ON public.duty_log FOR UPDATE TO authenticated
   USING ((is_department_admin() AND (department_id = my_department_id())))
   WITH CHECK ((is_department_admin() AND (department_id = my_department_id())));
+
+-- --- POST_CATEGORIES (station-editable social-calendar categories) ----------
+-- READ: any dept member. INSERT/UPDATE: Board Member / Department Admin /
+-- Training Officer ONLY (Project Admin intentionally excluded — inline role
+-- check, NOT is_leader()). DELETE: same three roles AND is_default = false
+-- (the 5 seeded defaults are protected at the DB level).
+
+CREATE POLICY "members read post_categories" ON public.post_categories FOR SELECT TO authenticated
+  USING ((department_id = my_department_id()));
+
+CREATE POLICY "leaders write post_categories" ON public.post_categories FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders update post_categories" ON public.post_categories FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))))
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders delete own post_categories" ON public.post_categories FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND (is_default = false) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
 
 -- --- Shared / global reads (intentional, NOT department-scoped) --------------
 
