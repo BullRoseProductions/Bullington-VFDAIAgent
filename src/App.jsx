@@ -153,27 +153,36 @@ export default function App() {
   const [feedback, setFeedback] = useState([]);
   const [members, setMembers] = useState(MEMBERS);
   useEffect(() => {
-    supabase
-      .from("members_view")
-      .select("*")
-      .then(({ data, error }) => {
-        if (!error && data && data.length) {
-          setMembers(
-            data.map((m) => ({
-              id: m.id,
-              name: m.name,
-              role: m.role,
-              access: m.access,
-              status: m.status,
-              phone: m.phone,
-              joined: m.joined,
-              participation: m.participation,
-              certs: [],
-              notes: [],
-            }))
-          );
+    Promise.all([
+      supabase.from("members_view").select("*"),
+      supabase.from("certs").select("member_id, name, exp"),
+    ]).then(([membersRes, certsRes]) => {
+      // Group certs by member_id into a lookup of { name, exp } arrays.
+      const certsByMember = new Map();
+      if (!certsRes.error && certsRes.data) {
+        for (const c of certsRes.data) {
+          if (!certsByMember.has(c.member_id)) certsByMember.set(c.member_id, []);
+          certsByMember.get(c.member_id).push({ name: c.name, exp: c.exp });
         }
-      });
+      }
+      const { data, error } = membersRes;
+      if (!error && data && data.length) {
+        setMembers(
+          data.map((m) => ({
+            id: m.id,
+            name: m.name,
+            role: m.role,
+            access: m.access,
+            status: m.status,
+            phone: m.phone,
+            joined: m.joined,
+            participation: m.participation,
+            certs: certsByMember.get(m.id) || [],
+            notes: [],
+          }))
+        );
+      }
+    });
   }, []);
   // Self-contained auth tracking (main.jsx still gates the session; this only reads it).
   useEffect(() => {
