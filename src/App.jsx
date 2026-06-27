@@ -1227,6 +1227,7 @@ const APPARATUS_SEED = [
   { id: 4, name: "Rescue 1", type: "Rescue", lastCheck: "Jun 20", by: "Okafor", status: "Pass", note: "" },
 ];
 function certStatus(exp) {
+  if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };
   const [y, m] = exp.split("-").map(Number);
   const diff = (y * 12 + m) - (2026 * 12 + 6);
   if (diff < 0) return { label: "EXPIRED", color: "#B11E2A", rank: 0 };
@@ -1241,6 +1242,7 @@ const CLASSES = [
   { name: "Fire Instructor I", date: "Oct 4", covers: ["Fire Instructor I"] },
 ];
 function expPhrase(exp) {
+  if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return "No expiration date";
   const [y, m] = exp.split("-").map(Number);
   const d = (y * 12 + m) - (2026 * 12 + 6);
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
