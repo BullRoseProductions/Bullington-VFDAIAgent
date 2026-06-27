@@ -1340,6 +1340,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
   const assign = canAssign(role);
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [editingCertId, setEditingCertId] = useState(null);
+  const [draft, setDraft] = useState({ name: "", exp: "" });
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
   const notes = member.notes || [];
   function addNote() { if (!note.trim()) return; onUpdate({ ...member, notes: [{ text: note.trim(), by: role, when: "Just now" }, ...notes] }); setNote(""); }
@@ -1351,19 +1353,26 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
     if (error) { alert("Could not remove: " + error.message); return; }
     onUpdate({ ...member, certs: member.certs.filter((x) => x.id !== c.id) });
   }
-  async function editCert(c) {
-    const name = window.prompt("Certification name:", c.name);
-    if (name === null) return; // cancelled
-    if (!name.trim()) { alert("Name can't be empty."); return; }
-    const exp = window.prompt("Expiration (YYYY-MM, blank for none):", c.exp || "");
-    if (exp === null) return; // cancelled
-    const expTrim = exp.trim();
+  function startEdit(c) {
+    setEditingCertId(c.id);
+    setDraft({ name: c.name, exp: c.exp || "" });
+  }
+  function cancelEdit() {
+    setEditingCertId(null);
+    setDraft({ name: "", exp: "" });
+  }
+  async function saveCert(c) {
+    const name = draft.name.trim();
+    if (!name) { alert("Name can't be empty."); return; }
+    const expTrim = draft.exp.trim();
     if (expTrim && !/^\d{4}-\d{2}$/.test(expTrim)) { alert("Expiration must be YYYY-MM (e.g. 2027-06)"); return; }
     setBusyId(c.id);
-    const { error } = await supabase.rpc("update_cert", { cert_id: c.id, new_name: name.trim(), new_exp: expTrim || null });
+    const { error } = await supabase.rpc("update_cert", { cert_id: c.id, new_name: name, new_exp: expTrim || null });
     setBusyId(null);
     if (error) { alert("Could not update: " + error.message); return; }
-    onUpdate({ ...member, certs: member.certs.map((x) => (x.id === c.id ? { ...x, name: name.trim(), exp: expTrim || null } : x)) });
+    onUpdate({ ...member, certs: member.certs.map((x) => (x.id === c.id ? { ...x, name, exp: expTrim || null } : x)) });
+    setEditingCertId(null);
+    setDraft({ name: "", exp: "" });
   }
   return (
     <div>
@@ -1396,13 +1405,20 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
       <div style={{ ...S.opCard, marginBottom: 16 }}>
         {certs.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No certifications on file yet.</div> :
           certs.map((c, i) => (
-            <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom }}>
+            <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom, ...(assign && editingCertId === c.id ? { flexWrap: "wrap" } : {}) }}>
               <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
-              <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
-              {assign && (<>
-                <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => editCert(c)}>Edit</button>
-                <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
+              {assign && editingCertId === c.id ? (<>
+                <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={S.fieldLabel}>Certification</span><input style={S.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
+                <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Expires (YYYY-MM)</span><input style={S.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
+                <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
+                <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
+              </>) : (<>
+                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+                <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+                {assign && (<>
+                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
+                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
+                </>)}
               </>)}
             </div>
           ))}
