@@ -326,16 +326,24 @@ export default function App() {
   );
 }
 
+/* One shared greeting for both dashboards: time-of-day + first name, clean fallback. */
+const dashboardGreeting = (me) => {
+  const h = new Date().getHours();
+  const time = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  const first = me && me.name ? me.name.trim().split(" ")[0] : "";
+  return `${time}${first ? `, ${first}` : ""}.`;
+};
+
 /* ---------------- Dashboard ---------------- */
 function Dashboard({ S, role, members, library, openPacket, go, meId }) {
   if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
-  const firstName = role === "Member" ? "Firefighter" : "Chief";
+  const me = members.find((m) => m.id === meId) || null;
   return (
     <div>
-      <PageHead S={S} eyebrow="THIS WATCH" title={`Good morning, ${firstName}.`} sub="Here's where your crew stands this month." />
+      <PageHead S={S} eyebrow="THIS WATCH" title={dashboardGreeting(me)} sub="Here's where your crew stands this month." />
 
       <div style={S.statRow}>
         <Stat S={S} n="6" label="Topics tracked" />
@@ -442,7 +450,7 @@ function MemberDashboard({ S, role, members, go, meId }) {
   const me = members.find((m) => m.id === meId) || null;
   return (
     <div>
-      <PageHead S={S} eyebrow="MY STATION" title={`Welcome back, ${me ? me.name.split(" ")[0] : "Firefighter"}.`} sub="Here's exactly where you stand — and what's coming up for you." />
+      <PageHead S={S} eyebrow="MY STATION" title={dashboardGreeting(me)} sub="Here's exactly where you stand — and what's coming up for you." />
       {me && <MyCerts S={S} me={me} />}
       <QuickAccess S={S} role={role} go={go} />
     </div>
