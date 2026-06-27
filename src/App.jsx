@@ -934,6 +934,58 @@ const POST_THEMES = [
   { tag: "SAFETY", c: "#54506B", t: "Quick home-safety reminder" },
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel }) {
+  const today = new Date();
+  const dim = new Date(cur.y, cur.m + 1, 0).getDate();
+  const firstDow = new Date(cur.y, cur.m, 1).getDay();
+  const isToday = (d) => cur.y === today.getFullYear() && cur.m === today.getMonth() && d === today.getDate();
+  function shift(n) { let m = cur.m + n, y = cur.y; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } setCur({ y, m }); }
+
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= dim; d++) cells.push(d);
+
+  const st = {
+    wrap: { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
+    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EFEEF3" },
+    mlabel: { fontWeight: 700, fontSize: 15, color: "#211C2B" },
+    nav: { border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center" },
+    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: "#F7F6FA" },
+    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4 },
+    grid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)" },
+    cell: { minHeight: 74, borderTop: "1px solid #EFEEF3", borderLeft: "1px solid #EFEEF3", padding: 5, display: "flex", flexDirection: "column", gap: 3 },
+    dnum: { fontSize: 11, color: "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
+    dtoday: { background: todayColor, color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
+    chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  };
+
+  return (
+    <div style={st.wrap}>
+      <div style={st.bar}>
+        <button style={st.nav} onClick={() => shift(-1)} title="Previous month"><ArrowLeft size={15} /></button>
+        <div style={st.mlabel}>{monthLabel}</div>
+        <button style={st.nav} onClick={() => shift(1)} title="Next month"><ChevronRight size={15} /></button>
+        {headerExtra}
+      </div>
+      <div style={st.dow}>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={st.dowc}>{d.toUpperCase()}</div>)}</div>
+      <div style={st.grid}>
+        {cells.map((d, i) => (
+          <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
+            {d != null && (<>
+              <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
+              {items.filter((it) => it.d === d).slice(0, 3).map((it) => {
+                const c = renderChip(it);
+                return (
+                  <div key={it.id} style={{ ...st.chip, background: c.color, ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>{c.label}</div>
+                );
+              })}
+            </>)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 function ContentCalendar({ S }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -953,10 +1005,7 @@ function ContentCalendar({ S }) {
   const [ft, setFt] = useState("");
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
-  const firstDow = new Date(cur.y, cur.m, 1).getDay();
   const monthPosts = posts.filter((p) => p.y === cur.y && p.m === cur.m);
-  const isToday = (d) => cur.y === today.getFullYear() && cur.m === today.getMonth() && d === today.getDate();
-  function shift(n) { let m = cur.m + n, y = cur.y; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } setCur({ y, m }); }
   function quickAdd(i) { setFi(i); setFt(POST_THEMES[i].t); setFd(Math.min(fd, dim)); setShow(true); }
   function add() {
     const th = POST_THEMES[fi];
@@ -964,24 +1013,6 @@ function ContentCalendar({ S }) {
     setShow(false); setFt("");
   }
   function remove(id, t) { if (window.confirm(`Remove “${t}” from the calendar?`)) setPosts((p) => p.filter((x) => x.id !== id)); }
-
-  const cells = [];
-  for (let i = 0; i < firstDow; i++) cells.push(null);
-  for (let d = 1; d <= dim; d++) cells.push(d);
-
-  const st = {
-    wrap: { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
-    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EFEEF3" },
-    mlabel: { fontWeight: 700, fontSize: 15, color: "#211C2B" },
-    nav: { border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center" },
-    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: "#F7F6FA" },
-    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4 },
-    grid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)" },
-    cell: { minHeight: 74, borderTop: "1px solid #EFEEF3", borderLeft: "1px solid #EFEEF3", padding: 5, display: "flex", flexDirection: "column", gap: 3 },
-    dnum: { fontSize: 11, color: "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
-    dtoday: { background: "#B11E2A", color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
-    chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  };
 
   return (
     <div>
@@ -1007,27 +1038,16 @@ function ContentCalendar({ S }) {
         </div>
       )}
 
-      <div style={st.wrap}>
-        <div style={st.bar}>
-          <button style={st.nav} onClick={() => shift(-1)} title="Previous month"><ArrowLeft size={15} /></button>
-          <div style={st.mlabel}>{CAL_MONTHS[cur.m]} {cur.y}</div>
-          <button style={st.nav} onClick={() => shift(1)} title="Next month"><ChevronRight size={15} /></button>
-          <button style={{ ...st.nav, marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setFi(0); setFt(POST_THEMES[0].t); setShow(true); }}><Plus size={14} /> Add a post</button>
-        </div>
-        <div style={st.dow}>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={st.dowc}>{d.toUpperCase()}</div>)}</div>
-        <div style={st.grid}>
-          {cells.map((d, i) => (
-            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
-              {d != null && (<>
-                <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
-                {monthPosts.filter((p) => p.d === d).slice(0, 3).map((p) => (
-                  <div key={p.id} style={{ ...st.chip, background: p.c }} title={`${p.tag} — ${p.t} (tap to remove)`} onClick={() => remove(p.id, p.t)}>{p.t}</div>
-                ))}
-              </>)}
-            </div>
-          ))}
-        </div>
-      </div>
+      <MonthCalendar
+        cur={cur} setCur={setCur}
+        items={monthPosts}
+        renderChip={(p) => ({ color: p.c, label: p.t, title: `${p.tag} — ${p.t} (tap to remove)`, onClick: () => remove(p.id, p.t) })}
+        todayColor="#B11E2A"
+        monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+        headerExtra={
+          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setFi(0); setFt(POST_THEMES[0].t); setShow(true); }}><Plus size={14} /> Add a post</button>
+        }
+      />
       <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
         {monthPosts.length} post{monthPosts.length === 1 ? "" : "s"} scheduled in {CAL_MONTHS[cur.m]} · tap a colored post to remove it, or use a category chip to add one.
       </div>
@@ -2107,24 +2127,7 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
   }
   function removeSession(id) { setSessions((ss) => ss.filter((x) => x.id !== id)); }
 
-  const firstDow = new Date(cur.y, cur.m, 1).getDay();
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
-  const cells = []; for (let i = 0; i < firstDow; i++) cells.push(null); for (let d = 1; d <= dim; d++) cells.push(d);
-  const isToday = (d) => cur.y === today.getFullYear() && cur.m === today.getMonth() && d === today.getDate();
-  function shift(n) { let m = cur.m + n, y = cur.y; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } setCur({ y, m }); }
-
-  const st = {
-    wrap: { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
-    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EFEEF3" },
-    nav: { border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center" },
-    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: "#F7F6FA" },
-    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4 },
-    grid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)" },
-    cell: { minHeight: 74, borderTop: "1px solid #EFEEF3", borderLeft: "1px solid #EFEEF3", padding: 5, display: "flex", flexDirection: "column", gap: 3 },
-    dnum: { fontSize: 11, color: "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
-    dtoday: { background: "#1F4E79", color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
-    chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  };
 
   return (
     <div>
@@ -2206,26 +2209,13 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
         </div>
       ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} /> Schedule a session</button>)}
 
-      <div style={st.wrap}>
-        <div style={st.bar}>
-          <button style={st.nav} onClick={() => shift(-1)} title="Previous month"><ArrowLeft size={15} /></button>
-          <div style={{ fontWeight: 700, fontSize: 15, color: "#211C2B" }}>{TRAIN_MONTHS[cur.m]} {cur.y}</div>
-          <button style={st.nav} onClick={() => shift(1)} title="Next month"><ChevronRight size={15} /></button>
-        </div>
-        <div style={st.dow}>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={st.dowc}>{d.toUpperCase()}</div>)}</div>
-        <div style={st.grid}>
-          {cells.map((d, i) => (
-            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
-              {d != null && (<>
-                <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
-                {monthSessions.filter((s) => s.d === d).slice(0, 3).map((s) => (
-                  <div key={s.id} style={{ ...st.chip, background: s.done ? "#2E7D52" : "#1F4E79" }} title={`${s.title}${s.done ? " (completed)" : ""}`}>{s.done ? "✓ " : ""}{s.title}</div>
-                ))}
-              </>)}
-            </div>
-          ))}
-        </div>
-      </div>
+      <MonthCalendar
+        cur={cur} setCur={setCur}
+        items={monthSessions}
+        renderChip={(s) => ({ color: s.done ? "#2E7D52" : "#1F4E79", label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` })}
+        todayColor="#1F4E79"
+        monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
+      />
 
       <div style={{ marginBottom: 18 }}>
         {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#6A7178" }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
