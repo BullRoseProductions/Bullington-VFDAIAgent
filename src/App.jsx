@@ -2675,6 +2675,7 @@ function StationDuties({ S, role, members, meId }) {
   const [log, setLog] = useState(DUTYLOG_SEED);
   const [pickerForDutyId, setPickerForDutyId] = useState(null); // which duty's picker is open
   const [selectedHelpers, setSelectedHelpers] = useState([]);   // member ids
+  const [pickerStage, setPickerStage] = useState("ask");        // "ask" | "pick"
   useEffect(() => {
     supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids").then(({ data, error }) => {
       if (error || !data) return;
@@ -2718,6 +2719,7 @@ function StationDuties({ S, role, members, meId }) {
   function openPicker(id) {
     setPickerForDutyId(id);
     setSelectedHelpers([]);
+    setPickerStage("ask");
   }
   async function confirmComplete(id) {
     const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: selectedHelpers });
@@ -2725,6 +2727,7 @@ function StationDuties({ S, role, members, meId }) {
     setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: true, doneBy: me?.id ?? null, doneAt: new Date().toISOString(), helperIds: selectedHelpers } : x)));
     setPickerForDutyId(null);
     setSelectedHelpers([]);
+    setPickerStage("ask");
   }
   async function uncompleteDuty(id) {
     const duty = duties.find((x) => x.id === id);
@@ -2807,22 +2810,31 @@ function StationDuties({ S, role, members, meId }) {
                 </div>
                 {pickerForDutyId === a.id && (
                   <div style={{ ...S.opCard, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-                    <span style={S.fieldLabel}>Who helped? (optional)</span>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {members.filter((m) => m.id !== me?.id).map((m) => {
-                        const sel = selectedHelpers.includes(m.id);
-                        return (
-                          <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
-                            style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: "#2E7D52", borderColor: "#2E7D52", background: "#EAF5EE" } : { color: "#6A7178", borderColor: "#E3E0EA", background: "transparent" }) }}>
-                            {m.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
-                      <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); }}>Cancel</button>
-                    </div>
+                    {pickerStage === "ask" ? (<>
+                      <span style={S.fieldLabel}>Did you have help?</span>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> No, just me</button>
+                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setPickerStage("pick")}>Yes</button>
+                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                      </div>
+                    </>) : (<>
+                      <span style={S.fieldLabel}>Who helped?</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {members.filter((m) => m.id !== me?.id).map((m) => {
+                          const sel = selectedHelpers.includes(m.id);
+                          return (
+                            <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
+                              style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: "#2E7D52", borderColor: "#2E7D52", background: "#EAF5EE" } : { color: "#6A7178", borderColor: "#E3E0EA", background: "transparent" }) }}>
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
+                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                      </div>
+                    </>)}
                   </div>
                 )}
               </div>
