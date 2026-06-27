@@ -999,17 +999,36 @@ function ContentCalendar({ S }) {
       { id: 4, y, m, d: Math.min(24, dim), ...POST_THEMES[3], t: "Thank-you to our supporters" },
     ];
   });
+  const [categories, setCategories] = useState(
+    POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, t: th.t }))
+  );
+  useEffect(() => {
+    supabase.from("post_categories")
+      .select("id, label, color, default_text, sort_order")
+      .order("sort_order", { ascending: true })
+      .then(({ data, error }) => {
+        if (error || !data || data.length === 0) return;   // keep fallback if empty/error
+        setCategories(data.map((r) => ({ id: r.id, tag: r.label, c: r.color, t: r.default_text || "" })));
+        const first = data[0];
+        setFi(first.id);
+        setFt(first.default_text || "");
+      });
+  }, []);
   const [show, setShow] = useState(false);
   const [fd, setFd] = useState(today.getDate());
-  const [fi, setFi] = useState(0);
+  const [fi, setFi] = useState(categories[0]?.id ?? null);   // fi is now a category ID, not an array index
   const [ft, setFt] = useState("");
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthPosts = posts.filter((p) => p.y === cur.y && p.m === cur.m);
-  function quickAdd(i) { setFi(i); setFt(POST_THEMES[i].t); setFd(Math.min(fd, dim)); setShow(true); }
+  function quickAdd(catId) {
+    const cat = categories.find((c) => c.id === catId);
+    setFi(catId); setFt(cat ? cat.t : ""); setFd(Math.min(fd, dim)); setShow(true);
+  }
   function add() {
-    const th = POST_THEMES[fi];
-    setPosts((p) => [...p, { id: Date.now(), y: cur.y, m: cur.m, d: Number(fd), tag: th.tag, c: th.c, t: ft.trim() || th.t }]);
+    const cat = categories.find((c) => c.id === fi);
+    if (!cat) return;   // guard: empty/unmatched categories
+    setPosts((p) => [...p, { id: Date.now(), y: cur.y, m: cur.m, d: Number(fd), tag: cat.tag, c: cat.c, t: ft.trim() || cat.t }]);
     setShow(false); setFt("");
   }
   function remove(id, t) { if (window.confirm(`Remove “${t}” from the calendar?`)) setPosts((p) => p.filter((x) => x.id !== id)); }
@@ -1017,10 +1036,10 @@ function ContentCalendar({ S }) {
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
-        {POST_THEMES.map((th, i) => (
-          <button key={th.tag} onClick={() => quickAdd(i)}
-            style={{ border: `1.5px solid ${th.c}`, color: th.c, background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <Plus size={13} /> {th.tag}
+        {categories.map((cat) => (
+          <button key={cat.id} onClick={() => quickAdd(cat.id)}
+            style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <Plus size={13} /> {cat.tag}
           </button>
         ))}
       </div>
@@ -1030,7 +1049,7 @@ function ContentCalendar({ S }) {
           <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
             <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span>
-            <select style={S.input} value={fi} onChange={(e) => { setFi(Number(e.target.value)); setFt(POST_THEMES[Number(e.target.value)].t); }}>{POST_THEMES.map((th, i) => <option key={th.tag} value={i}>{th.tag}</option>)}</select></label>
+            <select style={S.input} value={fi || ""} onChange={(e) => { const cat = categories.find((c) => c.id === e.target.value); setFi(e.target.value); setFt(cat ? cat.t : ""); }}>{categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.tag}</option>)}</select></label>
           <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Post idea</span>
             <input style={S.input} value={ft} onChange={(e) => setFt(e.target.value)} placeholder="What's the post?" /></label>
           <button style={S.primaryBtn} onClick={add}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
@@ -1045,7 +1064,7 @@ function ContentCalendar({ S }) {
         todayColor="#B11E2A"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={
-          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setFi(0); setFt(POST_THEMES[0].t); setShow(true); }}><Plus size={14} /> Add a post</button>
+          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
         }
       />
       <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
