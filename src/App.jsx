@@ -2676,6 +2676,9 @@ function StationDuties({ S, role, members, meId }) {
   const [pickerForDutyId, setPickerForDutyId] = useState(null); // which duty's picker is open
   const [selectedHelpers, setSelectedHelpers] = useState([]);   // member ids
   const [pickerStage, setPickerStage] = useState("ask");        // "ask" | "pick"
+  const [view, setView] = useState("checklist");                // "checklist" | "history"
+  const [logEntries, setLogEntries] = useState([]);
+  const [weekOffset, setWeekOffset] = useState(0);              // 0 = most recent week with entries
   useEffect(() => {
     supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids").then(({ data, error }) => {
       if (error || !data) return;
@@ -2691,6 +2694,23 @@ function StationDuties({ S, role, members, meId }) {
       })));
     });
   }, []);
+  useEffect(() => {
+    if (!canManage) return;
+    supabase.from("duty_log")
+      .select("id, duty_name, done_by, helper_ids, done_at")
+      .order("done_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        setLogEntries(data.map((e) => ({
+          id: e.id,
+          dutyName: e.duty_name,
+          doneBy: e.done_by,
+          helperIds: e.helper_ids ?? [],
+          doneAt: e.done_at,
+        })));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage]);
   const [addingA, setAddingA] = useState(false);
   const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [acatNew, setAcatNew] = useState(""); const [arec, setArec] = useState("Weekly");
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
@@ -2744,10 +2764,30 @@ function StationDuties({ S, role, members, meId }) {
   function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
   function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
   const doneCount = duties.filter((d) => d.done).length;
+  // History: group duty_log completions by the station's week setting (newest first)
+  const historyWeeks = (() => {
+    const byWeek = new Map();
+    for (const e of logEntries) {
+      if (!e.doneAt) continue;
+      const wk = toISO(weekStartOf(new Date(e.doneAt), weekStartDay));
+      if (!byWeek.has(wk)) byWeek.set(wk, []);
+      byWeek.get(wk).push(e);
+    }
+    return [...byWeek.keys()].sort((a, b) => (a < b ? 1 : -1)).map((wk) => ({ wk, entries: byWeek.get(wk) }));
+  })();
+  const currentWeek = historyWeeks.length ? historyWeeks[Math.min(weekOffset, historyWeeks.length - 1)] : null;
   return (
     <div>
       <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own." />
 
+      {canManage && (
+        <div style={S.segRow}>
+          <button onClick={() => setView("checklist")} style={{ ...S.segBtn, ...(view === "checklist" ? S.segBtnOn : {}) }}>Checklist</button>
+          <button onClick={() => setView("history")} style={{ ...S.segBtn, ...(view === "history" ? S.segBtnOn : {}) }}>History</button>
+        </div>
+      )}
+
+      {view === "checklist" && (<>
       <div style={{ ...S.opCard, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 180 }}>
@@ -2863,6 +2903,35 @@ function StationDuties({ S, role, members, meId }) {
           </div>
         ))}
       </div>
+      </>)}
+
+      {view === "history" && canManage && (
+        historyWeeks.length === 0 ? (
+          <div style={{ ...S.opCard, marginBottom: 14, fontSize: 13.5, color: "#6A7178" }}>No completions logged yet.</div>
+        ) : (
+          <>
+            <div style={{ ...S.opCard, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset >= historyWeeks.length - 1} onClick={() => setWeekOffset((o) => Math.min(o + 1, historyWeeks.length - 1))}>◀</button>
+              <div style={{ flex: 1, textAlign: "center", fontWeight: 600, color: "#191C20" }}>Week of {fmtWeek(currentWeek.wk)}</div>
+              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset <= 0} onClick={() => setWeekOffset((o) => Math.max(o - 1, 0))}>▶</button>
+            </div>
+            <div>
+              {currentWeek.entries.map((e) => {
+                const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
+                return (
+                  <div key={e.id} style={S.certRow}>
+                    <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, color: "#191C20" }}>{e.dutyName}</span>
+                      <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{names || "A member"} · {fmtDoneAt(e.doneAt)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )
+      )}
     </div>
   );
 }
