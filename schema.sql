@@ -2,45 +2,58 @@
 -- The Dayroom — Database Schema Reference
 -- Project: BullRoseProductions/Bullington-VFDAIAgent
 -- Supabase project: ifeptqnlucmvhlvadcpj
--- Captured: 2026-06-27
+-- Refreshed: 2026-06-27 (includes the full Station Duties feature)
 -- =============================================================================
 --
 -- WHAT THIS IS
 --   A human-readable snapshot of the Supabase backend: table structures, all
 --   Row-Level Security (RLS) policies, and all custom Postgres functions
---   (security helpers + the certification pipeline).
+--   (security helpers + the certification and duty pipelines).
 --
 --   This file exists because the entire backend lives only inside the live
---   Supabase project — it is not otherwise tracked in git. This snapshot makes
---   the security architecture reproducible, recoverable, and reviewable.
+--   Supabase project. This snapshot makes the security architecture
+--   reproducible, recoverable, and reviewable.
 --
 -- WHAT THIS IS NOT
---   This is a *reference* snapshot, not a guaranteed one-click rebuild script.
---   It does not include: row data, foreign-key/constraint definitions beyond
---   columns, indexes, sequences, grants, triggers, the auth schema, or the
---   members_view definition. For a complete, replayable dump + migration
---   history, adopt the Supabase CLI (`supabase db dump`) — tracked as a future
---   task. Until then, this file is the durable record of the structure.
+--   A reference snapshot, not a guaranteed one-click rebuild script. It omits:
+--   row data, foreign-key constraints beyond columns, indexes, sequences,
+--   grants, triggers, the auth schema, and the members_view definition. For a
+--   complete replayable dump + migration history, adopt the Supabase CLI
+--   (`supabase db dump`) — tracked as a future task.
 --
--- ISOLATION MODEL (built 2026-06-27)
---   Every station-specific table is scoped by department via the helper
---   my_department_id(), so one department can never read another's data.
---   Two deliberate exceptions:
+-- ISOLATION MODEL
+--   Every station-specific table is scoped by department via my_department_id(),
+--   so one department can never read another's data. Two deliberate exceptions:
 --     - training_plans : shared library, readable by any authenticated user.
 --     - departments    : readable by any authenticated user (needed to function).
 --
+-- IDENTITY MODEL
+--   No auth_user_id column. Identity bridges via lower(members.email) =
+--   lower(auth.email()). Helpers resolve the signed-in user's member id
+--   (my_member_id) and department (my_department_id).
+--
+-- STATION DUTIES (added 2026-06-27)
+--   - duties: the live checklist. done/done_by(uuid)/done_at + helper_ids (the
+--     current completion's participants, for display). Resets weekly.
+--   - duty_log: permanent, append-only completion history (the accountability
+--     trail). One row per completion: duty_name snapshot, done_by, helper_ids,
+--     done_at. Never wiped by the weekly reset.
+--   - Writes go ONLY through complete_duty / uncomplete_duty (SECURITY DEFINER,
+--     server-stamped identity + time, tamper-resistant). complete_duty also
+--     writes the duty_log history record atomically.
+--
 -- KNOWN GAPS / FOLLOW-UPS
---   - duties, duty_log : still readable by any authenticated user (USING true).
---       They have a department_id column but were NOT yet department-scoped.
---       Harmless for a single-department pilot; MUST be scoped before a 2nd
---       department joins. (Same pattern as the others:
---       USING (department_id = my_department_id()).)
 --   - profiles : table exists but had no RLS policy in the capture — review
---       before pilot (confirm intended access / whether it's in use).
---   - Write policies: most tables have SELECT policies only. Writes are denied
---       by default (RLS denies unless allowed). Add leader-write policies
---       table-by-table as edit features are built. The certs table is mutated
---       ONLY through the SECURITY DEFINER functions below, never direct writes.
+--     before pilot (confirm intended access / whether it's in use).
+--   - Calendar write policies: events, content_calendar, etc. have SELECT only,
+--     no write policies — needed for the upcoming "Training Officer / Board /
+--     Dept Admin can edit calendars" feature.
+--   - members / cert_submissions write policies are leader-gated but NOT yet
+--     department-scoped — fine for one station; scope before a 2nd department.
+--   - certs is mutated ONLY through SECURITY DEFINER functions; the duties
+--     tables ONLY through complete_duty / uncomplete_duty (+ the duties UPDATE
+--     policy backing optimistic UI). No DELETE policy on duty_log (audit trail
+--     is not casually deletable).
 -- =============================================================================
 
 
@@ -64,7 +77,7 @@ CREATE TABLE public.ai_feedback (
   department_id uuid NOT NULL,
   feature text,
   rating text,
-  tags ARRAY,
+  tags text[],
   original text,
   edited text,
   by text,
@@ -140,7 +153,9 @@ CREATE TABLE public.documents (
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
--- NOTE: duties.department_id exists but this table is NOT yet department-scoped (see header).
+-- The live duty checklist. helper_ids carries the CURRENT completion's helpers
+-- (for display); resets weekly. Mutated only via complete_duty/uncomplete_duty
+-- (+ the members-update RLS policy backing the optimistic UI).
 CREATE TABLE public.duties (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   department_id uuid NOT NULL,
@@ -148,19 +163,23 @@ CREATE TABLE public.duties (
   category text DEFAULT 'Station'::text,
   recurrence text DEFAULT 'Weekly'::text,
   done boolean NOT NULL DEFAULT false,
-  done_by text,
-  done_at text,
-  created_at timestamp with time zone NOT NULL DEFAULT now()
+  done_by uuid,
+  done_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  helper_ids uuid[] DEFAULT '{}'::uuid[]
 );
 
--- NOTE: duty_log.department_id exists but this table is NOT yet department-scoped (see header).
+-- Permanent, append-only completion history (the accountability trail).
+-- duty_name is a SNAPSHOT so history stays readable if a duty is renamed/removed.
 CREATE TABLE public.duty_log (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   department_id uuid NOT NULL,
-  what text NOT NULL,
-  who text,
-  "when" text,
-  created_at timestamp with time zone NOT NULL DEFAULT now()
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  duty_id uuid,
+  duty_name text,
+  done_by uuid,
+  helper_ids uuid[] DEFAULT '{}'::uuid[],
+  done_at timestamp with time zone DEFAULT now()
 );
 
 CREATE TABLE public.events (
@@ -228,11 +247,10 @@ CREATE TABLE public.members (
 );
 
 -- members_view is a VIEW (column-masking layer over members), not a base table.
--- Its full definition is NOT captured here — recapture with:
+-- Full definition NOT captured here — recapture with:
 --   SELECT pg_get_viewdef('public.members_view'::regclass, true);
--- Columns (for reference):
---   id, department_id, name, role, access, status, phone, joined,
---   participation, created_at, email, address
+-- Columns: id, department_id, name, role, access, status, phone, joined,
+--          participation, created_at, email, address
 
 CREATE TABLE public.onboarding_progress (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -243,7 +261,7 @@ CREATE TABLE public.onboarding_progress (
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
--- NOTE: profiles had no RLS policy in the capture — review before pilot (see header).
+-- NOTE: profiles had no RLS policy in the capture — review before pilot.
 CREATE TABLE public.profiles (
   id uuid NOT NULL,
   department_id uuid,
@@ -284,7 +302,7 @@ CREATE TABLE public.training_sessions (
 
 -- =============================================================================
 -- SECTION 2 — CUSTOM FUNCTIONS
--- Security helpers + certification pipeline. All SECURITY DEFINER.
+-- Security helpers + certification pipeline + duty pipeline. All SECURITY DEFINER.
 -- =============================================================================
 
 -- --- Security helpers -------------------------------------------------------
@@ -334,6 +352,18 @@ AS $function$
   limit 1;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.my_member_id()
+ RETURNS uuid
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select id
+  from public.members
+  where lower(email) = lower(auth.email())
+  limit 1;
+$function$;
+
 -- --- Certification pipeline (the ONLY write path into public.certs) ----------
 
 CREATE OR REPLACE FUNCTION public.approve_cert_submission(submission_id uuid)
@@ -346,31 +376,22 @@ declare
   sub public.cert_submissions;
   new_cert_id uuid;
 begin
-  -- authority gate (definer bypasses RLS, so we check explicitly)
   if not public.is_department_admin() then
     raise exception 'Not authorized to approve cert submissions';
   end if;
-
   select * into sub from public.cert_submissions where id = submission_id;
-
   if not found then
     raise exception 'Submission not found';
   end if;
-
   if sub.status <> 'pending' then
     raise exception 'Submission is not pending (current status: %)', sub.status;
   end if;
-
-  -- promote to the live certs table
   insert into public.certs (id, department_id, member_id, name, exp, created_at)
   values (gen_random_uuid(), sub.department_id, sub.member_id, sub.name, sub.exp, now())
   returning id into new_cert_id;
-
-  -- stamp the submission as approved
   update public.cert_submissions
   set status = 'approved', reviewed_by = auth.uid(), reviewed_at = now()
   where id = submission_id;
-
   return new_cert_id;
 end;
 $function$;
@@ -384,21 +405,16 @@ AS $function$
 declare
   sub public.cert_submissions;
 begin
-  -- same authority gate as approve
   if not public.is_department_admin() then
     raise exception 'Not authorized to reject cert submissions';
   end if;
-
   select * into sub from public.cert_submissions where id = submission_id;
-
   if not found then
     raise exception 'Submission not found';
   end if;
-
   if sub.status <> 'pending' then
     raise exception 'Submission is not pending (current status: %)', sub.status;
   end if;
-
   update public.cert_submissions
   set status = 'rejected',
       reviewed_by = auth.uid(),
@@ -418,21 +434,16 @@ begin
   if not public.is_department_admin() then
     raise exception 'Not authorized to edit certifications';
   end if;
-
   if new_name is null or btrim(new_name) = '' then
     raise exception 'Certification name is required';
   end if;
-
-  -- exp must be null/empty (no expiration) or a valid YYYY-MM string
   if new_exp is not null and btrim(new_exp) <> '' and new_exp !~ '^\d{4}-\d{2}$' then
     raise exception 'Expiration must be YYYY-MM (got: %)', new_exp;
   end if;
-
   update public.certs
   set name = btrim(new_name),
       exp  = case when new_exp is null or btrim(new_exp) = '' then null else new_exp end
   where id = cert_id;
-
   if not found then
     raise exception 'Certification not found';
   end if;
@@ -449,12 +460,90 @@ begin
   if not public.is_department_admin() then
     raise exception 'Not authorized to delete certifications';
   end if;
-
   delete from public.certs where id = cert_id;
-
   if not found then
     raise exception 'Certification not found';
   end if;
+end;
+$function$;
+
+-- --- Duty pipeline (the ONLY write path for duty completions) ----------------
+
+-- Mark a duty done WITH optional helpers, server-stamped, atomic.
+-- Writes done/done_by/done_at + helper_ids to the live duties row AND a
+-- permanent completion record to duty_log.
+CREATE OR REPLACE FUNCTION public.complete_duty(p_duty_id uuid, p_helper_ids uuid[] DEFAULT '{}'::uuid[])
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  d public.duties;
+  my_id uuid;
+  clean_helpers uuid[];
+begin
+  my_id := public.my_member_id();
+  if my_id is null then
+    raise exception 'No member record for the signed-in user';
+  end if;
+  select * into d from public.duties where id = p_duty_id;
+  if not found then
+    raise exception 'Duty not found';
+  end if;
+  if d.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: duty belongs to another department';
+  end if;
+  -- sanitize helpers: drop nulls, drop the doer, keep only real members of THIS dept, de-dupe
+  select coalesce(array_agg(distinct m.id), '{}')
+  into clean_helpers
+  from public.members m
+  where m.id = any(p_helper_ids)
+    and m.id <> my_id
+    and m.department_id = d.department_id;
+  update public.duties
+  set done = true,
+      done_by = my_id,
+      done_at = now(),
+      helper_ids = clean_helpers
+  where id = p_duty_id;
+  insert into public.duty_log (department_id, duty_id, duty_name, done_by, helper_ids, done_at)
+  values (d.department_id, d.id, d.duty, my_id, clean_helpers, now());
+end;
+$function$;
+
+-- Un-mark a duty: only the doer or a leader. Clears the live row's helpers;
+-- duty_log history is intentionally LEFT INTACT (accountability trail stays).
+CREATE OR REPLACE FUNCTION public.uncomplete_duty(p_duty_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  d public.duties;
+  my_id uuid;
+begin
+  my_id := public.my_member_id();
+  if my_id is null then
+    raise exception 'No member record for the signed-in user';
+  end if;
+  select * into d from public.duties where id = p_duty_id;
+  if not found then
+    raise exception 'Duty not found';
+  end if;
+  if d.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: duty belongs to another department';
+  end if;
+  if d.done_by is distinct from my_id and not public.is_leader() then
+    raise exception 'Only the member who completed this, or a leader, can undo it';
+  end if;
+  update public.duties
+  set done = false,
+      done_by = null,
+      done_at = null,
+      helper_ids = '{}'
+  where id = p_duty_id;
 end;
 $function$;
 
@@ -462,10 +551,8 @@ $function$;
 -- =============================================================================
 -- SECTION 3 — ROW-LEVEL SECURITY POLICIES
 -- Enable RLS on every table, then the read/write policies.
--- (Department-scoped via my_department_id(); see header for the model.)
 -- =============================================================================
 
--- Enable RLS (each table)
 ALTER TABLE public.action_items        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_feedback         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.apparatus           ENABLE ROW LEVEL SECURITY;
@@ -525,6 +612,9 @@ CREATE POLICY "authenticated can read content_calendar" ON public.content_calend
 CREATE POLICY "authenticated can read documents" ON public.documents FOR SELECT TO public
   USING ((department_id = my_department_id()));
 
+CREATE POLICY "authenticated can read duties" ON public.duties FOR SELECT TO public
+  USING ((department_id = my_department_id()));
+
 CREATE POLICY "authenticated can read events" ON public.events FOR SELECT TO public
   USING ((department_id = my_department_id()));
 
@@ -547,8 +637,7 @@ CREATE POLICY "Members read own certs" ON public.certs FOR SELECT TO authenticat
      FROM members
     WHERE (lower(members.email) = lower(auth.email())))));
 
--- --- members writes (leader-gated; not yet department-scoped) ----------------
--- FOLLOW-UP: add "AND department_id = my_department_id()" before 2nd department.
+-- --- members writes (leader-gated; NOT yet department-scoped — see header) ---
 
 CREATE POLICY "leaders insert members" ON public.members FOR INSERT TO authenticated
   WITH CHECK (is_leader());
@@ -564,6 +653,29 @@ CREATE POLICY "Leaders propose cert submissions" ON public.cert_submissions FOR 
 CREATE POLICY "Dept admins read cert submissions" ON public.cert_submissions FOR SELECT TO authenticated
   USING (is_department_admin());
 
+-- --- DUTIES write (members mark done in their dept; backs optimistic UI) -----
+-- The authoritative write path is complete_duty/uncomplete_duty (SECURITY
+-- DEFINER); this UPDATE policy permits the member-facing optimistic update.
+
+CREATE POLICY "members update duties in their dept" ON public.duties FOR UPDATE TO authenticated
+  USING ((department_id = my_department_id()))
+  WITH CHECK ((department_id = my_department_id()));
+
+-- --- DUTY_LOG (the accountability trail) ------------------------------------
+-- INSERT: any dept member, but only as themselves (done_by = my_member_id()).
+-- SELECT: leadership only (Board/Training Officer/Dept Admin/Project Admin).
+-- UPDATE: Department Admin only (amend a record). No DELETE policy (trail kept).
+
+CREATE POLICY "members log completions as themselves" ON public.duty_log FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (done_by = my_member_id())));
+
+CREATE POLICY "leaders read duty_log" ON public.duty_log FOR SELECT TO authenticated
+  USING ((is_leader() AND (department_id = my_department_id())));
+
+CREATE POLICY "dept admins edit duty_log" ON public.duty_log FOR UPDATE TO authenticated
+  USING ((is_department_admin() AND (department_id = my_department_id())))
+  WITH CHECK ((is_department_admin() AND (department_id = my_department_id())));
+
 -- --- Shared / global reads (intentional, NOT department-scoped) --------------
 
 CREATE POLICY "authenticated can read training_plans" ON public.training_plans FOR SELECT TO authenticated
@@ -571,17 +683,6 @@ CREATE POLICY "authenticated can read training_plans" ON public.training_plans F
 
 CREATE POLICY "signed in can read departments" ON public.departments FOR SELECT TO authenticated
   USING (true);  -- department info readable to function
-
--- --- FOLLOW-UP: not yet department-scoped (single-dept-pilot OK) -------------
--- These have a department_id column but still read open to any authenticated
--- user. Scope before a 2nd department joins:
---   USING (department_id = my_department_id())
-
-CREATE POLICY "authenticated can read duties" ON public.duties FOR SELECT TO authenticated
-  USING (true);  -- TODO: department-scope before 2nd department
-
-CREATE POLICY "authenticated can read duty_log" ON public.duty_log FOR SELECT TO authenticated
-  USING (true);  -- TODO: department-scope before 2nd department
 
 -- =============================================================================
 -- END OF SCHEMA SNAPSHOT
