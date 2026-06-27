@@ -2665,8 +2665,28 @@ const DUTYLOG_SEED = [
 function StationDuties({ S, role, members, meId }) {
   const canManage = isLeader(role); // board members + officers + admins assign duties
   const me = members.find((m) => m.id === meId);
-  const [duties, setDuties] = useState(DUTY_SEED);
+  const nameById = new Map(members.map((m) => [m.id, m.name]));
+  const fmtDoneAt = (v) => {
+    if (!v) return "";
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? v : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  };
+  const [duties, setDuties] = useState([]);
   const [log, setLog] = useState(DUTYLOG_SEED);
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at").then(({ data, error }) => {
+      if (error || !data) return;
+      setDuties(data.map((d) => ({
+        id: d.id,
+        duty: d.duty,
+        category: d.category,
+        recurrence: d.recurrence,
+        done: d.done,
+        doneBy: d.done_by,   // raw member UUID (or null) for now — name resolution is a later slice
+        doneAt: d.done_at,   // raw timestamptz string for now — formatting is a later slice
+      })));
+    });
+  }, []);
   const [addingA, setAddingA] = useState(false);
   const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [acatNew, setAcatNew] = useState(""); const [arec, setArec] = useState("Weekly");
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
@@ -2692,12 +2712,20 @@ function StationDuties({ S, role, members, meId }) {
   const fmtWeek = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const categories = [...DUTY_CATEGORIES.filter((c) => duties.some((d) => d.category === c)), ...[...new Set(duties.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
   const allCats = [...new Set([...DUTY_CATEGORIES, ...duties.map((d) => d.category)])];
-  function toggleDone(id) {
-    setDuties((ds) => ds.map((x) => {
-      if (x.id !== id) return x;
-      if (x.done) { if (!canManage && x.doneBy !== me?.name) return x; return { ...x, done: false, doneBy: null, doneAt: null }; }
-      return { ...x, done: true, doneBy: me?.name || "A member", doneAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) };
-    }));
+  async function toggleDone(id) {
+    const duty = duties.find((x) => x.id === id);
+    if (!duty) return;
+    if (!duty.done) {
+      const { error } = await supabase.rpc("complete_duty", { p_duty_id: id });
+      if (error) { alert("Could not mark done: " + error.message); return; }
+      setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: true, doneBy: me?.id ?? null, doneAt: new Date().toISOString() } : x)));
+    } else {
+      // client-side guard mirrors the server rule (doer or leader)
+      if (!canManage && duty.doneBy !== me?.id) return;
+      const { error } = await supabase.rpc("uncomplete_duty", { p_duty_id: id });
+      if (error) { alert("Could not undo: " + error.message); return; }
+      setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: false, doneBy: null, doneAt: null } : x)));
+    }
   }
   function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
   function addDuty() { if (!ad.trim()) return; const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), category: cat, recurrence: arec, done: false, doneBy: null, doneAt: null }]); setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAddingA(false); }
@@ -2751,8 +2779,8 @@ function StationDuties({ S, role, members, meId }) {
             {items.map((a) => (
               <div key={a.id} style={S.certRow}>
                 {(() => {
-                  const canUncheck = canManage || a.doneBy === me?.name;
-                  if (a.done && !canUncheck) return <span title={`Completed by ${a.doneBy} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
+                  const canUncheck = canManage || a.doneBy === me?.id;
+                  if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
                   return (
                     <button onClick={() => toggleDone(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
                       {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
@@ -2761,7 +2789,7 @@ function StationDuties({ S, role, members, meId }) {
                 })()}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
-                  {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {a.doneBy} · {a.doneAt}</div>}
+                  {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {nameById.get(a.doneBy) ?? "A member"} · {fmtDoneAt(a.doneAt)}</div>}
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: a.recurrence === "One-time" ? "#9A6B12" : "#6A7178", background: a.recurrence === "One-time" ? "#FBF1DC" : "#F1EFF5", borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
                 {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
