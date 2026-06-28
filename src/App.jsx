@@ -374,7 +374,7 @@ export default function App() {
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
-          {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} />}
+          {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
@@ -3076,7 +3076,7 @@ const DUTYLOG_SEED = [
   { id: 2, what: "Washed Engine 1, restocked EMS bags", who: "Cody Pearson", when: "Jun 21" },
   { id: 3, what: "Posted open-house recap", who: "Dana Cole", when: "Jun 20" },
 ];
-function StationDuties({ S, role, members, meId }) {
+function StationDuties({ S, role, members, meId, notify }) {
   const canManage = isLeader(role); // board members + officers + admins assign duties
   const me = members.find((m) => m.id === meId);
   const nameById = new Map(members.map((m) => [m.id, m.name]));
@@ -3157,7 +3157,7 @@ function StationDuties({ S, role, members, meId }) {
   }
   async function confirmComplete(id) {
     const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: selectedHelpers });
-    if (error) { alert("Could not mark done: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
     setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: true, doneBy: me?.id ?? null, doneAt: new Date().toISOString(), helperIds: selectedHelpers } : x)));
     setPickerForDutyId(null);
     setSelectedHelpers([]);
@@ -3169,7 +3169,7 @@ function StationDuties({ S, role, members, meId }) {
     // client-side guard mirrors the server rule (doer or leader)
     if (!canManage && duty.doneBy !== me?.id) return;
     const { error } = await supabase.rpc("uncomplete_duty", { p_duty_id: id });
-    if (error) { alert("Could not undo: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't undo that", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
     setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: false, doneBy: null, doneAt: null, helperIds: [] } : x)));
   }
   function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
