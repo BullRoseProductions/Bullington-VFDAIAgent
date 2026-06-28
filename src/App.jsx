@@ -122,7 +122,7 @@ const ACTIVITY = [
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
-  { key: "training", label: "Training Plan", Icon: GraduationCap, roles: ROLES },
+  { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
   { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Project Admin", "Department Admin", "Training Officer"], premium: true },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
@@ -2504,6 +2504,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [addingPlan, setAddingPlan] = useState(false);
   const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly"); const [pcolor, setPcolor] = useState(CATEGORY_COLORS[0]);
+  const [editingPlanId, setEditingPlanId] = useState(null);
+  const [ed, setEd] = useState({ name: "", cadence: "Monthly", color: CATEGORY_COLORS[0] });
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
@@ -2540,6 +2542,14 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { error } = await supabase.from("training_plans").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the training", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadPlans();
+  }
+  function startEditPlan(p) { setEditingPlanId(p.id); setEd({ name: p.name, cadence: p.cadence, color: p.color || CATEGORY_COLORS[0] }); }
+  async function updatePlan() {
+    const name = ed.name.trim();
+    if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before saving it." }); return; }
+    const { error } = await supabase.from("training_plans").update({ name, cadence: ed.cadence, color: ed.color }).eq("id", editingPlanId);   // last_iso intentionally NOT updated
+    if (error) { notify({ kind: "error", title: "Couldn't save the training", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setEditingPlanId(null); loadPlans();
   }
   function scheduleFor(p) {
     const info = dueInfo(p); setSpid(p.id); setStitle("");
@@ -2579,7 +2589,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
   return (
     <div>
-      <PageHead S={S} eyebrow={memberView ? "MY TRAINING" : "TRAINING PLAN"} title={memberView ? "Your training calendar" : "Keep training on schedule"} sub={memberView ? "See what's scheduled, who came to each session, and your own attendance record." : "Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance."} />
+      <PageHead S={S} eyebrow={memberView ? "MY TRAINING" : "TRAINING"} title={memberView ? "Your training calendar" : "Keep training on schedule"} sub={memberView ? "See what's scheduled, who came to each session, and your own attendance record." : "Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance."} />
       {!memberView && (<>
         <div style={S.statRow}>
           <Stat S={S} n={String(over)} label="Overdue / unlogged" warn={over > 0} />
@@ -2620,7 +2630,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       })()}
 
       {!memberView && (<>
-      <div style={S.cardEyebrow}><GraduationCap size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING PLAN</div>
+      <div style={S.cardEyebrow}><GraduationCap size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING CATEGORIES</div>
       {canManage && (addingPlan ? (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
@@ -2641,17 +2651,35 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         {planView.length === 0 ? (
           <div style={{ ...S.opCard, fontSize: 13, color: "#6A7178" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
         ) : planView.map(({ p, info }) => (
-          <div key={p.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
-            <GraduationCap size={15} color={info.color} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: "#191C20" }}>{p.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {p.cadence}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "never logged"} · <span style={{ color: info.color }}>{info.rel}</span></div>
+          editingPlanId === p.id ? (
+            <div key={p.id} style={{ ...S.opCard, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={ed.name} onChange={(e) => setEd((v) => ({ ...v, name: e.target.value }))} /></label>
+              <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={ed.cadence} onChange={(e) => setEd((v) => ({ ...v, cadence: e.target.value }))}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+              <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+                  {CATEGORY_COLORS.map((col) => (
+                    <button key={col} title={col} onClick={() => setEd((v) => ({ ...v, color: col }))}
+                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  ))}
+                </div>
+              </div>
+              <button style={S.primaryBtn} onClick={updatePlan}>Save</button>
+              <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setEditingPlanId(null)}>Cancel</button>
             </div>
-            <Pill S={S} color={info.color}>{info.label.toUpperCase()}</Pill>
-            {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => logDone(p.id)}><ClipboardCheck size={14} /> Log done</button>}
-            {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => scheduleFor(p)}><CalendarCheck size={14} /> Schedule</button>}
-            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removePlan(p.id)}><X size={14} /></button>}
-          </div>
+          ) : (
+            <div key={p.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
+              <GraduationCap size={15} color={info.color} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 600, color: "#191C20" }}>{p.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {p.cadence}</span>
+                <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "never logged"} · <span style={{ color: info.color }}>{info.rel}</span></div>
+              </div>
+              <Pill S={S} color={info.color}>{info.label.toUpperCase()}</Pill>
+              {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => logDone(p.id)}><ClipboardCheck size={14} /> Log done</button>}
+              {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => scheduleFor(p)}><CalendarCheck size={14} /> Schedule</button>}
+              {canManage && <button title="Edit" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} /></button>}
+              {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removePlan(p.id)}><X size={14} /></button>}
+            </div>
+          )
         ))}
       </div>
 
