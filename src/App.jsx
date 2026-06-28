@@ -1706,7 +1706,7 @@ function Roster({ S, role, members, setMembers, sessions, notify }) {
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
       {tab === "reports" && leader && <RosterReports S={S} members={members} />}
-      {tab === "pending" && canAssign(role) && <RosterPending S={S} members={members} />}
+      {tab === "pending" && canAssign(role) && <RosterPending S={S} members={members} notify={notify} />}
     </div>
   );
 }
@@ -1851,7 +1851,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
           ))}
       </div>
 
-      <ProposeCert S={S} role={role} member={member} />
+      <ProposeCert S={S} role={role} member={member} notify={notify} />
 
       {(() => {
         const done = (sessions || []).filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
@@ -1894,7 +1894,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
     </div>
   );
 }
-function ProposeCert({ S, role, member }) {
+function ProposeCert({ S, role, member, notify }) {
   const canPropose = isLeader(role);
   const [open, setOpen] = useState(false);
   const [cName, setCName] = useState("");
@@ -1903,12 +1903,12 @@ function ProposeCert({ S, role, member }) {
   const [busy, setBusy] = useState(false);
 
   async function propose() {
-    if (!cName.trim()) return;
+    if (!cName.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name before submitting." }); return; }
     const exp = cExp.trim();
-    if (exp && !/^\d{4}-\d{2}$/.test(exp)) { alert("Expiration must be YYYY-MM (e.g. 2027-06)"); return; }
+    if (exp && !/^\d{4}-\d{2}$/.test(exp)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
     setBusy(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { alert("Not signed in."); setBusy(false); return; }
+    if (!user) { notify({ kind: "error", title: "You're not signed in", text: "Please sign in again to continue." }); setBusy(false); return; }
     const row = {
       department_id: member.department_id,
       member_id: member.id,
@@ -1921,9 +1921,9 @@ function ProposeCert({ S, role, member }) {
     };
     const { data, error } = await supabase.from("cert_submissions").insert(row).select().single();
     setBusy(false);
-    if (error || !data) { alert("Could not submit: " + (error?.message ?? "unknown error")); return; }
+    if (error || !data) { notify({ kind: "error", title: "Couldn't submit", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setCName(""); setCExp(""); setCNote(""); setOpen(false);
-    alert("Submitted for review.");
+    notify({ kind: "success", text: "Submitted for review." });
   }
 
   if (!canPropose || !member) return null;
@@ -1996,7 +1996,7 @@ function RosterCerts({ S, members }) {
     </div>
   );
 }
-function RosterPending({ S, members }) {
+function RosterPending({ S, members, notify }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -2006,7 +2006,7 @@ function RosterPending({ S, members }) {
     setLoading(true);
     const { data, error } = await supabase.from("cert_submissions").select("*").eq("status", "pending");
     setLoading(false);
-    if (error) { alert("Could not load pending items: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't load pending items", text: "Something went wrong loading those. Please try again.", details: error.message }); return; }
     setRows(data || []);
   }
   useEffect(() => { loadPending(); }, []);
@@ -2015,7 +2015,7 @@ function RosterPending({ S, members }) {
     setBusyId(row.id);
     const { error } = await supabase.rpc("approve_cert_submission", { submission_id: row.id });
     setBusyId(null);
-    if (error) { alert("Could not approve: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't approve", text: "Something went wrong approving that. Please try again.", details: error.message }); return; }
     loadPending();
   }
   async function reject(row) {
@@ -2024,7 +2024,7 @@ function RosterPending({ S, members }) {
     setBusyId(row.id);
     const { error } = await supabase.rpc("reject_cert_submission", { submission_id: row.id, reason: reason.trim() || null });
     setBusyId(null);
-    if (error) { alert("Could not reject: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't reject", text: "Something went wrong rejecting that. Please try again.", details: error.message }); return; }
     loadPending();
   }
 
