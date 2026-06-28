@@ -376,6 +376,29 @@ function Dashboard({ S, role, members, library, openPacket, go, meId }) {
         <Stat S={S} n="14" label="Active members" />
       </div>
 
+      <DashboardCalendar S={S} />
+
+      <div style={S.dashGrid}>
+        <div style={S.featCard}>
+          <div style={S.featStripe} />
+          <div style={S.featInner}>
+            <div style={S.cardEyebrow}>BUILD THIS WEEK</div>
+            <h3 style={S.featTitle}>{featured.title}</h3>
+            <p style={S.featObj}>{featured.objective}</p>
+            <div style={S.metaRow}><Meta Icon={Clock} text={featured.time} /><Meta Icon={Users} text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
+            <button style={S.primaryBtn} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
+          </div>
+        </div>
+        <div style={S.logCard}>
+          <div style={S.cardEyebrow}>STATION LOG</div>
+          {ACTIVITY.map((a, i) => (
+            <div key={i} style={S.logRow}><span style={S.logTime}>{a.when}</span>
+              <span style={S.logText}><strong>{a.who}</strong> {a.action} <span style={S.logCode}>{a.code}</span></span></div>
+          ))}
+          <button style={S.ghostBtn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
+        </div>
+      </div>
+
       {/* Training roadmap — department memory / gap detection */}
       <div style={S.roadCard}>
         <div style={S.roadHead}>
@@ -402,29 +425,6 @@ function Dashboard({ S, role, members, library, openPacket, go, meId }) {
       </div>
 
       <QuickAccess S={S} role={role} go={go} />
-
-      <DashboardCalendar S={S} />
-
-      <div style={S.dashGrid}>
-        <div style={S.featCard}>
-          <div style={S.featStripe} />
-          <div style={S.featInner}>
-            <div style={S.cardEyebrow}>BUILD THIS WEEK</div>
-            <h3 style={S.featTitle}>{featured.title}</h3>
-            <p style={S.featObj}>{featured.objective}</p>
-            <div style={S.metaRow}><Meta Icon={Clock} text={featured.time} /><Meta Icon={Users} text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
-            <button style={S.primaryBtn} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
-          </div>
-        </div>
-        <div style={S.logCard}>
-          <div style={S.cardEyebrow}>STATION LOG</div>
-          {ACTIVITY.map((a, i) => (
-            <div key={i} style={S.logRow}><span style={S.logTime}>{a.when}</span>
-              <span style={S.logText}><strong>{a.who}</strong> {a.action} <span style={S.logCode}>{a.code}</span></span></div>
-          ))}
-          <button style={S.ghostBtn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -478,8 +478,8 @@ function MemberDashboard({ S, role, members, go, meId }) {
     <div>
       <PageHead S={S} eyebrow="MY STATION" title={dashboardGreeting(me)} sub="Here's exactly where you stand — and what's coming up for you." />
       {me && <MyCerts S={S} me={me} />}
-      <QuickAccess S={S} role={role} go={go} />
       <DashboardCalendar S={S} />
+      <QuickAccess S={S} role={role} go={go} />
     </div>
   );
 }
