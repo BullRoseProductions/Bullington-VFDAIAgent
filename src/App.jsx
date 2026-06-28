@@ -403,6 +403,8 @@ function Dashboard({ S, role, members, library, openPacket, go, meId }) {
 
       <QuickAccess S={S} role={role} go={go} />
 
+      <DashboardCalendar S={S} />
+
       <div style={S.dashGrid}>
         <div style={S.featCard}>
           <div style={S.featStripe} />
@@ -477,6 +479,7 @@ function MemberDashboard({ S, role, members, go, meId }) {
       <PageHead S={S} eyebrow="MY STATION" title={dashboardGreeting(me)} sub="Here's exactly where you stand — and what's coming up for you." />
       {me && <MyCerts S={S} me={me} />}
       <QuickAccess S={S} role={role} go={go} />
+      <DashboardCalendar S={S} />
     </div>
   );
 }
@@ -1337,6 +1340,47 @@ function FundingCalendar({ S, role }) {
       <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
         {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
       </div>
+    </div>
+  );
+}
+const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12" };
+function DashboardCalendar({ S }) {
+  const today = new Date();
+  const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [items, setItems] = useState([]);
+  const loadAll = () => {
+    Promise.all([
+      supabase.from("content_calendar").select("id, date, caption"),
+      supabase.from("training_sessions").select("id, date, title"),
+      supabase.from("recruitment_events").select("id, date, title"),
+      supabase.from("funding_events").select("id, date, title"),
+    ]).then(([social, training, recruit, funding]) => {
+      const mapRows = (res, source, labelOf) =>
+        (res.data || []).filter((r) => r.date).map((r) => {        // null data (source error) → []
+          const [yy, mm, dd] = r.date.split("-").map(Number);
+          return { source, id: `${source}-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: labelOf(r), color: SOURCE_COLORS[source] };
+        });
+      setItems([
+        ...mapRows(social, "social", (r) => r.caption || ""),
+        ...mapRows(training, "training", (r) => r.title),
+        ...mapRows(recruit, "recruit", (r) => r.title),
+        ...mapRows(funding, "funding", (r) => r.title),
+      ]);
+    });
+  };
+  useEffect(() => { loadAll(); }, []);
+  const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
+
+  return (
+    <div>
+      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+      <MonthCalendar
+        cur={cur} setCur={setCur}
+        items={monthItems}
+        renderChip={(it) => ({ color: it.color, label: it.label, title: it.label })}
+        todayColor="#211C2B"
+        monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+      />
     </div>
   );
 }
