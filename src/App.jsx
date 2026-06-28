@@ -368,10 +368,10 @@ export default function App() {
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
           {screen === "documents" && <Documents S={S} role={role} />}
-          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} />}
+          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
-          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} />}
+          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} />}
@@ -846,7 +846,7 @@ function RichOutput({ S, text }) {
 }
 
 /* ---------------- Recruitment ---------------- */
-function Recruitment({ S, brand, role }) {
+function Recruitment({ S, brand, role, notify }) {
   const [town, setTown] = useState("North Hood Country");
   const [size, setSize] = useState("14");
   const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
@@ -895,7 +895,7 @@ function Recruitment({ S, brand, role }) {
       ]} />
 
       <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECRUITMENT CALENDAR</div>
-      <RecruitmentCalendar S={S} role={role} />
+      <RecruitmentCalendar S={S} role={role} notify={notify} />
 
       <GraphicStudio S={S} brand={brand} />
 
@@ -1223,7 +1223,7 @@ function ContentCalendar({ S, role, notify }) {
     </div>
   );
 }
-function RecruitmentCalendar({ S, role }) {
+function RecruitmentCalendar({ S, role, notify }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
@@ -1252,22 +1252,22 @@ function RecruitmentCalendar({ S, role }) {
 
   async function addEvent() {
     const t = evTitle.trim();
-    if (!t) { alert("Give the event a title."); return; }
+    if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
     const { error } = await supabase.from("recruitment_events").insert({
       department_id: deptId,
       title: t,
       date: toISO(new Date(cur.y, cur.m, Number(fd))),
       color,
     });
-    if (error) { alert("Could not add the event: " + error.message); return; }   // keep form open on error
+    if (error) { notify({ kind: "error", title: "Couldn't add the event", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }   // keep form open on error
     setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); loadItems();
   }
   async function removeEvent(id, title) {
     if (!window.confirm(`Remove “${title}” from the recruitment calendar?`)) return;
     const { error } = await supabase.from("recruitment_events").delete().eq("id", id);
-    if (error) { alert("Could not remove the event: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't remove the event", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadItems();
   }
 
@@ -1686,7 +1686,7 @@ function Initials({ S, name }) {
   return <span style={S.avatar}>{i}</span>;
 }
 
-function Roster({ S, role, members, setMembers, sessions }) {
+function Roster({ S, role, members, setMembers, sessions, notify }) {
   const leader = isLeader(role);
   const tabs = leader
     ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"], ...(canAssign(role) ? [["pending", "Pending Items"]] : [])]
@@ -1695,14 +1695,14 @@ function Roster({ S, role, members, setMembers, sessions }) {
   const [sel, setSel] = useState(null);
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
-  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} />;
+  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} />;
   return (
     <div>
       <PageHead S={S} eyebrow="ROSTER" title="Your people, all in one place" sub={leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."} />
       <div style={S.segRow}>
         {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, ...(tab === k ? S.segBtnOn : {}) }}>{l}</button>)}
       </div>
-      {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} />}
+      {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
       {tab === "reports" && leader && <RosterReports S={S} members={members} />}
@@ -1710,7 +1710,7 @@ function Roster({ S, role, members, setMembers, sessions }) {
     </div>
   );
 }
-function RosterMembers({ S, role, members, setMembers, onOpen }) {
+function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const canAdd = canAssign(role);
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState("");
   const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
@@ -1719,7 +1719,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
     const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
     const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: "Member", status: "Probationary", phone: ph.trim() || "—", email: em.trim() || null, joined: "2026", participation: 0 };
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
-    if (error || !data) { alert("Could not add to the database: " + (error ? error.message : "unknown error")); return; }
+    if (error || !data) { notify({ kind: "error", title: "Couldn't add the member", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
     setNm(""); setPh(""); setEm(""); setAdding(false);
   }
@@ -1727,7 +1727,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
     if (!window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) return;
     setMembers((m) => m.filter((x) => x.id !== id));
     const { error } = await supabase.from("members").delete().eq("id", id);
-    if (error) { alert("Could not remove from the database: " + error.message); }
+    if (error) { notify({ kind: "error", title: "Couldn't remove the member", text: "Something went wrong removing that. Please try again.", details: error.message }); }
   }
   return (
     <div>
@@ -1763,7 +1763,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen }) {
     </div>
   );
 }
-function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
+function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
   const assign = canAssign(role);
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
@@ -1777,7 +1777,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
     setBusyId(c.id);
     const { error } = await supabase.rpc("delete_cert", { cert_id: c.id });
     setBusyId(null);
-    if (error) { alert("Could not remove: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't remove the certification", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     onUpdate({ ...member, certs: member.certs.filter((x) => x.id !== c.id) });
   }
   function startEdit(c) {
@@ -1790,13 +1790,13 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions }) {
   }
   async function saveCert(c) {
     const name = draft.name.trim();
-    if (!name) { alert("Name can't be empty."); return; }
+    if (!name) { notify({ kind: "error", title: "Name can't be empty", text: "Enter a name for the certification." }); return; }
     const expTrim = draft.exp.trim();
-    if (expTrim && !/^\d{4}-\d{2}$/.test(expTrim)) { alert("Expiration must be YYYY-MM (e.g. 2027-06)"); return; }
+    if (expTrim && !/^\d{4}-\d{2}$/.test(expTrim)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
     setBusyId(c.id);
     const { error } = await supabase.rpc("update_cert", { cert_id: c.id, new_name: name, new_exp: expTrim || null });
     setBusyId(null);
-    if (error) { alert("Could not update: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't update the certification", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     onUpdate({ ...member, certs: member.certs.map((x) => (x.id === c.id ? { ...x, name, exp: expTrim || null } : x)) });
     setEditingCertId(null);
     setDraft({ name: "", exp: "" });
