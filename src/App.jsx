@@ -248,7 +248,16 @@ export default function App() {
     return () => { cancelled = true; };
   }, [authEmail]);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
-  const [trainingPlan, setTrainingPlan] = useState(TRAIN_PLAN_SEED);
+  const [trainingPlan, setTrainingPlan] = useState([]);
+  const loadPlans = () => {
+    supabase.from("training_plans")
+      .select("id, name, cadence, last_iso")
+      .then(({ data, error }) => {
+        if (error || !data) { setTrainingPlan([]); return; }
+        setTrainingPlan(data.map((r) => ({ id: r.id, name: r.name, cadence: r.cadence, lastISO: r.last_iso })));
+      });
+  };
+  useEffect(() => { loadPlans(); }, []);
   const [trainingSessions, setTrainingSessions] = useState([]);
   const loadSessions = () => {
     supabase.from("training_sessions")
@@ -363,7 +372,7 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
@@ -2424,11 +2433,12 @@ function Onboarding({ S, members }) {
 }
 
 /* ---------------- Training Plan + Calendar ---------------- */
-const CADENCE_DAYS = { Weekly: 7, Monthly: 30, Quarterly: 90, "Semi-annual": 182, Annual: 365, Biennial: 730 };
+const CADENCE_DAYS = { Weekly: 7, "Bi-weekly": 14, Monthly: 30, Quarterly: 90, "Semi-annual": 180, Annual: 365, Biennial: 730 };
 const CADENCES = ["Weekly", "Monthly", "Quarterly", "Semi-annual", "Annual", "Biennial"];
 const TRAIN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function dueInfo(item) {
+  if (item.cadence === "One-off") return { label: item.lastISO ? "Done" : "Not logged", color: item.lastISO ? "#2E7D52" : "#B11E2A", rel: item.lastISO ? "one-off" : "never logged", nextLabel: "—", urgent: !item.lastISO };
   const days = CADENCE_DAYS[item.cadence] || 30;
   if (!item.lastISO) return { label: "Not logged", color: "#B11E2A", rel: "never logged", nextLabel: "—", urgent: true };
   const last = new Date(item.lastISO + "T00:00:00");
@@ -2486,7 +2496,7 @@ function CheckinConfirm({ S, result, members, meId, go }) {
     </div>
   );
 }
-function Training({ S, role, plan, setPlan, sessions, setSessions, loadSessions, members, meId, checkIn, notify }) {
+function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const memberView = !isLeader(role);
   const today = new Date();
