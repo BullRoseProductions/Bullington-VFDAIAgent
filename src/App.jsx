@@ -2534,7 +2534,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     if (error) { notify({ kind: "error", title: "Couldn't add the training", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setPn(""); setPc("Monthly"); setPcolor(CATEGORY_COLORS[0]); setAddingPlan(false); loadPlans();
   }
-  function removePlan(id) { if (!window.confirm("Remove this training from the plan?")) return; setPlan((ps) => ps.filter((x) => x.id !== id)); setSessions((ss) => ss.map((s) => s.planId === id ? { ...s, planId: null } : s)); }
+  async function removePlan(id) {
+    const p = plan.find((x) => x.id === id);
+    if (!window.confirm(`Remove “${p?.name || "this training"}” from the training plan?`)) return;
+    const { error } = await supabase.from("training_plans").delete().eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove the training", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadPlans();
+  }
   function scheduleFor(p) {
     const info = dueInfo(p); setSpid(p.id); setStitle("");
     if (info.next) { const nd = info.next; setCur({ y: nd.getFullYear(), m: nd.getMonth() }); setSd(Math.min(nd.getDate(), new Date(nd.getFullYear(), nd.getMonth() + 1, 0).getDate())); }
