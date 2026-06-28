@@ -1365,6 +1365,7 @@ function DashboardCalendar({ S }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
+  const [filter, setFilter] = useState("all");
   const loadAll = () => {
     Promise.all([
       supabase.from("content_calendar").select("id, date, caption"),
@@ -1387,16 +1388,34 @@ function DashboardCalendar({ S }) {
   };
   useEffect(() => { loadAll(); }, []);
   const monthItems = items
-    .filter((it) => it.y === cur.y && it.m === cur.m)
+    .filter((it) => it.y === cur.y && it.m === cur.m && (filter === "all" || it.source === filter))
     .sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source]);   // training→funding→recruit→social; stable within source
+  const FILTERS = [
+    { label: "All", key: "all", color: "#54506B" },                       // neutral — NOT a source color
+    { label: "Training", key: "training", color: SOURCE_COLORS.training }, // blue
+    { label: "Recruitment", key: "recruit", color: SOURCE_COLORS.recruit }, // teal — key is "recruit"
+    { label: "Funding", key: "funding", color: SOURCE_COLORS.funding },   // amber
+    { label: "Social", key: "social", color: SOURCE_COLORS.social },      // red
+  ];
 
   return (
     <div>
       <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
+        {FILTERS.map((f) => {
+          const active = filter === f.key;
+          return (
+            <button key={f.key} onClick={() => setFilter(f.key)}
+              style={{ border: `1.5px solid ${f.color}`, background: active ? f.color : "#fff", color: active ? "#fff" : f.color, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
       <MonthCalendar
         cur={cur} setCur={setCur}
         items={monthItems}
-        renderChip={(it) => ({ color: it.color, label: it.label, title: it.label, tier: it.tier })}
+        renderChip={(it) => ({ color: it.color, label: it.label, title: it.label, ...(filter === "all" ? { tier: it.tier } : {}) })}
         todayColor="#211C2B"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         overflowIndicator
