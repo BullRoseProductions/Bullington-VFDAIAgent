@@ -218,7 +218,21 @@ export default function App() {
   }, [authEmail]);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
   const [trainingPlan, setTrainingPlan] = useState(TRAIN_PLAN_SEED);
-  const [trainingSessions, setTrainingSessions] = useState(trainSessionsSeed);
+  const [trainingSessions, setTrainingSessions] = useState([]);
+  const loadSessions = () => {
+    supabase.from("training_sessions")
+      .select("id, plan_id, title, date, done")
+      .then(({ data, error }) => {
+        if (error || !data) { setTrainingSessions([]); return; }
+        setTrainingSessions(
+          data.filter((r) => r.date).map((r) => {
+            const [yy, mm, dd] = r.date.split("-").map(Number);
+            return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, attendance: [] };
+          })
+        );
+      });
+  };
+  useEffect(() => { loadSessions(); }, []);
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
   function doCheckIn(sessionId, token, memberId) {
@@ -314,7 +328,7 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} members={members} meId={myMemberId} checkIn={doCheckIn} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
@@ -2178,8 +2192,8 @@ function CheckinConfirm({ S, result, members, meId, go }) {
     </div>
   );
 }
-function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId, checkIn }) {
-  const canManage = canAssign(role);
+function Training({ S, role, plan, setPlan, sessions, setSessions, loadSessions, members, meId, checkIn }) {
+  const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const memberView = !isLeader(role);
   const today = new Date();
   const me = members.find((m) => m.id === meId);
@@ -2214,17 +2228,34 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, members, meId
     if (info.next) { const nd = info.next; setCur({ y: nd.getFullYear(), m: nd.getMonth() }); setSd(Math.min(nd.getDate(), new Date(nd.getFullYear(), nd.getMonth() + 1, 0).getDate())); }
     setShowSess(true);
   }
-  function addSession() {
+  async function addSession() {
     const pItem = plan.find((p) => p.id === Number(spid));
     const title = stitle.trim() || pItem?.name || "Training session";
-    setSessions((ss) => [...ss, { id: Date.now(), planId: pItem ? pItem.id : null, title, y: cur.y, m: cur.m, d: Number(sd), done: false, attendance: [] }]);
-    setShowSess(false); setStitle("");
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    const { error } = await supabase.from("training_sessions").insert({
+      department_id: deptId,
+      plan_id: null,                                          // local number plan ids aren't DB uuids yet — deferred
+      title,
+      date: toISO(new Date(cur.y, cur.m, Number(sd))),
+      done: false,
+    });
+    if (error) { alert("Could not schedule the session: " + error.message); return; }
+    setShowSess(false); setStitle(""); loadSessions();
   }
-  function completeSession(s) {
-    setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, done: true } : x));
-    if (s.planId) { const iso = toISO(new Date(s.y, s.m, s.d)); setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p)); }
+  async function completeSession(s) {
+    const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
+    if (error) { alert("Could not update the session: " + error.message); return; }
+    if (s.planId) { const iso = toISO(new Date(s.y, s.m, s.d)); setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p)); }   // in-memory, deferred
+    loadSessions();
   }
-  function removeSession(id) { setSessions((ss) => ss.filter((x) => x.id !== id)); }
+  async function removeSession(id) {
+    const sess = sessions.find((x) => x.id === id);
+    if (!window.confirm(`Remove “${sess?.title || "this session"}” from the training calendar?`)) return;
+    const { error } = await supabase.from("training_sessions").delete().eq("id", id);
+    if (error) { alert("Could not remove the session: " + error.message); return; }
+    loadSessions();
+  }
 
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
 
