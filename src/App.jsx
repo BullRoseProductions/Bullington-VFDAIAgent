@@ -334,6 +334,9 @@ export default function App() {
             );
           })}
         </nav>
+        <button onClick={() => supabase.auth.signOut()} aria-label="Sign out" style={{ ...S.navItem, borderTop: "1px solid #2A2F35", marginTop: 6, paddingTop: 13 }}>
+          <LogOut size={18} /><span style={{ flex: 1, textAlign: "left" }}>Sign out</span>
+        </button>
         <div style={S.deptCard}>
           <div style={S.deptLabel}>DEPARTMENT</div>
           <div style={S.deptName}>North Hood Country VFD</div>
@@ -354,7 +357,6 @@ export default function App() {
                 </select>
               </>
             )}
-            <button style={S.logout} onClick={() => supabase.auth.signOut()} aria-label="Sign out"><LogOut size={16} /></button>
           </div>
         </header>
 

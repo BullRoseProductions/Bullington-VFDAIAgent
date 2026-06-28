@@ -29,17 +29,7 @@ function Root() {
 
   if (!session) return <Login />;
 
-  return (
-    <>
-      <button
-        onClick={() => supabase.auth.signOut()}
-        style={{ position: "fixed", top: 10, right: 10, zIndex: 9999, fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "1px solid #D9D5E2", background: "#fff", color: "#3A4750", cursor: "pointer" }}
-      >
-        Sign out
-      </button>
-      <App />
-    </>
-  );
+  return <App />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
