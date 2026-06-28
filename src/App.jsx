@@ -363,7 +363,7 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
@@ -2486,7 +2486,7 @@ function CheckinConfirm({ S, result, members, meId, go }) {
     </div>
   );
 }
-function Training({ S, role, plan, setPlan, sessions, setSessions, loadSessions, members, meId, checkIn }) {
+function Training({ S, role, plan, setPlan, sessions, setSessions, loadSessions, members, meId, checkIn, notify }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const memberView = !isLeader(role);
   const today = new Date();
@@ -2526,7 +2526,7 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, loadSessions,
     const pItem = plan.find((p) => p.id === Number(spid));
     const title = stitle.trim() || pItem?.name || "Training session";
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
     const { error } = await supabase.from("training_sessions").insert({
       department_id: deptId,
       plan_id: null,                                          // local number plan ids aren't DB uuids yet — deferred
@@ -2534,12 +2534,12 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, loadSessions,
       date: toISO(new Date(cur.y, cur.m, Number(sd))),
       done: false,
     });
-    if (error) { alert("Could not schedule the session: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setShowSess(false); setStitle(""); loadSessions();
   }
   async function completeSession(s) {
     const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
-    if (error) { alert("Could not update the session: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't update the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     if (s.planId) { const iso = toISO(new Date(s.y, s.m, s.d)); setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p)); }   // in-memory, deferred
     loadSessions();
   }
@@ -2547,7 +2547,7 @@ function Training({ S, role, plan, setPlan, sessions, setSessions, loadSessions,
     const sess = sessions.find((x) => x.id === id);
     if (!window.confirm(`Remove “${sess?.title || "this session"}” from the training calendar?`)) return;
     const { error } = await supabase.from("training_sessions").delete().eq("id", id);
-    if (error) { alert("Could not remove the session: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't remove the session", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadSessions();
   }
 
