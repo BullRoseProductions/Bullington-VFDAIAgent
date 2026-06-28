@@ -1337,9 +1337,9 @@ function FundingCalendar({ S, role, notify }) {
 
   async function addEvent() {
     const t = evTitle.trim();
-    if (!t) { alert("Give the event a title."); return; }
+    if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
     const { error } = await supabase.from("funding_events").insert({
       department_id: deptId,
       title: t,
@@ -1352,7 +1352,7 @@ function FundingCalendar({ S, role, notify }) {
   async function removeEvent(id, title) {
     if (!window.confirm(`Remove “${title}” from the funding calendar?`)) return;
     const { error } = await supabase.from("funding_events").delete().eq("id", id);
-    if (error) { alert("Could not remove the event: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't remove the event", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadItems();
   }
 
