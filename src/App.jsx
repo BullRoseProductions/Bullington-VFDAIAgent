@@ -340,7 +340,7 @@ export default function App() {
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} />}
-          {screen === "funding" && <Funding S={S} />}
+          {screen === "funding" && <Funding S={S} role={role} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
@@ -1255,6 +1255,91 @@ function RecruitmentCalendar({ S, role }) {
     </div>
   );
 }
+function FundingCalendar({ S, role }) {
+  const today = new Date();
+  const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [items, setItems] = useState([]);
+  const loadItems = () => {
+    supabase.from("funding_events")
+      .select("id, date, title, color, notes")
+      .then(({ data, error }) => {
+        if (error || !data) { setItems([]); return; }
+        setItems(
+          data.filter((r) => r.date).map((r) => {
+            const [yy, mm, dd] = r.date.split("-").map(Number);
+            return { id: r.id, y: yy, m: (mm || 1) - 1, d: dd, title: r.title, c: r.color, notes: r.notes || "" };
+          })
+        );
+      });
+  };
+  useEffect(() => { loadItems(); }, []);
+  const [show, setShow] = useState(false);
+  const [fd, setFd] = useState(today.getDate());
+  const [evTitle, setEvTitle] = useState("");
+  const [color, setColor] = useState(CATEGORY_COLORS[0]);
+
+  const dim = new Date(cur.y, cur.m + 1, 0).getDate();
+  const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
+  const canEdit = ["Board Member", "Department Admin", "Training Officer"].includes(role);
+
+  async function addEvent() {
+    const t = evTitle.trim();
+    if (!t) { alert("Give the event a title."); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    const { error } = await supabase.from("funding_events").insert({
+      department_id: deptId,
+      title: t,
+      date: toISO(new Date(cur.y, cur.m, Number(fd))),
+      color,
+    });
+    if (error) { alert("Could not add the event: " + error.message); return; }   // keep form open on error
+    setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); loadItems();
+  }
+  async function removeEvent(id, title) {
+    if (!window.confirm(`Remove “${title}” from the funding calendar?`)) return;
+    const { error } = await supabase.from("funding_events").delete().eq("id", id);
+    if (error) { alert("Could not remove the event: " + error.message); return; }
+    loadItems();
+  }
+
+  return (
+    <div>
+      {show && canEdit && (
+        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Title</span>
+            <input style={S.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Pancake breakfast at Station 20" /></label>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
+            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+              {CATEGORY_COLORS.map((col) => (
+                <button key={col} title={col} onClick={() => setColor(col)}
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+              ))}
+            </div>
+          </div>
+          <button style={S.primaryBtn} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+        </div>
+      )}
+
+      <MonthCalendar
+        cur={cur} setCur={setCur}
+        items={monthItems}
+        renderChip={(it) => ({ color: it.c, label: it.title, title: canEdit ? `${it.title} (tap to remove)` : it.title, onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
+        todayColor="#9A6B12"
+        monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+        headerExtra={canEdit ? (
+          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+        ) : null}
+      />
+      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+        {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
+      </div>
+    </div>
+  );
+}
 function Visibility({ S, brand, role }) {
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
   const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
@@ -1319,7 +1404,7 @@ const FUNDRAISER_IDEAS = [
   { title: "Bingo or game night", key: "bingo", p: "Recurring revenue if you can host it monthly." },
   { title: "Prize raffle", key: "raffle", p: "Strong earner — but check your state's raffle/gaming rules first." },
 ];
-function Funding({ S }) {
+function Funding({ S, role }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
@@ -1385,6 +1470,9 @@ function Funding({ S }) {
           );
         })}
       </div>
+
+      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
+      <FundingCalendar S={S} role={role} />
 
       <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}>
         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
