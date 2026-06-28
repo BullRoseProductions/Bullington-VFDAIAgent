@@ -372,7 +372,7 @@ export default function App() {
           {screen === "onboarding" && <Onboarding S={S} members={members} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} />}
-          {screen === "visibility" && <Visibility S={S} brand={brand} role={role} />}
+          {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} />}
@@ -1057,7 +1057,7 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
     </div>
   );
 }
-function ContentCalendar({ S, role }) {
+function ContentCalendar({ S, role, notify }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [posts, setPosts] = useState([]);
@@ -1113,7 +1113,7 @@ function ContentCalendar({ S, role }) {
     const cat = categories.find((c) => c.id === fi);
     if (!cat) return;   // guard: empty/unmatched categories
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
     const row = {
       department_id: deptId,
       date: toISO(new Date(cur.y, cur.m, Number(fd))),
@@ -1122,31 +1122,31 @@ function ContentCalendar({ S, role }) {
       color: cat.c,
     };
     const { error } = await supabase.from("content_calendar").insert(row);
-    if (error) { alert("Could not add the post: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't add the post", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setShow(false); setFt(""); loadPosts();
   }
   async function remove(id, t) {
     if (!window.confirm(`Remove “${t}” from the calendar?`)) return;
     const { error } = await supabase.from("content_calendar").delete().eq("id", id);
-    if (error) { alert("Could not remove the post: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't remove the post", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadPosts();
   }
   async function addCat() {
     const label = catLabel.trim();
-    if (!label) { alert("Give the category a label."); return; }
+    if (!label) { notify({ kind: "error", title: "Category needs a label", text: "Give the category a label before saving it." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
     const sortOrder = categories.reduce((mx, c) => Math.max(mx, c.sortOrder ?? 0), 0) + 1;
     const row = { department_id: deptId, label, color: catColor, default_text: catText.trim() || null, is_default: false, sort_order: sortOrder };
     const { data, error } = await supabase.from("post_categories").insert(row).select().single();
-    if (error || !data) { alert("Could not add the category: " + (error?.message ?? "unknown error")); return; }   // keep form open on error
+    if (error || !data) { notify({ kind: "error", title: "Couldn't add the category", text: "Something went wrong saving that. Please try again.", details: error?.message ?? "unknown error" }); return; }   // keep form open on error
     setShowCat(false); setCatLabel(""); setCatColor(CATEGORY_COLORS[0]); setCatText("");
     loadCategories(false);                                   // refresh chips; do NOT reset the form selection
   }
   async function deleteCat(cat) {
     if (!window.confirm(`Delete the “${cat.tag}” category? Posts already on the calendar keep their color and won't change.`)) return;
     const { error } = await supabase.from("post_categories").delete().eq("id", cat.id);
-    if (error) { alert("Could not delete the category: " + error.message); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't delete the category", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadCategories(false);                                   // NOTE: posts state is intentionally untouched here
   }
 
@@ -1458,7 +1458,7 @@ function DashboardCalendar({ S }) {
     </div>
   );
 }
-function Visibility({ S, brand, role }) {
+function Visibility({ S, brand, role, notify }) {
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
   const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
   async function draft() {
@@ -1471,7 +1471,7 @@ function Visibility({ S, brand, role }) {
     <div>
       <PageHead S={S} eyebrow="VISIBILITY" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week." />
       <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
-      <ContentCalendar S={S} role={role} />
+      <ContentCalendar S={S} role={role} notify={notify} />
 
       <div style={S.cardEyebrow}>IDEAS FOR THINGS TO MAKE</div>
       <IdeaGrid S={S} items={[
