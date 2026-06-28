@@ -251,10 +251,10 @@ export default function App() {
   const [trainingPlan, setTrainingPlan] = useState([]);
   const loadPlans = () => {
     supabase.from("training_plans")
-      .select("id, name, cadence, last_iso")
+      .select("id, name, cadence, last_iso, color")
       .then(({ data, error }) => {
         if (error || !data) { setTrainingPlan([]); return; }
-        setTrainingPlan(data.map((r) => ({ id: r.id, name: r.name, cadence: r.cadence, lastISO: r.last_iso })));
+        setTrainingPlan(data.map((r) => ({ id: r.id, name: r.name, cadence: r.cadence, lastISO: r.last_iso, color: r.color })));
       });
   };
   useEffect(() => { loadPlans(); }, []);
@@ -2434,7 +2434,7 @@ function Onboarding({ S, members }) {
 
 /* ---------------- Training Plan + Calendar ---------------- */
 const CADENCE_DAYS = { Weekly: 7, "Bi-weekly": 14, Monthly: 30, Quarterly: 90, "Semi-annual": 180, Annual: 365, Biennial: 730 };
-const CADENCES = ["Weekly", "Monthly", "Quarterly", "Semi-annual", "Annual", "Biennial"];
+const CADENCES = ["Weekly", "Bi-weekly", "Monthly", "Quarterly", "Semi-annual", "Annual", "One-off"];
 const TRAIN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function dueInfo(item) {
@@ -2503,7 +2503,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const me = members.find((m) => m.id === meId);
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [addingPlan, setAddingPlan] = useState(false);
-  const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly");
+  const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly"); const [pcolor, setPcolor] = useState(CATEGORY_COLORS[0]);
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
@@ -2525,7 +2525,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const ok = planView.length - over - soon;
 
   function logDone(id) { setPlan((ps) => ps.map((x) => x.id === id ? { ...x, lastISO: toISO(new Date()) } : x)); }
-  function addPlan() { if (!pn.trim()) return; setPlan((ps) => [...ps, { id: Date.now(), name: pn.trim(), cadence: pc, lastISO: null }]); setPn(""); setPc("Monthly"); setAddingPlan(false); }
+  async function addPlan() {
+    const name = pn.trim();
+    if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before adding it." }); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+    const { error } = await supabase.from("training_plans").insert({ department_id: deptId, name, cadence: pc, color: pcolor });
+    if (error) { notify({ kind: "error", title: "Couldn't add the training", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setPn(""); setPc("Monthly"); setPcolor(CATEGORY_COLORS[0]); setAddingPlan(false); loadPlans();
+  }
   function removePlan(id) { if (!window.confirm("Remove this training from the plan?")) return; setPlan((ps) => ps.filter((x) => x.id !== id)); setSessions((ss) => ss.map((s) => s.planId === id ? { ...s, planId: null } : s)); }
   function scheduleFor(p) {
     const info = dueInfo(p); setSpid(p.id); setStitle("");
@@ -2611,12 +2619,22 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+              {CATEGORY_COLORS.map((col) => (
+                <button key={col} title={col} onClick={() => setPcolor(col)}
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+              ))}
+            </div>
+          </div>
           <button style={S.primaryBtn} onClick={addPlan}><Plus size={15} /> Add to plan</button>
           <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingPlan(false)}>Cancel</button>
         </div>
       ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} /> Add a training</button>)}
       <div>
-        {planView.map(({ p, info }) => (
+        {planView.length === 0 ? (
+          <div style={{ ...S.opCard, fontSize: 13, color: "#6A7178" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
+        ) : planView.map(({ p, info }) => (
           <div key={p.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
             <GraduationCap size={15} color={info.color} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
