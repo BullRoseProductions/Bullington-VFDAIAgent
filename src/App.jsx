@@ -955,7 +955,12 @@ const POST_THEMES = [
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const CATEGORY_COLORS = ["#B11E2A", "#1F4E79", "#0E6B62", "#9A6B12", "#54506B", "#2E7D52", "#C15512", "#3A4A5A"];
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel }) {
+const TIER_STYLES = {
+  bar:  { fontSize: 10.5, fontWeight: 700, padding: "3px 6px", borderRadius: 5 },
+  pill: { fontSize: 9.5,  fontWeight: 600, padding: "2px 5px", borderRadius: 999 },
+  dot:  { fontSize: 9, fontWeight: 600, padding: "1px 5px 1px 4px", borderRadius: 999, display: "inline-flex", alignItems: "center", gap: 4 },
+};
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator }) {
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const firstDow = new Date(cur.y, cur.m, 1).getDay();
@@ -990,19 +995,29 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
       </div>
       <div style={st.dow}>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={st.dowc}>{d.toUpperCase()}</div>)}</div>
       <div style={st.grid}>
-        {cells.map((d, i) => (
-          <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
-            {d != null && (<>
-              <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
-              {items.filter((it) => it.d === d).slice(0, 3).map((it) => {
-                const c = renderChip(it);
-                return (
-                  <div key={it.id} style={{ ...st.chip, background: c.color, ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>{c.label}</div>
-                );
-              })}
-            </>)}
-          </div>
-        ))}
+        {cells.map((d, i) => {
+          const dayItems = d == null ? [] : items.filter((it) => it.d === d);
+          return (
+            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
+              {d != null && (<>
+                <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
+                {dayItems.slice(0, 3).map((it) => {
+                  const c = renderChip(it);
+                  const isDot = c.tier === "dot";
+                  return (
+                    <div key={it.id} style={{ ...st.chip, background: isDot ? "transparent" : c.color, ...(isDot ? { color: "#3A4750" } : null), ...(c.tier ? TIER_STYLES[c.tier] : null), ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>
+                      {isDot && <span style={{ width: 6, height: 6, borderRadius: 999, background: c.color, flexShrink: 0, display: "inline-block" }} />}
+                      {c.label}
+                    </div>
+                  );
+                })}
+                {overflowIndicator && dayItems.length > 3 && (
+                  <div style={{ fontSize: 9, color: "#8A8696", fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - 3} more</div>
+                )}
+              </>)}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1344,6 +1359,8 @@ function FundingCalendar({ S, role }) {
   );
 }
 const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12" };
+const SOURCE_RANK = { training: 0, funding: 1, recruit: 2, social: 3 };
+const SOURCE_TIER = { training: "bar", funding: "pill", recruit: "pill", social: "dot" };
 function DashboardCalendar({ S }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -1358,7 +1375,7 @@ function DashboardCalendar({ S }) {
       const mapRows = (res, source, labelOf) =>
         (res.data || []).filter((r) => r.date).map((r) => {        // null data (source error) → []
           const [yy, mm, dd] = r.date.split("-").map(Number);
-          return { source, id: `${source}-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: labelOf(r), color: SOURCE_COLORS[source] };
+          return { source, id: `${source}-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: labelOf(r), color: SOURCE_COLORS[source], tier: SOURCE_TIER[source] };
         });
       setItems([
         ...mapRows(social, "social", (r) => r.caption || ""),
@@ -1369,7 +1386,9 @@ function DashboardCalendar({ S }) {
     });
   };
   useEffect(() => { loadAll(); }, []);
-  const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
+  const monthItems = items
+    .filter((it) => it.y === cur.y && it.m === cur.m)
+    .sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source]);   // training→funding→recruit→social; stable within source
 
   return (
     <div>
@@ -1377,9 +1396,10 @@ function DashboardCalendar({ S }) {
       <MonthCalendar
         cur={cur} setCur={setCur}
         items={monthItems}
-        renderChip={(it) => ({ color: it.color, label: it.label, title: it.label })}
+        renderChip={(it) => ({ color: it.color, label: it.label, title: it.label, tier: it.tier })}
         todayColor="#211C2B"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+        overflowIndicator
       />
     </div>
   );
