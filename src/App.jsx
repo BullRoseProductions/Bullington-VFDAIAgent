@@ -990,16 +990,21 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
 function ContentCalendar({ S, role }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
-  const [posts, setPosts] = useState(() => {
-    const y = today.getFullYear(), m = today.getMonth();
-    const dim = new Date(y, m + 1, 0).getDate();
-    return [
-      { id: 1, y, m, d: Math.min(3, dim), ...POST_THEMES[0] },
-      { id: 2, y, m, d: Math.min(10, dim), ...POST_THEMES[4], t: "Smoke-alarm check reminder" },
-      { id: 3, y, m, d: Math.min(17, dim), ...POST_THEMES[2], t: "Tuesday drill clip" },
-      { id: 4, y, m, d: Math.min(24, dim), ...POST_THEMES[3], t: "Thank-you to our supporters" },
-    ];
-  });
+  const [posts, setPosts] = useState([]);
+  const loadPosts = () => {
+    supabase.from("content_calendar")
+      .select("id, date, theme, caption, color")
+      .then(({ data, error }) => {
+        if (error || !data) { setPosts([]); return; }
+        setPosts(
+          data.filter((r) => r.date).map((r) => {
+            const [yy, mm, dd] = r.date.split("-").map(Number);
+            return { id: r.id, y: yy, m: (mm || 1) - 1, d: dd, tag: r.theme, c: r.color, t: r.caption || "" };
+          })
+        );
+      });
+  };
+  useEffect(() => { loadPosts(); }, []);
   const [categories, setCategories] = useState(
     POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, t: th.t, isDefault: true, sortOrder: i }))
   );
@@ -1034,13 +1039,28 @@ function ContentCalendar({ S, role }) {
     const cat = categories.find((c) => c.id === catId);
     setFi(catId); setFt(cat ? cat.t : ""); setFd(Math.min(fd, dim)); setShow(true);
   }
-  function add() {
+  async function add() {
     const cat = categories.find((c) => c.id === fi);
     if (!cat) return;   // guard: empty/unmatched categories
-    setPosts((p) => [...p, { id: Date.now(), y: cur.y, m: cur.m, d: Number(fd), tag: cat.tag, c: cat.c, t: ft.trim() || cat.t }]);
-    setShow(false); setFt("");
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { alert("Couldn't determine your department. Try again."); return; }
+    const row = {
+      department_id: deptId,
+      date: toISO(new Date(cur.y, cur.m, Number(fd))),
+      theme: cat.tag,
+      caption: ft.trim() || cat.t,
+      color: cat.c,
+    };
+    const { error } = await supabase.from("content_calendar").insert(row);
+    if (error) { alert("Could not add the post: " + error.message); return; }
+    setShow(false); setFt(""); loadPosts();
   }
-  function remove(id, t) { if (window.confirm(`Remove “${t}” from the calendar?`)) setPosts((p) => p.filter((x) => x.id !== id)); }
+  async function remove(id, t) {
+    if (!window.confirm(`Remove “${t}” from the calendar?`)) return;
+    const { error } = await supabase.from("content_calendar").delete().eq("id", id);
+    if (error) { alert("Could not remove the post: " + error.message); return; }
+    loadPosts();
+  }
   async function addCat() {
     const label = catLabel.trim();
     if (!label) { alert("Give the category a label."); return; }
