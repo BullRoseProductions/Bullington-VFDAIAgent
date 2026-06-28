@@ -17,7 +17,7 @@ import { supabase } from "./supabaseClient";
 /*  Working title: THE DAYROOM  (name not final — easy to swap)        */
 /*  Volunteer Fire & EMS — Training, Recruitment & Operations          */
 /* ------------------------------------------------------------------ */
-const APP = "THE DAYROOM";
+const APP = "Before the Call";
 
 const ROLES = ["Project Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
 const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Training Officer"];
@@ -327,10 +327,6 @@ export default function App() {
       <aside className={`dr-side${drawer ? " open" : ""}`} style={S.sidebar}>
         <div style={S.brandRow}>
           <Logo />
-          <div>
-            <div style={S.brandName}>{APP}</div>
-            <div style={S.brandSub}>WORKING TITLE</div>
-          </div>
         </div>
         <nav style={S.nav}>
           {visibleNav.map((n) => {
@@ -3529,7 +3525,7 @@ function Disclaimer({ S, compact }) {
   return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}) }}><AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
 }
 function Logo() {
-  return <div style={{ width: 38, height: 38, borderRadius: 8, background: "#191C20", display: "grid", placeItems: "center", flexShrink: 0, border: "1.5px solid #B11E2A" }}><Flame size={20} color="#B11E2A" /></div>;
+  return <img src="/b4c-logo.png" alt="Before the Call" style={{ height: 34, width: "auto", flexShrink: 0, display: "block" }} />;
 }
 function Fonts() {
   return (
