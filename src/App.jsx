@@ -139,6 +139,36 @@ const NAV = [
 ];
 
 /* ================================================================== */
+function Notification({ S, kind, title, text, details, onClose }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const isErr = kind === "error";
+  const accent = isErr ? "#B11E2A" : "#2E7D52";                 // ENGINE red / success green — app palette
+  const Icon = isErr ? AlertTriangle : CheckCircle2;
+  return (
+    <div style={{ position: "fixed", top: 18, right: 18, zIndex: 60, width: "min(380px, calc(100vw - 36px))", background: "#fff", border: `1px solid ${accent}44`, borderLeft: `4px solid ${accent}`, borderRadius: 10, boxShadow: "0 8px 26px rgba(20,16,24,.16)", padding: "13px 14px", display: "flex", gap: 10, alignItems: "flex-start", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
+      <Icon size={18} color={accent} style={{ flexShrink: 0, marginTop: 1 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {isErr ? (<>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "#191C20" }}>{title}</div>
+          {text && <div style={{ fontSize: 13, color: "#3A4750", marginTop: 2 }}>{text}</div>}
+          {details && (<>
+            <button onClick={() => setShowDetails((v) => !v)} style={{ marginTop: 8, border: "none", background: "transparent", color: accent, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+              {showDetails ? "Hide details" : "Show details"}
+            </button>
+            {showDetails && (
+              <div style={{ marginTop: 6, padding: "8px 9px", background: "#F7F6FA", border: "1px solid #E7E5EE", borderRadius: 6, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, color: "#3A4750", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div>
+            )}
+          </>)}
+        </>) : (
+          <div style={{ fontWeight: 600, fontSize: 13.5, color: "#191C20" }}>{text || title}</div>
+        )}
+      </div>
+      <button onClick={onClose} title="Dismiss" aria-label="Dismiss" style={{ border: "none", background: "transparent", color: "#6A7178", cursor: "pointer", padding: 0, flexShrink: 0, display: "inline-flex" }}>
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
 export default function App() {
   const [role, setRole] = useState("Member");
   const [realRole, setRealRole] = useState("Member");
@@ -152,6 +182,7 @@ export default function App() {
   const [requests, setRequests] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [members, setMembers] = useState(MEMBERS);
+  const [toast, setToast] = useState(null);
   useEffect(() => {
     Promise.all([
       supabase.from("members_view").select("*"),
@@ -271,6 +302,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCheckin, identityChecked, myMemberId]);
   const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
+  const notify = (n) => setToast(n);
   const S = baseStyles();
 
   function go(k) { setScreen(k); setPacketId(null); setDrawer(false); }
@@ -281,6 +313,7 @@ export default function App() {
   return (
     <div style={S.app}>
       <Fonts />
+      {toast && <Notification S={S} kind={toast.kind} title={toast.title} text={toast.text} details={toast.details} onClose={() => setToast(null)} />}
       {drawer && <div style={S.scrim} onClick={() => setDrawer(false)} />}
       <aside className={`dr-side${drawer ? " open" : ""}`} style={S.sidebar}>
         <div style={S.brandRow}>
@@ -340,7 +373,7 @@ export default function App() {
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} />}
-          {screen === "funding" && <Funding S={S} role={role} />}
+          {screen === "funding" && <Funding S={S} role={role} notify={notify} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
@@ -1273,7 +1306,7 @@ function RecruitmentCalendar({ S, role }) {
     </div>
   );
 }
-function FundingCalendar({ S, role }) {
+function FundingCalendar({ S, role, notify }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
@@ -1311,7 +1344,7 @@ function FundingCalendar({ S, role }) {
       date: toISO(new Date(cur.y, cur.m, Number(fd))),
       color,
     });
-    if (error) { alert("Could not add the event: " + error.message); return; }   // keep form open on error
+    if (error) { notify({ kind: "error", title: "Couldn't add the event", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }   // keep form open on error
     setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); loadItems();
   }
   async function removeEvent(id, title) {
@@ -1487,7 +1520,7 @@ const FUNDRAISER_IDEAS = [
   { title: "Bingo or game night", key: "bingo", p: "Recurring revenue if you can host it monthly." },
   { title: "Prize raffle", key: "raffle", p: "Strong earner — but check your state's raffle/gaming rules first." },
 ];
-function Funding({ S, role }) {
+function Funding({ S, role, notify }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
@@ -1555,7 +1588,7 @@ function Funding({ S, role }) {
       </div>
 
       <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
-      <FundingCalendar S={S} role={role} />
+      <FundingCalendar S={S} role={role} notify={notify} />
 
       <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}>
         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
