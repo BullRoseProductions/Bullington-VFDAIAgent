@@ -2,7 +2,8 @@
 -- The Dayroom — Database Schema Reference
 -- Project: BullRoseProductions/Bullington-VFDAIAgent
 -- Supabase project: ifeptqnlucmvhlvadcpj
--- Refreshed: 2026-06-27 (adds the station-editable post category system)
+-- Refreshed: 2026-06-27 (adds DB-backed calendars: content_calendar posts +
+--   color, training_sessions writes, and the new recruitment_events table)
 -- =============================================================================
 --
 -- WHAT THIS IS
@@ -52,18 +53,28 @@
 --   - Posts on the calendar are denormalized (each post copies its category's
 --     color/label/text), so deleting a category never affects existing posts.
 --
+-- DB-BACKED CALENDARS (2026-06-27) — all use the same three-role write gate
+--   (Board Member / Department Admin / Training Officer; Project Admin EXCLUDED).
+--   - content_calendar: social posts (Visibility). Added a `color` column (post
+--     snapshots its category color). INSERT/UPDATE/DELETE for the three roles.
+--   - training_sessions: Training calendar. INSERT/UPDATE/DELETE for the three
+--     roles (this also unblocked the Training Officer, previously locked out).
+--     NOTE: plan_id sent NULL on insert for now — training_plans are still local
+--     number-id seeds, not DB uuids; real plan linkage waits for the plan feature.
+--   - recruitment_events: NEW table — the Recruitment page calendar (title, date,
+--     color, optional notes). Read = members; INSERT/UPDATE/DELETE = three roles.
+--   - Still to come: a funding/events calendar + a unified dashboard calendar.
+--
 -- KNOWN GAPS / FOLLOW-UPS
 --   - profiles : table exists but had no RLS policy in the capture — review
 --     before pilot.
---   - Calendar POSTS not yet persisted: content_calendar / events tables have
---     SELECT-only RLS and are not yet read/written by the app (the Visibility
---     posts and Training sessions still run on local/seed state). Categories ARE
---     now persisted (post_categories); posts are the next slice.
+--   - Attendance/QR (session_attendance) is unused — Training attendance is still
+--     in-memory; persisting it is a separate future slice.
 --   - members / cert_submissions write policies are leader-gated but NOT yet
 --     department-scoped — fine for one station; scope before a 2nd department.
 --   - The "Board/Dept Admin/Training Officer minus Project Admin" group is now
---     inlined in 3 post_categories policies. If reused again (e.g. calendar edit
---     permissions), consider a can_edit_calendars() helper to define it once.
+--     inlined across many policies (post_categories + all three calendars). If
+--     reused again, consider a can_edit_calendars() helper to define it once.
 -- =============================================================================
 
 
@@ -137,7 +148,8 @@ CREATE TABLE public.content_calendar (
   theme text,
   caption text,
   status text DEFAULT 'planned'::text,
-  created_at timestamp with time zone NOT NULL DEFAULT now()
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  color text                          -- snapshot of the post's category color (denormalized; survives category deletion)
 );
 
 CREATE TABLE public.departments (
@@ -292,6 +304,18 @@ CREATE TABLE public.profiles (
   member_id uuid,
   access text NOT NULL DEFAULT 'Member'::text,
   email text,
+  created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
+-- Recruitment-drive calendar events (the Recruitment page calendar).
+-- Simple by design: title + date + color (+ notes column, not yet surfaced in UI).
+CREATE TABLE public.recruitment_events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  department_id uuid NOT NULL,
+  title text NOT NULL,
+  date date NOT NULL,
+  color text NOT NULL DEFAULT '#1F4E79'::text,
+  notes text,
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
@@ -594,6 +618,7 @@ ALTER TABLE public.member_notes        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.members             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.onboarding_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_categories     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.recruitment_events  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_attendance  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.training_plans      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.training_sessions   ENABLE ROW LEVEL SECURITY;
@@ -722,6 +747,67 @@ CREATE POLICY "leaders update post_categories" ON public.post_categories FOR UPD
 
 CREATE POLICY "leaders delete own post_categories" ON public.post_categories FOR DELETE TO authenticated
   USING (((department_id = my_department_id()) AND (is_default = false) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+-- --- Calendar writes (the three-role gate: Board Member / Department Admin /
+-- --- Training Officer; Project Admin excluded — they're platform support).
+-- --- content_calendar = social posts; training_sessions; recruitment_events.
+
+CREATE POLICY "leaders write content_calendar" ON public.content_calendar FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders update content_calendar" ON public.content_calendar FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))))
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders delete content_calendar" ON public.content_calendar FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders write training_sessions" ON public.training_sessions FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders update training_sessions" ON public.training_sessions FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))))
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders delete training_sessions" ON public.training_sessions FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "members read recruitment_events" ON public.recruitment_events FOR SELECT TO authenticated
+  USING ((department_id = my_department_id()));
+
+CREATE POLICY "leaders write recruitment_events" ON public.recruitment_events FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders update recruitment_events" ON public.recruitment_events FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))))
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "leaders delete recruitment_events" ON public.recruitment_events FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
      FROM members
     WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
 
