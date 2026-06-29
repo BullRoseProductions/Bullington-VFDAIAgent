@@ -935,6 +935,7 @@ function Phase({ S, n, weeks, title, items, accent }) {
 /* ---------------- Station Documents (upload + create) ---------------- */
 function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
+  const canManageDocs = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   function loadDocs() {
@@ -1033,7 +1034,7 @@ function Documents({ S, role, notify, uploaderName }) {
     <div>
       <PageHead S={S} eyebrow="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place" sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."} />
 
-      {leader && (<>
+      {canManageDocs && (<>
         <div style={S.cardEyebrow}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
         <label style={S.docDrop}>
           <Upload size={22} color="#54506B" />
@@ -1063,7 +1064,7 @@ function Documents({ S, role, notify, uploaderName }) {
       <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
       {!docsLoading && docs.length === 0 ? (
         <div style={S.empty}>
-          {leader
+          {canManageDocs
             ? "No documents yet — upload your first above."
             : "No documents have been added yet."}
         </div>
