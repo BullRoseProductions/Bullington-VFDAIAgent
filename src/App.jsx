@@ -939,12 +939,12 @@ function Documents({ S, role, notify, uploaderName }) {
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   function loadDocs() {
-    supabase
+    return supabase
       .from("documents")
       .select("id, name, type, storage_path")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
-        if (error || !data) { setDocs([]); setDocsLoading(false); return; }
+        if (error || !data) { setDocsLoading(false); return; }   // leave existing docs in place on a flaky read
         setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path })));
         setDocsLoading(false);
       });
@@ -953,40 +953,51 @@ function Documents({ S, role, notify, uploaderName }) {
   const [kind, setKind] = useState("SOP / SOG");
   const [desc, setDesc] = useState("A standard operating guideline for responding to a structure fire with a single engine plus mutual aid.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
-  async function onFiles(e) {
-    const files = Array.from(e.target.files || []);
+  async function uploadFiles(files) {
     if (!files.length) return;
-    const file = files[0];
 
-    // resolve department id (same RPC pattern as addCat)
+    // resolve department id ONCE, before the loop (same RPC pattern as addCat)
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) {
       notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." });
       return;
     }
 
-    // collision-safe path: {deptId}/{timestamp}-{filename}
-    const path = `${deptId}/${Date.now()}-${file.name}`;
-
-    // 1) upload the file bytes to the private bucket
-    const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
-    if (upErr) {
-      notify({ kind: "error", title: "Upload failed", text: "The file couldn't be uploaded.", details: upErr.message });
-      return;
+    let okCount = 0;
+    const failed = [];
+    let lastErr = "";
+    const added = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // collision-proof path: {deptId}/{timestamp}-{index}-{filename}
+      const path = `${deptId}/${Date.now()}-${i}-${file.name}`;
+      // 1) upload the file bytes to the private bucket
+      const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
+      if (upErr) { failed.push(file.name); lastErr = upErr.message; continue; }
+      // 2) write the metadata row
+      const row = { department_id: deptId, name: file.name, type: "Uploaded", storage_path: path, uploaded_by: uploaderName };
+      const { data: docData, error: docErr } = await supabase.from("documents").insert(row).select().single();
+      if (docErr || !docData) { failed.push(file.name); lastErr = docErr?.message ?? "unknown error"; continue; }
+      // confirmed-committed row — map to loadDocs's exact shape for an optimistic prepend
+      added.push({ id: docData.id, name: docData.name, type: docData.type, storage_path: docData.storage_path });
+      okCount++;
     }
 
-    // 2) write the metadata row
-    const row = { department_id: deptId, name: file.name, type: "Uploaded", storage_path: path, uploaded_by: uploaderName };
-    const { data: docData, error: docErr } = await supabase.from("documents").insert(row).select().single();
-    if (docErr || !docData) {
-      notify({ kind: "error", title: "Couldn't save document", text: "The file uploaded but its record couldn't be saved.", details: docErr?.message ?? "unknown error" });
-      return;
+    // 3) show the just-inserted rows instantly (already committed), then reconcile with DB truth
+    if (added.length) setDocs((d) => [...added, ...d]);
+    await loadDocs();   // non-destructive: a flaky read leaves the optimistic rows in place
+    if (failed.length === 0) {
+      notify({ kind: "success", title: "Documents uploaded", text: `${okCount} document${okCount === 1 ? "" : "s"} uploaded.` });
+    } else if (okCount > 0) {
+      notify({ kind: "error", title: "Some uploads failed", text: `${okCount} uploaded, ${failed.length} couldn't be added: ${failed.join(", ")}.` });
+    } else {
+      notify({ kind: "error", title: "Couldn't upload", text: "None of your documents could be uploaded.", details: lastErr });
     }
-
-    // 3) show it immediately + success toast
-    loadDocs();
-    notify({ kind: "success", title: "Document uploaded", text: `"${file.name}" was added.` });
-    e.target.value = "";
+  }
+  async function onFiles(e) {
+    const input = e.target;
+    await uploadFiles(Array.from(input.files || []));
+    input.value = "";   // reset unconditionally so re-selecting the same file(s) refires onChange
   }
   async function openDoc(item) {
     if (!item?.storage_path) return;
@@ -1036,7 +1047,9 @@ function Documents({ S, role, notify, uploaderName }) {
 
       {canManageDocs && (<>
         <div style={S.cardEyebrow}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
-        <label style={S.docDrop}>
+        <label style={S.docDrop}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); uploadFiles(Array.from(e.dataTransfer.files || [])); }}>
           <Upload size={22} color="#54506B" />
           <div style={S.docDropText}>Drop files here or <span style={{ color: "#1F4E79", fontWeight: 600 }}>browse</span></div>
           <div style={S.docDropSub}>SOPs, SOGs, guidelines, agreements — PDF, Word, or images</div>
