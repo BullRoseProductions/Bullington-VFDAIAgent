@@ -19,6 +19,27 @@ import { supabase } from "./supabaseClient";
 /* ------------------------------------------------------------------ */
 const APP = "Before the Call";
 
+/* ---------------- FIRE-LUXURY palette (shared; rest of app adopts later) ---------------- */
+const FIRE = {
+  pageBg: "radial-gradient(130% 100% at 100% 0%, #1A1217 0%, #0E1014 42%, #0A0B0E 100%)",
+  sidebar: "#0A0C0F",
+  card: "#13161B",
+  hairline: "rgba(255,255,255,.05)",
+  cardShadow: "0 10px 30px rgba(0,0,0,.4)",
+  cardRadius: 16,
+  textPrimary: "#F7F8FA",
+  textSecondary: "#B6BDC8",
+  textMuted: "#7E8794",
+  textMuted2: "#9AA1AC",
+  red: "#C8323A",          // active-nav hairline, today marker, kicker labels
+  redBright: "#E5484D",    // tiny icon accents only
+  green: "#3FB860",
+  greenText: "#76C98D",
+  amberText: "#D6A95E",
+  redText: "#E58A90",
+  track: "rgba(255,255,255,.06)",
+};
+
 const ROLES = ["Project Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
 const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Training Officer"];
 const isLeader = (role) => LEADERSHIP.includes(role);
@@ -2691,6 +2712,152 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
 
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
+
+  // ============================ MEMBER VIEW (presentational reskin) ============================
+  // Reuses existing reads only (sessions/plan/members/monthSessions, dueInfo helpers). No queries,
+  // no attendance logic, no MonthCalendar internals touched. Leader return below is unchanged.
+  if (memberView) {
+    const DISPLAY = "'Oswald', system-ui, sans-serif";
+    const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
+    const since90 = new Date(t0); since90.setDate(since90.getDate() - 90);
+    const inWindow = (s) => { const d = sessDate(s); return d >= since90 && d <= today; };
+    const catOf = (s) => plan.find((p) => String(p.id) === String(s.planId));
+    // DATA HONESTY: a session only "has a record" once attendance was actually taken (non-empty).
+    // Attendance doesn't persist yet, so today every array is empty → these fall to clean empty states.
+    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s));
+    const totalRecorded = recorded.length;
+    const attendedCount = recorded.filter((s) => (s.attendance || []).includes(me?.id)).length;
+    const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
+    const missed = recorded.filter((s) => !(s.attendance || []).includes(me?.id)).sort((a, b) => sessDate(b) - sessDate(a));
+    const upcoming = sessions.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+
+    // IDENTICAL chip logic to the leader calendar — colors/layout unchanged (do not alter).
+    const renderChip = (s) => {
+      const cat = plan.find((p) => String(p.id) === String(s.planId));
+      const base = cat?.color || "#1F4E79";
+      const mix = (hex, tt) => {
+        const h = hex.replace("#", "");
+        const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+        const tr = 42, tg = 46, tb = 53; // #2A2E35
+        const to2 = (n) => n.toString(16).padStart(2, "0");
+        return "#" + to2(Math.round(r + (tr - r) * tt)) + to2(Math.round(g + (tg - g) * tt)) + to2(Math.round(b + (tb - b) * tt));
+      };
+      const color = s.done ? mix(base, 0.45) : base;
+      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
+    };
+
+    const card = { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow, padding: 18, marginBottom: 14 };
+    const kick = { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 };
+    const num = { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" };
+
+    return (
+      <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+        {/* 1 — header */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={kick}>MY TRAINING</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your training calendar</h1>
+          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>See what's scheduled, what you've missed, and where your attendance stands.</div>
+        </div>
+
+        {/* 2 — attendance progress */}
+        <div style={card}>
+          <div style={kick}>MY ATTENDANCE · LAST 90 DAYS</div>
+          {totalRecorded === 0 ? (
+            <div style={{ marginTop: 12, fontSize: 13.5, color: FIRE.textMuted }}>No sessions recorded yet.</div>
+          ) : (<>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "12px 0 8px" }}>
+              <span style={{ fontSize: 13.5, color: FIRE.textSecondary, ...num }}>{attendedCount} of {totalRecorded} sessions attended</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.greenText, ...num }}>{pct}%</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 999, background: FIRE.track, overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", background: FIRE.green, borderRadius: 999 }} />
+            </div>
+          </>)}
+        </div>
+
+        {/* 3 — missed / catch up (hidden entirely when no real missed records) */}
+        {missed.length > 0 && (
+          <div style={card}>
+            <div style={kick}>TRAINING YOU MISSED · CATCH UP</div>
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
+              {missed.map((s) => { const cat = catOf(s); return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || "#1F4E79", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>Missed {fmtSess(s)} · {cat?.name || "One-off"}</div>
+                  </div>
+                </div>
+              ); })}
+            </div>
+          </div>
+        )}
+
+        {/* 4 — training calendar (MonthCalendar + chip logic unchanged; deliberate light inset in dark card) */}
+        <div style={card}>
+          <div style={{ ...kick, marginBottom: 12 }}>TRAINING CALENDAR</div>
+          <div style={{ marginBottom: -10 }}>{/* cancels MonthCalendar's built-in 10px bottom margin → even inset framing */}
+            <MonthCalendar
+              cur={cur} setCur={setCur}
+              items={monthSessions}
+              renderChip={renderChip}
+              todayColor="#C8323A"
+              monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
+            />
+          </div>
+        </div>
+
+        {/* 5 — this month's sessions */}
+        <div style={card}>
+          <div style={kick}>THIS MONTH'S SESSIONS</div>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
+            {monthSessions.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div>
+            ) : monthSessions.map((s) => {
+              const cat = catOf(s); const att = s.attendance || []; const hasRecord = att.length > 0; const present = att.includes(me?.id);
+              return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                  <CalendarCheck size={15} color={cat?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d} · {s.planId ? "counts toward the plan" : "one-off"}</div>
+                  </div>
+                  {!s.done ? (
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em" }}>Scheduled</span>
+                  ) : hasRecord ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
+                      <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: present ? FIRE.greenText : FIRE.redText }}>{present ? "You came" : "You missed"}</span>
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 6 — upcoming / prep ahead (no "Open plan" control — materials are greenfield) */}
+        <div style={card}>
+          <div style={kick}>UPCOMING · PREP AHEAD</div>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
+            {upcoming.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing on the calendar yet.</div>
+            ) : upcoming.map((s) => { const cat = catOf(s); return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || "#1F4E79", flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{fmtSess(s)} · {cat?.name || "One-off"}</div>
+                </div>
+              </div>
+            ); })}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
