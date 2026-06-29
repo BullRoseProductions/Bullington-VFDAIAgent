@@ -936,14 +936,16 @@ function Phase({ S, n, weeks, title, items, accent }) {
 function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
   const [docs, setDocs] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(true);
   function loadDocs() {
     supabase
       .from("documents")
       .select("id, name, type, storage_path")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
-        if (error || !data) { setDocs([]); return; }
+        if (error || !data) { setDocs([]); setDocsLoading(false); return; }
         setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path })));
+        setDocsLoading(false);
       });
   }
   useEffect(() => { loadDocs(); }, []);
@@ -1059,7 +1061,15 @@ function Documents({ S, role, notify, uploaderName }) {
       </>)}
 
       <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
-      <ResourceLibrary S={S} verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
+      {!docsLoading && docs.length === 0 ? (
+        <div style={S.empty}>
+          {leader
+            ? "No documents yet — upload your first above."
+            : "No documents have been added yet."}
+        </div>
+      ) : (
+        <ResourceLibrary S={S} verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
+      )}
     </div>
   );
 }
