@@ -280,32 +280,43 @@ export default function App() {
   };
   useEffect(() => { loadPlans(); }, []);
   const [trainingSessions, setTrainingSessions] = useState([]);
-  const loadSessions = () => {
-    supabase.from("training_sessions")
-      .select("id, plan_id, title, date, done")
-      .then(({ data, error }) => {
-        if (error || !data) { setTrainingSessions([]); return; }
-        setTrainingSessions(
-          data.filter((r) => r.date).map((r) => {
-            const [yy, mm, dd] = r.date.split("-").map(Number);
-            return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, attendance: [] };
-          })
-        );
-      });
+  const loadSessions = async () => {
+    const [{ data: srows, error: sErr }, { data: arows }] = await Promise.all([
+      supabase.from("training_sessions").select("id, plan_id, title, date, done"),
+      supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
+    ]);
+    if (sErr || !srows) { setTrainingSessions([]); return; }   // sessions are source of truth; attendance read is non-fatal
+    const byS = {};
+    (arows || []).forEach((a) => {
+      const e = byS[a.session_id] || (byS[a.session_id] = { attendance: [], times: {} });
+      e.attendance.push(a.member_id);
+      if (a.checked_in_at) e.times[a.member_id] = new Date(a.checked_in_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    });
+    setTrainingSessions(
+      srows.filter((r) => r.date).map((r) => {
+        const [yy, mm, dd] = r.date.split("-").map(Number);
+        const ae = byS[r.id] || { attendance: [], times: {} };
+        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, attendance: ae.attendance, times: ae.times };
+      })
+    );
   };
   useEffect(() => { loadSessions(); }, []);
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
-  function doCheckIn(sessionId, token, memberId) {
-    const s = trainingSessions.find((x) => x.id === Number(sessionId));
+  async function doCheckIn(sessionId, token, memberId) {
+    const s = trainingSessions.find((x) => String(x.id) === String(sessionId));   // ids are uuids (was Number() -> NaN)
     if (!s) return { ok: false, reason: "That training session wasn't found." };
     const sg = s.signin;
     if (!sg || !sg.open) return { ok: false, reason: "Sign-in is closed for this session.", title: s.title };
     if (sg.token !== token) return { ok: false, reason: "This code has expired — ask the training officer for the current one.", title: s.title };
-    const att = s.attendance || [];
-    if (att.includes(memberId)) return { ok: true, already: true, at: (s.times || {})[memberId], title: s.title };
+    if (s.done) return { ok: false, reason: "This session is complete — attendance is locked.", title: s.title };
+    if ((s.attendance || []).includes(memberId)) return { ok: true, already: true, at: (s.times || {})[memberId], title: s.title };
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) return { ok: false, reason: "We couldn't determine your department, so no attendance was recorded.", title: s.title };
+    const { error } = await supabase.from("session_attendance").insert({ department_id: deptId, session_id: s.id, member_id: memberId, checked_in_at: new Date().toISOString() });
+    if (error) return { ok: false, reason: "We couldn't record your sign-in — please see your training officer.", title: s.title };
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    setTrainingSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), memberId], times: { ...(x.times || {}), [memberId]: now } } : x));
+    setTrainingSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), memberId], times: { ...(x.times || {}), [memberId]: now } } : x));   // optimistic; preserves in-memory signin
     return { ok: true, at: now, title: s.title };
   }
   // Capture a QR/deep-link check-in on mount; don't act until we know who's signed in.
@@ -326,7 +337,7 @@ export default function App() {
     if (myMemberId == null) {
       setCheckinResult({ ok: false, reason: "We couldn't match your sign-in to a member record, so no attendance was recorded. Please see your training officer." });
     } else {
-      setCheckinResult(doCheckIn(pendingCheckin.cid, pendingCheckin.token, myMemberId));
+      doCheckIn(pendingCheckin.cid, pendingCheckin.token, myMemberId).then(setCheckinResult);
     }
     setPendingCheckin(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2644,7 +2655,22 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState("");
-  function toggleAttend(sid, mid) { setSessions((ss) => ss.map((s) => { if (s.id !== sid) return s; const a = s.attendance || []; return { ...s, attendance: a.includes(mid) ? a.filter((x) => x !== mid) : [...a, mid] }; })); }
+  async function toggleAttend(s, mid) {
+    if (s.done) return;   // officer lock (UI also hides the control once done)
+    const present = (s.attendance || []).includes(mid);
+    if (present) {
+      const { error } = await supabase.from("session_attendance").delete().eq("session_id", s.id).eq("member_id", mid);
+      if (error) { notify({ kind: "error", title: "Couldn't update attendance", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+      setSessions((ss) => ss.map((x) => { if (x.id !== s.id) return x; const t = { ...(x.times || {}) }; delete t[mid]; return { ...x, attendance: (x.attendance || []).filter((y) => y !== mid), times: t }; }));
+    } else {
+      const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+      if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+      const { error } = await supabase.from("session_attendance").insert({ department_id: deptId, session_id: s.id, member_id: mid, checked_in_at: new Date().toISOString() });
+      if (error) { notify({ kind: "error", title: "Couldn't update attendance", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), mid], times: { ...(x.times || {}), [mid]: now } } : x));
+    }
+  }
 
   const rank = (l) => (l === "Overdue" || l === "Not logged") ? 0 : l === "Due soon" ? 1 : 2;
   const planView = plan.map((p) => ({ p, info: dueInfo(p) })).sort((a, b) => rank(a.info.label) - rank(b.info.label));
@@ -2700,8 +2726,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   async function completeSession(s) {
     const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
     if (error) { notify({ kind: "error", title: "Couldn't update the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    if (s.planId) { const iso = toISO(new Date(s.y, s.m, s.d)); setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p)); }   // in-memory, deferred
+    // plan-linked -> reset the overdue clock (SAME mechanism as logDone: today), now PERSISTED. One-offs reset nothing.
+    if (s.planId) {
+      const iso = toISO(new Date());
+      const { error: pErr } = await supabase.from("training_plans").update({ last_iso: iso }).eq("id", s.planId);
+      if (pErr) notify({ kind: "error", title: "Session complete — clock not reset", text: "The session was saved, but the training clock couldn't be reset.", details: pErr.message });
+      else setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p));
+    }
+    setOpenAtt(s.id);   // (a) open the attendance roster in the same step
     loadSessions();
+    loadPlans();
   }
   async function removeSession(id) {
     const sess = sessions.find((x) => x.id === id);
@@ -3060,19 +3094,19 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
                     <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
-                    {canManage && <button style={{ ...Lbtn, ...(s.signin?.open ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signin?.open ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signin?.open ? " · open" : ""}</button>}
+                    {canManage && !s.done && <button style={{ ...Lbtn, ...(s.signin?.open ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signin?.open ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signin?.open ? " · open" : ""}</button>}
                     {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
                     {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
                   {open && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
-                      <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? "Tap a name to mark who attended." : "Who attended this session."}</div>
+                      <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked." : "Tap a name to mark who attended.") : "Who attended this session."}</div>
                       {members.map((m) => {
                         const present = att.includes(m.id);
                         return (
                           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
-                            {canManage
-                              ? <button onClick={() => toggleAttend(s.id, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#76C98D" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
+                            {canManage && !s.done
+                              ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#76C98D" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
                               : (present ? <CheckCircle2 size={18} color="#76C98D" /> : <X size={16} color="#E58A90" />)}
                             <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}</span>
                             <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#76C98D" : "#E58A90" }}>{present ? "PRESENT" : "ABSENT"}</span>
@@ -3081,7 +3115,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       })}
                     </div>
                   )}
-                  {canManage && openSignin === s.id && (
+                  {canManage && !s.done && openSignin === s.id && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
                       {!s.signin?.open ? (
                         <div>
