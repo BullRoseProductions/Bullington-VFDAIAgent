@@ -2553,13 +2553,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     setShowSess(true);
   }
   async function addSession() {
-    const pItem = plan.find((p) => p.id === Number(spid));
+    const pItem = plan.find((p) => String(p.id) === String(spid));
     const title = stitle.trim() || pItem?.name || "Training session";
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
     const { error } = await supabase.from("training_sessions").insert({
       department_id: deptId,
-      plan_id: null,                                          // local number plan ids aren't DB uuids yet — deferred
+      plan_id: pItem ? pItem.id : null,                       // link the session to its training category (null = one-off)
       title,
       date: toISO(new Date(cur.y, cur.m, Number(sd))),
       done: false,
