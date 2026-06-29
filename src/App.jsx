@@ -281,22 +281,25 @@ export default function App() {
   useEffect(() => { loadPlans(); }, []);
   const [trainingSessions, setTrainingSessions] = useState([]);
   const loadSessions = async () => {
-    const [{ data: srows, error: sErr }, { data: arows }] = await Promise.all([
+    const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
       supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
+      supabase.from("session_plans").select("id, title, storage_path, session_id").order("created_at", { ascending: false }),
     ]);
-    if (sErr || !srows) { setTrainingSessions([]); return; }   // sessions are source of truth; attendance read is non-fatal
+    if (sErr || !srows) { setTrainingSessions([]); return; }   // sessions are source of truth; attendance/plan reads are non-fatal
     const byS = {};
     (arows || []).forEach((a) => {
       const e = byS[a.session_id] || (byS[a.session_id] = { attendance: [], times: {} });
       e.attendance.push(a.member_id);
       if (a.checked_in_at) e.times[a.member_id] = new Date(a.checked_in_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     });
+    const planByS = {};   // most-recent plan per session wins (query ordered desc; no UNIQUE on session_id)
+    (prows || []).forEach((p) => { if (p.session_id && !planByS[p.session_id]) planByS[p.session_id] = { id: p.id, title: p.title, storage_path: p.storage_path, session_id: p.session_id }; });
     setTrainingSessions(
       srows.filter((r) => r.date).map((r) => {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
-        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times };
+        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times, plan: planByS[r.id] || null };
       })
     );
   };
@@ -2752,6 +2755,40 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     loadSessions();
   }
 
+  async function attachPlan(s, file) {
+    if (!file) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+    // 1) upload the new file FIRST (so the old plan stays intact if upload fails)
+    const path = `${deptId}/plans/${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
+    if (upErr) { notify({ kind: "error", title: "Couldn't upload the plan", text: "Something went wrong uploading that. Please try again.", details: upErr.message }); return; }
+    // 2) REPLACE: clear any existing plan(s) for this session — storage-first, then rows (like deleteDoc)
+    const { data: olds } = await supabase.from("session_plans").select("id, storage_path").eq("session_id", s.id);
+    const oldPaths = (olds || []).map((p) => p.storage_path).filter(Boolean);
+    if (oldPaths.length) await supabase.storage.from("station-documents").remove(oldPaths);
+    if (olds && olds.length) await supabase.from("session_plans").delete().eq("session_id", s.id);
+    // 3) insert the new plan
+    const { error: insErr } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: s.id, title: file.name, source: "upload", storage_path: path, created_by: me?.name || "Unknown" });
+    if (insErr) { notify({ kind: "error", title: "Couldn't attach the plan", text: "The file uploaded but couldn't be attached. Please try again.", details: insErr.message }); loadSessions(); return; }
+    notify({ kind: "success", title: "Plan attached", text: `"${file.name}" is now the plan for ${s.title}.` });
+    loadSessions();
+  }
+  async function openPlan(plan) {
+    if (!plan?.storage_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
+    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
+  async function detachPlan(plan) {
+    if (!plan?.id) return;
+    if (!window.confirm(`Remove the attached plan “${plan.title}”?`)) return;
+    if (plan.storage_path) { const { error: rmErr } = await supabase.storage.from("station-documents").remove([plan.storage_path]); if (rmErr) { notify({ kind: "error", title: "Couldn't remove the plan", text: "Please try again.", details: rmErr.message }); return; } }
+    const { error } = await supabase.from("session_plans").delete().eq("id", plan.id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove the plan", text: "The file was removed but its record wasn't.", details: error.message }); }
+    loadSessions();
+  }
+
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
 
   // ============================ MEMBER VIEW (presentational reskin) ============================
@@ -2873,6 +2910,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   ) : (
                     <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
                   )}
+                  {s.plan && <button onClick={() => openPlan(s.plan)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
                 </div>
               );
             })}
@@ -2892,6 +2930,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
                   <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{fmtSess(s)} · {cat?.name || "One-off"}</div>
                 </div>
+                {s.plan && <button onClick={() => openPlan(s.plan)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
               </div>
             ); })}
           </div>
@@ -2960,12 +2999,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         {/* Card 2 — training plan (upload + AI draft; neither built → honest "Coming soon") */}
         <div style={Lcard}>
           <div style={Lkick}>TRAINING PLAN</div>
-          <div onClick={() => comingSoon("Uploading a training plan")} style={{ marginTop: 12, border: "1px dashed rgba(255,255,255,.14)", borderRadius: 10, padding: "16px 12px", textAlign: "center", cursor: "pointer", background: "rgba(255,255,255,.02)" }}>
-            <Upload size={18} color="#9AA1AC" />
-            <div style={{ fontSize: 12.5, color: "#B6BDC8", marginTop: 5 }}>Upload a plan or syllabus</div>
-          </div>
+          <div style={{ marginTop: 12, fontSize: 12.5, color: "#B6BDC8", lineHeight: 1.5 }}>Attach a plan or syllabus to a specific session — use <b style={{ color: "#F0F2F5" }}>Attach plan</b> on any session in the calendar below.</div>
           <button onClick={() => comingSoon("Draft with AI")} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> Draft with AI</button>
-          <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>Coming soon — not yet available.</div>
+          <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>AI plan drafting — coming soon.</div>
         </div>
 
         {/* Card 3 — next session (pure read of existing sessions) */}
@@ -3102,6 +3138,12 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
                     <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
                     {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                    {canManage && (s.plan
+                      ? <span style={{ display: "inline-flex", gap: 4 }}>
+                          <button style={Lbtn} onClick={() => openPlan(s.plan)}><FileText size={14} color={LbtnIcon} /> Open plan</button>
+                          <button title="Remove plan" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => detachPlan(s.plan)}><X size={14} color="#C8606A" /></button>
+                        </span>
+                      : <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> Attach plan<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; attachPlan(s, f); }} /></label>)}
                     {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
                     {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
