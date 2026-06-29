@@ -282,7 +282,7 @@ export default function App() {
   const [trainingSessions, setTrainingSessions] = useState([]);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, done"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
     ]);
     if (sErr || !srows) { setTrainingSessions([]); return; }   // sessions are source of truth; attendance read is non-fatal
@@ -296,28 +296,22 @@ export default function App() {
       srows.filter((r) => r.date).map((r) => {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
-        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, attendance: ae.attendance, times: ae.times };
+        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times };
       })
     );
   };
   useEffect(() => { loadSessions(); }, []);
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
-  async function doCheckIn(sessionId, token, memberId) {
-    const s = trainingSessions.find((x) => String(x.id) === String(sessionId));   // ids are uuids (was Number() -> NaN)
-    if (!s) return { ok: false, reason: "That training session wasn't found." };
-    const sg = s.signin;
-    if (!sg || !sg.open) return { ok: false, reason: "Sign-in is closed for this session.", title: s.title };
-    if (sg.token !== token) return { ok: false, reason: "This code has expired — ask the training officer for the current one.", title: s.title };
-    if (s.done) return { ok: false, reason: "This session is complete — attendance is locked.", title: s.title };
-    if ((s.attendance || []).includes(memberId)) return { ok: true, already: true, at: (s.times || {})[memberId], title: s.title };
-    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) return { ok: false, reason: "We couldn't determine your department, so no attendance was recorded.", title: s.title };
-    const { error } = await supabase.from("session_attendance").insert({ department_id: deptId, session_id: s.id, member_id: memberId, checked_in_at: new Date().toISOString() });
-    if (error) return { ok: false, reason: "We couldn't record your sign-in — please see your training officer.", title: s.title };
+  // Self-serve check-in: the DB RPC enforces identity (my_member_id), department, not-done, and token match.
+  async function doCheckIn(sessionId, token) {
+    const title = trainingSessions.find((x) => String(x.id) === String(sessionId))?.title;
+    const { data, error } = await supabase.rpc("member_check_in", { p_session_id: sessionId, p_token: token });
+    if (error) return { ok: false, reason: error.message || "We couldn't record your sign-in — please see your training officer.", title };
+    loadSessions();   // refresh attendance counts / roster
+    if (data === "already") return { ok: true, already: true, title };
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    setTrainingSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), memberId], times: { ...(x.times || {}), [memberId]: now } } : x));   // optimistic; preserves in-memory signin
-    return { ok: true, at: now, title: s.title };
+    return { ok: true, at: now, title };
   }
   // Capture a QR/deep-link check-in on mount; don't act until we know who's signed in.
   useEffect(() => {
@@ -2635,6 +2629,7 @@ function CheckinConfirm({ S, result, members, meId, go }) {
 }
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
+  const canRunSignin = ["Department Admin", "Training Officer", "Project Admin"].includes(role);   // QR generate-gate (NOT Board Member, NOT Member)
   const memberView = !isLeader(role);
   const today = new Date();
   const me = members.find((m) => m.id === meId);
@@ -2646,11 +2641,23 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
-  const genToken = () => Math.random().toString(36).slice(2, 7).toUpperCase();
-  function openSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { open: true, token: genToken(), ts: Date.now() } } : x)); setOpenSignin(s.id); }
-  function rotateSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { ...(x.signin || {}), open: true, token: genToken(), ts: Date.now() } } : x)); }
-  function closeSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { ...(x.signin || {}), open: false } } : x)); }
-  const checkinURL = (s) => `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?checkin=${s.id}&t=${s.signin?.token || ""}`;
+  // Live codes come from open_signin and are held locally for display only — never persisted/loaded, so a member can't read a code without scanning.
+  const [signinTokens, setSigninTokens] = useState({});   // sessionId -> 6-char code (this browser, this open)
+  async function openSI(s) {
+    const { data, error } = await supabase.rpc("open_signin", { p_session_id: s.id });   // generates/rotates; gated DA/TO/PA at the DB
+    if (error) { notify({ kind: "error", title: "Couldn't open sign-in", text: error.message || "Please try again.", details: error.message }); return; }
+    setSigninTokens((t) => ({ ...t, [s.id]: data }));
+    setOpenSignin(s.id);
+    loadSessions();   // refresh signin_open
+  }
+  const rotateSI = openSI;   // open_signin rotates on every call
+  async function closeSI(s) {
+    const { error } = await supabase.rpc("close_signin", { p_session_id: s.id });
+    if (error) { notify({ kind: "error", title: "Couldn't close sign-in", text: error.message || "Please try again.", details: error.message }); return; }
+    setSigninTokens((t) => { const n = { ...t }; delete n[s.id]; return n; });
+    loadSessions();
+  }
+  const checkinURL = (s, token) => `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?checkin=${s.id}&t=${token || ""}`;
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
@@ -3094,7 +3101,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
                     <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
-                    {canManage && !s.done && <button style={{ ...Lbtn, ...(s.signin?.open ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signin?.open ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signin?.open ? " · open" : ""}</button>}
+                    {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                     {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
                     {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
@@ -3115,25 +3122,28 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       })}
                     </div>
                   )}
-                  {canManage && !s.done && openSignin === s.id && (
+                  {canRunSignin && !s.done && openSignin === s.id && (() => {
+                    const liveToken = signinTokens[s.id];
+                    return (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
-                      {!s.signin?.open ? (
+                      {!liveToken ? (
                         <div>
-                          <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Volunteers scan it to check themselves in — each scan is stamped with the time.</div>
-                          <button style={LprimaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> Open sign-in</button>
+                          <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Show the code to display the QR (this generates a fresh code).</> : <>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
+                          <button style={LprimaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> {s.signinOpen ? "Show / refresh code" : "Open sign-in"}</button>
+                          {s.signinOpen && <button style={{ ...Lbtn, marginLeft: 8 }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>}
                         </div>
                       ) : (
                         <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
                           <div style={{ textAlign: "center" }}>
                             <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
-                              <QRCodeCanvas value={checkinURL(s)} size={172} />
+                              <QRCodeCanvas value={checkinURL(s, liveToken)} size={172} />
                             </div>
-                            <div style={{ marginTop: 8, fontSize: 12, color: "#9AA1AC" }}>This week's code: <b style={{ letterSpacing: 2, color: "#F0F2F5" }}>{s.signin.token}</b></div>
+                            <div style={{ marginTop: 8, fontSize: 12, color: "#9AA1AC" }}>This session's code: <b style={{ letterSpacing: 2, color: "#F0F2F5" }}>{liveToken}</b></div>
                             <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
                               <button style={Lbtn} onClick={() => rotateSI(s)}><RefreshCw size={14} color={LbtnIcon} /> Rotate code</button>
                               <button style={{ ...Lbtn, padding: "7px 11px" }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>
                             </div>
-                            <button style={{ ...Lbtn, marginTop: 8 }} onClick={() => checkIn && meId != null && checkIn(s.id, s.signin.token, meId)}>Simulate a scan (check me in)</button>
+                            <button style={{ ...Lbtn, marginTop: 8 }} onClick={async () => { const r = await checkIn(s.id, liveToken, meId); notify(r.ok ? { title: r.already ? "Already checked in" : "Checked in", text: `${me?.name || "You"} ${r.already ? "were already on the list" : "added"}.` } : { kind: "error", title: "Couldn't check in", text: r.reason }); }}>Simulate a scan (check me in)</button>
                           </div>
                           <div style={{ flex: 1, minWidth: 190 }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color: "#9AA1AC", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
@@ -3147,12 +3157,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                                   </div>
                                 );
                               })}
-                            <div style={{ fontSize: 11, color: "#7E8794", marginTop: 12, lineHeight: 1.5 }}>Each week's session gets its own code; rotate it if it leaks. <i>Prototype note: a production build ties each scan to the volunteer's own login and stores it server-side so it can't be spoofed.</i></div>
+                            <div style={{ fontSize: 11, color: "#7E8794", marginTop: 12, lineHeight: 1.5 }}>Each session gets its own code; rotate it if it leaks. The code is generated server-side, and a scan records the scanning member's own attendance.</div>
                           </div>
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })}
