@@ -777,7 +777,7 @@ function AIList({ S, Icon, title, items, warn }) {
 }
 
 /* ---------------- shared: resource library + idea grid ---------------- */
-function ResourceLibrary({ S, items, verb }) {
+function ResourceLibrary({ S, items, verb, onOpen }) {
   return (
     <div style={S.resGrid}>
       {items.map((r) => (
@@ -787,7 +787,11 @@ function ResourceLibrary({ S, items, verb }) {
             <div style={S.resName}>{r.name}</div>
             <div style={S.resType}>{r.type}</div>
           </div>
-          <span style={S.resDl}><Download size={13} /> {verb || "Download"}</span>
+          {onOpen ? (
+            <button onClick={() => onOpen(r)} style={{ ...S.resDl, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit" }}><Download size={13} /> {verb || "Download"}</button>
+          ) : (
+            <span style={S.resDl}><Download size={13} /> {verb || "Download"}</span>
+          )}
         </div>
       ))}
     </div>
@@ -978,6 +982,23 @@ function Documents({ S, role, notify, uploaderName }) {
     notify({ kind: "success", title: "Document uploaded", text: `"${file.name}" was added.` });
     e.target.value = "";
   }
+  async function openDoc(item) {
+    if (!item?.storage_path) return;
+    const { data, error } = await supabase.storage
+      .from("station-documents")
+      .createSignedUrl(item.storage_path, 3600);
+    if (error || !data?.signedUrl) {
+      notify({ kind: "error", title: "Couldn't open file", text: "The document couldn't be opened — please try again.", details: error?.message ?? "no signed URL" });
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = data.signedUrl;
+    a.target = "_blank";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
     const sys = "You help a volunteer fire/EMS department draft an internal document (SOP/SOG, guideline, policy, or checklist). Write a clear, well-structured DRAFT in plain text with a title, a short note that it must be reviewed and adapted to the department's AHJ, local protocols, medical direction, and applicable law, then numbered sections. Practical and realistic for a small volunteer department. Under 450 words.";
@@ -1016,7 +1037,7 @@ function Documents({ S, role, notify, uploaderName }) {
       </>)}
 
       <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
-      <ResourceLibrary S={S} verb="Open" items={docs} />
+      <ResourceLibrary S={S} verb="Open" items={docs} onOpen={openDoc} />
     </div>
   );
 }
