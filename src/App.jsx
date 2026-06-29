@@ -373,7 +373,7 @@ export default function App() {
       <div style={S.main}>
         <header style={S.topbar}>
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
-          <div style={S.chevronBand} />
+          <div style={{ flex: 1 }} />
           <div style={S.viewAs}>
             {isLeader(realRole) && (
               <>
@@ -3840,9 +3840,9 @@ function baseStyles() {
   const INK = "#191C20", SLATE = "#3A4750", ENGINE = "#B11E2A", EMS = "#1F4E79", PAPER = "#E9EBEC", CARD = "#FFFFFF", LINE = "#D9DCDF", MUTED = "#6A7178";
   const chevron = "repeating-linear-gradient(135deg, #B11E2A 0 14px, #191C20 14px 28px)";
   return {
-    app: { display: "flex", minHeight: "100vh", background: PAPER, fontFamily: body, color: INK },
+    app: { display: "flex", minHeight: "100vh", background: FIRE.pageBg, fontFamily: body, color: INK },
     scrim: { position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 35 },
-    sidebar: { width: 262, background: INK, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, flexShrink: 0 },
+    sidebar: { width: 262, background: FIRE.sidebar, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, flexShrink: 0 },
     brandRow: { display: "flex", alignItems: "center", gap: 11, paddingBottom: 18, borderBottom: "1px solid #2A2F35" },
     brandName: { fontFamily: display, fontWeight: 700, fontSize: 19, letterSpacing: ".5px", lineHeight: 1 },
     brandSub: { fontSize: 10, color: "#8A929B", letterSpacing: ".9px", marginTop: 3, fontFamily: mono },
@@ -3855,7 +3855,7 @@ function baseStyles() {
     deptName: { fontFamily: display, fontWeight: 600, fontSize: 16, marginTop: 4 },
     deptMeta: { fontSize: 12, color: "#9AA1A9", marginTop: 2 },
     main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0 },
-    topbar: { height: 60, background: CARD, borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", gap: 14, padding: "0 18px", position: "sticky", top: 0, zIndex: 20 },
+    topbar: { height: 60, background: FIRE.sidebar, borderBottom: `1px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 14, padding: "0 18px", position: "sticky", top: 0, zIndex: 20 },
     menuBtn: { display: "none", alignItems: "center", justifyContent: "center", width: 38, height: 38, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: INK },
     chevronBand: { flex: 1, height: 8, borderRadius: 2, background: chevron, opacity: .9 },
     viewAs: { display: "flex", alignItems: "center", gap: 8 },
