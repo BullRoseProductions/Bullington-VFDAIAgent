@@ -2688,7 +2688,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const soon = planView.filter((x) => x.info.label === "Due soon").length;
   const ok = planView.length - over - soon;
 
-  function logDone(id) { setPlan((ps) => ps.map((x) => x.id === id ? { ...x, lastISO: toISO(new Date()) } : x)); }
   async function addPlan() {
     const name = pn.trim();
     if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before adding it." }); return; }
@@ -2736,7 +2735,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   async function completeSession(s) {
     const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
     if (error) { notify({ kind: "error", title: "Couldn't update the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    // plan-linked -> reset the overdue clock (SAME mechanism as logDone: today), now PERSISTED. One-offs reset nothing.
+    // plan-linked -> reset the overdue clock to today, persisted. One-offs reset nothing.
     if (s.planId) {
       const iso = toISO(new Date());
       const { error: pErr } = await supabase.from("training_plans").update({ last_iso: iso }).eq("id", s.planId);
@@ -3075,7 +3074,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>} · <span style={{ color: statusColor(info.label) }}>{info.rel}</span></div>
               </div>
               <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
-              {canManage && <button style={Lbtn} onClick={() => logDone(p.id)}><ClipboardCheck size={14} color={LbtnIcon} /> Log done</button>}
               {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
               {canManage && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
               {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
