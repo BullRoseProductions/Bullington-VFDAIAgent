@@ -933,11 +933,13 @@ function Phase({ S, n, weeks, title, items, accent }) {
 }
 
 /* ---------------- Station Documents (upload + create) ---------------- */
+const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
 function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
   const canManageDocs = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
+  const [uploadType, setUploadType] = useState("SOP / SOG");
   function loadDocs() {
     return supabase
       .from("documents")
@@ -975,7 +977,7 @@ function Documents({ S, role, notify, uploaderName }) {
       const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
       if (upErr) { failed.push(file.name); lastErr = upErr.message; continue; }
       // 2) write the metadata row
-      const row = { department_id: deptId, name: file.name, type: "Uploaded", storage_path: path, uploaded_by: uploaderName };
+      const row = { department_id: deptId, name: file.name, type: uploadType, storage_path: path, uploaded_by: uploaderName };
       const { data: docData, error: docErr } = await supabase.from("documents").insert(row).select().single();
       if (docErr || !docData) { failed.push(file.name); lastErr = docErr?.message ?? "unknown error"; continue; }
       // confirmed-committed row — map to loadDocs's exact shape for an optimistic prepend
@@ -1047,6 +1049,10 @@ function Documents({ S, role, notify, uploaderName }) {
 
       {canManageDocs && (<>
         <div style={S.cardEyebrow}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
+        <label style={{ ...S.field, maxWidth: 240, marginBottom: 12 }}><span style={S.fieldLabel}>Type for these uploads</span>
+          <select style={{ ...S.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
+            {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select></label>
         <label style={S.docDrop}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); uploadFiles(Array.from(e.dataTransfer.files || [])); }}>
@@ -1061,7 +1067,7 @@ function Documents({ S, role, notify, uploaderName }) {
           <div style={{ flex: 1 }}>
             <label style={S.field}><span style={S.fieldLabel}>Document type</span>
               <select style={{ ...S.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
-                <option>SOP / SOG</option><option>Guideline</option><option>Policy</option><option>Checklist</option><option>Memo</option>
+                {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select></label>
             <label style={{ ...S.field, marginTop: 12 }}><span style={S.fieldLabel}>What should it cover?</span>
               <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
