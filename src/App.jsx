@@ -928,11 +928,18 @@ function Phase({ S, n, weeks, title, items, accent }) {
 /* ---------------- Station Documents (upload + create) ---------------- */
 function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
-  const [docs, setDocs] = useState([
-    { name: "North Hood Country VFD — Member Handbook 2026.pdf", type: "Handbook · all members" },
-    { name: "North Hood Country SOG — Apparatus Response.pdf", type: "Uploaded · SOG" },
-    { name: "Mutual Aid Agreement 2026.pdf", type: "Uploaded · Guideline" },
-  ]);
+  const [docs, setDocs] = useState([]);
+  function loadDocs() {
+    supabase
+      .from("documents")
+      .select("id, name, type, storage_path")
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error || !data) { setDocs([]); return; }
+        setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path })));
+      });
+  }
+  useEffect(() => { loadDocs(); }, []);
   const [kind, setKind] = useState("SOP / SOG");
   const [desc, setDesc] = useState("A standard operating guideline for responding to a structure fire with a single engine plus mutual aid.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
@@ -967,7 +974,7 @@ function Documents({ S, role, notify, uploaderName }) {
     }
 
     // 3) show it immediately + success toast
-    setDocs((d) => [{ name: docData.name, type: docData.type }, ...d]);
+    loadDocs();
     notify({ kind: "success", title: "Document uploaded", text: `"${file.name}" was added.` });
     e.target.value = "";
   }
