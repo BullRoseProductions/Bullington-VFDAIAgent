@@ -777,11 +777,11 @@ function AIList({ S, Icon, title, items, warn }) {
 }
 
 /* ---------------- shared: resource library + idea grid ---------------- */
-function ResourceLibrary({ S, items, verb, onOpen }) {
+function ResourceLibrary({ S, items, verb, onOpen, onDelete }) {
   return (
     <div style={S.resGrid}>
       {items.map((r) => (
-        <div key={r.name} style={S.resCard}>
+        <div key={r.id ?? r.name} style={S.resCard}>
           <FileText size={16} color="#54506B" style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={S.resName}>{r.name}</div>
@@ -791,6 +791,9 @@ function ResourceLibrary({ S, items, verb, onOpen }) {
             <button onClick={() => onOpen(r)} style={{ ...S.resDl, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit" }}><Download size={13} /> {verb || "Download"}</button>
           ) : (
             <span style={S.resDl}><Download size={13} /> {verb || "Download"}</span>
+          )}
+          {onDelete && (
+            <button onClick={() => onDelete(r)} title="Delete" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "#B11E2A", display: "inline-flex", alignItems: "center", flexShrink: 0, alignSelf: "center", marginLeft: 8 }}><X size={14} /></button>
           )}
         </div>
       ))}
@@ -999,6 +1002,25 @@ function Documents({ S, role, notify, uploaderName }) {
     a.click();
     a.remove();
   }
+  async function deleteDoc(item) {
+    if (!item?.storage_path || !item?.id) return;
+    if (!window.confirm(`Delete "${item.name}"? This can't be undone.`)) return;
+    // 1) remove the file from storage first (safer failure mode)
+    const { error: rmErr } = await supabase.storage.from("station-documents").remove([item.storage_path]);
+    if (rmErr) {
+      notify({ kind: "error", title: "Couldn't delete file", text: "The document couldn't be removed — please try again.", details: rmErr.message });
+      return;
+    }
+    // 2) then delete the metadata row
+    const { error: rowErr } = await supabase.from("documents").delete().eq("id", item.id);
+    if (rowErr) {
+      notify({ kind: "error", title: "File removed, record not", text: "The file was deleted but its record couldn't be removed.", details: rowErr.message });
+      loadDocs();
+      return;
+    }
+    notify({ kind: "success", title: "Document deleted", text: `"${item.name}" was removed.` });
+    loadDocs();
+  }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
     const sys = "You help a volunteer fire/EMS department draft an internal document (SOP/SOG, guideline, policy, or checklist). Write a clear, well-structured DRAFT in plain text with a title, a short note that it must be reviewed and adapted to the department's AHJ, local protocols, medical direction, and applicable law, then numbered sections. Practical and realistic for a small volunteer department. Under 450 words.";
@@ -1037,7 +1059,7 @@ function Documents({ S, role, notify, uploaderName }) {
       </>)}
 
       <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
-      <ResourceLibrary S={S} verb="Open" items={docs} onOpen={openDoc} />
+      <ResourceLibrary S={S} verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
     </div>
   );
 }
