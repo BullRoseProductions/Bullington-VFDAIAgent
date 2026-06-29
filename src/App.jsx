@@ -2859,212 +2859,270 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     );
   }
 
+  // ---------- leader view: FIRE-palette styles + derived reads (presentational only) ----------
+  const Lcard = { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 16, boxShadow: FIRE.cardShadow, padding: 16 };
+  const Lkick = { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: 6 };
+  const Lnum = { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" };
+  const Lbtn = { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 9, color: "#E7EAEF", cursor: "pointer", fontFamily: "inherit" };
+  const LbtnIcon = "#9AA1AC";
+  const Lfield = { display: "flex", flexDirection: "column", gap: 6 };
+  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: "#B6BDC8" };
+  const Linput = { border: "0.5px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "#F0F2F5", width: "100%" };
+  const LprimaryBtn = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: "#fff", border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" };
+  const Lrow = { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: "0.5px solid rgba(255,255,255,.05)" };
+  // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
+  const statusColor = (label) => (label === "On track" || label === "Done") ? "#76C98D" : label === "Due soon" ? "#D6A95E" : "#E58A90";
+  // Card 1 — most recent done session's attendance (empty until persistence lands)
+  const lastDone = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a))[0];
+  const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
+  const totalMembers = members.length;
+  const hasAtt = !!lastDone && lastAtt > 0;
+  const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
+  // Card 3 — next not-done session from today forward (pure read)
+  const t0n = new Date(today); t0n.setHours(0, 0, 0, 0);
+  const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort((a, b) => sessDate(a) - sessDate(b))[0];
+  const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
+  // Card 2 — neither upload-to-session nor AI-draft is built; controls are honest about it
+  const comingSoon = (what) => notify({ title: "Coming soon", text: `${what} isn't available yet — it lands in an upcoming update.` });
+
   return (
     <div>
-      <PageHead S={S} eyebrow={memberView ? "MY TRAINING" : "TRAINING"} title={memberView ? "Your training calendar" : "Keep training on schedule"} sub={memberView ? "See what's scheduled, who came to each session, and your own attendance record." : "Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance."} />
-      {!memberView && (<>
-        <div style={S.statRow}>
-          <Stat S={S} n={String(over)} label="Overdue / unlogged" warn={over > 0} />
-          <Stat S={S} n={String(soon)} label="Due soon" warn={soon > 0} />
-          <Stat S={S} n={String(ok)} label="On track" />
+      {/* header — readable on dark */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={Lkick}>TRAINING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: "#F7F8FA", margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Keep training on schedule</h1>
+        <div style={{ fontSize: 14, color: "#9AA1AC", lineHeight: 1.5 }}>Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.</div>
+      </div>
+
+      {/* TOP ROW — three dark cards (replaces the 3 Stat tiles) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
+        {/* Card 1 — last session attendance (ring or honest empty state) */}
+        <div style={Lcard}>
+          <div style={Lkick}>LAST SESSION ATTENDANCE</div>
+          {hasAtt ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
+              <svg width="72" height="72" viewBox="0 0 72 72" style={{ flexShrink: 0 }}>
+                <circle cx="36" cy="36" r={ringR} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="6" />
+                <circle cx="36" cy="36" r={ringR} fill="none" stroke="#76C98D" strokeWidth="6" strokeLinecap="round" strokeDasharray={ringC} strokeDashoffset={ringC * (1 - ringFrac)} transform="rotate(-90 36 36)" />
+                <text x="36" y="40" textAnchor="middle" fontSize="15" fontWeight="700" fill="#F7F8FA" style={{ fontFeatureSettings: '"tnum"' }}>{lastAtt}/{totalMembers}</text>
+              </svg>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F2F5" }}>{lastDone.title}</div>
+                <div style={{ fontSize: 11.5, color: "#7E8794", marginTop: 2, ...Lnum }}>{fmtSess(lastDone)}</div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, fontSize: 13, color: "#7E8794", lineHeight: 1.5 }}>No attendance recorded yet.<div style={{ fontSize: 11.5, color: "#9AA1AC", marginTop: 3 }}>Activates once session sign-in is saved.</div></div>
+          )}
         </div>
-        {over > 0 && (
-          <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
-            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-            <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
-          </div>
-        )}
-      </>)}
 
-      {role === "Member" && me && (() => {
-        const mine = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
-        const went = mine.filter((s) => (s.attendance || []).includes(me.id)).length;
-        return (
-          <div style={{ marginBottom: 22 }}>
-            <div style={S.cardEyebrow}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MY TRAINING HISTORY</div>
-            <div style={{ fontSize: 13, color: "#3A4750", margin: "2px 0 8px" }}>You attended <b>{went}</b> of <b>{mine.length}</b> recorded sessions.</div>
-            {mine.length === 0 ? <div style={{ fontSize: 13, color: "#6A7178" }}>No training sessions recorded yet.</div> :
-              mine.map((s) => {
-                const present = (s.attendance || []).includes(me.id);
-                return (
-                  <div key={s.id} style={S.certRow}>
-                    <CalendarCheck size={15} color={present ? "#2E7D52" : "#B11E2A"} style={{ flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span>
-                      <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{fmtSess(s)}</div>
-                    </div>
-                    <Pill S={S} color={present ? "#2E7D52" : "#B11E2A"}>{present ? "PRESENT" : "ABSENT"}</Pill>
-                  </div>
-                );
-              })}
+        {/* Card 2 — training plan (upload + AI draft; neither built → honest "Coming soon") */}
+        <div style={Lcard}>
+          <div style={Lkick}>TRAINING PLAN</div>
+          <div onClick={() => comingSoon("Uploading a training plan")} style={{ marginTop: 12, border: "1px dashed rgba(255,255,255,.14)", borderRadius: 10, padding: "16px 12px", textAlign: "center", cursor: "pointer", background: "rgba(255,255,255,.02)" }}>
+            <Upload size={18} color="#9AA1AC" />
+            <div style={{ fontSize: 12.5, color: "#B6BDC8", marginTop: 5 }}>Upload a plan or syllabus</div>
           </div>
-        );
-      })()}
+          <button onClick={() => comingSoon("Draft with AI")} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> Draft with AI</button>
+          <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>Coming soon — not yet available.</div>
+        </div>
 
-      {!memberView && (<>
-      <div style={S.cardEyebrow}><GraduationCap size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING CATEGORIES</div>
+        {/* Card 3 — next session (pure read of existing sessions) */}
+        <div style={Lcard}>
+          <div style={Lkick}>NEXT SESSION</div>
+          {nextSession ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 999, background: nextCat?.color || "#1F4E79", flexShrink: 0 }} />
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F2F5" }}>{nextSession.title}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "#B6BDC8", marginTop: 4, ...Lnum }}>{fmtSess(nextSession)}</div>
+              {nextCat && <div style={{ fontSize: 11.5, color: "#7E8794", marginTop: 2 }}>Last trained: {nextCat.lastISO ? new Date(nextCat.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>}</div>}
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, fontSize: 13, color: "#7E8794" }}>Nothing scheduled yet.</div>
+          )}
+        </div>
+      </div>
+
+      {/* overdue banner — kept as-is (light alert, per instruction) */}
+      {over > 0 && (
+        <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+          <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
+        </div>
+      )}
+
+      {/* TRAINING CATEGORIES */}
+      <div style={{ ...Lkick, marginBottom: 10 }}><GraduationCap size={13} /> TRAINING CATEGORIES</div>
       {canManage && (addingPlan ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
+          <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+          <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setPcolor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? "3px solid #F7F8FA" : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
               ))}
             </div>
           </div>
-          <button style={S.primaryBtn} onClick={addPlan}><Plus size={15} /> Add to plan</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingPlan(false)}>Cancel</button>
+          <button style={LprimaryBtn} onClick={addPlan}><Plus size={15} /> Add to plan</button>
+          <button style={Lbtn} onClick={() => setAddingPlan(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} /> Add a training</button>)}
+      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={LbtnIcon} /> Add a training</button>)}
       <div>
         {planView.length === 0 ? (
-          <div style={{ ...S.opCard, fontSize: 13, color: "#6A7178" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
+          <div style={{ ...Lcard, fontSize: 13, color: "#9AA1AC" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
         ) : planView.map(({ p, info }) => (
           editingPlanId === p.id ? (
-            <div key={p.id} style={{ ...S.opCard, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={ed.name} onChange={(e) => setEd((v) => ({ ...v, name: e.target.value }))} /></label>
-              <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={ed.cadence} onChange={(e) => setEd((v) => ({ ...v, cadence: e.target.value }))}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
-              <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+            <div key={p.id} style={{ ...Lcard, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={ed.name} onChange={(e) => setEd((v) => ({ ...v, name: e.target.value }))} /></label>
+              <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={ed.cadence} onChange={(e) => setEd((v) => ({ ...v, cadence: e.target.value }))}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+              <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
                   {CATEGORY_COLORS.map((col) => (
                     <button key={col} title={col} onClick={() => setEd((v) => ({ ...v, color: col }))}
-                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? "3px solid #F7F8FA" : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
                   ))}
                 </div>
               </div>
-              <button style={S.primaryBtn} onClick={updatePlan}>Save</button>
-              <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setEditingPlanId(null)}>Cancel</button>
+              <button style={LprimaryBtn} onClick={updatePlan}>Save</button>
+              <button style={Lbtn} onClick={() => setEditingPlanId(null)}>Cancel</button>
             </div>
           ) : (
-            <div key={p.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
+            <div key={p.id} style={Lrow}>
               <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color || "#1F4E79", flexShrink: 0, display: "inline-block" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontWeight: 600, color: "#191C20" }}>{p.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {p.cadence}</span>
-                <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "never logged"} · <span style={{ color: info.color }}>{info.rel}</span></div>
+                <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{p.name}</span> <span style={{ color: "#9AA1AC", fontSize: 13 }}>· {p.cadence}</span>
+                <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>} · <span style={{ color: statusColor(info.label) }}>{info.rel}</span></div>
               </div>
-              <Pill S={S} color={info.color}>{info.label.toUpperCase()}</Pill>
-              {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => logDone(p.id)}><ClipboardCheck size={14} /> Log done</button>}
-              {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => scheduleFor(p)}><CalendarCheck size={14} /> Schedule</button>}
-              {canManage && <button title="Edit" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} /></button>}
-              {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removePlan(p.id)}><X size={14} /></button>}
+              <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
+              {canManage && <button style={Lbtn} onClick={() => logDone(p.id)}><ClipboardCheck size={14} color={LbtnIcon} /> Log done</button>}
+              {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
+              {canManage && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
+              {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
             </div>
           )
         ))}
       </div>
 
-      </>)}
-      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING CALENDAR</div>
+      {/* TRAINING CALENDAR */}
+      <div style={{ ...Lkick, marginTop: 22, marginBottom: 10 }}><Calendar size={13} /> TRAINING CALENDAR</div>
       {canManage && (showSess ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span><select style={S.input} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><select style={S.input} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
-          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={S.fieldLabel}>Title (optional)</span><input style={S.input} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
-          <button style={S.primaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShowSess(false)}>Cancel</button>
+        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
+          <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
+          <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>
+          <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} /> Schedule a session</button>)}
+      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
 
-      <MonthCalendar
-        cur={cur} setCur={setCur}
-        items={monthSessions}
-        renderChip={(s) => {
-          // base color = linked category's live color, or fallback blue for one-off / deleted category
-          const cat = plan.find((p) => String(p.id) === String(s.planId));
-          const base = cat?.color || "#1F4E79";
-          // dim toward dark slate for completed (keep dark enough for white text)
-          const mix = (hex, t) => {
-            const h = hex.replace("#", "");
-            const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-            const tr = 42, tg = 46, tb = 53; // #2A2E35
-            const to2 = (n) => n.toString(16).padStart(2, "0");
-            return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
-          };
-          const color = s.done ? mix(base, 0.45) : base;
-          return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
-        }}
-        todayColor="#1F4E79"
-        monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
-      />
+      {/* calendar wrapped in dark card; MonthCalendar internals untouched (light inset); red today marker */}
+      <div style={{ ...Lcard, marginBottom: 16 }}>
+        <div style={{ marginBottom: -10 }}>
+          <MonthCalendar
+            cur={cur} setCur={setCur}
+            items={monthSessions}
+            renderChip={(s) => {
+              // base color = linked category's live color, or fallback blue for one-off / deleted category
+              const cat = plan.find((p) => String(p.id) === String(s.planId));
+              const base = cat?.color || "#1F4E79";
+              // dim toward dark slate for completed (keep dark enough for white text)
+              const mix = (hex, t) => {
+                const h = hex.replace("#", "");
+                const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+                const tr = 42, tg = 46, tb = 53; // #2A2E35
+                const to2 = (n) => n.toString(16).padStart(2, "0");
+                return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
+              };
+              const color = s.done ? mix(base, 0.45) : base;
+              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
+            }}
+            todayColor="#C8323A"
+            monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
+          />
+        </div>
 
-      <div style={{ marginBottom: 18 }}>
-        {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#6A7178" }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
-          monthSessions.map((s) => {
-            const att = s.attendance || [];
-            const open = openAtt === s.id;
-            return (
-              <div key={s.id}>
-                <div style={S.certRow}>
-                  <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span>
-                    <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
+        <div>
+          {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#7E8794", marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
+            monthSessions.map((s) => {
+              const att = s.attendance || [];
+              const open = openAtt === s.id;
+              return (
+                <div key={s.id}>
+                  <div style={Lrow}>
+                    <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}</span>
+                      <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
+                    </div>
+                    {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
+                    <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
+                    {canManage && <button style={{ ...Lbtn, ...(s.signin?.open ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signin?.open ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signin?.open ? " · open" : ""}</button>}
+                    {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
+                    {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
-                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} /> Attendance {att.length}/{members.length}</button>
-                  {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5, ...(s.signin?.open ? { color: "#2E7D52", borderColor: "#BFE3CC" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} /> QR sign-in{s.signin?.open ? " · open" : ""}</button>}
-                  {s.done ? <Pill S={S} color="#2E7D52">DONE</Pill> : canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => completeSession(s)}><ClipboardCheck size={14} /> Mark complete</button>}
-                  {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeSession(s.id)}><X size={14} /></button>}
+                  {open && (
+                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
+                      <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? "Tap a name to mark who attended." : "Who attended this session."}</div>
+                      {members.map((m) => {
+                        const present = att.includes(m.id);
+                        return (
+                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
+                            {canManage
+                              ? <button onClick={() => toggleAttend(s.id, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#76C98D" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
+                              : (present ? <CheckCircle2 size={18} color="#76C98D" /> : <X size={16} color="#E58A90" />)}
+                            <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#76C98D" : "#E58A90" }}>{present ? "PRESENT" : "ABSENT"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {canManage && openSignin === s.id && (
+                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
+                      {!s.signin?.open ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Volunteers scan it to check themselves in — each scan is stamped with the time.</div>
+                          <button style={LprimaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> Open sign-in</button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                          <div style={{ textAlign: "center" }}>
+                            <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
+                              <QRCodeCanvas value={checkinURL(s)} size={172} />
+                            </div>
+                            <div style={{ marginTop: 8, fontSize: 12, color: "#9AA1AC" }}>This week's code: <b style={{ letterSpacing: 2, color: "#F0F2F5" }}>{s.signin.token}</b></div>
+                            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
+                              <button style={Lbtn} onClick={() => rotateSI(s)}><RefreshCw size={14} color={LbtnIcon} /> Rotate code</button>
+                              <button style={{ ...Lbtn, padding: "7px 11px" }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>
+                            </div>
+                            <button style={{ ...Lbtn, marginTop: 8 }} onClick={() => checkIn && meId != null && checkIn(s.id, s.signin.token, meId)}>Simulate a scan (check me in)</button>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 190 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#9AA1AC", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
+                            {(s.attendance || []).length === 0 ? <div style={{ fontSize: 12.5, color: "#7E8794" }}>No one's scanned in yet.</div> :
+                              (s.attendance || []).map((id) => { const mm = members.find((x) => x.id === id); const tt = (s.times || {})[id];
+                                return (
+                                  <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
+                                    <CheckCircle2 size={15} color="#76C98D" style={{ flexShrink: 0 }} />
+                                    <span style={{ flex: 1, color: "#F0F2F5" }}>{mm ? mm.name : `Member #${id}`}{id === meId ? " (you)" : ""}</span>
+                                    <span style={{ fontSize: 11.5, color: "#7E8794" }}>{tt || "added"}</span>
+                                  </div>
+                                );
+                              })}
+                            <div style={{ fontSize: 11, color: "#7E8794", marginTop: 12, lineHeight: 1.5 }}>Each week's session gets its own code; rotate it if it leaks. <i>Prototype note: a production build ties each scan to the volunteer's own login and stores it server-side so it can't be spoofed.</i></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {open && (
-                  <div style={{ ...S.opCard, margin: "2px 0 10px", padding: 12 }}>
-                    <div style={{ fontSize: 12, color: "#6A7178", marginBottom: 8 }}>{canManage ? "Tap a name to mark who attended." : "Who attended this session."}</div>
-                    {members.map((m) => {
-                      const present = att.includes(m.id);
-                      return (
-                        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "1px solid #F1EFF5" }}>
-                          {canManage
-                            ? <button onClick={() => toggleAttend(s.id, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}</button>
-                            : (present ? <CheckCircle2 size={18} color="#2E7D52" /> : <X size={16} color="#B11E2A" />)}
-                          <span style={{ flex: 1, fontSize: 13.5, color: present ? "#191C20" : "#6A7178" }}>{m.name}{m.id === meId ? " (you)" : ""}</span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#2E7D52" : "#B11E2A" }}>{present ? "PRESENT" : "ABSENT"}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {canManage && openSignin === s.id && (
-                  <div style={{ ...S.opCard, margin: "2px 0 10px", padding: 14 }}>
-                    {!s.signin?.open ? (
-                      <div>
-                        <div style={{ fontSize: 13, color: "#3A4750", marginBottom: 10 }}>Open a QR sign-in for <b>{s.title}</b>. Volunteers scan it to check themselves in — each scan is stamped with the time.</div>
-                        <button style={S.primaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> Open sign-in</button>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-                        <div style={{ textAlign: "center" }}>
-                          <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
-                            <QRCodeCanvas value={checkinURL(s)} size={172} />
-                          </div>
-                          <div style={{ marginTop: 8, fontSize: 12, color: "#6A7178" }}>This week's code: <b style={{ letterSpacing: 2, color: "#191C20" }}>{s.signin.token}</b></div>
-                          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
-                            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => rotateSI(s)}><RefreshCw size={14} /> Rotate code</button>
-                            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => closeSI(s)}><X size={14} /> Close</button>
-                          </div>
-                          <button style={{ ...S.ghostBtn, marginTop: 8, padding: "6px 10px", fontSize: 12 }} onClick={() => checkIn && meId != null && checkIn(s.id, s.signin.token, meId)}>Simulate a scan (check me in)</button>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 190 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "#54506B", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
-                          {(s.attendance || []).length === 0 ? <div style={{ fontSize: 12.5, color: "#6A7178" }}>No one's scanned in yet.</div> :
-                            (s.attendance || []).map((id) => { const mm = members.find((x) => x.id === id); const tt = (s.times || {})[id];
-                              return (
-                                <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
-                                  <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
-                                  <span style={{ flex: 1, color: "#191C20" }}>{mm ? mm.name : `Member #${id}`}{id === meId ? " (you)" : ""}</span>
-                                  <span style={{ fontSize: 11.5, color: "#6A7178" }}>{tt || "added"}</span>
-                                </div>
-                              );
-                            })}
-                          <div style={{ fontSize: 11, color: "#9A96A6", marginTop: 12, lineHeight: 1.5 }}>Each week's session gets its own code; rotate it if it leaks. <i>Prototype note: a production build ties each scan to the volunteer's own login and stores it server-side so it can't be spoofed.</i></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+        </div>
       </div>
     </div>
   );
