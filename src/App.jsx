@@ -372,7 +372,7 @@ export default function App() {
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
-          {screen === "documents" && <Documents S={S} role={role} />}
+          {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
@@ -926,7 +926,7 @@ function Phase({ S, n, weeks, title, items, accent }) {
 }
 
 /* ---------------- Station Documents (upload + create) ---------------- */
-function Documents({ S, role }) {
+function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
   const [docs, setDocs] = useState([
     { name: "North Hood Country VFD — Member Handbook 2026.pdf", type: "Handbook · all members" },
@@ -936,10 +936,39 @@ function Documents({ S, role }) {
   const [kind, setKind] = useState("SOP / SOG");
   const [desc, setDesc] = useState("A standard operating guideline for responding to a structure fire with a single engine plus mutual aid.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
-  function onFiles(e) {
+  async function onFiles(e) {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    setDocs((d) => [...files.map((f) => ({ name: f.name, type: "Uploaded · just now" })), ...d]);
+    const file = files[0];
+
+    // resolve department id (same RPC pattern as addCat)
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) {
+      notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." });
+      return;
+    }
+
+    // collision-safe path: {deptId}/{timestamp}-{filename}
+    const path = `${deptId}/${Date.now()}-${file.name}`;
+
+    // 1) upload the file bytes to the private bucket
+    const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
+    if (upErr) {
+      notify({ kind: "error", title: "Upload failed", text: "The file couldn't be uploaded.", details: upErr.message });
+      return;
+    }
+
+    // 2) write the metadata row
+    const row = { department_id: deptId, name: file.name, type: "Uploaded", storage_path: path, uploaded_by: uploaderName };
+    const { data: docData, error: docErr } = await supabase.from("documents").insert(row).select().single();
+    if (docErr || !docData) {
+      notify({ kind: "error", title: "Couldn't save document", text: "The file uploaded but its record couldn't be saved.", details: docErr?.message ?? "unknown error" });
+      return;
+    }
+
+    // 3) show it immediately + success toast
+    setDocs((d) => [{ name: docData.name, type: docData.type }, ...d]);
+    notify({ kind: "success", title: "Document uploaded", text: `"${file.name}" was added.` });
     e.target.value = "";
   }
   async function draft() {
