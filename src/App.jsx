@@ -2664,7 +2664,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             </div>
           ) : (
             <div key={p.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
-              <GraduationCap size={15} color={info.color} style={{ flexShrink: 0 }} />
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color || "#1F4E79", flexShrink: 0, display: "inline-block" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontWeight: 600, color: "#191C20" }}>{p.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {p.cadence}</span>
                 <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "never logged"} · <span style={{ color: info.color }}>{info.rel}</span></div>
@@ -2721,7 +2721,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             return (
               <div key={s.id}>
                 <div style={S.certRow}>
-                  <CalendarCheck size={15} color={s.done ? "#2E7D52" : "#1F4E79"} style={{ flexShrink: 0 }} />
+                  <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span>
                     <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
