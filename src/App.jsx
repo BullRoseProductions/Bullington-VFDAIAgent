@@ -2694,7 +2694,21 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       <MonthCalendar
         cur={cur} setCur={setCur}
         items={monthSessions}
-        renderChip={(s) => ({ color: s.done ? "#2E7D52" : "#1F4E79", label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` })}
+        renderChip={(s) => {
+          // base color = linked category's live color, or fallback blue for one-off / deleted category
+          const cat = plan.find((p) => String(p.id) === String(s.planId));
+          const base = cat?.color || "#1F4E79";
+          // dim toward dark slate for completed (keep dark enough for white text)
+          const mix = (hex, t) => {
+            const h = hex.replace("#", "");
+            const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+            const tr = 42, tg = 46, tb = 53; // #2A2E35
+            const to2 = (n) => n.toString(16).padStart(2, "0");
+            return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
+          };
+          const color = s.done ? mix(base, 0.45) : base;
+          return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
+        }}
         todayColor="#1F4E79"
         monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
       />
