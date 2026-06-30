@@ -4044,17 +4044,22 @@ function RequestForm({ S, requests, setRequests }) {
     setRequests([{ topic, notes, when: "Just now" }, ...requests]); setTopic(""); setNotes(""); setDone(true); setTimeout(() => setDone(false), 2500);
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="CUSTOM TRAINING" title="Request a custom packet" sub="Tell us what your crew needs. We build it into the next monthly drop." />
-      <div style={S.formCard}>
-        <label style={S.field}><span style={S.fieldLabel}>Topic or scenario</span><input style={S.input} placeholder="e.g. Rural water shuttle with one tender" value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
-        <label style={S.field}><span style={S.fieldLabel}>Anything specific to your department?</span><textarea style={{ ...S.input, minHeight: 88, resize: "vertical" }} placeholder="Apparatus, member count, local hazards, constraints…" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
-        <button style={S.primaryBtn} onClick={submit}><Send size={16} /> Submit request</button>
-        {done && <div style={S.successBox}><CheckCircle2 size={16} /> Request received. We'll confirm by email.</div>}
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* header (inline FS — shared PageHead not used/mutated) */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={FS.kicker}>CUSTOM TRAINING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Request a custom packet</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Tell us what your crew needs. We build it into the next monthly drop.</div>
+      </div>
+      <div style={{ ...FS.card, padding: 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 620 }}>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Topic or scenario</span><input style={FS.input} placeholder="e.g. Rural water shuttle with one tender" value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Anything specific to your department?</span><textarea style={{ ...FS.input, minHeight: 88, resize: "vertical" }} placeholder="Apparatus, member count, local hazards, constraints…" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        <button style={FS.btnPrimary} onClick={submit}><Send size={16} /> Submit request</button>
+        {done && <div style={{ display: "flex", alignItems: "center", gap: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText, borderRadius: 8, padding: "10px 12px", fontSize: 13.5 }}><CheckCircle2 size={16} color={FIRE.green} /> Request received. We'll confirm by email.</div>}
       </div>
       {requests.length > 0 && (
-        <div style={{ marginTop: 24 }}><div style={S.cardEyebrow}>YOUR REQUESTS</div>
-          {requests.map((r, i) => <div key={i} style={S.reqRow}><div><strong>{r.topic}</strong>{r.notes ? <div style={S.reqNotes}>{r.notes}</div> : null}</div><span style={S.reqWhen}>{r.when}</span></div>)}
+        <div style={{ marginTop: 24 }}><div style={{ ...FS.kicker, marginBottom: 8 }}>YOUR REQUESTS</div>
+          {requests.map((r, i) => <div key={i} style={{ ...FS.card, padding: "14px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14 }}><div><strong style={{ color: FIRE.textPrimary }}>{r.topic}</strong>{r.notes ? <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 3 }}>{r.notes}</div> : null}</div><span style={{ fontSize: 11.5, color: FIRE.textMuted2, flexShrink: 0, ...FS.num }}>{r.when}</span></div>)}
         </div>
       )}
     </div>
