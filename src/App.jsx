@@ -417,7 +417,7 @@ export default function App() {
         </header>
 
         <main style={S.content}>
-          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} />}
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
@@ -450,8 +450,8 @@ const dashboardGreeting = (me) => {
 };
 
 /* ---------------- Dashboard ---------------- */
-function Dashboard({ S, role, members, library, openPacket, go, meId }) {
-  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} />;
+function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify }) {
+  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -563,52 +563,141 @@ function QuickAccess({ S, role, go }) {
 }
 
 /* ---------------- Member dashboard (personal view) ---------------- */
-function MemberDashboard({ S, role, members, go, meId }) {
-  const me = members.find((m) => m.id === meId) || null;
+/* FS-based stat box (NEW — does not touch the shared <Stat>) */
+function FireStat({ label, value, sub, subColor }) {
   return (
-    <div>
-      <PageHead S={S} eyebrow="MY STATION" title={dashboardGreeting(me)} sub="Here's exactly where you stand — and what's coming up for you." />
-      {me && <MyCerts S={S} me={me} />}
-      <DashboardCalendar S={S} />
-      <QuickAccess S={S} role={role} go={go} />
+    <div style={{ ...FS.card, padding: "14px 16px" }}>
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: subColor || FIRE.textMuted, marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
-function MyCerts({ S, me }) {
-  const certs = me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
-  const expired = certs.filter((c) => c.st.rank === 0);
-  const expiring = certs.filter((c) => c.st.rank === 1);
-  const urgent = certs.filter((c) => c.st.rank < 2).map((c) => c.name);
-  const classes = CLASSES.map((cl) => ({ ...cl, forYou: cl.covers.some((n) => urgent.includes(n)) })).sort((a, b) => (b.forYou ? 1 : 0) - (a.forYou ? 1 : 0));
-  let al;
-  if (expired.length) al = { c: "#B11E2A", t: `Action needed: your ${expired[0].name} has expired — renew as soon as you can.` };
-  else if (expiring.length) al = { c: "#9A6B12", t: `Heads up: your ${expiring[0].name} ${expPhrase(expiring[0].exp)}.` };
-  else al = { c: "#2E7D52", t: "You're all current — nice work." };
+function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const me = members.find((m) => m.id === meId) || null;
+  const sess = sessions || [];
+  // ---- derived (lifted from the member Training branch; no new query/RLS) ----
+  const today = new Date();
+  const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
+  const since90 = new Date(t0); since90.setDate(since90.getDate() - 90);
+  const inWindow = (s) => { const d = sessDate(s); return d >= since90 && d <= today; };
+  const recorded = sess.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s));
+  const totalRecorded = recorded.length;
+  const attendedCount = me ? recorded.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
+  const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
+  const hasAtt = totalRecorded > 0;
+  const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
+  const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+  const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
+  const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length;
+  const certsTotal = certsAll.length;
+  const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length;
+  const expired = certsAll.filter((c) => c.st.rank === 0).length;
+  const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
+  const band = pct >= 75 ? { color: FIRE.greenText, label: "On track" } : pct >= 50 ? { color: FIRE.amberText, label: "Keep it up" } : { color: FIRE.redText, label: "Needs attention" };
+  const fireCert = (st) => st.rank === 2 ? FIRE.greenText : st.rank === 1 ? FIRE.amberText : FIRE.redText;
+  const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalRecorded ? attendedCount / totalRecorded : 0;
+  async function openPlan(plan) {
+    if (!plan?.storage_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
+    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
   return (
-    <div style={{ marginBottom: 24 }}>
-      <div style={{ display: "flex", gap: 9, alignItems: "center", background: `${al.c}12`, border: `1px solid ${al.c}44`, borderLeft: `4px solid ${al.c}`, borderRadius: 10, padding: "12px 15px", marginBottom: 16, fontSize: 14, color: "#2B3138", fontWeight: 500 }}>
-        <AlertTriangle size={16} color={al.c} style={{ flexShrink: 0 }} /> {al.t}
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* 1 — greeting */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={FS.kicker}>MY STATION · North Hood Country VFD</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
       </div>
-      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MY CERTIFICATIONS</div>
-      <div style={S.opCard}>
-        {certs.map((c, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom }}>
-            <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
-            <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
-          </div>
-        ))}
+
+      {/* 2 — three stat boxes */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <FireStat label="My attendance" value={hasAtt ? `${pct}%` : "—"} sub={hasAtt ? `${attendedCount} of ${totalRecorded} sessions` : "No record yet"} />
+        <FireStat label="Certs current" value={`${certsCurrent}/${certsTotal}`} sub={certAlert.text} subColor={certAlert.color} />
+        <FireStat label="Trainings this month" value={String(trainingsThisMonth)} sub={TRAIN_MONTHS[today.getMonth()]} />
       </div>
-      <div style={{ ...S.cardEyebrow, marginTop: 20 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPCOMING CLASSES</div>
-      <div style={S.opCard}>
-        {classes.map((cl, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === classes.length - 1 ? "none" : S.certRow.borderBottom }}>
-            <Calendar size={15} color="#54506B" style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{cl.name}</span></div>
-            {cl.forYou && <span style={S.forYou}>FOR YOU</span>}
-            <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, color: "#6A7178" }}>{cl.date}</span>
+
+      {/* 3 — attendance ring (honest empty state when no records) */}
+      <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+        <div style={FS.kicker}>MY ATTENDANCE · LAST 90 DAYS</div>
+        {!hasAtt ? (
+          <div style={{ marginTop: 12, fontSize: 13.5, color: FIRE.textMuted }}>No attendance recorded yet.<div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Your sign-ins appear here once sessions are recorded.</div></div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 12 }}>
+            <svg width="84" height="84" viewBox="0 0 84 84" style={{ flexShrink: 0 }}>
+              <circle cx="42" cy="42" r={ringR} fill="none" stroke={FIRE.track} strokeWidth="7" />
+              <circle cx="42" cy="42" r={ringR} fill="none" stroke={FIRE.green} strokeWidth="7" strokeLinecap="round" strokeDasharray={ringC} strokeDashoffset={ringC * (1 - ringFrac)} transform="rotate(-90 42 42)" />
+              <text x="42" y="46" textAnchor="middle" fontSize="17" fontWeight="700" fill={FIRE.textPrimary} style={{ fontFeatureSettings: '"tnum"' }}>{pct}%</text>
+            </svg>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, color: FIRE.textSecondary, ...FS.num }}>You've attended <b style={{ color: FIRE.textPrimary }}>{attendedCount}</b> of <b style={{ color: FIRE.textPrimary }}>{totalRecorded}</b> recorded sessions in the last 90 days.</div>
+              <span style={{ display: "inline-block", marginTop: 8, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: band.color, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 10px", background: FIRE.btnBg }}>{band.label}</span>
+            </div>
           </div>
-        ))}
+        )}
+      </div>
+
+      {/* 4 — two columns: certifications | upcoming training */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={FS.kicker}>MY CERTIFICATIONS</div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color }}>{certAlert.text}</span>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {certsAll.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No certifications on file yet.</div>
+            ) : certsAll.map((c, i) => (
+              <div key={c.id ?? i} style={{ ...FS.row, padding: "9px 0" }}>
+                <Award size={15} color={fireCert(c.st)} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
+                </div>
+                <Pill S={S} color={fireCert(c.st)}>{c.st.label}</Pill>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={FS.kicker}>UPCOMING TRAINING</div>
+          <div style={{ marginTop: 10 }}>
+            {upcoming.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>
+            ) : upcoming.map((s) => (
+              <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
+                <CalendarCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
+                </div>
+                {s.plan && <button onClick={() => openPlan(s.plan)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 5 — station calendar: shared DashboardCalendar wrapped in a dark FS card (light inset; NOT mutated) */}
+      <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
+        <DashboardCalendar S={S} />
+      </div>
+
+      {/* 6 — quick actions (member-filtered NAV; new FS styling, shared QuickAccess untouched) */}
+      <div style={{ ...FS.card, padding: 18 }}>
+        <div style={FS.kicker}>QUICK ACTIONS</div>
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+          {NAV.filter((n) => n.key !== "dashboard" && n.roles.includes(role)).map((n) => (
+            <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
+              <n.Icon size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: FIRE.btnText }}>{n.label}</span>
+              <ChevronRight size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
