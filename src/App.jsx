@@ -2381,28 +2381,28 @@ function RosterAttendance({ S, members }) {
   const people = [...members].sort((a, b) => (b.participation ?? -1) - (a.participation ?? -1));
   return (
     <div>
-      <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
-      <div style={{ marginBottom: 22 }}>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
+      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
         {EVENTS.map((e) => {
           const pct = Math.round((e.present / e.total) * 100);
           return (
-            <div key={e.id} style={S.eventRow}>
+            <div key={e.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={S.personName}>{e.name}</div>
-                <div style={S.personMeta}>{e.type} · {e.date}</div>
+                <div style={{ ...S.personName, color: FIRE.textPrimary }}>{e.name}</div>
+                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{e.type} · {e.date}</div>
               </div>
-              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} color={pct >= 75 ? "#2E7D52" : "#9A6B12"} /></div>
+              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} track={FIRE.track} color={pct >= 75 ? FIRE.green : FIRE.amberText} /></div>
             </div>
           );
         })}
       </div>
-      <div style={S.cardEyebrow}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
-      <div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
+      <div style={{ ...FS.card, padding: "4px 16px" }}>
         {people.map((m) => (
-          <div key={m.id} style={S.eventRow}>
-            <Initials S={S} name={m.name} />
-            <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={S.personName}>{m.name}</div><div style={S.personMeta}>{m.role}</div></div>
-            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{m.participation == null ? "—" : `${m.participation}%`}</div>{m.participation != null && <Bar S={S} pct={m.participation} color={m.participation >= 75 ? "#2E7D52" : (m.participation >= 50 ? "#9A6B12" : "#B11E2A")} />}</div>
+          <div key={m.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <Initials S={S} dark name={m.name} />
+            <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}</div></div>
+            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{m.participation == null ? "—" : `${m.participation}%`}</div>{m.participation != null && <Bar S={S} pct={m.participation} track={FIRE.track} color={m.participation >= 75 ? FIRE.green : (m.participation >= 50 ? FIRE.amberText : FIRE.redText)} />}</div>
           </div>
         ))}
       </div>
@@ -2444,28 +2444,28 @@ function RosterReports({ S, members }) {
   return (
     <div>
       <div style={S.statRow}>
-        <Stat S={S} n={`${active}/${members.length}`} label="Active members" />
-        <Stat S={S} n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
-        <Stat S={S} n={`${avgPart}%`} label="Avg participation" />
-        <Stat S={S} n={`${rigsReady}/${APPARATUS_SEED.length}`} label="Apparatus ready" />
+        <Stat S={S} dark n={`${active}/${members.length}`} label="Active members" />
+        <Stat S={S} dark n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
+        <Stat S={S} dark n={`${avgPart}%`} label="Avg participation" />
+        <Stat S={S} dark n={`${rigsReady}/${APPARATUS_SEED.length}`} label="Apparatus ready" />
       </div>
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
-          <h3 style={S.featTitle}>Turn your numbers into a report — in one tap</h3>
-          <p style={{ ...S.helpP, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Turn your numbers into a report — in one tap</h3>
+          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
             </button>
             <button
-              style={{ ...S.primaryBtn, background: "#fff", color: "#B11E2A", border: "1.5px solid #B11E2A" }}
+              style={FS.btn}
               onClick={() => downloadDepartmentReport(buildReportData())}>
               <Download size={16} /> Download PDF
             </button>
           </div>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
     </div>
