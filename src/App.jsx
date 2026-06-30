@@ -2003,9 +2003,9 @@ function expPhrase(exp) {
 function Pill({ S, color, children }) {
   return <span style={{ ...S.opChip, color, borderColor: `${color}55`, background: `${color}14` }}>{children}</span>;
 }
-function Initials({ S, name }) {
+function Initials({ S, name, dark }) {
   const i = name.split(" ").map((w) => w[0]).slice(0, 2).join("");
-  return <span style={S.avatar}>{i}</span>;
+  return <span style={dark ? { ...S.avatar, border: `0.5px solid ${FIRE.btnBorder}` } : S.avatar}>{i}</span>;
 }
 
 function Roster({ S, role, members, setMembers, sessions, notify }) {
@@ -2019,10 +2019,14 @@ function Roster({ S, role, members, setMembers, sessions, notify }) {
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} />;
   return (
-    <div>
-      <PageHead S={S} eyebrow="ROSTER" title="Your people, all in one place" sub={leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."} />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>ROSTER</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your people, all in one place</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."}</div>
+      </div>
       <div style={S.segRow}>
-        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, ...(tab === k ? S.segBtnOn : {}) }}>{l}</button>)}
+        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
       {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
@@ -2035,7 +2039,7 @@ function Roster({ S, role, members, setMembers, sessions, notify }) {
 function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const canAdd = canAssign(role);
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState("");
-  const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
+  const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   async function add() {
     if (!nm.trim()) return;
     const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
@@ -2054,29 +2058,29 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   return (
     <div>
       {canAdd && (adding ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Name</span><input style={S.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Rank</span><select style={S.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Phone</span><input style={S.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 180 }}><span style={S.fieldLabel}>Email</span><input style={S.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><select style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span><input style={FS.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
       <div style={S.opGrid}>
         {members.map((m) => (
-          <div key={m.id} style={{ ...S.opCard, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+          <div key={m.id} style={{ ...S.opCard, ...FS.card, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <Initials S={S} name={m.name} />
+              <Initials S={S} dark name={m.name} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={S.personName}>{m.name}</div>
-                <div style={S.personMeta}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
+                <div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div>
+                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
               </div>
               <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill>
-              {canAdd && <button title="Remove from roster" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", marginLeft: 4, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} /></button>}
+              {canAdd && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: "#6A7178" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: FIRE.textMuted }}>
               <Phone size={13} /> {m.phone}
-              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: "#1F4E79", fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
+              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
                 : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
             </div>
           </div>
@@ -2124,49 +2128,49 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
     setDraft({ name: "", exp: "" });
   }
   return (
-    <div>
-      <button style={S.backBtn} onClick={back}><ArrowLeft size={16} /> Back to roster</button>
-      <div style={{ ...S.opCard, marginBottom: 16 }}>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <Initials S={S} name={member.name} />
+          <Initials S={S} dark name={member.name} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ ...S.personName, fontSize: 19 }}>{member.name}</div>
-            <div style={S.personMeta}>{member.role} · since {member.joined} · {member.phone}</div>
+            <div style={{ ...S.personName, fontSize: 19, color: FIRE.textPrimary }}>{member.name}</div>
+            <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{member.role} · since {member.joined} · {member.phone}</div>
           </div>
-          <Pill S={S} color={member.status === "Active" ? "#2E7D52" : member.status === "Probationary" ? "#9A6B12" : "#6A7178"}>{member.status.toUpperCase()}</Pill>
+          <Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>
         </div>
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation == null ? "—" : `${member.participation}%`}</span></div>
-          {member.participation != null && <Bar S={S} pct={member.participation} color={member.participation >= 75 ? "#2E7D52" : member.participation >= 50 ? "#9A6B12" : "#B11E2A"} />}
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation == null ? "—" : `${member.participation}%`}</span></div>
+          {member.participation != null && <Bar S={S} pct={member.participation} track={FIRE.track} color={member.participation >= 75 ? FIRE.green : member.participation >= 50 ? FIRE.amberText : FIRE.redText} />}
         </div>
         {assign && (
-          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid #ECEDEA` }}>
-            <label style={S.field}><span style={S.fieldLabel}>Station role &amp; access</span>
-              <select style={{ ...S.input, maxWidth: 260 }} value={member.access} onChange={(e) => onUpdate({ ...member, access: e.target.value })}>
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station role &amp; access</span>
+              <select style={{ ...FS.input, maxWidth: 260 }} value={member.access} onChange={(e) => onUpdate({ ...member, access: e.target.value })}>
                 <option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option>
               </select></label>
-            <div style={{ fontSize: 12, color: "#6A7178", marginTop: 5 }}>Sets what this person can see and do across the platform.</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5 }}>Sets what this person can see and do across the platform.</div>
           </div>
         )}
       </div>
 
-      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</div>
-      <div style={{ ...S.opCard, marginBottom: 16 }}>
-        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No certifications on file yet.</div> :
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</div>
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
+        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> :
           certs.map((c, i) => (
-            <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom, ...(assign && editingCertId === c.id ? { flexWrap: "wrap" } : {}) }}>
+            <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, ...(assign && editingCertId === c.id ? { flexWrap: "wrap" } : {}) }}>
               <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
               {assign && editingCertId === c.id ? (<>
-                <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={S.fieldLabel}>Certification</span><input style={S.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
-                <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Expires (YYYY-MM)</span><input style={S.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
-                <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
-                <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
+                <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
+                <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
+                <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
+                <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
               </>) : (<>
-                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
                 <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
                 {assign && (<>
-                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
-                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
+                  <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
+                  <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
                 </>)}
               </>)}
             </div>
@@ -2180,17 +2184,17 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
         const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
-            <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</div>
-            <div style={{ ...S.opCard, marginBottom: 16 }}>
-              {done.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No training sessions recorded yet.</div> : (<>
-                <div style={{ fontSize: 13, color: "#3A4750", marginBottom: 8 }}>Attended <b>{went}</b> of <b>{done.length}</b> recorded sessions.</div>
+            <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</div>
+            <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
+              {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
+                <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{done.length}</b> recorded sessions.</div>
                 {done.map((s, i) => {
                   const present = (s.attendance || []).includes(member.id);
                   return (
-                    <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : S.certRow.borderBottom }}>
-                      <CalendarCheck size={15} color={present ? "#2E7D52" : "#B11E2A"} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {fmtSess(s)}</span></div>
-                      <Pill S={S} color={present ? "#2E7D52" : "#B11E2A"}>{present ? "PRESENT" : "ABSENT"}</Pill>
+                    <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                      <CalendarCheck size={15} color={present ? FIRE.green : FIRE.redBright} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
+                      <Pill S={S} color={present ? FIRE.green : FIRE.redBright}>{present ? "PRESENT" : "ABSENT"}</Pill>
                     </div>
                   );
                 })}
@@ -2200,18 +2204,18 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
         );
       })()}
 
-      <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
-      <div style={S.opCard}>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
+      <div style={{ ...S.opCard, ...FS.card }}>
         <div style={{ display: "flex", gap: 8, marginBottom: notes.length ? 14 : 0 }}>
-          <input style={{ ...S.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
-          <button style={S.primaryBtn} onClick={addNote}>Add</button>
+          <input style={{ ...FS.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button style={FS.btnPrimary} onClick={addNote}>Add</button>
         </div>
         {notes.map((n, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : S.certRow.borderBottom, alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: "#2B3138", lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: "#6A7178", marginTop: 3 }}>{n.by} · {n.when}</div></div>
+          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{n.by} · {n.when}</div></div>
           </div>
         ))}
-        {notes.length === 0 && <div style={{ fontSize: 13, color: "#6A7178" }}>No notes yet. Notes here are visible to leadership only — never to the member.</div>}
+        {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to leadership only — never to the member.</div>}
       </div>
     </div>
   );
@@ -2250,14 +2254,14 @@ function ProposeCert({ S, role, member, notify }) {
 
   if (!canPropose || !member) return null;
   return open ? (
-    <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-      <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Certification</span><input style={S.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
-      <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Expires (YYYY-MM)</span><input style={S.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
-      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Note (optional)</span><input style={S.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
-      <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} disabled={busy} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
+    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
+      <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
+      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
+      <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busy} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
     </div>
   ) : (
-    <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setOpen(true)}>+ Propose certification</button>
+    <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setOpen(true)}>+ Propose certification</button>
   );
 }
 
