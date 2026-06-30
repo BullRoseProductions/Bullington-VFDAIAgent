@@ -3895,18 +3895,18 @@ function StationDuties({ S, role, members, meId, notify }) {
       </div>
 
       {canCreate && addingA && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span><select style={S.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
-          {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>New category name</span><input style={S.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
-          <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Recurs</span><select style={S.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 160 }}><span style={S.fieldLabel}>Assign to</span><select style={S.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Due date (optional)</span><input type="date" style={S.input} value={due} onChange={(e) => setDue(e.target.value)} /></label>
-          <button style={S.primaryBtn} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
+        <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Duty</span><input style={FS.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
+          {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
+          <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={due} onChange={(e) => setDue(e.target.value)} /></label>
+          <button style={FS.btnPrimary} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
+          <button style={FS.btn} onClick={() => setAddingA(false)}>Cancel</button>
         </div>
       )}
-      {canCreate && <p style={{ ...S.helpP, marginTop: -2 }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
+      {canCreate && <p style={{ ...S.helpP, marginTop: -2, color: FIRE.textMuted }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
       {categories.map((cat) => {
         const items = duties.filter((d) => d.category === cat);
@@ -3914,26 +3914,26 @@ function StationDuties({ S, role, members, meId, notify }) {
         const dn = items.filter((d) => d.done).length;
         return (
           <div key={cat} style={{ marginBottom: 16 }}>
-            <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? "#2E7D52" : "#9A96A6" }}>{dn}/{items.length}</span></div>
+            <div style={{ ...FS.kicker, display: "flex", alignItems: "center", marginBottom: 8 }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary }}>{dn}/{items.length}</span></div>
             {items.map((a) => {
               const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
               return (
               <div key={a.id}>
-                <div style={S.certRow}>
+                <div style={FS.row}>
                   {(() => {
                     const canUncheck = canManage || a.doneBy === me?.id;
                     const canCompleteThis = a.assignedTo == null || a.assignedTo === me?.id || canManage;
-                    if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
-                    if (!a.done && !canCompleteThis) return <span title={`Assigned to ${nameById.get(a.assignedTo) ?? "a member"} — only they or a leader can complete this`} style={{ display: "inline-flex", flexShrink: 0 }}><span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block", opacity: 0.5 }} /></span>;
+                    if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color={FIRE.green} /></span>;
+                    if (!a.done && !canCompleteThis) return <span title={`Assigned to ${nameById.get(a.assignedTo) ?? "a member"} — only they or a leader can complete this`} style={{ display: "inline-flex", flexShrink: 0 }}><span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block", opacity: 0.5 }} /></span>;
                     return (
                       <button onClick={() => a.done ? uncompleteDuty(a.id) : openPicker(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                        {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                        {a.done ? <CheckCircle2 size={22} color={FIRE.green} /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
                       </button>
                     );
                   })()}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
-                    {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
+                    <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
+                    {a.done && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
                   </div>
                   {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
                   {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
@@ -3944,8 +3944,8 @@ function StationDuties({ S, role, members, meId, notify }) {
                     const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                     return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
                   })()}
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: a.recurrence === "One-time" ? "#9A6B12" : "#6A7178", background: a.recurrence === "One-time" ? "#FBF1DC" : "#F1EFF5", borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
-                  {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                  {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
                 {pickerForDutyId === a.id && (
                   <div style={{ ...S.opCard, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
