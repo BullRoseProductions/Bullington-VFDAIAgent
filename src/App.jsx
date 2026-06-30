@@ -612,15 +612,38 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   const [mine, setMine] = useState([]);
   function loadMine() {
     if (!meId) return;
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to").eq("assigned_to", meId).eq("done", false)
-      .then(({ data }) => setMine(data || []));
+    supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId)
+      .then(({ data }) => setMine(data || []));   // open + completed (done filter dropped); partitioned below
   }
   useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  const mineOpen = mine.filter((d) => !d.done);
+  const mineDone = mine.filter((d) => d.done);
   async function markMineDone(id) {
     const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });   // assignee allowed by the RPC rule
     if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
-    loadMine();   // refetch — the completed duty drops off (done=true no longer matches)
+    loadMine();   // refetch — the duty moves from mineOpen → mineDone (loader now returns both)
   }
+  // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
+  const [nextEvent, setNextEvent] = useState(null);
+  useEffect(() => {
+    const todayIso = toISO(today);
+    Promise.all([
+      supabase.from("training_sessions").select("title, date"),
+      supabase.from("funding_events").select("title, date"),
+      supabase.from("recruitment_events").select("title, date"),
+      supabase.from("content_calendar").select("caption, date"),
+    ]).then(([tr, fu, rc, so]) => {
+      const rows = [
+        ...(tr.data || []).map((r) => ({ title: r.title, date: r.date, type: "Training" })),
+        ...(fu.data || []).map((r) => ({ title: r.title, date: r.date, type: "Fundraiser" })),
+        ...(rc.data || []).map((r) => ({ title: r.title, date: r.date, type: "Recruitment" })),
+        ...(so.data || []).map((r) => ({ title: r.caption, date: r.date, type: "Social" })),
+      ].filter((r) => r.date && r.date >= todayIso);                    // upcoming = date >= today (ISO string compare)
+      rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));   // YYYY-MM-DD sorts chronologically
+      setNextEvent(rows[0] || null);                                    // soonest across all 4 sources, or null
+    });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, []);
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {/* 1 — greeting */}
@@ -628,6 +651,10 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
         <div style={FS.kicker}>MY STATION · North Hood Country VFD</div>
         <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
         <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
+      </div>
+      {/* SLICE-1 TEMP — verify the Next Event loader; becomes a real stat box in slice 2 */}
+      <div style={{ ...FS.card, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, color: FIRE.textMuted2 }}>
+        NEXT EVENT (temp): {nextEvent ? `${nextEvent.type} · ${nextEvent.title || "—"} · ${nextEvent.date}` : "none upcoming"}
       </div>
 
       {/* 2 — three stat boxes */}
@@ -688,11 +715,11 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
       </div>
 
       {/* 4b — assigned to me (self-contained loader; hidden entirely when empty) */}
-      {mine.length > 0 && (
+      {(mineOpen.length > 0 || mineDone.length > 0) && (
         <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
           <div style={FS.kicker}>ASSIGNED TO ME</div>
           <div style={{ marginTop: 10 }}>
-            {mine.map((d) => {
+            {mineOpen.map((d) => {
               let badge = null;
               if (d.due_date) {
                 const dd = new Date(d.due_date + "T00:00:00");
@@ -713,6 +740,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
                 </div>
               );
             })}
+            {/* SLICE-1 TEMP — confirms completed duties now load; real open/completed grouping in slice 2 */}
+            {mineDone.length > 0 && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, paddingTop: 6 }}>+ {mineDone.length} completed (temp — grouped layout in slice 2)</div>}
           </div>
         </div>
       )}
