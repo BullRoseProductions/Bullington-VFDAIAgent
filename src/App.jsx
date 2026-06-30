@@ -2471,43 +2471,47 @@ function Apparatus({ S, role }) {
     }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="APPARATUS & EQUIPMENT" title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."} />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>APPARATUS & EQUIPMENT</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Know your rigs are ready</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}</div>
+      </div>
       <div style={S.statRow}>
-        <Stat S={S} n={String(ready)} label="Ready to roll" />
-        <Stat S={S} n={String(flagged)} label="Needs attention" warn={flagged > 0} />
-        <Stat S={S} n={String(rigs.length)} label="Apparatus in station" />
+        <Stat S={S} dark n={String(ready)} label="Ready to roll" />
+        <Stat S={S} dark n={String(flagged)} label="Needs attention" warn={flagged > 0} />
+        <Stat S={S} dark n={String(rigs.length)} label="Apparatus in station" />
       </div>
       {canManage && (adding ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={S.fieldLabel}>Name / unit</span><input style={S.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Type</span><select style={S.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>Status</span><select style={S.input} value={rd} onChange={(e) => setRd(e.target.value)}><option>Ready</option><option>Needs attention</option></select></label>
-          <button style={S.primaryBtn} onClick={addRig}><Plus size={15} /> Add to station</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setAdding(false); setNm(""); }}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name / unit</span><input style={FS.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={rd} onChange={(e) => setRd(e.target.value)}><option>Ready</option><option>Needs attention</option></select></label>
+          <button style={FS.btnPrimary} onClick={addRig}><Plus size={15} /> Add to station</button>
+          <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); }}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
       {rigs.length === 0 ? (
-        <div style={{ ...S.opCard, textAlign: "center", color: "#6A7178", fontSize: 14 }}>
-          <Truck size={22} color="#9AA1AB" style={{ marginBottom: 6 }} />
+        <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+          <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus in the station yet.{canManage ? " Use “Add apparatus” to build your list." : ""}</div>
         </div>
       ) : (
       <div style={S.opGrid}>
         {rigs.map((r) => {
-          const ok = r.status === "Pass"; const color = ok ? "#2E7D52" : "#B11E2A";
+          const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
           return (
-            <div key={r.id} style={S.opCard}>
+            <div key={r.id} style={{ ...S.opCard, ...FS.card }}>
               <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-                <Truck size={20} color="#54506B" style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{r.name}</div><div style={S.personMeta}>{r.type}</div></div>
+                <Truck size={20} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
                 <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>
-                {canManage && <button title="Take out of station" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", marginLeft: 4, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeRig(r.id, r.name)}><X size={14} /></button>}
+                {canManage && <button title="Take out of station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
-              {r.note && <div style={{ fontSize: 13, color: ok ? "#3A4750" : "#8A1620", marginTop: 10 }}>{r.note}</div>}
-              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: "#6A7178" }}>
+              {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
+              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: FIRE.textMuted }}>
                 <span>Last check: {r.lastCheck} · {r.by}</span>
-                <button style={{ ...S.ghostBtn, marginTop: 0, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id)}><ClipboardCheck size={14} /> Log a check</button>
+                <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id)}><ClipboardCheck size={14} /> Log a check</button>
               </div>
             </div>
           );
@@ -2529,6 +2533,7 @@ const MAINT_SEED = [
   { id: 6, unit: "All units", task: "Registration & insurance", cadence: "Annual", last: "Jan 2026", status: "Current" },
 ];
 const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
+const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
 function MaintenancePanel({ S, role, rigs }) {
   const canManage = canAssign(role);
   const [items, setItems] = useState(MAINT_SEED);
@@ -2550,44 +2555,44 @@ function MaintenancePanel({ S, role, rigs }) {
   }
   return (
     <div style={{ marginTop: 22 }}>
-      <div style={S.cardEyebrow}><Wrench size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAINTENANCE & REMINDERS</div>
-      <div style={{ fontSize: 13, color: due > 0 ? "#8A1620" : "#2E7D52", margin: "2px 0 12px", fontWeight: 600 }}>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Wrench size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAINTENANCE & REMINDERS</div>
+      <div style={{ fontSize: 13, color: due > 0 ? FIRE.red : FIRE.greenText, margin: "2px 0 12px", fontWeight: 600 }}>
         {due > 0 ? `${due} maintenance item${due === 1 ? "" : "s"} need attention` : "All maintenance up to date"}
       </div>
       {canManage && (adding ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Unit</span><select style={S.input} value={u} onChange={(e) => setU(e.target.value)}>{[...rigs.map((r) => r.name), "All units"].map((nm) => <option key={nm}>{nm}</option>)}</select></label>
-          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Task</span><input style={S.input} value={t} placeholder="e.g. Hose pressure test" onChange={(e) => setT(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Cadence</span><select style={S.input} value={cad} onChange={(e) => setCad(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
-          <button style={S.primaryBtn} onClick={addItem}><Plus size={15} /> Add</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAdding(false)}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Unit</span><select style={FS.input} value={u} onChange={(e) => setU(e.target.value)}>{[...rigs.map((r) => r.name), "All units"].map((nm) => <option key={nm}>{nm}</option>)}</select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={t} placeholder="e.g. Hose pressure test" onChange={(e) => setT(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cadence</span><select style={FS.input} value={cad} onChange={(e) => setCad(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
+          <button style={FS.btnPrimary} onClick={addItem}><Plus size={15} /> Add</button>
+          <button style={FS.btn} onClick={() => setAdding(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add maintenance item</button>)}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add maintenance item</button>)}
       <div>
         {sorted.map((i) => (
-          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
-            <Wrench size={15} color={MAINT_COLOR[i.status]} style={{ flexShrink: 0 }} />
+          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <Wrench size={15} color={MAINT_FIRE[i.status]} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: "#191C20" }}>{i.task}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {i.unit}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{i.cadence} · last done {i.last}</div>
+              <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{i.task}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {i.unit}</span>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{i.cadence} · last done {i.last}</div>
             </div>
-            <Pill S={S} color={MAINT_COLOR[i.status]}>{i.status.toUpperCase()}</Pill>
-            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
-            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeItem(i.id)}><X size={14} /></button>}
+            <Pill S={S} color={MAINT_FIRE[i.status]}>{i.status.toUpperCase()}</Pill>
+            <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
+            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i.id)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
       </div>
       {canManage && (
-        <div style={{ ...S.aiBanner, marginTop: 16 }}>
+        <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}`, marginTop: 16 }}>
           <div style={{ flex: 1 }}>
-            <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
-            <h3 style={S.featTitle}>Draft a preventive-maintenance checklist</h3>
-            <p style={{ ...S.helpP, marginBottom: 10 }}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
-            <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftChecklist} disabled={loading}>
+            <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
+            <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a preventive-maintenance checklist</h3>
+            <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
+            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftChecklist} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Wrench size={16} /> Draft a checklist</>}
             </button>
-            {err && <div style={S.errBox}>{err}</div>}
-            {out && <RichOutput S={S} text={out} />}
+            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {out && <RichOutput S={S} text={out} dark />}
           </div>
         </div>
       )}
@@ -4151,8 +4156,8 @@ function Admin({ S, library, setLibrary, feedback }) {
 function PageHead({ S, eyebrow, title, sub }) {
   return <div style={S.pageHead}><div style={S.cardEyebrow}>{eyebrow}</div><h1 style={S.pageTitle}>{title}</h1>{sub && <p style={S.pageSub}>{sub}</p>}</div>;
 }
-function Stat({ S, n, label, warn }) {
-  return <div style={S.stat}><div style={{ ...S.statN, color: warn ? "#B11E2A" : "#191C20" }}>{n}</div><div style={S.statLabel}>{label}</div></div>;
+function Stat({ S, n, label, warn, dark }) {
+  return <div style={dark ? { ...S.stat, ...FS.card } : S.stat}><div style={{ ...S.statN, color: warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20") }}>{n}</div><div style={dark ? { ...S.statLabel, color: FIRE.textMuted } : S.statLabel}>{label}</div></div>;
 }
 function Meta({ Icon, text, dark }) {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: dark ? FIRE.textMuted : "#6A7178" }}><Icon size={14} /> {text}</span>;
