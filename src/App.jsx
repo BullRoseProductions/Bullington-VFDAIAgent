@@ -895,44 +895,48 @@ function AIAssistant({ S, addFeedback }) {
     } catch { setErr("Couldn't generate a plan just now. Check the connection and try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="AI TRAINING ASSISTANT" title="Draft a drill plan" sub="Describe your crew and constraints. You'll get a starting plan to adapt — then review it against your protocols." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>AI TRAINING ASSISTANT</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Draft a drill plan</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Describe your crew and constraints. You'll get a starting plan to adapt — then review it against your protocols.</div>
+      </div>
       <div style={S.aiGrid}>
-        <div style={S.aiForm}>
-          <AIField S={S} label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
-          <AIField S={S} label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
-          <AIField S={S} label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
-          <label style={S.field}><span style={S.fieldLabel}>Skill level</span>
-            <select style={S.input} value={form.level} onChange={(e) => up("level", e.target.value)}><option>New / probationary</option><option>Intermediate</option><option>Experienced</option><option>Mixed</option></select></label>
-          <AIField S={S} label="Time available (minutes)" value={form.time} onChange={(v) => up("time", v)} />
-          <label style={S.field}><span style={S.fieldLabel}>Recent training history</span>
-            <textarea style={{ ...S.input, minHeight: 66, resize: "vertical" }} value={form.history} onChange={(e) => up("history", e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+        <div style={{ ...S.aiForm, ...FS.card }}>
+          <AIField S={S} dark label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
+          <AIField S={S} dark label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
+          <AIField S={S} dark label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Skill level</span>
+            <select style={FS.input} value={form.level} onChange={(e) => up("level", e.target.value)}><option>New / probationary</option><option>Intermediate</option><option>Experienced</option><option>Mixed</option></select></label>
+          <AIField S={S} dark label="Time available (minutes)" value={form.time} onChange={(v) => up("time", v)} />
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recent training history</span>
+            <textarea style={{ ...FS.input, minHeight: 66, resize: "vertical" }} value={form.history} onChange={(e) => up("history", e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate drill plan</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
         </div>
-        <div style={S.aiResult}>
-          {!plan && !loading && <div style={S.aiPlaceholder}><Sparkles size={28} color="#54506B" /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
-          {loading && <div style={S.aiPlaceholder}><Loader2 size={28} className="spin" color="#54506B" /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
+        <div style={{ ...S.aiResult, ...FS.card }}>
+          {!plan && !loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Sparkles size={28} color={FIRE.textMuted2} /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
+          {loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Loader2 size={28} className="spin" color={FIRE.textMuted2} /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
           {plan && (
             <div>
-              <Disclaimer S={S} compact />
-              <h3 style={S.featTitle}>{form.topic}</h3>
-              <p style={S.body}>{plan.summary}</p>
-              {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} text={`${plan.durationMin} min`} /></div> : null}
-              <AIList S={S} Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
-              <AIList S={S} Icon={Wrench} title="Equipment" items={plan.equipment} />
+              <Disclaimer S={S} compact dark />
+              <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{form.topic}</h3>
+              <p style={{ ...S.body, color: FIRE.textSecondary }}>{plan.summary}</p>
+              {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
+              <AIList S={S} dark Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
+              <AIList S={S} dark Icon={Wrench} title="Equipment" items={plan.equipment} />
               {Array.isArray(plan.steps) && (
-                <div style={{ marginTop: 16 }}><div style={S.aiListHead}><FileText size={16} /> Drill steps</div>
+                <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Drill steps</div>
                   <div style={S.steps}>{plan.steps.map((s, i) => (
-                    <div key={i} style={S.step}><span style={S.stepNum}>{String(i + 1).padStart(2, "0")}</span>
-                      <div style={{ flex: 1 }}><div style={S.stepTitle}>{s.title} {s.minutes ? <span style={S.stepMin}>{s.minutes} min</span> : null}</div><div style={S.stepDetail}>{s.detail}</div></div></div>
+                    <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
+                      <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div></div></div>
                   ))}</div></div>
               )}
-              <AIList S={S} Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
-              <AIList S={S} Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
-              <AIList S={S} Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
+              <AIList S={S} dark Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
+              <AIList S={S} dark Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
+              <AIList S={S} dark Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
               <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
             </div>
           )}
@@ -941,15 +945,15 @@ function AIAssistant({ S, addFeedback }) {
     </div>
   );
 }
-function AIField({ S, label, value, onChange }) {
-  return <label style={S.field}><span style={S.fieldLabel}>{label}</span><input style={S.input} value={value} onChange={(e) => onChange(e.target.value)} /></label>;
+function AIField({ S, label, value, onChange, dark }) {
+  return <label style={S.field}><span style={dark ? { ...S.fieldLabel, color: FIRE.textSecondary } : S.fieldLabel}>{label}</span><input style={dark ? FS.input : S.input} value={value} onChange={(e) => onChange(e.target.value)} /></label>;
 }
-function AIList({ S, Icon, title, items, warn }) {
+function AIList({ S, Icon, title, items, warn, dark }) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ ...S.aiListHead, color: warn ? "#8A1620" : "#191C20" }}><Icon size={16} /> {title}</div>
-      <ul style={S.list}>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
+      <div style={{ ...S.aiListHead, color: warn ? (dark ? FIRE.redText : "#8A1620") : (dark ? FIRE.textPrimary : "#191C20") }}><Icon size={16} /> {title}</div>
+      <ul style={dark ? { ...S.list, color: FIRE.textSecondary } : S.list}>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
     </div>
   );
 }
@@ -4142,8 +4146,8 @@ function PageHead({ S, eyebrow, title, sub }) {
 function Stat({ S, n, label, warn }) {
   return <div style={S.stat}><div style={{ ...S.statN, color: warn ? "#B11E2A" : "#191C20" }}>{n}</div><div style={S.statLabel}>{label}</div></div>;
 }
-function Meta({ Icon, text }) {
-  return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "#6A7178" }}><Icon size={14} /> {text}</span>;
+function Meta({ Icon, text, dark }) {
+  return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: dark ? FIRE.textMuted : "#6A7178" }}><Icon size={14} /> {text}</span>;
 }
 function TrackPill({ S, track }) {
   const T = TRACKS[track];
@@ -4155,8 +4159,8 @@ function Chip({ S, active, accent, onClick, children }) {
 function Section({ S, Icon, title, children }) {
   return <div style={S.section}><div style={S.sectionHead}><Icon size={16} color="#54506B" /> {title}</div>{children}</div>;
 }
-function Disclaimer({ S, compact }) {
-  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}) }}><AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
+function Disclaimer({ S, compact, dark }) {
+  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
 }
 function Logo() {
   return <img src="/b4c-logo.png" alt="Before the Call" style={{ height: 34, width: "auto", flexShrink: 0, display: "block" }} />;
