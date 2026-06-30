@@ -3953,30 +3953,30 @@ function StationDuties({ S, role, members, meId, notify }) {
                   {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
                 {pickerForDutyId === a.id && (
-                  <div style={{ ...S.opCard, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                     {pickerStage === "ask" ? (<>
-                      <span style={S.fieldLabel}>Did you have help?</span>
+                      <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Did you have help?</span>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> No, just me</button>
-                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setPickerStage("pick")}>Yes</button>
-                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                        <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> No, just me</button>
+                        <button style={FS.btn} onClick={() => setPickerStage("pick")}>Yes</button>
+                        <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
                       </div>
                     </>) : (<>
-                      <span style={S.fieldLabel}>Who helped?</span>
+                      <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Who helped?</span>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                         {members.filter((m) => m.id !== me?.id).map((m) => {
                           const sel = selectedHelpers.includes(m.id);
                           return (
                             <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
-                              style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: "#2E7D52", borderColor: "#2E7D52", background: "#EAF5EE" } : { color: "#6A7178", borderColor: "#E3E0EA", background: "transparent" }) }}>
+                              style={{ ...FS.btn, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: FIRE.greenText, border: `0.5px solid ${FIRE.greenText}` } : {}) }}>
                               {m.name}
                             </button>
                           );
                         })}
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
-                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                        <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
+                        <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
                       </div>
                     </>)}
                   </div>
@@ -3988,22 +3988,22 @@ function StationDuties({ S, role, members, meId, notify }) {
         );
       })}
 
-      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />OTHER WORK LOGGED</div>
-      <p style={S.helpP}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
-      <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>What got done</span><input style={S.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Who</span><input style={S.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
-        <button style={S.primaryBtn} onClick={addLog}><Plus size={15} /> Log it</button>
+      <div style={{ ...FS.kicker, marginTop: 22, marginBottom: 8 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />OTHER WORK LOGGED</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
+      <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What got done</span><input style={FS.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span><input style={FS.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
+        <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
       </div>
       <div>
         {log.map((e) => (
-          <div key={e.id} style={S.certRow}>
-            <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
+          <div key={e.id} style={FS.row}>
+            <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: "#191C20" }}>{e.what}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{e.who} · {e.when}</div>
+              <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.who} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span></div>
             </div>
-            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeLog(e.id)}><X size={14} /></button>}
+            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
       </div>
@@ -4011,24 +4011,24 @@ function StationDuties({ S, role, members, meId, notify }) {
 
       {view === "history" && canManage && (
         historyWeeks.length === 0 ? (
-          <div style={{ ...S.opCard, marginBottom: 14, fontSize: 13.5, color: "#6A7178" }}>No completions logged yet.</div>
+          <div style={{ ...FS.card, padding: 16, marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>No completions logged yet.</div>
         ) : (
           <>
-            <div style={{ ...S.opCard, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
-              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset >= historyWeeks.length - 1} onClick={() => setWeekOffset((o) => Math.min(o + 1, historyWeeks.length - 1))}>◀</button>
-              <div style={{ flex: 1, textAlign: "center", fontWeight: 600, color: "#191C20" }}>Week of {fmtWeek(currentWeek.wk)}</div>
-              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset <= 0} onClick={() => setWeekOffset((o) => Math.max(o - 1, 0))}>▶</button>
-              {currentWeek && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} /> Download CSV</button>}
+            <div style={{ ...FS.card, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+              <button style={{ ...FS.btn, padding: "6px 11px" }} disabled={weekOffset >= historyWeeks.length - 1} onClick={() => setWeekOffset((o) => Math.min(o + 1, historyWeeks.length - 1))}>◀</button>
+              <div style={{ flex: 1, textAlign: "center", fontWeight: 600, color: FIRE.textPrimary }}>Week of {fmtWeek(currentWeek.wk)}</div>
+              <button style={{ ...FS.btn, padding: "6px 11px" }} disabled={weekOffset <= 0} onClick={() => setWeekOffset((o) => Math.max(o - 1, 0))}>▶</button>
+              {currentWeek && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>}
             </div>
             <div>
               {currentWeek.entries.map((e) => {
                 const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
                 return (
-                  <div key={e.id} style={S.certRow}>
-                    <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
+                  <div key={e.id} style={FS.row}>
+                    <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, color: "#191C20" }}>{e.dutyName}</span>
-                      <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{names || "A member"} · {fmtDoneAt(e.doneAt)}</div>
+                      <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.dutyName}</span>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{names || "A member"} · <span style={FS.num}>{fmtDoneAt(e.doneAt)}</span></div>
                     </div>
                   </div>
                 );
