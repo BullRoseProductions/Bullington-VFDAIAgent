@@ -982,11 +982,11 @@ function ResourceLibrary({ S, items, verb, onOpen, onDelete, dark }) {
     </div>
   );
 }
-function IdeaGrid({ S, items }) {
+function IdeaGrid({ S, items, dark }) {
   return (
     <div style={S.ideaGrid}>
       {items.map((i) => (
-        <div key={i.h} style={S.ideaCard}><div style={S.ideaH}>{i.h}</div><div style={S.ideaP}>{i.p}</div></div>
+        <div key={i.h} style={dark ? { ...S.ideaCard, ...FS.card } : S.ideaCard}><div style={dark ? { ...S.ideaH, color: FIRE.textPrimary } : S.ideaH}>{i.h}</div><div style={dark ? { ...S.ideaP, color: FIRE.textSecondary } : S.ideaP}>{i.p}</div></div>
       ))}
     </div>
   );
@@ -1058,34 +1058,38 @@ function Recruitment({ S, brand, role, notify }) {
     catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>RECRUITMENT</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Build a recruitment plan — not just a post</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.</div>
+      </div>
       <div style={S.phaseRow}>
         <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent="#B11E2A" />
         <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent="#1F4E79" />
         <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent="#0E6B62" />
       </div>
 
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER</div>
-          <h3 style={S.featTitle}>Draft a recruitment plan for your department</h3>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
-            <AIField S={S} label="Your town" value={town} onChange={setTown} />
-            <AIField S={S} label="Department size" value={size} onChange={setSize} />
+            <AIField S={S} dark label="Your town" value={town} onChange={setTown} />
+            <AIField S={S} dark label="Department size" value={size} onChange={setSize} />
           </div>
-          <label style={S.field}><span style={S.fieldLabel}>What you need</span>
-            <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={need} onChange={(e) => setNeed(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What you need</span>
+            <textarea style={{ ...FS.input, minHeight: 48, resize: "vertical" }} value={need} onChange={(e) => setNeed(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {plan && <RichOutput S={S} text={plan} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {plan && <RichOutput S={S} text={plan} dark />}
         </div>
       </div>
 
-      <div style={S.cardEyebrow}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA</div>
-      <IdeaGrid S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA</div>
+      <IdeaGrid S={S} dark items={[
         { h: "Current-member referrals", p: "Your people's networks convert best. Give them a one-line script to forward." },
         { h: "Local employers", p: "Release-time or support partnerships — many owners want the community goodwill." },
         { h: "Schools & trade programs", p: "High schools, EMT classes, and fire-science programs build your pipeline." },
@@ -1094,13 +1098,13 @@ function Recruitment({ S, brand, role, notify }) {
         { h: "Open house", p: "Your highest-converting event — tour, demo, food, and fast follow-up." },
       ]} />
 
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECRUITMENT CALENDAR</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECRUITMENT CALENDAR</div>
       <RecruitmentCalendar S={S} role={role} notify={notify} />
 
       <GraphicStudio S={S} brand={brand} />
 
-      <div style={S.cardEyebrow}>RECRUITMENT LIBRARY</div>
-      <ResourceLibrary S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>RECRUITMENT LIBRARY</div>
+      <ResourceLibrary S={S} dark items={[
         { name: "Volunteer Recruitment Playbook", type: "PDF · 90-day plan + templates" },
         { name: "Printable recruitment flyer", type: "PDF · fill-in-the-blank" },
         { name: "Member-referral scripts", type: "Doc · copy & send" },
@@ -1112,10 +1116,10 @@ function Recruitment({ S, brand, role, notify }) {
 }
 function Phase({ S, n, weeks, title, items, accent }) {
   return (
-    <div style={{ ...S.phaseCard, borderTop: `3px solid ${accent}` }}>
-      <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={S.phaseWeeks}>{weeks}</span></div>
-      <div style={S.phaseTitle}>{title}</div>
-      <ul style={S.phaseList}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
+    <div style={{ ...S.phaseCard, ...FS.card, borderTop: `3px solid ${accent}` }}>
+      <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={{ ...S.phaseWeeks, color: FIRE.textMuted }}>{weeks}</span></div>
+      <div style={{ ...S.phaseTitle, color: FIRE.textPrimary }}>{title}</div>
+      <ul style={{ ...S.phaseList, color: FIRE.textSecondary }}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
     </div>
   );
 }
@@ -1301,7 +1305,7 @@ const TIER_STYLES = {
   pill: { fontSize: 9.5,  fontWeight: 600, padding: "2px 5px", borderRadius: 999 },
   dot:  { fontSize: 9, fontWeight: 600, padding: "1px 5px 1px 4px", borderRadius: 999, display: "inline-flex", alignItems: "center", gap: 4 },
 };
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator }) {
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark }) {
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const firstDow = new Date(cur.y, cur.m, 1).getDay();
@@ -1313,15 +1317,15 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
   for (let d = 1; d <= dim; d++) cells.push(d);
 
   const st = {
-    wrap: { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
-    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EFEEF3" },
-    mlabel: { fontWeight: 700, fontSize: 15, color: "#211C2B" },
-    nav: { border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center" },
-    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: "#F7F6FA" },
-    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4 },
+    wrap: dark ? { ...FS.card, overflow: "hidden", marginBottom: 10 } : { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
+    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}` },
+    mlabel: { fontWeight: 700, fontSize: 15, color: dark ? FIRE.textPrimary : "#211C2B" },
+    nav: { border: `${dark ? "0.5px" : "1px"} solid ${dark ? FIRE.btnBorder : "#E0DEE8"}`, background: dark ? FIRE.btnBg : "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: dark ? FIRE.btnIcon : "#54506B", display: "inline-flex", alignItems: "center" },
+    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: dark ? FIRE.btnBg : "#F7F6FA" },
+    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: dark ? FIRE.textMuted : "#8A8696", letterSpacing: 0.4 },
     grid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)" },
-    cell: { minHeight: 74, borderTop: "1px solid #EFEEF3", borderLeft: "1px solid #EFEEF3", padding: 5, display: "flex", flexDirection: "column", gap: 3 },
-    dnum: { fontSize: 11, color: "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
+    cell: { minHeight: 74, borderTop: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, borderLeft: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, padding: 5, display: "flex", flexDirection: "column", gap: 3 },
+    dnum: { fontSize: 11, color: dark ? FIRE.textMuted : "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
     dtoday: { background: todayColor, color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
     chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   };
@@ -1339,21 +1343,21 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
         {cells.map((d, i) => {
           const dayItems = d == null ? [] : items.filter((it) => it.d === d);
           return (
-            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
+            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? (dark ? FIRE.btnBg : "#FBFAFC") : (dark ? "transparent" : "#fff") }}>
               {d != null && (<>
                 <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
                 {dayItems.slice(0, 3).map((it) => {
                   const c = renderChip(it);
                   const isDot = c.tier === "dot";
                   return (
-                    <div key={it.id} style={{ ...st.chip, background: isDot ? "transparent" : c.color, ...(isDot ? { color: "#3A4750" } : null), ...(c.tier ? TIER_STYLES[c.tier] : null), ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>
+                    <div key={it.id} style={{ ...st.chip, background: isDot ? "transparent" : c.color, ...(isDot ? { color: dark ? FIRE.textSecondary : "#3A4750" } : null), ...(c.tier ? TIER_STYLES[c.tier] : null), ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>
                       {isDot && <span style={{ width: 6, height: 6, borderRadius: 999, background: c.color, flexShrink: 0, display: "inline-block" }} />}
                       {c.label}
                     </div>
                   );
                 })}
                 {overflowIndicator && dayItems.length > 3 && (
-                  <div style={{ fontSize: 9, color: "#8A8696", fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - 3} more</div>
+                  <div style={{ fontSize: 9, color: dark ? FIRE.textMuted : "#8A8696", fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - 3} more</div>
                 )}
               </>)}
             </div>
@@ -1580,35 +1584,35 @@ function RecruitmentCalendar({ S, role, notify }) {
   return (
     <div>
       {show && canEdit && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Title</span>
-            <input style={S.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Open house at Station 20" /></label>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
-            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
+            <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Open house at Station 20" /></label>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
               ))}
             </div>
           </div>
-          <button style={S.primaryBtn} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+          <button style={FS.btnPrimary} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
         </div>
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthItems}
         renderChip={(it) => ({ color: it.c, label: it.title, title: canEdit ? `${it.title} (tap to remove)` : it.title, onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#0E6B62"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
-      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
         {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
       </div>
     </div>
@@ -1665,35 +1669,35 @@ function FundingCalendar({ S, role, notify }) {
   return (
     <div>
       {show && canEdit && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Title</span>
-            <input style={S.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Pancake breakfast at Station 20" /></label>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
-            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
+            <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Pancake breakfast at Station 20" /></label>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
               ))}
             </div>
           </div>
-          <button style={S.primaryBtn} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+          <button style={FS.btnPrimary} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
         </div>
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthItems}
         renderChip={(it) => ({ color: it.c, label: it.title, title: canEdit ? `${it.title} (tap to remove)` : it.title, onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#9A6B12"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
-      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
         {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
       </div>
     </div>
@@ -1854,81 +1858,85 @@ function Funding({ S, role, notify }) {
     catch { setErr("Couldn't generate that just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="FUNDING" title="Plan fundraisers, write the appeals, line up sponsors" sub="Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>FUNDING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident.</div>
+      </div>
 
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
           <div style={S.segRow}>
             {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
-              <button key={m} onClick={() => { setMode(m); setOut(""); }} style={{ ...S.segBtn, ...(mode === m ? S.segBtnOn : {}) }}>{m}</button>
+              <button key={m} onClick={() => { setMode(m); setOut(""); }} style={{ ...S.segBtn, background: mode === m ? FIRE.btnBg : "transparent", borderColor: mode === m ? FIRE.red : FIRE.btnBorder, color: mode === m ? FIRE.textPrimary : FIRE.navLabel }}>{m}</button>
             ))}
           </div>
-          <label style={S.field}><span style={S.fieldLabel}>Tell us about it</span>
-            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tell us about it</span>
+            <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Working…</> : <><Sparkles size={16} /> Generate</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
 
-      <div style={S.cardEyebrow}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EVENT IDEAS</div>
-      <p style={S.helpP}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EVENT IDEAS</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
       <div style={S.opGrid}>
         {FUNDRAISER_IDEAS.map((idea) => {
           const recent = recentFor(idea);
           return (
-            <div key={idea.title} style={S.opCard}>
+            <div key={idea.title} style={{ ...S.opCard, ...FS.card }}>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{idea.title}</div></div>
-                {recent && <Pill S={S} color="#9A6B12">DONE {recent.date}</Pill>}
+                <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{idea.title}</div></div>
+                {recent && <Pill S={S} color={FIRE.amberText}>DONE {recent.date}</Pill>}
               </div>
-              <div style={{ fontSize: 13, color: "#3A4750", marginTop: 7 }}>{idea.p}</div>
+              <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{idea.p}</div>
               <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-                <button style={{ ...S.ghostBtn, marginTop: 0, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => planThis(idea)}><Sparkles size={14} /> Plan this</button>
+                <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => planThis(idea)}><Sparkles size={14} /> Plan this</button>
               </div>
             </div>
           );
         })}
       </div>
 
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
       <FundingCalendar S={S} role={role} notify={notify} />
 
-      <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}>
+      <div style={{ ...FS.kicker, marginBottom: 8, display: "flex", alignItems: "center" }}>
         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
-        {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: "#2E7D52", fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
+        {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: FIRE.greenText, fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
       </div>
-      <p style={S.helpP}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
       {addingLog ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Event</span><input style={S.input} value={ln} placeholder="e.g. Chili Cook-Off" onChange={(e) => setLn(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>When</span><input style={S.input} value={ld} placeholder="e.g. Jun 2026" onChange={(e) => setLd(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Raised ($)</span><input style={S.input} value={la} placeholder="e.g. 1500" onChange={(e) => setLa(e.target.value)} /></label>
-          <button style={S.primaryBtn} onClick={addLog}><Plus size={15} /> Log it</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingLog(false)}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Event</span><input style={FS.input} value={ln} placeholder="e.g. Chili Cook-Off" onChange={(e) => setLn(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>When</span><input style={FS.input} value={ld} placeholder="e.g. Jun 2026" onChange={(e) => setLd(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Raised ($)</span><input style={FS.input} value={la} placeholder="e.g. 1500" onChange={(e) => setLa(e.target.value)} /></label>
+          <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
+          <button style={FS.btn} onClick={() => setAddingLog(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingLog(true)}><Plus size={15} /> Log a fundraiser</button>}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAddingLog(true)}><Plus size={15} /> Log a fundraiser</button>}
       <div style={{ marginBottom: 6 }}>
-        {log.length === 0 ? <div style={{ ...S.opCard, fontSize: 13, color: "#6A7178" }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
+        {log.length === 0 ? <div style={{ ...S.opCard, ...FS.card, fontSize: 13, color: FIRE.textMuted }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
           log.map((e) => (
-            <div key={e.id} style={S.certRow}>
-              <PartyPopper size={15} color="#9A6B12" style={{ flexShrink: 0 }} />
+            <div key={e.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <PartyPopper size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontWeight: 600, color: "#191C20" }}>{e.name}</span>
-                <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{e.date}</div>
+                <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.name}</span>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.date}</div>
               </div>
-              {e.amount > 0 && <span style={{ fontWeight: 700, color: "#2E7D52", fontSize: 13.5 }}>${e.amount.toLocaleString()}</span>}
-              <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeLog(e.id)}><X size={14} /></button>
+              {e.amount > 0 && <span style={{ fontWeight: 700, color: FIRE.greenText, fontSize: 13.5 }}>${e.amount.toLocaleString()}</span>}
+              <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>
             </div>
           ))}
       </div>
 
-      <div style={S.cardEyebrow}>FUNDING LIBRARY</div>
-      <ResourceLibrary S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>FUNDING LIBRARY</div>
+      <ResourceLibrary S={S} dark items={[
         { name: "Fundraising idea menu", type: "PDF" },
         { name: "Sponsor package one-pager", type: "Doc · editable" },
         { name: "Donor & business outreach letters", type: "Doc · templates" },
