@@ -2667,41 +2667,46 @@ function Onboarding({ S, members }) {
     catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan." />
-      <div style={{ ...S.opCard, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <label style={{ ...S.field, minWidth: 200 }}><span style={S.fieldLabel}>Onboarding</span>
-          <select style={S.input} value={who} onChange={(e) => { setWho(e.target.value); }}>{candidates.map((m) => <option key={m.id}>{m.name}</option>)}</select></label>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* header (inline FS — shared PageHead not used/mutated) */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={FS.kicker}>NEW-MEMBER ONBOARDING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Get new members started right</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan.</div>
+      </div>
+      <div style={{ ...FS.card, padding: 16, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Onboarding</span>
+          <select style={FS.input} value={who} onChange={(e) => { setWho(e.target.value); }}>{candidates.map((m) => <option key={m.id}>{m.name}</option>)}</select></label>
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Onboarding progress</span><span>{pct}%</span></div>
-          <Bar S={S} pct={pct} color={pct >= 100 ? "#2E7D52" : pct >= 50 ? "#9A6B12" : "#B11E2A"} />
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>Onboarding progress</span><span>{pct}%</span></div>
+          <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
         </div>
       </div>
       {ONBOARD_TEMPLATE.map((g) => (
         <div key={g.group} style={{ marginBottom: 6 }}>
-          <div style={S.cardEyebrow}>{g.group.toUpperCase()}</div>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>{g.group.toUpperCase()}</div>
           {g.items.map((it, i) => {
             const key = `${who}::${g.group}::${i}`; const done = !!checks[key];
             return (
-              <div key={i} style={S.certRow}>
+              <div key={i} style={FS.row}>
                 <button onClick={() => toggle(key)} title={done ? "Undo" : "Mark complete"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                  {done ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                  {done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
                 </button>
-                <div style={{ flex: 1, minWidth: 0, color: done ? "#9A96A6" : "#191C20", textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
+                <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
               </div>
             );
           })}
         </div>
       ))}
-      <div style={{ ...S.aiBanner, marginTop: 10 }}>
+      <div style={{ ...FS.card, padding: 18, marginTop: 10 }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI WELCOME & 30-DAY PLAN</div>
-          <h3 style={S.featTitle}>Draft a welcome for {who}</h3>
-          <p style={{ ...S.helpP, marginBottom: 10 }}>A friendly welcome note and a week-by-week first-month plan. You review and send.</p>
-          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftPlan} disabled={loading}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} color={FIRE.red} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI WELCOME & 30-DAY PLAN</div>
+          <h3 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, margin: "0 0 4px" }}>Draft a welcome for {who}</h3>
+          <p style={{ fontSize: 13, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 10 }}>A friendly welcome note and a week-by-week first-month plan. You review and send.</p>
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftPlan} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><UserPlus size={16} /> Draft welcome & plan</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
+          {err && <div style={{ marginTop: 10, fontSize: 13, color: FIRE.redText }}>{err}</div>}
           {out && <RichOutput S={S} text={out} />}
         </div>
       </div>
