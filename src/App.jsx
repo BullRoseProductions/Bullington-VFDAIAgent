@@ -2332,8 +2332,8 @@ function RosterPending({ S, members, notify }) {
     </div>
   );
 }
-function Bar({ S, pct, color }) {
-  return <div style={S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
+function Bar({ S, pct, color, track }) {
+  return <div style={track ? { ...S.bar, background: track } : S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
 }
 function RosterAttendance({ S, members }) {
   const people = [...members].sort((a, b) => (b.participation ?? -1) - (a.participation ?? -1));
@@ -3856,34 +3856,41 @@ function StationDuties({ S, role, members, meId, notify }) {
     URL.revokeObjectURL(url);
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* header (inline FS — shared PageHead not mutated) */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION DUTIES</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Everyone pitches in</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own.</div>
+      </div>
 
       {canManage && (
-        <div style={S.segRow}>
-          <button onClick={() => setView("checklist")} style={{ ...S.segBtn, ...(view === "checklist" ? S.segBtnOn : {}) }}>Checklist</button>
-          <button onClick={() => setView("history")} style={{ ...S.segBtn, ...(view === "history" ? S.segBtnOn : {}) }}>History</button>
+        <div style={{ display: "inline-flex", gap: 6, marginBottom: 14 }}>
+          {[["checklist", "Checklist"], ["history", "History"]].map(([k, l]) => {
+            const on = view === k;
+            return <button key={k} onClick={() => setView(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 14px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.btnBg : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? FIRE.red : FIRE.btnBorder}` }}>{l}</button>;
+          })}
         </div>
       )}
 
       {view === "checklist" && (<>
-      <div style={{ ...S.opCard, marginBottom: 14 }}>
+      <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#3A4750", marginBottom: 4 }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: "#191C20" }}>{doneCount}</b> of {duties.length} done</span></div>
-            <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color="#2E7D52" />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 4, ...FS.num }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: FIRE.textPrimary }}>{doneCount}</b> of {duties.length} done</span></div>
+            <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color={FIRE.green} track={FIRE.track} />
           </div>
-          {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={resetWeek}><RefreshCw size={14} /> Reset now</button>}
-          {canCreate && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>}
+          {canManage && <button style={FS.btn} onClick={resetWeek}><RefreshCw size={14} color={FIRE.btnIcon} /> Reset now</button>}
+          {canCreate && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F1EFF5", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: "#6A7178" }}>
-          <RefreshCw size={13} style={{ flexShrink: 0 }} />
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
+          <RefreshCw size={13} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
           <span>Recurring duties roll over on their own — weekly, monthly, or quarterly. One-time duties stay until done.</span>
           {canManage
-            ? <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>Week starts on
-                <select style={{ ...S.input, width: "auto", padding: "5px 8px" }} value={weekStartDay} onChange={(e) => setStartDay(e.target.value)}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select>
+            ? <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, color: FIRE.textSecondary }}>Week starts on
+                <select style={{ ...FS.input, width: "auto", padding: "5px 8px" }} value={weekStartDay} onChange={(e) => setStartDay(e.target.value)}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select>
               </label>
-            : <span style={{ marginLeft: "auto" }}>Resets every {DOW[weekStartDay]}</span>}
+            : <span style={{ marginLeft: "auto", color: FIRE.textMuted }}>Resets every {DOW[weekStartDay]}</span>}
         </div>
       </div>
 
