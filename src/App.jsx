@@ -172,7 +172,7 @@ const NAV = [
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
-  { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
+  { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
   { key: "brand", label: "Media Builder", Icon: ImageIcon, roles: LEADERSHIP },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
@@ -1466,12 +1466,12 @@ function ContentCalendar({ S, role, notify }) {
         {categories.map((cat) => (
           <span key={cat.id} style={{ position: "relative", display: "inline-flex" }}>
             <button onClick={() => quickAdd(cat.id)}
-              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <Plus size={13} /> {cat.tag}
             </button>
             {canEditCategories && !cat.isDefault && (
               <button title={`Delete ${cat.tag}`} onClick={(e) => { e.stopPropagation(); deleteCat(cat); }}
-                style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 999, border: `1px solid ${cat.c}`, background: "#fff", color: cat.c, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
+                style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 999, border: `1px solid ${cat.c}`, background: FIRE.card, color: cat.c, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
                 <X size={10} />
               </button>
             )}
@@ -1479,55 +1479,55 @@ function ContentCalendar({ S, role, notify }) {
         ))}
         {canEditCategories && (
           <button onClick={() => setShowCat((v) => !v)}
-            style={{ border: "1.5px dashed #B9B5C4", color: "#6A7178", background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            style={{ border: `1.5px dashed ${FIRE.btnBorder}`, color: FIRE.navLabel, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <Plus size={13} /> New
           </button>
         )}
       </div>
 
       {showCat && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Label</span>
-            <input style={S.input} value={catLabel} onChange={(e) => setCatLabel(e.target.value)} placeholder="e.g. EVENTS" /></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Label</span>
+            <input style={FS.input} value={catLabel} onChange={(e) => setCatLabel(e.target.value)} placeholder="e.g. EVENTS" /></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setCatColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
               ))}
             </div>
           </div>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Post idea (optional)</span>
-            <input style={S.input} value={catText} onChange={(e) => setCatText(e.target.value)} placeholder="Default text for this category" /></label>
-          <button style={S.primaryBtn} onClick={addCat}><Plus size={15} /> Save category</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setShowCat(false); setCatLabel(""); setCatColor(CATEGORY_COLORS[0]); setCatText(""); }}>Cancel</button>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Post idea (optional)</span>
+            <input style={FS.input} value={catText} onChange={(e) => setCatText(e.target.value)} placeholder="Default text for this category" /></label>
+          <button style={FS.btnPrimary} onClick={addCat}><Plus size={15} /> Save category</button>
+          <button style={FS.btn} onClick={() => { setShowCat(false); setCatLabel(""); setCatColor(CATEGORY_COLORS[0]); setCatText(""); }}>Cancel</button>
         </div>
       )}
 
       {show && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
-            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span>
-            <select style={S.input} value={fi || ""} onChange={(e) => { const cat = categories.find((c) => c.id === e.target.value); setFi(e.target.value); setFt(cat ? cat.t : ""); }}>{categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.tag}</option>)}</select></label>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Post idea</span>
-            <input style={S.input} value={ft} onChange={(e) => setFt(e.target.value)} placeholder="What's the post?" /></label>
-          <button style={S.primaryBtn} onClick={add}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span>
+            <select style={FS.input} value={fi || ""} onChange={(e) => { const cat = categories.find((c) => c.id === e.target.value); setFi(e.target.value); setFt(cat ? cat.t : ""); }}>{categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.tag}</option>)}</select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Post idea</span>
+            <input style={FS.input} value={ft} onChange={(e) => setFt(e.target.value)} placeholder="What's the post?" /></label>
+          <button style={FS.btnPrimary} onClick={add}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
         </div>
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthPosts}
         renderChip={(p) => ({ color: p.c, label: p.t, title: `${p.tag} — ${p.t} (tap to remove)`, onClick: () => remove(p.id, p.t) })}
         todayColor="#B11E2A"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={
-          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
+          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
         }
       />
-      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
         {monthPosts.length} post{monthPosts.length === 1 ? "" : "s"} scheduled in {CAL_MONTHS[cur.m]} · tap a colored post to remove it, or use a category chip to add one.
       </div>
     </div>
@@ -1778,13 +1778,17 @@ function Visibility({ S, brand, role, notify }) {
     catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="VISIBILITY" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week." />
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>PUBLIC RELATIONS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Stay seen between calls</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week.</div>
+      </div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
       <ContentCalendar S={S} role={role} notify={notify} />
 
-      <div style={S.cardEyebrow}>IDEAS FOR THINGS TO MAKE</div>
-      <IdeaGrid S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>IDEAS FOR THINGS TO MAKE</div>
+      <IdeaGrid S={S} dark items={[
         { h: "60-second station tour", p: "Walk the bay on a phone camera. People love seeing inside." },
         { h: "Member spotlight", p: "One photo + why they serve. Faces build trust the fastest." },
         { h: "Safety tip card", p: "Smoke alarms, seasonal hazards — useful posts get shared." },
@@ -1793,24 +1797,24 @@ function Visibility({ S, brand, role, notify }) {
         { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
       ]} />
 
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI CAPTION HELPER</div>
-          <h3 style={S.featTitle}>Write a post for your station</h3>
-          <label style={S.field}><span style={S.fieldLabel}>What's the post about?</span>
-            <input style={S.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI CAPTION HELPER</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Write a post for your station</h3>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What's the post about?</span>
+            <input style={FS.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {post && <RichOutput S={S} text={post} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {post && <RichOutput S={S} text={post} dark />}
         </div>
       </div>
 
       <GraphicStudio S={S} brand={brand} />
 
-      <div style={S.cardEyebrow}>VISIBILITY LIBRARY</div>
-      <ResourceLibrary S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>PUBLIC RELATIONS LIBRARY</div>
+      <ResourceLibrary S={S} dark items={[
         { name: "Monthly content calendar template", type: "PDF · copy & repeat" },
         { name: "Caption starters", type: "Doc · fill-in" },
         { name: "Social Media Playbook", type: "PDF · the full guide" },
