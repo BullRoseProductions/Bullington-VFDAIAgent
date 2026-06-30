@@ -844,36 +844,36 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
     setSent(true);
   }
   if (sent) return (
-    <div style={S.fbDone}>
-      <CheckCircle2 size={18} color="#1A6B3C" style={{ flexShrink: 0, marginTop: 1 }} />
+    <div style={{ ...S.fbDone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
+      <CheckCircle2 size={18} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />
       <div><strong>Logged — thank you.</strong> Critiques like this are exactly what sharpen the next plan. Your team reviews them and tunes the system from them.</div>
     </div>
   );
   return (
-    <div style={S.fbCard}>
-      <div style={S.fbHead}><MessageSquare size={15} color="#54506B" /> Help it get better</div>
+    <div style={{ ...S.fbCard, ...FS.card }}>
+      <div style={{ ...S.fbHead, color: FIRE.textPrimary }}><MessageSquare size={15} color={FIRE.btnIcon} /> Help it get better</div>
       <div style={S.fbRow}>
-        <span style={S.fbLabel}>Was this useful?</span>
-        <button style={{ ...S.fbThumb, ...(rating === "up" ? S.fbThumbUp : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
-        <button style={{ ...S.fbThumb, ...(rating === "down" ? S.fbThumbDown : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
+        <span style={{ ...S.fbLabel, color: FIRE.textSecondary }}>Was this useful?</span>
+        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "up" ? { border: `0.5px solid ${FIRE.green}`, color: FIRE.greenText } : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
+        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "down" ? { border: `0.5px solid ${FIRE.redBright}`, color: FIRE.redText } : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
       </div>
-      <div style={S.fbLabel2}>What was off? (tap any)</div>
+      <div style={{ ...S.fbLabel2, color: FIRE.textMuted }}>What was off? (tap any)</div>
       <div style={S.chipRow}>
         {CRITIQUE_TAGS.map((t) => (
-          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, ...(tags.includes(t) ? S.fbTagOn : {}) }}>{t}</button>
+          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.navLabel, ...(tags.includes(t) ? { border: `0.5px solid ${FIRE.red}`, color: FIRE.textPrimary } : {}) }}>{t}</button>
         ))}
       </div>
       {!editing ? (
-        <button style={S.fbEditBtn} onClick={() => setEditing(true)}><Pencil size={14} /> Edit the plan & save your version</button>
+        <button style={{ ...S.fbEditBtn, ...FS.btn, marginTop: 13 }} onClick={() => setEditing(true)}><Pencil size={14} /> Edit the plan & save your version</button>
       ) : (
         <div style={{ marginTop: 12 }}>
-          <div style={S.fbLabel2}>Your corrected summary</div>
-          <textarea style={{ ...S.input, minHeight: 72, resize: "vertical" }} value={editedSummary} onChange={(e) => setEditedSummary(e.target.value)} />
+          <div style={{ ...S.fbLabel2, color: FIRE.textMuted }}>Your corrected summary</div>
+          <textarea style={{ ...FS.input, minHeight: 72, resize: "vertical" }} value={editedSummary} onChange={(e) => setEditedSummary(e.target.value)} />
         </div>
       )}
-      <div style={{ ...S.fbLabel2, marginTop: 12 }}>Anything else you'd change?</div>
-      <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. swap the prop, add an accountability check…" />
-      <button style={{ ...S.primaryBtn, marginTop: 12, opacity: (rating || tags.length || notes.trim() || changed) ? 1 : 0.55 }}
+      <div style={{ ...S.fbLabel2, color: FIRE.textMuted, marginTop: 12 }}>Anything else you'd change?</div>
+      <textarea style={{ ...FS.input, minHeight: 48, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. swap the prop, add an accountability check…" />
+      <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: (rating || tags.length || notes.trim() || changed) ? 1 : 0.55 }}
         onClick={send} disabled={!(rating || tags.length || notes.trim() || changed)}>Send feedback</button>
     </div>
   );
