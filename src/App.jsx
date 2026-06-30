@@ -457,57 +457,61 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
   const next = sorted[0];
   const me = members.find((m) => m.id === meId) || null;
   return (
-    <div>
-      <PageHead S={S} eyebrow="THIS WATCH" title={dashboardGreeting(me)} sub="Here's where your crew stands this month." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>THIS WATCH</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Here's where your crew stands this month.</div>
+      </div>
 
       <div style={S.statRow}>
-        <Stat S={S} n="6" label="Topics tracked" />
-        <Stat S={S} n="2" label="Overdue for training" warn />
-        <Stat S={S} n="9" label="Packets in library" />
-        <Stat S={S} n="14" label="Active members" />
+        <Stat S={S} dark n="6" label="Topics tracked" />
+        <Stat S={S} dark n="2" label="Overdue for training" warn />
+        <Stat S={S} dark n="9" label="Packets in library" />
+        <Stat S={S} dark n="14" label="Active members" />
       </div>
 
       <DashboardCalendar S={S} />
 
       <div style={S.dashGrid}>
-        <div style={S.featCard}>
+        <div style={{ ...S.featCard, ...FS.card }}>
           <div style={S.featStripe} />
           <div style={S.featInner}>
-            <div style={S.cardEyebrow}>BUILD THIS WEEK</div>
-            <h3 style={S.featTitle}>{featured.title}</h3>
-            <p style={S.featObj}>{featured.objective}</p>
-            <div style={S.metaRow}><Meta Icon={Clock} text={featured.time} /><Meta Icon={Users} text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
-            <button style={S.primaryBtn} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
+            <div style={{ ...FS.kicker, marginBottom: 8 }}>BUILD THIS WEEK</div>
+            <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{featured.title}</h3>
+            <p style={{ ...S.featObj, color: FIRE.textSecondary }}>{featured.objective}</p>
+            <div style={S.metaRow}><Meta Icon={Clock} dark text={featured.time} /><Meta Icon={Users} dark text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
+            <button style={FS.btnPrimary} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
           </div>
         </div>
-        <div style={S.logCard}>
-          <div style={S.cardEyebrow}>STATION LOG</div>
+        <div style={{ ...S.logCard, ...FS.card }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>STATION LOG</div>
           {ACTIVITY.map((a, i) => (
-            <div key={i} style={S.logRow}><span style={S.logTime}>{a.when}</span>
-              <span style={S.logText}><strong>{a.who}</strong> {a.action} <span style={S.logCode}>{a.code}</span></span></div>
+            <div key={i} style={{ ...S.logRow, borderBottom: `0.5px solid ${FIRE.hairline}`, color: FIRE.textSecondary }}><span style={{ ...S.logTime, color: FIRE.textMuted }}>{a.when}</span>
+              <span style={S.logText}><strong style={{ color: FIRE.textPrimary }}>{a.who}</strong> {a.action} <span style={{ ...S.logCode, color: FIRE.textMuted }}>{a.code}</span></span></div>
           ))}
-          <button style={S.ghostBtn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
+          <button style={FS.btn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
         </div>
       </div>
 
       {/* Training roadmap — department memory / gap detection */}
-      <div style={S.roadCard}>
+      <div style={{ ...S.roadCard, ...FS.card }}>
         <div style={S.roadHead}>
-          <div><div style={S.cardEyebrow}><TrendingUp size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING ROADMAP</div>
-            <h3 style={S.roadTitle}>What your crew hasn't trained lately</h3></div>
+          <div><div style={{ ...FS.kicker, marginBottom: 8 }}><TrendingUp size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING ROADMAP</div>
+            <h3 style={{ ...S.roadTitle, color: FIRE.textPrimary }}>What your crew hasn't trained lately</h3></div>
         </div>
-        <div style={S.roadRecommend}>
-          <Sparkles size={16} color="#E0A100" />
+        <div style={{ ...S.roadRecommend, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary }}>
+          <Sparkles size={16} color={FIRE.amberText} />
           <span>Recommended next: <strong>{next.topic}</strong> — last trained {next.months} months ago.</span>
         </div>
         <div style={S.roadList}>
           {sorted.map((r) => {
             const st = statusOf(r.months, r.target); const T = TRACKS[r.track];
             return (
-              <div key={r.topic} style={S.roadRow}>
+              <div key={r.topic} style={{ ...S.roadRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
                 <T.Icon size={15} color={T.accent} style={{ flexShrink: 0 }} />
-                <span style={S.roadTopic}>{r.topic}</span>
-                <span style={S.roadAgo}>{r.months} mo ago</span>
+                <span style={{ ...S.roadTopic, color: FIRE.textPrimary }}>{r.topic}</span>
+                <span style={{ ...S.roadAgo, color: FIRE.textMuted }}>{r.months} mo ago</span>
                 <span style={{ ...S.roadChip, color: st.color, borderColor: `${st.color}55`, background: `${st.color}12` }}>{st.label}</span>
               </div>
             );
@@ -542,18 +546,18 @@ function QuickAccess({ S, role, go }) {
   const items = NAV.filter((n) => n.key !== "dashboard" && n.roles.includes(role));
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={S.cardEyebrow}>EXPLORE THE PLATFORM</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>EXPLORE THE PLATFORM</div>
       <div style={S.quickGrid}>
         {items.map((n) => {
           const q = QUICK[n.key] || {};
           return (
-            <button key={n.key} style={S.quickCard} onClick={() => go(n.key)}>
+            <button key={n.key} style={{ ...S.quickCard, ...FS.card }} onClick={() => go(n.key)}>
               <span style={{ ...S.quickIcon, background: q.accent }}><n.Icon size={18} color="#fff" /></span>
               <div style={{ flex: 1 }}>
-                <div style={S.quickTitle}>{n.label}{n.premium && <span style={S.quickAi}>AI</span>}</div>
-                <div style={S.quickBlurb}>{q.blurb}</div>
+                <div style={{ ...S.quickTitle, color: FIRE.textPrimary }}>{n.label}{n.premium && <span style={S.quickAi}>AI</span>}</div>
+                <div style={{ ...S.quickBlurb, color: FIRE.textMuted }}>{q.blurb}</div>
               </div>
-              <ChevronRight size={16} color="#9AA1A9" style={{ flexShrink: 0, alignSelf: "center" }} />
+              <ChevronRight size={16} color={FIRE.btnIcon} style={{ flexShrink: 0, alignSelf: "center" }} />
             </button>
           );
         })}
@@ -1745,23 +1749,23 @@ function DashboardCalendar({ S }) {
 
   return (
     <div>
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
             <button key={f.key} onClick={() => setFilter(f.key)}
-              style={{ border: `1.5px solid ${f.color}`, background: active ? f.color : "#fff", color: active ? "#fff" : f.color, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              style={{ border: `1.5px solid ${f.color}`, background: active ? f.color : FIRE.btnBg, color: active ? "#fff" : f.color, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
               {f.label}
             </button>
           );
         })}
       </div>
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthItems}
         renderChip={(it) => ({ color: it.color, label: it.label, title: it.label, ...(filter === "all" ? { tier: it.tier } : {}) })}
-        todayColor="#211C2B"
+        todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         overflowIndicator
       />
