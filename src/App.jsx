@@ -3680,6 +3680,7 @@ const DUTYLOG_SEED = [
 ];
 function StationDuties({ S, role, members, meId, notify }) {
   const canManage = isLeader(role); // board members + officers + admins assign duties
+  const canCreate = ["Board Member", "Department Admin", "Training Officer"].includes(role); // matches create_duty's DB gate (excludes Project Admin)
   const me = members.find((m) => m.id === meId);
   const nameById = new Map(members.map((m) => [m.id, m.name]));
   const fmtDoneAt = (v) => {
@@ -3695,8 +3696,8 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [view, setView] = useState("checklist");                // "checklist" | "history"
   const [logEntries, setLogEntries] = useState([]);
   const [weekOffset, setWeekOffset] = useState(0);              // 0 = most recent week with entries
-  useEffect(() => {
-    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids").then(({ data, error }) => {
+  function loadDuties() {
+    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids, assigned_to, due_date").then(({ data, error }) => {
       if (error || !data) return;
       setDuties(data.map((d) => ({
         id: d.id,
@@ -3707,9 +3708,12 @@ function StationDuties({ S, role, members, meId, notify }) {
         doneBy: d.done_by,   // raw member UUID (or null) for now — name resolution is a later slice
         doneAt: d.done_at,   // raw timestamptz string for now — formatting is a later slice
         helperIds: d.helper_ids ?? [],
+        assignedTo: d.assigned_to ?? null,   // null = station-wide; set = person-assigned
+        dueDate: d.due_date ?? null,
       })));
     });
-  }, []);
+  }
+  useEffect(() => { loadDuties(); }, []);
   useEffect(() => {
     if (!canManage) return;
     supabase.from("duty_log")
@@ -3729,6 +3733,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   }, [canManage]);
   const [addingA, setAddingA] = useState(false);
   const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [acatNew, setAcatNew] = useState(""); const [arec, setArec] = useState("Weekly");
+  const [assignee, setAssignee] = useState(""); const [due, setDue] = useState("");   // "" = station-wide / no due date
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
   const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
   const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
@@ -3775,7 +3780,14 @@ function StationDuties({ S, role, members, meId, notify }) {
     setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: false, doneBy: null, doneAt: null, helperIds: [] } : x)));
   }
   function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
-  function addDuty() { if (!ad.trim()) return; const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), category: cat, recurrence: arec, done: false, doneBy: null, doneAt: null }]); setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAddingA(false); }
+  async function addDuty() {
+    if (!ad.trim()) return;
+    const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat;
+    const { error } = await supabase.rpc("create_duty", { p_title: ad.trim(), p_category: cat, p_recurrence: arec, p_assigned_to: assignee || null, p_due_date: due || null });
+    if (error) { notify({ kind: "error", title: "Couldn't add the duty", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    loadDuties();   // re-fetch so the persisted row (real uuid + server-applied recurrence) appears — no optimistic numeric id
+    setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAssignee(""); setDue(""); setAddingA(false);
+  }
   function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
   function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
   function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
@@ -3830,7 +3842,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color="#2E7D52" />
           </div>
           {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={resetWeek}><RefreshCw size={14} /> Reset now</button>}
-          {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>}
+          {canCreate && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>}
         </div>
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F1EFF5", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: "#6A7178" }}>
           <RefreshCw size={13} style={{ flexShrink: 0 }} />
@@ -3843,17 +3855,19 @@ function StationDuties({ S, role, members, meId, notify }) {
         </div>
       </div>
 
-      {canManage && addingA && (
+      {canCreate && addingA && (
         <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span><select style={S.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
           {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>New category name</span><input style={S.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
           <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Recurs</span><select style={S.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 160 }}><span style={S.fieldLabel}>Assign to</span><select style={S.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Due date (optional)</span><input type="date" style={S.input} value={due} onChange={(e) => setDue(e.target.value)} /></label>
           <button style={S.primaryBtn} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
           <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
         </div>
       )}
-      {canManage && <p style={{ ...S.helpP, marginTop: -2 }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
+      {canCreate && <p style={{ ...S.helpP, marginTop: -2 }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
       {categories.map((cat) => {
         const items = duties.filter((d) => d.category === cat);
