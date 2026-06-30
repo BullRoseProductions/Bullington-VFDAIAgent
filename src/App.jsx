@@ -1983,6 +1983,8 @@ function certStatus(exp) {
   if (diff <= 3) return { label: "EXPIRING", color: "#9A6B12", rank: 1 };
   return { label: "CURRENT", color: "#2E7D52", rank: 2 };
 }
+// FIRE cert-status colors for crisp dark badges — additive sibling to certStatus's light `color`; does NOT mutate it.
+const CERT_FIRE = { EXPIRED: FIRE.redText, EXPIRING: FIRE.amberText, CURRENT: FIRE.green, "NO DATE": FIRE.textMuted };
 const CLASSES = [
   { name: "EMT-B Refresher", date: "Jul 12", covers: ["EMT-B", "Paramedic"] },
   { name: "CPR / BLS Recert", date: "Jun 28", covers: ["EMT-B", "Paramedic"] },
@@ -2159,7 +2161,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
         {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> :
           certs.map((c, i) => (
             <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, ...(assign && editingCertId === c.id ? { flexWrap: "wrap" } : {}) }}>
-              <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
+              <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
               {assign && editingCertId === c.id ? (<>
                 <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
                 <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
@@ -2167,7 +2169,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
               </>) : (<>
                 <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
-                <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+                <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
                 {assign && (<>
                   <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
                   <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
@@ -2287,34 +2289,34 @@ function RosterCerts({ S, members }) {
   return (
     <div>
       <div style={S.statRow}>
-        <Stat S={S} n={String(n(2))} label="Certs current" />
-        <Stat S={S} n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
-        <Stat S={S} n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
+        <Stat S={S} dark n={String(n(2))} label="Certs current" />
+        <Stat S={S} dark n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
+        <Stat S={S} dark n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
       </div>
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</div>
-          <h3 style={S.featTitle}>Stay ahead of every renewal</h3>
-          <p style={{ ...S.helpP, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
-          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Stay ahead of every renewal</h3>
+          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
       <div style={{ marginTop: 4 }}>
         {rows.map((r, i) => {
           const cl = r.st.rank < 2 ? nextClassFor(r.cert) : null;
           return (
-            <div key={i} style={{ ...S.certRow, flexWrap: "wrap" }}>
-              <Award size={15} color={r.st.color} style={{ flexShrink: 0 }} />
+            <div key={i} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <Award size={15} color={CERT_FIRE[r.st.label]} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontWeight: 600, color: "#191C20" }}>{r.cert}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {r.member}</span>
-                <div style={{ fontSize: 12, color: r.st.color, marginTop: 1 }}>{expPhrase(r.exp)}</div>
-                {cl && <div style={{ fontSize: 12, color: "#0E6B62", marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
+                <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.cert}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {r.member}</span>
+                <div style={{ fontSize: 12, color: CERT_FIRE[r.st.label], marginTop: 1 }}>{expPhrase(r.exp)}</div>
+                {cl && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
               </div>
-              <Pill S={S} color={r.st.color}>{r.st.label}</Pill>
+              <Pill S={S} color={CERT_FIRE[r.st.label]}>{r.st.label}</Pill>
             </div>
           );
         })}
@@ -2354,19 +2356,19 @@ function RosterPending({ S, members, notify }) {
     loadPending();
   }
 
-  if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: "#6A7178", marginTop: 4 }}>Loading…</div>;
-  if (rows.length === 0) return <div style={{ fontSize: 13.5, color: "#6A7178", marginTop: 4 }}>No pending items.</div>;
+  if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>Loading…</div>;
+  if (rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>No pending items.</div>;
   return (
     <div style={{ marginTop: 4 }}>
       {rows.map((r) => (
-        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
-          <Award size={15} color="#9A6B12" style={{ flexShrink: 0 }} />
+        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <Award size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontWeight: 600, color: "#191C20" }}>{r.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {nameFor(r.member_id)}</span>
-            <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
+            <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {nameFor(r.member_id)}</span>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
           </div>
-          <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#2E7D52", borderColor: "#BFE3CC" }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
+          <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.green }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
+          <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
         </div>
       ))}
     </div>
