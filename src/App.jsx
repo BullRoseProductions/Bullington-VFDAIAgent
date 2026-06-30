@@ -1011,17 +1011,23 @@ function parseSections(text) {
   }
   pushCur(); return sections;
 }
-function RichOutput({ S, text }) {
+function RichOutput({ S, text, dark }) {
   const sections = parseSections(text);
+  // additive: default (dark falsy) uses the exact same S.rich* objects → byte-identical light path. Parse/RichText untouched.
+  const wrap  = S.richWrap;   // layout-only (flex/gap/marginTop) — same for both themes
+  const card  = dark ? { ...FS.card, padding: "15px 17px" } : S.richCard;
+  const title = dark ? { ...S.richTitle, color: FIRE.textPrimary, borderBottom: `1px solid ${FIRE.hairline}` } : S.richTitle;
+  const para  = dark ? { ...S.richP, color: FIRE.textSecondary } : S.richP;
+  const list  = dark ? { ...S.richList, color: FIRE.textSecondary } : S.richList;
   return (
-    <div style={S.richWrap}>
+    <div style={wrap}>
       {sections.map((sec, i) => (
-        <div key={i} style={S.richCard}>
-          {sec.title && <div style={S.richTitle}>{sec.title}</div>}
+        <div key={i} style={card}>
+          {sec.title && <div style={title}>{sec.title}</div>}
           {sec.blocks.map((b, j) => {
-            if (b.para != null) return <p key={j} style={S.richP}><RichText text={b.para} /></p>;
+            if (b.para != null) return <p key={j} style={para}><RichText text={b.para} /></p>;
             const Tag = b.ordered ? "ol" : "ul";
-            return <Tag key={j} style={S.richList}>{b.items.map((it, k) => <li key={k}><RichText text={it} /></li>)}</Tag>;
+            return <Tag key={j} style={list}>{b.items.map((it, k) => <li key={k}><RichText text={it} /></li>)}</Tag>;
           })}
         </div>
       ))}
@@ -2707,7 +2713,7 @@ function Onboarding({ S, members }) {
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><UserPlus size={16} /> Draft welcome & plan</>}
           </button>
           {err && <div style={{ marginTop: 10, fontSize: 13, color: FIRE.redText }}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
     </div>
