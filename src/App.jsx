@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
-  Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
+  Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, XCircle, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
   ThumbsUp, ThumbsDown, Pencil, MessageSquare,
   FolderOpen, Upload, FilePlus, PartyPopper,
@@ -18,6 +18,49 @@ import { supabase } from "./supabaseClient";
 /*  Volunteer Fire & EMS — Training, Recruitment & Operations          */
 /* ------------------------------------------------------------------ */
 const APP = "Before the Call";
+
+/* ---------------- FIRE-LUXURY palette (shared; rest of app adopts later) ---------------- */
+const FIRE = {
+  pageBg: "radial-gradient(130% 100% at 100% 0%, #1A1217 0%, #0E1014 42%, #0A0B0E 100%)",
+  sidebar: "#0A0C0F",
+  card: "#13161B",
+  hairline: "rgba(255,255,255,.05)",
+  cardShadow: "0 10px 30px rgba(0,0,0,.4)",
+  cardRadius: 16,
+  textPrimary: "#F7F8FA",
+  textSecondary: "#B6BDC8",
+  textMuted: "#7E8794",
+  textMuted2: "#9AA1AC",
+  red: "#C8323A",          // active-nav hairline, today marker, kicker labels
+  redBright: "#E5484D",    // tiny icon accents only
+  green: "#3FB860",
+  greenText: "#76C98D",
+  amberText: "#D6A95E",
+  redText: "#E58A90",
+  track: "rgba(255,255,255,.06)",
+  // --- Phase 0 additive tokens (values previously hardcoded in the Training reskins) ---
+  name: "#F0F2F5",                       // near-white for NAMES (kept distinct from textPrimary #F7F8FA)
+  btnBg: "rgba(255,255,255,.04)",        // dark control fill
+  btnBorder: "rgba(255,255,255,.1)",     // dark control border
+  inputBorder: "rgba(255,255,255,.12)",
+  btnText: "#E7EAEF",
+  btnIcon: "#9AA1AC",                    // == textMuted2
+  navLabel: "#C7CDD6",
+  neverLogged: "#D08A8F",
+  deleteRed: "#C8606A",
+  white: "#fff",
+};
+
+/* ---------------- Fire-luxury shared style recipes (reference FIRE tokens; reused across reskinned pages) ---------------- */
+const FS = {
+  kicker: { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 },
+  card: { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
+  num: { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" },
+  btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
+  btnPrimary: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: FIRE.white, border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  input: { border: `0.5px solid ${FIRE.inputBorder}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: FIRE.btnBg, color: FIRE.name, width: "100%" },
+  row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `0.5px solid ${FIRE.hairline}` },
+};
 
 const ROLES = ["Project Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
 const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Training Officer"];
@@ -129,7 +172,7 @@ const NAV = [
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
-  { key: "visibility", label: "Visibility", Icon: Calendar, roles: LEADERSHIP },
+  { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
   { key: "brand", label: "Media Builder", Icon: ImageIcon, roles: LEADERSHIP },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
@@ -259,33 +302,41 @@ export default function App() {
   };
   useEffect(() => { loadPlans(); }, []);
   const [trainingSessions, setTrainingSessions] = useState([]);
-  const loadSessions = () => {
-    supabase.from("training_sessions")
-      .select("id, plan_id, title, date, done")
-      .then(({ data, error }) => {
-        if (error || !data) { setTrainingSessions([]); return; }
-        setTrainingSessions(
-          data.filter((r) => r.date).map((r) => {
-            const [yy, mm, dd] = r.date.split("-").map(Number);
-            return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, attendance: [] };
-          })
-        );
-      });
+  const loadSessions = async () => {
+    const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
+      supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open"),
+      supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
+      supabase.from("session_plans").select("id, title, storage_path, session_id").order("created_at", { ascending: false }),
+    ]);
+    if (sErr || !srows) { setTrainingSessions([]); return; }   // sessions are source of truth; attendance/plan reads are non-fatal
+    const byS = {};
+    (arows || []).forEach((a) => {
+      const e = byS[a.session_id] || (byS[a.session_id] = { attendance: [], times: {} });
+      e.attendance.push(a.member_id);
+      if (a.checked_in_at) e.times[a.member_id] = new Date(a.checked_in_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    });
+    const planByS = {};   // most-recent plan per session wins (query ordered desc; no UNIQUE on session_id)
+    (prows || []).forEach((p) => { if (p.session_id && !planByS[p.session_id]) planByS[p.session_id] = { id: p.id, title: p.title, storage_path: p.storage_path, session_id: p.session_id }; });
+    setTrainingSessions(
+      srows.filter((r) => r.date).map((r) => {
+        const [yy, mm, dd] = r.date.split("-").map(Number);
+        const ae = byS[r.id] || { attendance: [], times: {} };
+        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times, plan: planByS[r.id] || null };
+      })
+    );
   };
   useEffect(() => { loadSessions(); }, []);
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
-  function doCheckIn(sessionId, token, memberId) {
-    const s = trainingSessions.find((x) => x.id === Number(sessionId));
-    if (!s) return { ok: false, reason: "That training session wasn't found." };
-    const sg = s.signin;
-    if (!sg || !sg.open) return { ok: false, reason: "Sign-in is closed for this session.", title: s.title };
-    if (sg.token !== token) return { ok: false, reason: "This code has expired — ask the training officer for the current one.", title: s.title };
-    const att = s.attendance || [];
-    if (att.includes(memberId)) return { ok: true, already: true, at: (s.times || {})[memberId], title: s.title };
+  // Self-serve check-in: the DB RPC enforces identity (my_member_id), department, not-done, and token match.
+  async function doCheckIn(sessionId, token) {
+    const title = trainingSessions.find((x) => String(x.id) === String(sessionId))?.title;
+    const { data, error } = await supabase.rpc("member_check_in", { p_session_id: sessionId, p_token: token });
+    if (error) return { ok: false, reason: error.message || "We couldn't record your sign-in — please see your training officer.", title };
+    loadSessions();   // refresh attendance counts / roster
+    if (data === "already") return { ok: true, already: true, title };
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    setTrainingSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), memberId], times: { ...(x.times || {}), [memberId]: now } } : x));
-    return { ok: true, at: now, title: s.title };
+    return { ok: true, at: now, title };
   }
   // Capture a QR/deep-link check-in on mount; don't act until we know who's signed in.
   useEffect(() => {
@@ -305,7 +356,7 @@ export default function App() {
     if (myMemberId == null) {
       setCheckinResult({ ok: false, reason: "We couldn't match your sign-in to a member record, so no attendance was recorded. Please see your training officer." });
     } else {
-      setCheckinResult(doCheckIn(pendingCheckin.cid, pendingCheckin.token, myMemberId));
+      doCheckIn(pendingCheckin.cid, pendingCheckin.token, myMemberId).then(setCheckinResult);
     }
     setPendingCheckin(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -352,7 +403,7 @@ export default function App() {
       <div style={S.main}>
         <header style={S.topbar}>
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
-          <div style={S.chevronBand} />
+          <div style={{ flex: 1 }} />
           <div style={S.viewAs}>
             {isLeader(realRole) && (
               <>
@@ -366,7 +417,7 @@ export default function App() {
         </header>
 
         <main style={S.content}>
-          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} />}
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
@@ -399,64 +450,68 @@ const dashboardGreeting = (me) => {
 };
 
 /* ---------------- Dashboard ---------------- */
-function Dashboard({ S, role, members, library, openPacket, go, meId }) {
-  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} />;
+function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify }) {
+  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
   const me = members.find((m) => m.id === meId) || null;
   return (
-    <div>
-      <PageHead S={S} eyebrow="THIS WATCH" title={dashboardGreeting(me)} sub="Here's where your crew stands this month." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>THIS WATCH</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Here's where your crew stands this month.</div>
+      </div>
 
       <div style={S.statRow}>
-        <Stat S={S} n="6" label="Topics tracked" />
-        <Stat S={S} n="2" label="Overdue for training" warn />
-        <Stat S={S} n="9" label="Packets in library" />
-        <Stat S={S} n="14" label="Active members" />
+        <Stat S={S} dark n="6" label="Topics tracked" />
+        <Stat S={S} dark n="2" label="Overdue for training" warn />
+        <Stat S={S} dark n="9" label="Packets in library" />
+        <Stat S={S} dark n="14" label="Active members" />
       </div>
 
       <DashboardCalendar S={S} />
 
       <div style={S.dashGrid}>
-        <div style={S.featCard}>
+        <div style={{ ...S.featCard, ...FS.card }}>
           <div style={S.featStripe} />
           <div style={S.featInner}>
-            <div style={S.cardEyebrow}>BUILD THIS WEEK</div>
-            <h3 style={S.featTitle}>{featured.title}</h3>
-            <p style={S.featObj}>{featured.objective}</p>
-            <div style={S.metaRow}><Meta Icon={Clock} text={featured.time} /><Meta Icon={Users} text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
-            <button style={S.primaryBtn} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
+            <div style={{ ...FS.kicker, marginBottom: 8 }}>BUILD THIS WEEK</div>
+            <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{featured.title}</h3>
+            <p style={{ ...S.featObj, color: FIRE.textSecondary }}>{featured.objective}</p>
+            <div style={S.metaRow}><Meta Icon={Clock} dark text={featured.time} /><Meta Icon={Users} dark text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
+            <button style={FS.btnPrimary} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
           </div>
         </div>
-        <div style={S.logCard}>
-          <div style={S.cardEyebrow}>STATION LOG</div>
+        <div style={{ ...S.logCard, ...FS.card }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>STATION LOG</div>
           {ACTIVITY.map((a, i) => (
-            <div key={i} style={S.logRow}><span style={S.logTime}>{a.when}</span>
-              <span style={S.logText}><strong>{a.who}</strong> {a.action} <span style={S.logCode}>{a.code}</span></span></div>
+            <div key={i} style={{ ...S.logRow, borderBottom: `0.5px solid ${FIRE.hairline}`, color: FIRE.textSecondary }}><span style={{ ...S.logTime, color: FIRE.textMuted }}>{a.when}</span>
+              <span style={S.logText}><strong style={{ color: FIRE.textPrimary }}>{a.who}</strong> {a.action} <span style={{ ...S.logCode, color: FIRE.textMuted }}>{a.code}</span></span></div>
           ))}
-          <button style={S.ghostBtn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
+          <button style={FS.btn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
         </div>
       </div>
 
       {/* Training roadmap — department memory / gap detection */}
-      <div style={S.roadCard}>
+      <div style={{ ...S.roadCard, ...FS.card }}>
         <div style={S.roadHead}>
-          <div><div style={S.cardEyebrow}><TrendingUp size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING ROADMAP</div>
-            <h3 style={S.roadTitle}>What your crew hasn't trained lately</h3></div>
+          <div><div style={{ ...FS.kicker, marginBottom: 8 }}><TrendingUp size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING ROADMAP</div>
+            <h3 style={{ ...S.roadTitle, color: FIRE.textPrimary }}>What your crew hasn't trained lately</h3></div>
         </div>
-        <div style={S.roadRecommend}>
-          <Sparkles size={16} color="#E0A100" />
+        <div style={{ ...S.roadRecommend, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary }}>
+          <Sparkles size={16} color={FIRE.amberText} />
           <span>Recommended next: <strong>{next.topic}</strong> — last trained {next.months} months ago.</span>
         </div>
         <div style={S.roadList}>
           {sorted.map((r) => {
             const st = statusOf(r.months, r.target); const T = TRACKS[r.track];
             return (
-              <div key={r.topic} style={S.roadRow}>
+              <div key={r.topic} style={{ ...S.roadRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
                 <T.Icon size={15} color={T.accent} style={{ flexShrink: 0 }} />
-                <span style={S.roadTopic}>{r.topic}</span>
-                <span style={S.roadAgo}>{r.months} mo ago</span>
+                <span style={{ ...S.roadTopic, color: FIRE.textPrimary }}>{r.topic}</span>
+                <span style={{ ...S.roadAgo, color: FIRE.textMuted }}>{r.months} mo ago</span>
                 <span style={{ ...S.roadChip, color: st.color, borderColor: `${st.color}55`, background: `${st.color}12` }}>{st.label}</span>
               </div>
             );
@@ -491,18 +546,18 @@ function QuickAccess({ S, role, go }) {
   const items = NAV.filter((n) => n.key !== "dashboard" && n.roles.includes(role));
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={S.cardEyebrow}>EXPLORE THE PLATFORM</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>EXPLORE THE PLATFORM</div>
       <div style={S.quickGrid}>
         {items.map((n) => {
           const q = QUICK[n.key] || {};
           return (
-            <button key={n.key} style={S.quickCard} onClick={() => go(n.key)}>
+            <button key={n.key} style={{ ...S.quickCard, ...FS.card }} onClick={() => go(n.key)}>
               <span style={{ ...S.quickIcon, background: q.accent }}><n.Icon size={18} color="#fff" /></span>
               <div style={{ flex: 1 }}>
-                <div style={S.quickTitle}>{n.label}{n.premium && <span style={S.quickAi}>AI</span>}</div>
-                <div style={S.quickBlurb}>{q.blurb}</div>
+                <div style={{ ...S.quickTitle, color: FIRE.textPrimary }}>{n.label}{n.premium && <span style={S.quickAi}>AI</span>}</div>
+                <div style={{ ...S.quickBlurb, color: FIRE.textMuted }}>{q.blurb}</div>
               </div>
-              <ChevronRight size={16} color="#9AA1A9" style={{ flexShrink: 0, alignSelf: "center" }} />
+              <ChevronRight size={16} color={FIRE.btnIcon} style={{ flexShrink: 0, alignSelf: "center" }} />
             </button>
           );
         })}
@@ -512,52 +567,173 @@ function QuickAccess({ S, role, go }) {
 }
 
 /* ---------------- Member dashboard (personal view) ---------------- */
-function MemberDashboard({ S, role, members, go, meId }) {
-  const me = members.find((m) => m.id === meId) || null;
+/* FS-based stat box (NEW — does not touch the shared <Stat>) */
+function FireStat({ label, value, sub, subColor, extra }) {
   return (
-    <div>
-      <PageHead S={S} eyebrow="MY STATION" title={dashboardGreeting(me)} sub="Here's exactly where you stand — and what's coming up for you." />
-      {me && <MyCerts S={S} me={me} />}
-      <DashboardCalendar S={S} />
-      <QuickAccess S={S} role={role} go={go} />
+    <div style={{ ...FS.card, padding: "14px 16px" }}>
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: subColor || FIRE.textMuted, marginTop: 2 }}>{sub}</div>}
+      {extra}
     </div>
   );
 }
-function MyCerts({ S, me }) {
-  const certs = me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
-  const expired = certs.filter((c) => c.st.rank === 0);
-  const expiring = certs.filter((c) => c.st.rank === 1);
-  const urgent = certs.filter((c) => c.st.rank < 2).map((c) => c.name);
-  const classes = CLASSES.map((cl) => ({ ...cl, forYou: cl.covers.some((n) => urgent.includes(n)) })).sort((a, b) => (b.forYou ? 1 : 0) - (a.forYou ? 1 : 0));
-  let al;
-  if (expired.length) al = { c: "#B11E2A", t: `Action needed: your ${expired[0].name} has expired — renew as soon as you can.` };
-  else if (expiring.length) al = { c: "#9A6B12", t: `Heads up: your ${expiring[0].name} ${expPhrase(expiring[0].exp)}.` };
-  else al = { c: "#2E7D52", t: "You're all current — nice work." };
+function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const me = members.find((m) => m.id === meId) || null;
+  const sess = sessions || [];
+  // ---- derived (lifted from the member Training branch; no new query/RLS) ----
+  const today = new Date();
+  const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
+  const since90 = new Date(t0); since90.setDate(since90.getDate() - 90);
+  const inWindow = (s) => { const d = sessDate(s); return d >= since90 && d <= today; };
+  const recorded = sess.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s));
+  const totalRecorded = recorded.length;
+  const attendedCount = me ? recorded.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
+  const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
+  const hasAtt = totalRecorded > 0;
+  const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
+  const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+  const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
+  const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length;
+  const certsTotal = certsAll.length;
+  const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length;
+  const expired = certsAll.filter((c) => c.st.rank === 0).length;
+  const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
+  const fireCert = (st) => st.rank === 2 ? FIRE.greenText : st.rank === 1 ? FIRE.amberText : FIRE.redText;
+  const dots = [...recorded].sort((a, b) => sessDate(a) - sessDate(b)).map((s) => ({ present: (s.attendance || []).includes(me?.id), date: sessDate(s) }));   // one per recorded drill, oldest→newest — same `recorded` the % uses
+  async function openPlan(plan) {
+    if (!plan?.storage_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
+    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
+  // ---- "Assigned to me" duties (self-contained; no App threading; existing read RLS) ----
+  const [mine, setMine] = useState([]);
+  function loadMine() {
+    if (!meId) return;
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").eq("assigned_to", meId).eq("done", false)
+      .then(({ data }) => setMine(data || []));
+  }
+  useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  async function markMineDone(id) {
+    const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });   // assignee allowed by the RPC rule
+    if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
+    loadMine();   // refetch — the completed duty drops off (done=true no longer matches)
+  }
   return (
-    <div style={{ marginBottom: 24 }}>
-      <div style={{ display: "flex", gap: 9, alignItems: "center", background: `${al.c}12`, border: `1px solid ${al.c}44`, borderLeft: `4px solid ${al.c}`, borderRadius: 10, padding: "12px 15px", marginBottom: 16, fontSize: 14, color: "#2B3138", fontWeight: 500 }}>
-        <AlertTriangle size={16} color={al.c} style={{ flexShrink: 0 }} /> {al.t}
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* 1 — greeting */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={FS.kicker}>MY STATION · North Hood Country VFD</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
       </div>
-      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MY CERTIFICATIONS</div>
-      <div style={S.opCard}>
-        {certs.map((c, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom }}>
-            <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
-            <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+
+      {/* 2 — three stat boxes */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <FireStat label="My attendance" value={hasAtt ? `${pct}%` : "—"} sub={hasAtt ? `${attendedCount} of ${totalRecorded} drills` : "No record yet"} extra={dots.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 8 }}>
+            {dots.map((d, i) => {
+              const t = d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+              return d.present
+                ? <CheckCircle2 key={i} size={13} color={FIRE.green} title={`${t} — present`} />
+                : <XCircle key={i} size={13} color={FIRE.red} title={`${t} — missed`} />;
+            })}
           </div>
-        ))}
+        ) : null} />
+        <FireStat label="Certs current" value={`${certsCurrent}/${certsTotal}`} sub={certAlert.text} subColor={certAlert.color} />
+        <FireStat label="Trainings this month" value={String(trainingsThisMonth)} sub={TRAIN_MONTHS[today.getMonth()]} />
       </div>
-      <div style={{ ...S.cardEyebrow, marginTop: 20 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPCOMING CLASSES</div>
-      <div style={S.opCard}>
-        {classes.map((cl, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === classes.length - 1 ? "none" : S.certRow.borderBottom }}>
-            <Calendar size={15} color="#54506B" style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{cl.name}</span></div>
-            {cl.forYou && <span style={S.forYou}>FOR YOU</span>}
-            <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, color: "#6A7178" }}>{cl.date}</span>
+
+      {/* 4 — two columns: certifications | upcoming training */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={FS.kicker}>MY CERTIFICATIONS</div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color }}>{certAlert.text}</span>
           </div>
-        ))}
+          <div style={{ marginTop: 10 }}>
+            {certsAll.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No certifications on file yet.</div>
+            ) : certsAll.map((c, i) => (
+              <div key={c.id ?? i} style={{ ...FS.row, padding: "9px 0" }}>
+                <Award size={15} color={fireCert(c.st)} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
+                </div>
+                <Pill S={S} color={fireCert(c.st)}>{c.st.label}</Pill>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={FS.kicker}>UPCOMING TRAINING</div>
+          <div style={{ marginTop: 10 }}>
+            {upcoming.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>
+            ) : upcoming.map((s) => (
+              <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
+                <CalendarCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
+                </div>
+                {s.plan && <button onClick={() => openPlan(s.plan)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 4b — assigned to me (self-contained loader; hidden entirely when empty) */}
+      {mine.length > 0 && (
+        <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+          <div style={FS.kicker}>ASSIGNED TO ME</div>
+          <div style={{ marginTop: 10 }}>
+            {mine.map((d) => {
+              let badge = null;
+              if (d.due_date) {
+                const dd = new Date(d.due_date + "T00:00:00");
+                const tn = new Date(); tn.setHours(0, 0, 0, 0);
+                const days = Math.round((dd - tn) / 86400000);
+                const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted — same as the StationDuties badge
+                const dl = dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                badge = <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, ...FS.num }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+              }
+              return (
+                <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                  <ClipboardCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
+                    {badge && <div style={{ marginTop: 2 }}>{badge}</div>}
+                  </div>
+                  <button onClick={() => markMineDone(d.id)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}><CheckCircle2 size={13} color={FIRE.btnIcon} /> Mark done</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 5 — station calendar: shared DashboardCalendar wrapped in a dark FS card (light inset; NOT mutated) */}
+      <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
+        <DashboardCalendar S={S} />
+      </div>
+
+      {/* 6 — quick actions (member-filtered NAV; new FS styling, shared QuickAccess untouched) */}
+      <div style={{ ...FS.card, padding: 18 }}>
+        <div style={FS.kicker}>QUICK ACTIONS</div>
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+          {NAV.filter((n) => n.key !== "dashboard" && n.roles.includes(role)).map((n) => (
+            <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
+              <n.Icon size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: FIRE.btnText }}>{n.label}</span>
+              <ChevronRight size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -572,19 +748,25 @@ function Library({ S, library, openPacket }) {
     return okT && okQ;
   }), [library, q, track]);
   return (
-    <div>
-      <PageHead S={S} eyebrow="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight." />
-      <div style={S.searchBox}>
-        <Search size={18} color="#6A7178" />
-        <input style={S.searchInput} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {q && <button style={S.clearBtn} onClick={() => setQ("")}><X size={15} /></button>}
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>TRAINING LIBRARY</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Find a packet</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Search by topic or filter by track. Every packet is ready to run tonight.</div>
+      </div>
+      <div style={{ ...S.searchBox, ...FS.card, marginBottom: 14 }}>
+        <Search size={18} color={FIRE.btnIcon} />
+        <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {q && <button style={{ ...S.clearBtn, color: FIRE.textMuted }} onClick={() => setQ("")}><X size={15} /></button>}
       </div>
       <div style={S.chipRow}>
-        <Chip S={S} active={track === "All"} onClick={() => setTrack("All")}>All</Chip>
-        {Object.keys(TRACKS).map((k) => <Chip key={k} S={S} active={track === k} accent={TRACKS[k].accent} onClick={() => setTrack(k)}>{TRACKS[k].label}</Chip>)}
+        {[["All", "All", null], ...Object.keys(TRACKS).map((k) => [k, TRACKS[k].label, TRACKS[k].accent])].map(([k, label, accent]) => {
+          const on = track === k;
+          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.btnBg : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? (accent || FIRE.red) : FIRE.btnBorder}` }}>{label}</button>;
+        })}
       </div>
       {results.length === 0 ? (
-        <div style={S.empty}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</div>
+        <div style={{ ...FS.card, padding: 36, textAlign: "center", color: FIRE.textMuted }}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</div>
       ) : (
         <div style={S.cardGrid}>{results.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} />)}</div>
       )}
@@ -594,11 +776,11 @@ function Library({ S, library, openPacket }) {
 function RunCard({ S, p, onClick }) {
   const T = TRACKS[p.track];
   return (
-    <button style={{ ...S.runCard, borderLeft: `4px solid ${T.accent}` }} onClick={onClick}>
+    <button style={{ ...S.runCard, ...FS.card, cursor: "pointer", textAlign: "left", borderLeft: `4px solid ${T.accent}` }} onClick={onClick}>
       <div style={S.runTop}><span style={{ ...S.runCode, color: T.accent }}>{p.code}</span><T.Icon size={16} color={T.accent} /></div>
-      <h3 style={S.runTitle}>{p.title}</h3>
-      <p style={S.runObj}>{p.objective}</p>
-      <div style={S.runFoot}><span><Clock size={13} /> {p.time}</span><span style={S.runUpdated}>Updated {p.updated}</span></div>
+      <h3 style={{ ...S.runTitle, color: FIRE.textPrimary }}>{p.title}</h3>
+      <p style={{ ...S.runObj, color: FIRE.textMuted }}>{p.objective}</p>
+      <div style={{ ...S.runFoot, color: FIRE.textMuted }}><span><Clock size={13} /> {p.time}</span><span style={S.runUpdated}>Updated {p.updated}</span></div>
     </button>
   );
 }
@@ -666,36 +848,36 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
     setSent(true);
   }
   if (sent) return (
-    <div style={S.fbDone}>
-      <CheckCircle2 size={18} color="#1A6B3C" style={{ flexShrink: 0, marginTop: 1 }} />
+    <div style={{ ...S.fbDone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
+      <CheckCircle2 size={18} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />
       <div><strong>Logged — thank you.</strong> Critiques like this are exactly what sharpen the next plan. Your team reviews them and tunes the system from them.</div>
     </div>
   );
   return (
-    <div style={S.fbCard}>
-      <div style={S.fbHead}><MessageSquare size={15} color="#54506B" /> Help it get better</div>
+    <div style={{ ...S.fbCard, ...FS.card }}>
+      <div style={{ ...S.fbHead, color: FIRE.textPrimary }}><MessageSquare size={15} color={FIRE.btnIcon} /> Help it get better</div>
       <div style={S.fbRow}>
-        <span style={S.fbLabel}>Was this useful?</span>
-        <button style={{ ...S.fbThumb, ...(rating === "up" ? S.fbThumbUp : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
-        <button style={{ ...S.fbThumb, ...(rating === "down" ? S.fbThumbDown : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
+        <span style={{ ...S.fbLabel, color: FIRE.textSecondary }}>Was this useful?</span>
+        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "up" ? { border: `0.5px solid ${FIRE.green}`, color: FIRE.greenText } : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
+        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "down" ? { border: `0.5px solid ${FIRE.redBright}`, color: FIRE.redText } : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
       </div>
-      <div style={S.fbLabel2}>What was off? (tap any)</div>
+      <div style={{ ...S.fbLabel2, color: FIRE.textMuted }}>What was off? (tap any)</div>
       <div style={S.chipRow}>
         {CRITIQUE_TAGS.map((t) => (
-          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, ...(tags.includes(t) ? S.fbTagOn : {}) }}>{t}</button>
+          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.navLabel, ...(tags.includes(t) ? { border: `0.5px solid ${FIRE.red}`, color: FIRE.textPrimary } : {}) }}>{t}</button>
         ))}
       </div>
       {!editing ? (
-        <button style={S.fbEditBtn} onClick={() => setEditing(true)}><Pencil size={14} /> Edit the plan & save your version</button>
+        <button style={{ ...S.fbEditBtn, ...FS.btn, marginTop: 13 }} onClick={() => setEditing(true)}><Pencil size={14} /> Edit the plan & save your version</button>
       ) : (
         <div style={{ marginTop: 12 }}>
-          <div style={S.fbLabel2}>Your corrected summary</div>
-          <textarea style={{ ...S.input, minHeight: 72, resize: "vertical" }} value={editedSummary} onChange={(e) => setEditedSummary(e.target.value)} />
+          <div style={{ ...S.fbLabel2, color: FIRE.textMuted }}>Your corrected summary</div>
+          <textarea style={{ ...FS.input, minHeight: 72, resize: "vertical" }} value={editedSummary} onChange={(e) => setEditedSummary(e.target.value)} />
         </div>
       )}
-      <div style={{ ...S.fbLabel2, marginTop: 12 }}>Anything else you'd change?</div>
-      <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. swap the prop, add an accountability check…" />
-      <button style={{ ...S.primaryBtn, marginTop: 12, opacity: (rating || tags.length || notes.trim() || changed) ? 1 : 0.55 }}
+      <div style={{ ...S.fbLabel2, color: FIRE.textMuted, marginTop: 12 }}>Anything else you'd change?</div>
+      <textarea style={{ ...FS.input, minHeight: 48, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. swap the prop, add an accountability check…" />
+      <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: (rating || tags.length || notes.trim() || changed) ? 1 : 0.55 }}
         onClick={send} disabled={!(rating || tags.length || notes.trim() || changed)}>Send feedback</button>
     </div>
   );
@@ -717,44 +899,48 @@ function AIAssistant({ S, addFeedback }) {
     } catch { setErr("Couldn't generate a plan just now. Check the connection and try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="AI TRAINING ASSISTANT" title="Draft a drill plan" sub="Describe your crew and constraints. You'll get a starting plan to adapt — then review it against your protocols." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>AI TRAINING ASSISTANT</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Draft a drill plan</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Describe your crew and constraints. You'll get a starting plan to adapt — then review it against your protocols.</div>
+      </div>
       <div style={S.aiGrid}>
-        <div style={S.aiForm}>
-          <AIField S={S} label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
-          <AIField S={S} label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
-          <AIField S={S} label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
-          <label style={S.field}><span style={S.fieldLabel}>Skill level</span>
-            <select style={S.input} value={form.level} onChange={(e) => up("level", e.target.value)}><option>New / probationary</option><option>Intermediate</option><option>Experienced</option><option>Mixed</option></select></label>
-          <AIField S={S} label="Time available (minutes)" value={form.time} onChange={(v) => up("time", v)} />
-          <label style={S.field}><span style={S.fieldLabel}>Recent training history</span>
-            <textarea style={{ ...S.input, minHeight: 66, resize: "vertical" }} value={form.history} onChange={(e) => up("history", e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+        <div style={{ ...S.aiForm, ...FS.card }}>
+          <AIField S={S} dark label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
+          <AIField S={S} dark label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
+          <AIField S={S} dark label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Skill level</span>
+            <select style={FS.input} value={form.level} onChange={(e) => up("level", e.target.value)}><option>New / probationary</option><option>Intermediate</option><option>Experienced</option><option>Mixed</option></select></label>
+          <AIField S={S} dark label="Time available (minutes)" value={form.time} onChange={(v) => up("time", v)} />
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recent training history</span>
+            <textarea style={{ ...FS.input, minHeight: 66, resize: "vertical" }} value={form.history} onChange={(e) => up("history", e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate drill plan</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
         </div>
-        <div style={S.aiResult}>
-          {!plan && !loading && <div style={S.aiPlaceholder}><Sparkles size={28} color="#54506B" /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
-          {loading && <div style={S.aiPlaceholder}><Loader2 size={28} className="spin" color="#54506B" /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
+        <div style={{ ...S.aiResult, ...FS.card }}>
+          {!plan && !loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Sparkles size={28} color={FIRE.textMuted2} /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
+          {loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Loader2 size={28} className="spin" color={FIRE.textMuted2} /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
           {plan && (
             <div>
-              <Disclaimer S={S} compact />
-              <h3 style={S.featTitle}>{form.topic}</h3>
-              <p style={S.body}>{plan.summary}</p>
-              {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} text={`${plan.durationMin} min`} /></div> : null}
-              <AIList S={S} Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
-              <AIList S={S} Icon={Wrench} title="Equipment" items={plan.equipment} />
+              <Disclaimer S={S} compact dark />
+              <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{form.topic}</h3>
+              <p style={{ ...S.body, color: FIRE.textSecondary }}>{plan.summary}</p>
+              {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
+              <AIList S={S} dark Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
+              <AIList S={S} dark Icon={Wrench} title="Equipment" items={plan.equipment} />
               {Array.isArray(plan.steps) && (
-                <div style={{ marginTop: 16 }}><div style={S.aiListHead}><FileText size={16} /> Drill steps</div>
+                <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Drill steps</div>
                   <div style={S.steps}>{plan.steps.map((s, i) => (
-                    <div key={i} style={S.step}><span style={S.stepNum}>{String(i + 1).padStart(2, "0")}</span>
-                      <div style={{ flex: 1 }}><div style={S.stepTitle}>{s.title} {s.minutes ? <span style={S.stepMin}>{s.minutes} min</span> : null}</div><div style={S.stepDetail}>{s.detail}</div></div></div>
+                    <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
+                      <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div></div></div>
                   ))}</div></div>
               )}
-              <AIList S={S} Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
-              <AIList S={S} Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
-              <AIList S={S} Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
+              <AIList S={S} dark Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
+              <AIList S={S} dark Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
+              <AIList S={S} dark Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
               <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
             </div>
           )}
@@ -763,48 +949,48 @@ function AIAssistant({ S, addFeedback }) {
     </div>
   );
 }
-function AIField({ S, label, value, onChange }) {
-  return <label style={S.field}><span style={S.fieldLabel}>{label}</span><input style={S.input} value={value} onChange={(e) => onChange(e.target.value)} /></label>;
+function AIField({ S, label, value, onChange, dark }) {
+  return <label style={S.field}><span style={dark ? { ...S.fieldLabel, color: FIRE.textSecondary } : S.fieldLabel}>{label}</span><input style={dark ? FS.input : S.input} value={value} onChange={(e) => onChange(e.target.value)} /></label>;
 }
-function AIList({ S, Icon, title, items, warn }) {
+function AIList({ S, Icon, title, items, warn, dark }) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ ...S.aiListHead, color: warn ? "#8A1620" : "#191C20" }}><Icon size={16} /> {title}</div>
-      <ul style={S.list}>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
+      <div style={{ ...S.aiListHead, color: warn ? (dark ? FIRE.redText : "#8A1620") : (dark ? FIRE.textPrimary : "#191C20") }}><Icon size={16} /> {title}</div>
+      <ul style={dark ? { ...S.list, color: FIRE.textSecondary } : S.list}>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
     </div>
   );
 }
 
 /* ---------------- shared: resource library + idea grid ---------------- */
-function ResourceLibrary({ S, items, verb, onOpen, onDelete }) {
+function ResourceLibrary({ S, items, verb, onOpen, onDelete, dark }) {
   return (
     <div style={S.resGrid}>
       {items.map((r) => (
-        <div key={r.id ?? r.name} style={S.resCard}>
-          <FileText size={16} color="#54506B" style={{ flexShrink: 0, marginTop: 1 }} />
+        <div key={r.id ?? r.name} style={dark ? { ...S.resCard, ...FS.card } : S.resCard}>
+          <FileText size={16} color={dark ? FIRE.btnIcon : "#54506B"} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={S.resName}>{r.name}</div>
-            <div style={S.resType}>{r.type}</div>
+            <div style={dark ? { ...S.resName, color: FIRE.textPrimary } : S.resName}>{r.name}</div>
+            <div style={dark ? { ...S.resType, color: FIRE.textMuted } : S.resType}>{r.type}</div>
           </div>
           {onOpen ? (
-            <button onClick={() => onOpen(r)} style={{ ...S.resDl, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit" }}><Download size={13} /> {verb || "Download"}</button>
+            <button onClick={() => onOpen(r)} style={{ ...S.resDl, ...(dark ? { color: FIRE.btnText } : {}), border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit" }}><Download size={13} /> {verb || "Download"}</button>
           ) : (
-            <span style={S.resDl}><Download size={13} /> {verb || "Download"}</span>
+            <span style={dark ? { ...S.resDl, color: FIRE.btnText } : S.resDl}><Download size={13} /> {verb || "Download"}</span>
           )}
           {onDelete && (
-            <button onClick={() => onDelete(r)} title="Delete" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "#B11E2A", display: "inline-flex", alignItems: "center", flexShrink: 0, alignSelf: "center", marginLeft: 8 }}><X size={14} /></button>
+            <button onClick={() => onDelete(r)} title="Delete" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: dark ? FIRE.deleteRed : "#B11E2A", display: "inline-flex", alignItems: "center", flexShrink: 0, alignSelf: "center", marginLeft: 8 }}><X size={14} /></button>
           )}
         </div>
       ))}
     </div>
   );
 }
-function IdeaGrid({ S, items }) {
+function IdeaGrid({ S, items, dark }) {
   return (
     <div style={S.ideaGrid}>
       {items.map((i) => (
-        <div key={i.h} style={S.ideaCard}><div style={S.ideaH}>{i.h}</div><div style={S.ideaP}>{i.p}</div></div>
+        <div key={i.h} style={dark ? { ...S.ideaCard, ...FS.card } : S.ideaCard}><div style={dark ? { ...S.ideaH, color: FIRE.textPrimary } : S.ideaH}>{i.h}</div><div style={dark ? { ...S.ideaP, color: FIRE.textSecondary } : S.ideaP}>{i.p}</div></div>
       ))}
     </div>
   );
@@ -839,17 +1025,23 @@ function parseSections(text) {
   }
   pushCur(); return sections;
 }
-function RichOutput({ S, text }) {
+function RichOutput({ S, text, dark }) {
   const sections = parseSections(text);
+  // additive: default (dark falsy) uses the exact same S.rich* objects → byte-identical light path. Parse/RichText untouched.
+  const wrap  = S.richWrap;   // layout-only (flex/gap/marginTop) — same for both themes
+  const card  = dark ? { ...FS.card, padding: "15px 17px" } : S.richCard;
+  const title = dark ? { ...S.richTitle, color: FIRE.textPrimary, borderBottom: `1px solid ${FIRE.hairline}` } : S.richTitle;
+  const para  = dark ? { ...S.richP, color: FIRE.textSecondary } : S.richP;
+  const list  = dark ? { ...S.richList, color: FIRE.textSecondary } : S.richList;
   return (
-    <div style={S.richWrap}>
+    <div style={wrap}>
       {sections.map((sec, i) => (
-        <div key={i} style={S.richCard}>
-          {sec.title && <div style={S.richTitle}>{sec.title}</div>}
+        <div key={i} style={card}>
+          {sec.title && <div style={title}>{sec.title}</div>}
           {sec.blocks.map((b, j) => {
-            if (b.para != null) return <p key={j} style={S.richP}><RichText text={b.para} /></p>;
+            if (b.para != null) return <p key={j} style={para}><RichText text={b.para} /></p>;
             const Tag = b.ordered ? "ol" : "ul";
-            return <Tag key={j} style={S.richList}>{b.items.map((it, k) => <li key={k}><RichText text={it} /></li>)}</Tag>;
+            return <Tag key={j} style={list}>{b.items.map((it, k) => <li key={k}><RichText text={it} /></li>)}</Tag>;
           })}
         </div>
       ))}
@@ -870,34 +1062,38 @@ function Recruitment({ S, brand, role, notify }) {
     catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>RECRUITMENT</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Build a recruitment plan — not just a post</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.</div>
+      </div>
       <div style={S.phaseRow}>
         <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent="#B11E2A" />
         <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent="#1F4E79" />
         <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent="#0E6B62" />
       </div>
 
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER</div>
-          <h3 style={S.featTitle}>Draft a recruitment plan for your department</h3>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
-            <AIField S={S} label="Your town" value={town} onChange={setTown} />
-            <AIField S={S} label="Department size" value={size} onChange={setSize} />
+            <AIField S={S} dark label="Your town" value={town} onChange={setTown} />
+            <AIField S={S} dark label="Department size" value={size} onChange={setSize} />
           </div>
-          <label style={S.field}><span style={S.fieldLabel}>What you need</span>
-            <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={need} onChange={(e) => setNeed(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What you need</span>
+            <textarea style={{ ...FS.input, minHeight: 48, resize: "vertical" }} value={need} onChange={(e) => setNeed(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {plan && <RichOutput S={S} text={plan} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {plan && <RichOutput S={S} text={plan} dark />}
         </div>
       </div>
 
-      <div style={S.cardEyebrow}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA</div>
-      <IdeaGrid S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA</div>
+      <IdeaGrid S={S} dark items={[
         { h: "Current-member referrals", p: "Your people's networks convert best. Give them a one-line script to forward." },
         { h: "Local employers", p: "Release-time or support partnerships — many owners want the community goodwill." },
         { h: "Schools & trade programs", p: "High schools, EMT classes, and fire-science programs build your pipeline." },
@@ -906,13 +1102,13 @@ function Recruitment({ S, brand, role, notify }) {
         { h: "Open house", p: "Your highest-converting event — tour, demo, food, and fast follow-up." },
       ]} />
 
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECRUITMENT CALENDAR</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECRUITMENT CALENDAR</div>
       <RecruitmentCalendar S={S} role={role} notify={notify} />
 
       <GraphicStudio S={S} brand={brand} />
 
-      <div style={S.cardEyebrow}>RECRUITMENT LIBRARY</div>
-      <ResourceLibrary S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>RECRUITMENT LIBRARY</div>
+      <ResourceLibrary S={S} dark items={[
         { name: "Volunteer Recruitment Playbook", type: "PDF · 90-day plan + templates" },
         { name: "Printable recruitment flyer", type: "PDF · fill-in-the-blank" },
         { name: "Member-referral scripts", type: "Doc · copy & send" },
@@ -924,10 +1120,10 @@ function Recruitment({ S, brand, role, notify }) {
 }
 function Phase({ S, n, weeks, title, items, accent }) {
   return (
-    <div style={{ ...S.phaseCard, borderTop: `3px solid ${accent}` }}>
-      <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={S.phaseWeeks}>{weeks}</span></div>
-      <div style={S.phaseTitle}>{title}</div>
-      <ul style={S.phaseList}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
+    <div style={{ ...S.phaseCard, ...FS.card, borderTop: `3px solid ${accent}` }}>
+      <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={{ ...S.phaseWeeks, color: FIRE.textMuted }}>{weeks}</span></div>
+      <div style={{ ...S.phaseTitle, color: FIRE.textPrimary }}>{title}</div>
+      <ul style={{ ...S.phaseList, color: FIRE.textSecondary }}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
     </div>
   );
 }
@@ -1044,51 +1240,55 @@ function Documents({ S, role, notify, uploaderName }) {
     catch { setErr("Couldn't draft that just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place" sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."} />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION DOCUMENTS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your SOPs and guidelines, in one place</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."}</div>
+      </div>
 
       {canManageDocs && (<>
-        <div style={S.cardEyebrow}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
-        <label style={{ ...S.field, maxWidth: 240, marginBottom: 12 }}><span style={S.fieldLabel}>Type for these uploads</span>
-          <select style={{ ...S.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
+        <label style={{ ...S.field, maxWidth: 240, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type for these uploads</span>
+          <select style={{ ...FS.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
             {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select></label>
-        <label style={S.docDrop}
+        <label style={{ ...S.docDrop, background: FIRE.btnBg, border: `2px dashed ${FIRE.btnBorder}` }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); uploadFiles(Array.from(e.dataTransfer.files || [])); }}>
-          <Upload size={22} color="#54506B" />
-          <div style={S.docDropText}>Drop files here or <span style={{ color: "#1F4E79", fontWeight: 600 }}>browse</span></div>
-          <div style={S.docDropSub}>SOPs, SOGs, guidelines, agreements — PDF, Word, or images</div>
+          <Upload size={22} color={FIRE.btnIcon} />
+          <div style={{ ...S.docDropText, color: FIRE.textSecondary }}>Drop files here or <span style={{ color: FIRE.redBright, fontWeight: 600 }}>browse</span></div>
+          <div style={{ ...S.docDropSub, color: FIRE.textMuted }}>SOPs, SOGs, guidelines, agreements — PDF, Word, or images</div>
           <input type="file" multiple style={{ display: "none" }} onChange={onFiles} />
         </label>
 
-        <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FilePlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT</div>
-        <div style={S.aiBanner}>
+        <div style={{ ...FS.kicker, marginTop: 24, marginBottom: 8 }}><FilePlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT</div>
+        <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
           <div style={{ flex: 1 }}>
-            <label style={S.field}><span style={S.fieldLabel}>Document type</span>
-              <select style={{ ...S.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Document type</span>
+              <select style={{ ...FS.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
                 {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select></label>
-            <label style={{ ...S.field, marginTop: 12 }}><span style={S.fieldLabel}>What should it cover?</span>
-              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
-            <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            <label style={{ ...S.field, marginTop: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What should it cover?</span>
+              <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+            <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><FilePlus size={16} /> Draft document</>}
             </button>
-            {err && <div style={S.errBox}>{err}</div>}
-            {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact /><RichOutput S={S} text={out} /></div>}
+            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact dark /><RichOutput S={S} text={out} dark /></div>}
           </div>
         </div>
       </>)}
 
-      <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
+      <div style={{ ...FS.kicker, marginTop: 24, marginBottom: 8 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
       {!docsLoading && docs.length === 0 ? (
-        <div style={S.empty}>
+        <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>
           {canManageDocs
             ? "No documents yet — upload your first above."
             : "No documents have been added yet."}
         </div>
       ) : (
-        <ResourceLibrary S={S} verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
+        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
       )}
     </div>
   );
@@ -1109,7 +1309,7 @@ const TIER_STYLES = {
   pill: { fontSize: 9.5,  fontWeight: 600, padding: "2px 5px", borderRadius: 999 },
   dot:  { fontSize: 9, fontWeight: 600, padding: "1px 5px 1px 4px", borderRadius: 999, display: "inline-flex", alignItems: "center", gap: 4 },
 };
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator }) {
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark }) {
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const firstDow = new Date(cur.y, cur.m, 1).getDay();
@@ -1121,15 +1321,15 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
   for (let d = 1; d <= dim; d++) cells.push(d);
 
   const st = {
-    wrap: { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
-    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EFEEF3" },
-    mlabel: { fontWeight: 700, fontSize: 15, color: "#211C2B" },
-    nav: { border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center" },
-    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: "#F7F6FA" },
-    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4 },
+    wrap: dark ? { ...FS.card, overflow: "hidden", marginBottom: 10 } : { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
+    bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}` },
+    mlabel: { fontWeight: 700, fontSize: 15, color: dark ? FIRE.textPrimary : "#211C2B" },
+    nav: { border: `${dark ? "0.5px" : "1px"} solid ${dark ? FIRE.btnBorder : "#E0DEE8"}`, background: dark ? FIRE.btnBg : "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: dark ? FIRE.btnIcon : "#54506B", display: "inline-flex", alignItems: "center" },
+    dow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", background: dark ? FIRE.btnBg : "#F7F6FA" },
+    dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: dark ? FIRE.textMuted : "#8A8696", letterSpacing: 0.4 },
     grid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)" },
-    cell: { minHeight: 74, borderTop: "1px solid #EFEEF3", borderLeft: "1px solid #EFEEF3", padding: 5, display: "flex", flexDirection: "column", gap: 3 },
-    dnum: { fontSize: 11, color: "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
+    cell: { minHeight: 74, borderTop: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, borderLeft: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, padding: 5, display: "flex", flexDirection: "column", gap: 3 },
+    dnum: { fontSize: 11, color: dark ? FIRE.textMuted : "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
     dtoday: { background: todayColor, color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
     chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   };
@@ -1147,21 +1347,21 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
         {cells.map((d, i) => {
           const dayItems = d == null ? [] : items.filter((it) => it.d === d);
           return (
-            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? "#FBFAFC" : "#fff" }}>
+            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? (dark ? FIRE.btnBg : "#FBFAFC") : (dark ? "transparent" : "#fff") }}>
               {d != null && (<>
                 <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
                 {dayItems.slice(0, 3).map((it) => {
                   const c = renderChip(it);
                   const isDot = c.tier === "dot";
                   return (
-                    <div key={it.id} style={{ ...st.chip, background: isDot ? "transparent" : c.color, ...(isDot ? { color: "#3A4750" } : null), ...(c.tier ? TIER_STYLES[c.tier] : null), ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>
+                    <div key={it.id} style={{ ...st.chip, background: isDot ? "transparent" : c.color, ...(isDot ? { color: dark ? FIRE.textSecondary : "#3A4750" } : null), ...(c.tier ? TIER_STYLES[c.tier] : null), ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>
                       {isDot && <span style={{ width: 6, height: 6, borderRadius: 999, background: c.color, flexShrink: 0, display: "inline-block" }} />}
                       {c.label}
                     </div>
                   );
                 })}
                 {overflowIndicator && dayItems.length > 3 && (
-                  <div style={{ fontSize: 9, color: "#8A8696", fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - 3} more</div>
+                  <div style={{ fontSize: 9, color: dark ? FIRE.textMuted : "#8A8696", fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - 3} more</div>
                 )}
               </>)}
             </div>
@@ -1270,12 +1470,12 @@ function ContentCalendar({ S, role, notify }) {
         {categories.map((cat) => (
           <span key={cat.id} style={{ position: "relative", display: "inline-flex" }}>
             <button onClick={() => quickAdd(cat.id)}
-              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <Plus size={13} /> {cat.tag}
             </button>
             {canEditCategories && !cat.isDefault && (
               <button title={`Delete ${cat.tag}`} onClick={(e) => { e.stopPropagation(); deleteCat(cat); }}
-                style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 999, border: `1px solid ${cat.c}`, background: "#fff", color: cat.c, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
+                style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 999, border: `1px solid ${cat.c}`, background: FIRE.card, color: cat.c, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
                 <X size={10} />
               </button>
             )}
@@ -1283,55 +1483,55 @@ function ContentCalendar({ S, role, notify }) {
         ))}
         {canEditCategories && (
           <button onClick={() => setShowCat((v) => !v)}
-            style={{ border: "1.5px dashed #B9B5C4", color: "#6A7178", background: "#fff", borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            style={{ border: `1.5px dashed ${FIRE.btnBorder}`, color: FIRE.navLabel, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <Plus size={13} /> New
           </button>
         )}
       </div>
 
       {showCat && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Label</span>
-            <input style={S.input} value={catLabel} onChange={(e) => setCatLabel(e.target.value)} placeholder="e.g. EVENTS" /></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Label</span>
+            <input style={FS.input} value={catLabel} onChange={(e) => setCatLabel(e.target.value)} placeholder="e.g. EVENTS" /></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setCatColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
               ))}
             </div>
           </div>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Post idea (optional)</span>
-            <input style={S.input} value={catText} onChange={(e) => setCatText(e.target.value)} placeholder="Default text for this category" /></label>
-          <button style={S.primaryBtn} onClick={addCat}><Plus size={15} /> Save category</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setShowCat(false); setCatLabel(""); setCatColor(CATEGORY_COLORS[0]); setCatText(""); }}>Cancel</button>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Post idea (optional)</span>
+            <input style={FS.input} value={catText} onChange={(e) => setCatText(e.target.value)} placeholder="Default text for this category" /></label>
+          <button style={FS.btnPrimary} onClick={addCat}><Plus size={15} /> Save category</button>
+          <button style={FS.btn} onClick={() => { setShowCat(false); setCatLabel(""); setCatColor(CATEGORY_COLORS[0]); setCatText(""); }}>Cancel</button>
         </div>
       )}
 
       {show && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
-            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span>
-            <select style={S.input} value={fi || ""} onChange={(e) => { const cat = categories.find((c) => c.id === e.target.value); setFi(e.target.value); setFt(cat ? cat.t : ""); }}>{categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.tag}</option>)}</select></label>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Post idea</span>
-            <input style={S.input} value={ft} onChange={(e) => setFt(e.target.value)} placeholder="What's the post?" /></label>
-          <button style={S.primaryBtn} onClick={add}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span>
+            <select style={FS.input} value={fi || ""} onChange={(e) => { const cat = categories.find((c) => c.id === e.target.value); setFi(e.target.value); setFt(cat ? cat.t : ""); }}>{categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.tag}</option>)}</select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Post idea</span>
+            <input style={FS.input} value={ft} onChange={(e) => setFt(e.target.value)} placeholder="What's the post?" /></label>
+          <button style={FS.btnPrimary} onClick={add}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
         </div>
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthPosts}
         renderChip={(p) => ({ color: p.c, label: p.t, title: `${p.tag} — ${p.t} (tap to remove)`, onClick: () => remove(p.id, p.t) })}
         todayColor="#B11E2A"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={
-          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
+          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
         }
       />
-      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
         {monthPosts.length} post{monthPosts.length === 1 ? "" : "s"} scheduled in {CAL_MONTHS[cur.m]} · tap a colored post to remove it, or use a category chip to add one.
       </div>
     </div>
@@ -1388,35 +1588,35 @@ function RecruitmentCalendar({ S, role, notify }) {
   return (
     <div>
       {show && canEdit && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Title</span>
-            <input style={S.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Open house at Station 20" /></label>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
-            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
+            <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Open house at Station 20" /></label>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
               ))}
             </div>
           </div>
-          <button style={S.primaryBtn} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+          <button style={FS.btnPrimary} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
         </div>
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthItems}
         renderChip={(it) => ({ color: it.c, label: it.title, title: canEdit ? `${it.title} (tap to remove)` : it.title, onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#0E6B62"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
-      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
         {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
       </div>
     </div>
@@ -1473,35 +1673,35 @@ function FundingCalendar({ S, role, notify }) {
   return (
     <div>
       {show && canEdit && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Title</span>
-            <input style={S.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Pancake breakfast at Station 20" /></label>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span>
-            <select style={S.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
+            <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Pancake breakfast at Station 20" /></label>
+          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
               ))}
             </div>
           </div>
-          <button style={S.primaryBtn} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShow(false)}>Cancel</button>
+          <button style={FS.btnPrimary} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
         </div>
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthItems}
         renderChip={(it) => ({ color: it.c, label: it.title, title: canEdit ? `${it.title} (tap to remove)` : it.title, onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#9A6B12"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: "1px solid #E0DEE8", background: "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#54506B", display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
-      <div style={{ fontSize: 12.5, color: "#6A7178", marginBottom: 18 }}>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
         {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
       </div>
     </div>
@@ -1549,23 +1749,23 @@ function DashboardCalendar({ S }) {
 
   return (
     <div>
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
             <button key={f.key} onClick={() => setFilter(f.key)}
-              style={{ border: `1.5px solid ${f.color}`, background: active ? f.color : "#fff", color: active ? "#fff" : f.color, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              style={{ border: `1.5px solid ${f.color}`, background: active ? f.color : FIRE.btnBg, color: active ? "#fff" : f.color, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
               {f.label}
             </button>
           );
         })}
       </div>
       <MonthCalendar
-        cur={cur} setCur={setCur}
+        cur={cur} setCur={setCur} dark
         items={monthItems}
         renderChip={(it) => ({ color: it.color, label: it.label, title: it.label, ...(filter === "all" ? { tier: it.tier } : {}) })}
-        todayColor="#211C2B"
+        todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         overflowIndicator
       />
@@ -1582,13 +1782,17 @@ function Visibility({ S, brand, role, notify }) {
     catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="VISIBILITY" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week." />
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>PUBLIC RELATIONS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Stay seen between calls</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week.</div>
+      </div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
       <ContentCalendar S={S} role={role} notify={notify} />
 
-      <div style={S.cardEyebrow}>IDEAS FOR THINGS TO MAKE</div>
-      <IdeaGrid S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>IDEAS FOR THINGS TO MAKE</div>
+      <IdeaGrid S={S} dark items={[
         { h: "60-second station tour", p: "Walk the bay on a phone camera. People love seeing inside." },
         { h: "Member spotlight", p: "One photo + why they serve. Faces build trust the fastest." },
         { h: "Safety tip card", p: "Smoke alarms, seasonal hazards — useful posts get shared." },
@@ -1597,24 +1801,24 @@ function Visibility({ S, brand, role, notify }) {
         { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
       ]} />
 
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI CAPTION HELPER</div>
-          <h3 style={S.featTitle}>Write a post for your station</h3>
-          <label style={S.field}><span style={S.fieldLabel}>What's the post about?</span>
-            <input style={S.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI CAPTION HELPER</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Write a post for your station</h3>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What's the post about?</span>
+            <input style={FS.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {post && <RichOutput S={S} text={post} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {post && <RichOutput S={S} text={post} dark />}
         </div>
       </div>
 
       <GraphicStudio S={S} brand={brand} />
 
-      <div style={S.cardEyebrow}>VISIBILITY LIBRARY</div>
-      <ResourceLibrary S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>PUBLIC RELATIONS LIBRARY</div>
+      <ResourceLibrary S={S} dark items={[
         { name: "Monthly content calendar template", type: "PDF · copy & repeat" },
         { name: "Caption starters", type: "Doc · fill-in" },
         { name: "Social Media Playbook", type: "PDF · the full guide" },
@@ -1662,81 +1866,85 @@ function Funding({ S, role, notify }) {
     catch { setErr("Couldn't generate that just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="FUNDING" title="Plan fundraisers, write the appeals, line up sponsors" sub="Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>FUNDING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident.</div>
+      </div>
 
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
           <div style={S.segRow}>
             {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
-              <button key={m} onClick={() => { setMode(m); setOut(""); }} style={{ ...S.segBtn, ...(mode === m ? S.segBtnOn : {}) }}>{m}</button>
+              <button key={m} onClick={() => { setMode(m); setOut(""); }} style={{ ...S.segBtn, background: mode === m ? FIRE.btnBg : "transparent", borderColor: mode === m ? FIRE.red : FIRE.btnBorder, color: mode === m ? FIRE.textPrimary : FIRE.navLabel }}>{m}</button>
             ))}
           </div>
-          <label style={S.field}><span style={S.fieldLabel}>Tell us about it</span>
-            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tell us about it</span>
+            <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Working…</> : <><Sparkles size={16} /> Generate</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
 
-      <div style={S.cardEyebrow}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EVENT IDEAS</div>
-      <p style={S.helpP}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EVENT IDEAS</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
       <div style={S.opGrid}>
         {FUNDRAISER_IDEAS.map((idea) => {
           const recent = recentFor(idea);
           return (
-            <div key={idea.title} style={S.opCard}>
+            <div key={idea.title} style={{ ...S.opCard, ...FS.card }}>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{idea.title}</div></div>
-                {recent && <Pill S={S} color="#9A6B12">DONE {recent.date}</Pill>}
+                <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{idea.title}</div></div>
+                {recent && <Pill S={S} color={FIRE.amberText}>DONE {recent.date}</Pill>}
               </div>
-              <div style={{ fontSize: 13, color: "#3A4750", marginTop: 7 }}>{idea.p}</div>
+              <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{idea.p}</div>
               <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-                <button style={{ ...S.ghostBtn, marginTop: 0, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => planThis(idea)}><Sparkles size={14} /> Plan this</button>
+                <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => planThis(idea)}><Sparkles size={14} /> Plan this</button>
               </div>
             </div>
           );
         })}
       </div>
 
-      <div style={S.cardEyebrow}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
       <FundingCalendar S={S} role={role} notify={notify} />
 
-      <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}>
+      <div style={{ ...FS.kicker, marginBottom: 8, display: "flex", alignItems: "center" }}>
         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
-        {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: "#2E7D52", fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
+        {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: FIRE.greenText, fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
       </div>
-      <p style={S.helpP}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
       {addingLog ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Event</span><input style={S.input} value={ln} placeholder="e.g. Chili Cook-Off" onChange={(e) => setLn(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>When</span><input style={S.input} value={ld} placeholder="e.g. Jun 2026" onChange={(e) => setLd(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Raised ($)</span><input style={S.input} value={la} placeholder="e.g. 1500" onChange={(e) => setLa(e.target.value)} /></label>
-          <button style={S.primaryBtn} onClick={addLog}><Plus size={15} /> Log it</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingLog(false)}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Event</span><input style={FS.input} value={ln} placeholder="e.g. Chili Cook-Off" onChange={(e) => setLn(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>When</span><input style={FS.input} value={ld} placeholder="e.g. Jun 2026" onChange={(e) => setLd(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Raised ($)</span><input style={FS.input} value={la} placeholder="e.g. 1500" onChange={(e) => setLa(e.target.value)} /></label>
+          <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
+          <button style={FS.btn} onClick={() => setAddingLog(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingLog(true)}><Plus size={15} /> Log a fundraiser</button>}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAddingLog(true)}><Plus size={15} /> Log a fundraiser</button>}
       <div style={{ marginBottom: 6 }}>
-        {log.length === 0 ? <div style={{ ...S.opCard, fontSize: 13, color: "#6A7178" }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
+        {log.length === 0 ? <div style={{ ...S.opCard, ...FS.card, fontSize: 13, color: FIRE.textMuted }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
           log.map((e) => (
-            <div key={e.id} style={S.certRow}>
-              <PartyPopper size={15} color="#9A6B12" style={{ flexShrink: 0 }} />
+            <div key={e.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <PartyPopper size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontWeight: 600, color: "#191C20" }}>{e.name}</span>
-                <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{e.date}</div>
+                <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.name}</span>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.date}</div>
               </div>
-              {e.amount > 0 && <span style={{ fontWeight: 700, color: "#2E7D52", fontSize: 13.5 }}>${e.amount.toLocaleString()}</span>}
-              <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeLog(e.id)}><X size={14} /></button>
+              {e.amount > 0 && <span style={{ fontWeight: 700, color: FIRE.greenText, fontSize: 13.5 }}>${e.amount.toLocaleString()}</span>}
+              <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>
             </div>
           ))}
       </div>
 
-      <div style={S.cardEyebrow}>FUNDING LIBRARY</div>
-      <ResourceLibrary S={S} items={[
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>FUNDING LIBRARY</div>
+      <ResourceLibrary S={S} dark items={[
         { name: "Fundraising idea menu", type: "PDF" },
         { name: "Sponsor package one-pager", type: "Doc · editable" },
         { name: "Donor & business outreach letters", type: "Doc · templates" },
@@ -1775,6 +1983,8 @@ function certStatus(exp) {
   if (diff <= 3) return { label: "EXPIRING", color: "#9A6B12", rank: 1 };
   return { label: "CURRENT", color: "#2E7D52", rank: 2 };
 }
+// FIRE cert-status colors for crisp dark badges — additive sibling to certStatus's light `color`; does NOT mutate it.
+const CERT_FIRE = { EXPIRED: FIRE.redText, EXPIRING: FIRE.amberText, CURRENT: FIRE.green, "NO DATE": FIRE.textMuted };
 const CLASSES = [
   { name: "EMT-B Refresher", date: "Jul 12", covers: ["EMT-B", "Paramedic"] },
   { name: "CPR / BLS Recert", date: "Jun 28", covers: ["EMT-B", "Paramedic"] },
@@ -1795,9 +2005,9 @@ function expPhrase(exp) {
 function Pill({ S, color, children }) {
   return <span style={{ ...S.opChip, color, borderColor: `${color}55`, background: `${color}14` }}>{children}</span>;
 }
-function Initials({ S, name }) {
+function Initials({ S, name, dark }) {
   const i = name.split(" ").map((w) => w[0]).slice(0, 2).join("");
-  return <span style={S.avatar}>{i}</span>;
+  return <span style={dark ? { ...S.avatar, border: `0.5px solid ${FIRE.btnBorder}` } : S.avatar}>{i}</span>;
 }
 
 function Roster({ S, role, members, setMembers, sessions, notify }) {
@@ -1811,10 +2021,14 @@ function Roster({ S, role, members, setMembers, sessions, notify }) {
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} />;
   return (
-    <div>
-      <PageHead S={S} eyebrow="ROSTER" title="Your people, all in one place" sub={leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."} />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>ROSTER</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your people, all in one place</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."}</div>
+      </div>
       <div style={S.segRow}>
-        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, ...(tab === k ? S.segBtnOn : {}) }}>{l}</button>)}
+        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
       {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
@@ -1827,7 +2041,7 @@ function Roster({ S, role, members, setMembers, sessions, notify }) {
 function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const canAdd = canAssign(role);
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState("");
-  const sColor = (s) => s === "Active" ? "#2E7D52" : (s === "Probationary" ? "#9A6B12" : "#6A7178");
+  const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   async function add() {
     if (!nm.trim()) return;
     const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
@@ -1846,29 +2060,29 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   return (
     <div>
       {canAdd && (adding ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Name</span><input style={S.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Rank</span><select style={S.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Phone</span><input style={S.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 180 }}><span style={S.fieldLabel}>Email</span><input style={S.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><select style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span><input style={FS.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
       <div style={S.opGrid}>
         {members.map((m) => (
-          <div key={m.id} style={{ ...S.opCard, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+          <div key={m.id} style={{ ...S.opCard, ...FS.card, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <Initials S={S} name={m.name} />
+              <Initials S={S} dark name={m.name} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={S.personName}>{m.name}</div>
-                <div style={S.personMeta}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
+                <div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div>
+                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
               </div>
               <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill>
-              {canAdd && <button title="Remove from roster" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", marginLeft: 4, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} /></button>}
+              {canAdd && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: "#6A7178" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: FIRE.textMuted }}>
               <Phone size={13} /> {m.phone}
-              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: "#1F4E79", fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
+              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
                 : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
             </div>
           </div>
@@ -1916,49 +2130,49 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
     setDraft({ name: "", exp: "" });
   }
   return (
-    <div>
-      <button style={S.backBtn} onClick={back}><ArrowLeft size={16} /> Back to roster</button>
-      <div style={{ ...S.opCard, marginBottom: 16 }}>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <Initials S={S} name={member.name} />
+          <Initials S={S} dark name={member.name} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ ...S.personName, fontSize: 19 }}>{member.name}</div>
-            <div style={S.personMeta}>{member.role} · since {member.joined} · {member.phone}</div>
+            <div style={{ ...S.personName, fontSize: 19, color: FIRE.textPrimary }}>{member.name}</div>
+            <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{member.role} · since {member.joined} · {member.phone}</div>
           </div>
-          <Pill S={S} color={member.status === "Active" ? "#2E7D52" : member.status === "Probationary" ? "#9A6B12" : "#6A7178"}>{member.status.toUpperCase()}</Pill>
+          <Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>
         </div>
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation == null ? "—" : `${member.participation}%`}</span></div>
-          {member.participation != null && <Bar S={S} pct={member.participation} color={member.participation >= 75 ? "#2E7D52" : member.participation >= 50 ? "#9A6B12" : "#B11E2A"} />}
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation == null ? "—" : `${member.participation}%`}</span></div>
+          {member.participation != null && <Bar S={S} pct={member.participation} track={FIRE.track} color={member.participation >= 75 ? FIRE.green : member.participation >= 50 ? FIRE.amberText : FIRE.redText} />}
         </div>
         {assign && (
-          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid #ECEDEA` }}>
-            <label style={S.field}><span style={S.fieldLabel}>Station role &amp; access</span>
-              <select style={{ ...S.input, maxWidth: 260 }} value={member.access} onChange={(e) => onUpdate({ ...member, access: e.target.value })}>
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station role &amp; access</span>
+              <select style={{ ...FS.input, maxWidth: 260 }} value={member.access} onChange={(e) => onUpdate({ ...member, access: e.target.value })}>
                 <option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option>
               </select></label>
-            <div style={{ fontSize: 12, color: "#6A7178", marginTop: 5 }}>Sets what this person can see and do across the platform.</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5 }}>Sets what this person can see and do across the platform.</div>
           </div>
         )}
       </div>
 
-      <div style={S.cardEyebrow}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</div>
-      <div style={{ ...S.opCard, marginBottom: 16 }}>
-        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No certifications on file yet.</div> :
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</div>
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
+        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> :
           certs.map((c, i) => (
-            <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : S.certRow.borderBottom, ...(assign && editingCertId === c.id ? { flexWrap: "wrap" } : {}) }}>
-              <Award size={15} color={c.st.color} style={{ flexShrink: 0 }} />
+            <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, ...(assign && editingCertId === c.id ? { flexWrap: "wrap" } : {}) }}>
+              <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
               {assign && editingCertId === c.id ? (<>
-                <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={S.fieldLabel}>Certification</span><input style={S.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
-                <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Expires (YYYY-MM)</span><input style={S.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
-                <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
-                <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
+                <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
+                <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
+                <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
+                <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
               </>) : (<>
-                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{c.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
-                <Pill S={S} color={c.st.color}>{c.st.label}</Pill>
+                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+                <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
                 {assign && (<>
-                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
-                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
+                  <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
+                  <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
                 </>)}
               </>)}
             </div>
@@ -1972,17 +2186,17 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
         const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
-            <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</div>
-            <div style={{ ...S.opCard, marginBottom: 16 }}>
-              {done.length === 0 ? <div style={{ fontSize: 13.5, color: "#6A7178" }}>No training sessions recorded yet.</div> : (<>
-                <div style={{ fontSize: 13, color: "#3A4750", marginBottom: 8 }}>Attended <b>{went}</b> of <b>{done.length}</b> recorded sessions.</div>
+            <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</div>
+            <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
+              {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
+                <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{done.length}</b> recorded sessions.</div>
                 {done.map((s, i) => {
                   const present = (s.attendance || []).includes(member.id);
                   return (
-                    <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : S.certRow.borderBottom }}>
-                      <CalendarCheck size={15} color={present ? "#2E7D52" : "#B11E2A"} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {fmtSess(s)}</span></div>
-                      <Pill S={S} color={present ? "#2E7D52" : "#B11E2A"}>{present ? "PRESENT" : "ABSENT"}</Pill>
+                    <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                      <CalendarCheck size={15} color={present ? FIRE.green : FIRE.redBright} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
+                      <Pill S={S} color={present ? FIRE.green : FIRE.redBright}>{present ? "PRESENT" : "ABSENT"}</Pill>
                     </div>
                   );
                 })}
@@ -1992,18 +2206,18 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
         );
       })()}
 
-      <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
-      <div style={S.opCard}>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
+      <div style={{ ...S.opCard, ...FS.card }}>
         <div style={{ display: "flex", gap: 8, marginBottom: notes.length ? 14 : 0 }}>
-          <input style={{ ...S.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
-          <button style={S.primaryBtn} onClick={addNote}>Add</button>
+          <input style={{ ...FS.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button style={FS.btnPrimary} onClick={addNote}>Add</button>
         </div>
         {notes.map((n, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : S.certRow.borderBottom, alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: "#2B3138", lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: "#6A7178", marginTop: 3 }}>{n.by} · {n.when}</div></div>
+          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{n.by} · {n.when}</div></div>
           </div>
         ))}
-        {notes.length === 0 && <div style={{ fontSize: 13, color: "#6A7178" }}>No notes yet. Notes here are visible to leadership only — never to the member.</div>}
+        {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to leadership only — never to the member.</div>}
       </div>
     </div>
   );
@@ -2042,14 +2256,14 @@ function ProposeCert({ S, role, member, notify }) {
 
   if (!canPropose || !member) return null;
   return open ? (
-    <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-      <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Certification</span><input style={S.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
-      <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Expires (YYYY-MM)</span><input style={S.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
-      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Note (optional)</span><input style={S.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
-      <button style={{ ...S.primaryBtn, flex: "0 0 auto" }} disabled={busy} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
+    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
+      <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
+      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
+      <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busy} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
     </div>
   ) : (
-    <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setOpen(true)}>+ Propose certification</button>
+    <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setOpen(true)}>+ Propose certification</button>
   );
 }
 
@@ -2075,34 +2289,34 @@ function RosterCerts({ S, members }) {
   return (
     <div>
       <div style={S.statRow}>
-        <Stat S={S} n={String(n(2))} label="Certs current" />
-        <Stat S={S} n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
-        <Stat S={S} n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
+        <Stat S={S} dark n={String(n(2))} label="Certs current" />
+        <Stat S={S} dark n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
+        <Stat S={S} dark n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
       </div>
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</div>
-          <h3 style={S.featTitle}>Stay ahead of every renewal</h3>
-          <p style={{ ...S.helpP, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
-          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Stay ahead of every renewal</h3>
+          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
       <div style={{ marginTop: 4 }}>
         {rows.map((r, i) => {
           const cl = r.st.rank < 2 ? nextClassFor(r.cert) : null;
           return (
-            <div key={i} style={{ ...S.certRow, flexWrap: "wrap" }}>
-              <Award size={15} color={r.st.color} style={{ flexShrink: 0 }} />
+            <div key={i} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <Award size={15} color={CERT_FIRE[r.st.label]} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontWeight: 600, color: "#191C20" }}>{r.cert}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {r.member}</span>
-                <div style={{ fontSize: 12, color: r.st.color, marginTop: 1 }}>{expPhrase(r.exp)}</div>
-                {cl && <div style={{ fontSize: 12, color: "#0E6B62", marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
+                <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.cert}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {r.member}</span>
+                <div style={{ fontSize: 12, color: CERT_FIRE[r.st.label], marginTop: 1 }}>{expPhrase(r.exp)}</div>
+                {cl && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
               </div>
-              <Pill S={S} color={r.st.color}>{r.st.label}</Pill>
+              <Pill S={S} color={CERT_FIRE[r.st.label]}>{r.st.label}</Pill>
             </div>
           );
         })}
@@ -2142,53 +2356,53 @@ function RosterPending({ S, members, notify }) {
     loadPending();
   }
 
-  if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: "#6A7178", marginTop: 4 }}>Loading…</div>;
-  if (rows.length === 0) return <div style={{ fontSize: 13.5, color: "#6A7178", marginTop: 4 }}>No pending items.</div>;
+  if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>Loading…</div>;
+  if (rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>No pending items.</div>;
   return (
     <div style={{ marginTop: 4 }}>
       {rows.map((r) => (
-        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
-          <Award size={15} color="#9A6B12" style={{ flexShrink: 0 }} />
+        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <Award size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontWeight: 600, color: "#191C20" }}>{r.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {nameFor(r.member_id)}</span>
-            <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
+            <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {nameFor(r.member_id)}</span>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
           </div>
-          <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#2E7D52", borderColor: "#BFE3CC" }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
+          <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.green }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
+          <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
         </div>
       ))}
     </div>
   );
 }
-function Bar({ S, pct, color }) {
-  return <div style={S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
+function Bar({ S, pct, color, track }) {
+  return <div style={track ? { ...S.bar, background: track } : S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
 }
 function RosterAttendance({ S, members }) {
   const people = [...members].sort((a, b) => (b.participation ?? -1) - (a.participation ?? -1));
   return (
     <div>
-      <div style={S.cardEyebrow}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
-      <div style={{ marginBottom: 22 }}>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
+      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
         {EVENTS.map((e) => {
           const pct = Math.round((e.present / e.total) * 100);
           return (
-            <div key={e.id} style={S.eventRow}>
+            <div key={e.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={S.personName}>{e.name}</div>
-                <div style={S.personMeta}>{e.type} · {e.date}</div>
+                <div style={{ ...S.personName, color: FIRE.textPrimary }}>{e.name}</div>
+                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{e.type} · {e.date}</div>
               </div>
-              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} color={pct >= 75 ? "#2E7D52" : "#9A6B12"} /></div>
+              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} track={FIRE.track} color={pct >= 75 ? FIRE.green : FIRE.amberText} /></div>
             </div>
           );
         })}
       </div>
-      <div style={S.cardEyebrow}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
-      <div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
+      <div style={{ ...FS.card, padding: "4px 16px" }}>
         {people.map((m) => (
-          <div key={m.id} style={S.eventRow}>
-            <Initials S={S} name={m.name} />
-            <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={S.personName}>{m.name}</div><div style={S.personMeta}>{m.role}</div></div>
-            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: "#3A4750", textAlign: "right" }}>{m.participation == null ? "—" : `${m.participation}%`}</div>{m.participation != null && <Bar S={S} pct={m.participation} color={m.participation >= 75 ? "#2E7D52" : (m.participation >= 50 ? "#9A6B12" : "#B11E2A")} />}</div>
+          <div key={m.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <Initials S={S} dark name={m.name} />
+            <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}</div></div>
+            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{m.participation == null ? "—" : `${m.participation}%`}</div>{m.participation != null && <Bar S={S} pct={m.participation} track={FIRE.track} color={m.participation >= 75 ? FIRE.green : (m.participation >= 50 ? FIRE.amberText : FIRE.redText)} />}</div>
           </div>
         ))}
       </div>
@@ -2230,28 +2444,28 @@ function RosterReports({ S, members }) {
   return (
     <div>
       <div style={S.statRow}>
-        <Stat S={S} n={`${active}/${members.length}`} label="Active members" />
-        <Stat S={S} n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
-        <Stat S={S} n={`${avgPart}%`} label="Avg participation" />
-        <Stat S={S} n={`${rigsReady}/${APPARATUS_SEED.length}`} label="Apparatus ready" />
+        <Stat S={S} dark n={`${active}/${members.length}`} label="Active members" />
+        <Stat S={S} dark n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
+        <Stat S={S} dark n={`${avgPart}%`} label="Avg participation" />
+        <Stat S={S} dark n={`${rigsReady}/${APPARATUS_SEED.length}`} label="Apparatus ready" />
       </div>
-      <div style={S.aiBanner}>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
-          <h3 style={S.featTitle}>Turn your numbers into a report — in one tap</h3>
-          <p style={{ ...S.helpP, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Turn your numbers into a report — in one tap</h3>
+          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
             </button>
             <button
-              style={{ ...S.primaryBtn, background: "#fff", color: "#B11E2A", border: "1.5px solid #B11E2A" }}
+              style={FS.btn}
               onClick={() => downloadDepartmentReport(buildReportData())}>
               <Download size={16} /> Download PDF
             </button>
           </div>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
     </div>
@@ -2279,43 +2493,47 @@ function Apparatus({ S, role }) {
     }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="APPARATUS & EQUIPMENT" title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."} />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>APPARATUS & EQUIPMENT</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Know your rigs are ready</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}</div>
+      </div>
       <div style={S.statRow}>
-        <Stat S={S} n={String(ready)} label="Ready to roll" />
-        <Stat S={S} n={String(flagged)} label="Needs attention" warn={flagged > 0} />
-        <Stat S={S} n={String(rigs.length)} label="Apparatus in station" />
+        <Stat S={S} dark n={String(ready)} label="Ready to roll" />
+        <Stat S={S} dark n={String(flagged)} label="Needs attention" warn={flagged > 0} />
+        <Stat S={S} dark n={String(rigs.length)} label="Apparatus in station" />
       </div>
       {canManage && (adding ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={S.fieldLabel}>Name / unit</span><input style={S.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Type</span><select style={S.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>Status</span><select style={S.input} value={rd} onChange={(e) => setRd(e.target.value)}><option>Ready</option><option>Needs attention</option></select></label>
-          <button style={S.primaryBtn} onClick={addRig}><Plus size={15} /> Add to station</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setAdding(false); setNm(""); }}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name / unit</span><input style={FS.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={rd} onChange={(e) => setRd(e.target.value)}><option>Ready</option><option>Needs attention</option></select></label>
+          <button style={FS.btnPrimary} onClick={addRig}><Plus size={15} /> Add to station</button>
+          <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); }}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
       {rigs.length === 0 ? (
-        <div style={{ ...S.opCard, textAlign: "center", color: "#6A7178", fontSize: 14 }}>
-          <Truck size={22} color="#9AA1AB" style={{ marginBottom: 6 }} />
+        <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+          <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus in the station yet.{canManage ? " Use “Add apparatus” to build your list." : ""}</div>
         </div>
       ) : (
       <div style={S.opGrid}>
         {rigs.map((r) => {
-          const ok = r.status === "Pass"; const color = ok ? "#2E7D52" : "#B11E2A";
+          const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
           return (
-            <div key={r.id} style={S.opCard}>
+            <div key={r.id} style={{ ...S.opCard, ...FS.card }}>
               <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-                <Truck size={20} color="#54506B" style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}><div style={S.personName}>{r.name}</div><div style={S.personMeta}>{r.type}</div></div>
+                <Truck size={20} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
                 <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>
-                {canManage && <button title="Take out of station" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", marginLeft: 4, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeRig(r.id, r.name)}><X size={14} /></button>}
+                {canManage && <button title="Take out of station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
-              {r.note && <div style={{ fontSize: 13, color: ok ? "#3A4750" : "#8A1620", marginTop: 10 }}>{r.note}</div>}
-              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: "#6A7178" }}>
+              {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
+              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: FIRE.textMuted }}>
                 <span>Last check: {r.lastCheck} · {r.by}</span>
-                <button style={{ ...S.ghostBtn, marginTop: 0, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id)}><ClipboardCheck size={14} /> Log a check</button>
+                <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id)}><ClipboardCheck size={14} /> Log a check</button>
               </div>
             </div>
           );
@@ -2337,6 +2555,7 @@ const MAINT_SEED = [
   { id: 6, unit: "All units", task: "Registration & insurance", cadence: "Annual", last: "Jan 2026", status: "Current" },
 ];
 const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
+const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
 function MaintenancePanel({ S, role, rigs }) {
   const canManage = canAssign(role);
   const [items, setItems] = useState(MAINT_SEED);
@@ -2358,44 +2577,44 @@ function MaintenancePanel({ S, role, rigs }) {
   }
   return (
     <div style={{ marginTop: 22 }}>
-      <div style={S.cardEyebrow}><Wrench size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAINTENANCE & REMINDERS</div>
-      <div style={{ fontSize: 13, color: due > 0 ? "#8A1620" : "#2E7D52", margin: "2px 0 12px", fontWeight: 600 }}>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><Wrench size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAINTENANCE & REMINDERS</div>
+      <div style={{ fontSize: 13, color: due > 0 ? FIRE.red : FIRE.greenText, margin: "2px 0 12px", fontWeight: 600 }}>
         {due > 0 ? `${due} maintenance item${due === 1 ? "" : "s"} need attention` : "All maintenance up to date"}
       </div>
       {canManage && (adding ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Unit</span><select style={S.input} value={u} onChange={(e) => setU(e.target.value)}>{[...rigs.map((r) => r.name), "All units"].map((nm) => <option key={nm}>{nm}</option>)}</select></label>
-          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={S.fieldLabel}>Task</span><input style={S.input} value={t} placeholder="e.g. Hose pressure test" onChange={(e) => setT(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Cadence</span><select style={S.input} value={cad} onChange={(e) => setCad(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
-          <button style={S.primaryBtn} onClick={addItem}><Plus size={15} /> Add</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAdding(false)}>Cancel</button>
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Unit</span><select style={FS.input} value={u} onChange={(e) => setU(e.target.value)}>{[...rigs.map((r) => r.name), "All units"].map((nm) => <option key={nm}>{nm}</option>)}</select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={t} placeholder="e.g. Hose pressure test" onChange={(e) => setT(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cadence</span><select style={FS.input} value={cad} onChange={(e) => setCad(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
+          <button style={FS.btnPrimary} onClick={addItem}><Plus size={15} /> Add</button>
+          <button style={FS.btn} onClick={() => setAdding(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add maintenance item</button>)}
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add maintenance item</button>)}
       <div>
         {sorted.map((i) => (
-          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
-            <Wrench size={15} color={MAINT_COLOR[i.status]} style={{ flexShrink: 0 }} />
+          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <Wrench size={15} color={MAINT_FIRE[i.status]} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: "#191C20" }}>{i.task}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {i.unit}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{i.cadence} · last done {i.last}</div>
+              <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{i.task}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {i.unit}</span>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{i.cadence} · last done {i.last}</div>
             </div>
-            <Pill S={S} color={MAINT_COLOR[i.status]}>{i.status.toUpperCase()}</Pill>
-            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
-            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeItem(i.id)}><X size={14} /></button>}
+            <Pill S={S} color={MAINT_FIRE[i.status]}>{i.status.toUpperCase()}</Pill>
+            <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
+            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i.id)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
       </div>
       {canManage && (
-        <div style={{ ...S.aiBanner, marginTop: 16 }}>
+        <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}`, marginTop: 16 }}>
           <div style={{ flex: 1 }}>
-            <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
-            <h3 style={S.featTitle}>Draft a preventive-maintenance checklist</h3>
-            <p style={{ ...S.helpP, marginBottom: 10 }}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
-            <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftChecklist} disabled={loading}>
+            <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
+            <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a preventive-maintenance checklist</h3>
+            <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
+            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftChecklist} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Wrench size={16} /> Draft a checklist</>}
             </button>
-            {err && <div style={S.errBox}>{err}</div>}
-            {out && <RichOutput S={S} text={out} />}
+            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {out && <RichOutput S={S} text={out} dark />}
           </div>
         </div>
       )}
@@ -2426,43 +2645,47 @@ function Minutes({ S }) {
   function toggle(id) { setActions((a) => a.map((x) => x.id === id ? { ...x, done: !x.done } : x)); }
   function removeA(id) { setActions((a) => a.filter((x) => x.id !== id)); }
   return (
-    <div>
-      <PageHead S={S} eyebrow="MEETING MINUTES" title="From rough notes to clean minutes" sub="Type your notes, get a structured draft to approve, and carry every action item to the next meeting." />
-      <div style={S.aiBanner}>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>MEETING MINUTES</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>From rough notes to clean minutes</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Type your notes, get a structured draft to approve, and carry every action item to the next meeting.</div>
+      </div>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</div>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Meeting</span><input style={S.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
-            <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>Date</span><input style={S.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
+            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+            <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
           </div>
-          <label style={{ ...S.field, marginTop: 10 }}><span style={S.fieldLabel}>Rough notes</span>
-            <textarea style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} value={notes} placeholder={"Who was there, what came up, what was decided, what people agreed to do…"} onChange={(e) => setNotes(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+          <label style={{ ...S.field, marginTop: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rough notes</span>
+            <textarea style={{ ...FS.input, minHeight: 110, resize: "vertical", lineHeight: 1.5 }} value={notes} placeholder={"Who was there, what came up, what was decided, what people agreed to do…"} onChange={(e) => setNotes(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><ClipboardList size={16} /> Draft the minutes</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
 
-      <div style={S.cardEyebrow}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
-      <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Action</span><input style={S.input} value={at} placeholder="What needs to happen?" onChange={(e) => setAt(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Owner</span><input style={S.input} value={ao} placeholder="Who?" onChange={(e) => setAo(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Due</span><input style={S.input} value={ad} placeholder="When?" onChange={(e) => setAd(e.target.value)} /></label>
-        <button style={S.primaryBtn} onClick={addAction}><Plus size={15} /> Add</button>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Action</span><input style={FS.input} value={at} placeholder="What needs to happen?" onChange={(e) => setAt(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span><input style={FS.input} value={ao} placeholder="Who?" onChange={(e) => setAo(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input style={FS.input} value={ad} placeholder="When?" onChange={(e) => setAd(e.target.value)} /></label>
+        <button style={FS.btnPrimary} onClick={addAction}><Plus size={15} /> Add</button>
       </div>
       <div>
         {actions.map((a) => (
-          <div key={a.id} style={S.certRow}>
+          <div key={a.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
             <button onClick={() => toggle(a.id)} title={a.done ? "Mark open" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-              {a.done ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+              {a.done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: `2px solid ${FIRE.textMuted}`, display: "inline-block" }} />}
             </button>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: a.done ? "#9A96A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.text}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{a.owner} · due {a.due}</div>
+              <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.text}</span>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{a.owner} · due {a.due}</div>
             </div>
-            <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeA(a.id)}><X size={14} /></button>
+            <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeA(a.id)}><X size={14} color={FIRE.deleteRed} /></button>
           </div>
         ))}
       </div>
@@ -2495,42 +2718,47 @@ function Onboarding({ S, members }) {
     catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan." />
-      <div style={{ ...S.opCard, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <label style={{ ...S.field, minWidth: 200 }}><span style={S.fieldLabel}>Onboarding</span>
-          <select style={S.input} value={who} onChange={(e) => { setWho(e.target.value); }}>{candidates.map((m) => <option key={m.id}>{m.name}</option>)}</select></label>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* header (inline FS — shared PageHead not used/mutated) */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={FS.kicker}>NEW-MEMBER ONBOARDING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Get new members started right</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan.</div>
+      </div>
+      <div style={{ ...FS.card, padding: 16, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Onboarding</span>
+          <select style={FS.input} value={who} onChange={(e) => { setWho(e.target.value); }}>{candidates.map((m) => <option key={m.id}>{m.name}</option>)}</select></label>
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 12.5, color: "#3A4750", display: "flex", justifyContent: "space-between" }}><span>Onboarding progress</span><span>{pct}%</span></div>
-          <Bar S={S} pct={pct} color={pct >= 100 ? "#2E7D52" : pct >= 50 ? "#9A6B12" : "#B11E2A"} />
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>Onboarding progress</span><span>{pct}%</span></div>
+          <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
         </div>
       </div>
       {ONBOARD_TEMPLATE.map((g) => (
         <div key={g.group} style={{ marginBottom: 6 }}>
-          <div style={S.cardEyebrow}>{g.group.toUpperCase()}</div>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>{g.group.toUpperCase()}</div>
           {g.items.map((it, i) => {
             const key = `${who}::${g.group}::${i}`; const done = !!checks[key];
             return (
-              <div key={i} style={S.certRow}>
+              <div key={i} style={FS.row}>
                 <button onClick={() => toggle(key)} title={done ? "Undo" : "Mark complete"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                  {done ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                  {done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
                 </button>
-                <div style={{ flex: 1, minWidth: 0, color: done ? "#9A96A6" : "#191C20", textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
+                <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
               </div>
             );
           })}
         </div>
       ))}
-      <div style={{ ...S.aiBanner, marginTop: 10 }}>
+      <div style={{ ...FS.card, padding: 18, marginTop: 10 }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI WELCOME & 30-DAY PLAN</div>
-          <h3 style={S.featTitle}>Draft a welcome for {who}</h3>
-          <p style={{ ...S.helpP, marginBottom: 10 }}>A friendly welcome note and a week-by-week first-month plan. You review and send.</p>
-          <button style={{ ...S.primaryBtn, opacity: loading ? 0.7 : 1 }} onClick={draftPlan} disabled={loading}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} color={FIRE.red} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI WELCOME & 30-DAY PLAN</div>
+          <h3 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, margin: "0 0 4px" }}>Draft a welcome for {who}</h3>
+          <p style={{ fontSize: 13, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 10 }}>A friendly welcome note and a week-by-week first-month plan. You review and send.</p>
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftPlan} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><UserPlus size={16} /> Draft welcome & plan</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ marginTop: 10, fontSize: 13, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
     </div>
@@ -2603,6 +2831,7 @@ function CheckinConfirm({ S, result, members, meId, go }) {
 }
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
+  const canRunSignin = ["Department Admin", "Training Officer", "Project Admin"].includes(role);   // QR generate-gate (NOT Board Member, NOT Member)
   const memberView = !isLeader(role);
   const today = new Date();
   const me = members.find((m) => m.id === meId);
@@ -2614,16 +2843,43 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
-  const genToken = () => Math.random().toString(36).slice(2, 7).toUpperCase();
-  function openSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { open: true, token: genToken(), ts: Date.now() } } : x)); setOpenSignin(s.id); }
-  function rotateSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { ...(x.signin || {}), open: true, token: genToken(), ts: Date.now() } } : x)); }
-  function closeSI(s) { setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, signin: { ...(x.signin || {}), open: false } } : x)); }
-  const checkinURL = (s) => `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?checkin=${s.id}&t=${s.signin?.token || ""}`;
+  // Live codes come from open_signin and are held locally for display only — never persisted/loaded, so a member can't read a code without scanning.
+  const [signinTokens, setSigninTokens] = useState({});   // sessionId -> 6-char code (this browser, this open)
+  async function openSI(s) {
+    const { data, error } = await supabase.rpc("open_signin", { p_session_id: s.id });   // generates/rotates; gated DA/TO/PA at the DB
+    if (error) { notify({ kind: "error", title: "Couldn't open sign-in", text: error.message || "Please try again.", details: error.message }); return; }
+    setSigninTokens((t) => ({ ...t, [s.id]: data }));
+    setOpenSignin(s.id);
+    loadSessions();   // refresh signin_open
+  }
+  const rotateSI = openSI;   // open_signin rotates on every call
+  async function closeSI(s) {
+    const { error } = await supabase.rpc("close_signin", { p_session_id: s.id });
+    if (error) { notify({ kind: "error", title: "Couldn't close sign-in", text: error.message || "Please try again.", details: error.message }); return; }
+    setSigninTokens((t) => { const n = { ...t }; delete n[s.id]; return n; });
+    loadSessions();
+  }
+  const checkinURL = (s, token) => `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?checkin=${s.id}&t=${token || ""}`;
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState("");
-  function toggleAttend(sid, mid) { setSessions((ss) => ss.map((s) => { if (s.id !== sid) return s; const a = s.attendance || []; return { ...s, attendance: a.includes(mid) ? a.filter((x) => x !== mid) : [...a, mid] }; })); }
+  async function toggleAttend(s, mid) {
+    if (s.done) return;   // officer lock (UI also hides the control once done)
+    const present = (s.attendance || []).includes(mid);
+    if (present) {
+      const { error } = await supabase.from("session_attendance").delete().eq("session_id", s.id).eq("member_id", mid);
+      if (error) { notify({ kind: "error", title: "Couldn't update attendance", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+      setSessions((ss) => ss.map((x) => { if (x.id !== s.id) return x; const t = { ...(x.times || {}) }; delete t[mid]; return { ...x, attendance: (x.attendance || []).filter((y) => y !== mid), times: t }; }));
+    } else {
+      const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+      if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+      const { error } = await supabase.from("session_attendance").insert({ department_id: deptId, session_id: s.id, member_id: mid, checked_in_at: new Date().toISOString() });
+      if (error) { notify({ kind: "error", title: "Couldn't update attendance", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), mid], times: { ...(x.times || {}), [mid]: now } } : x));
+    }
+  }
 
   const rank = (l) => (l === "Overdue" || l === "Not logged") ? 0 : l === "Due soon" ? 1 : 2;
   const planView = plan.map((p) => ({ p, info: dueInfo(p) })).sort((a, b) => rank(a.info.label) - rank(b.info.label));
@@ -2631,7 +2887,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const soon = planView.filter((x) => x.info.label === "Due soon").length;
   const ok = planView.length - over - soon;
 
-  function logDone(id) { setPlan((ps) => ps.map((x) => x.id === id ? { ...x, lastISO: toISO(new Date()) } : x)); }
   async function addPlan() {
     const name = pn.trim();
     if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before adding it." }); return; }
@@ -2679,8 +2934,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   async function completeSession(s) {
     const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
     if (error) { notify({ kind: "error", title: "Couldn't update the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    if (s.planId) { const iso = toISO(new Date(s.y, s.m, s.d)); setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p)); }   // in-memory, deferred
+    // plan-linked -> reset the overdue clock to today, persisted. One-offs reset nothing.
+    if (s.planId) {
+      const iso = toISO(new Date());
+      const { error: pErr } = await supabase.from("training_plans").update({ last_iso: iso }).eq("id", s.planId);
+      if (pErr) notify({ kind: "error", title: "Session complete — clock not reset", text: "The session was saved, but the training clock couldn't be reset.", details: pErr.message });
+      else setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p));
+    }
+    setOpenAtt(s.id);   // (a) open the attendance roster in the same step
     loadSessions();
+    loadPlans();
   }
   async function removeSession(id) {
     const sess = sessions.find((x) => x.id === id);
@@ -2690,214 +2953,460 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     loadSessions();
   }
 
+  async function attachPlan(s, file) {
+    if (!file) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+    // 1) upload the new file FIRST (so the old plan stays intact if upload fails)
+    const path = `${deptId}/plans/${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
+    if (upErr) { notify({ kind: "error", title: "Couldn't upload the plan", text: "Something went wrong uploading that. Please try again.", details: upErr.message }); return; }
+    // 2) REPLACE: clear any existing plan(s) for this session — storage-first, then rows (like deleteDoc)
+    const { data: olds } = await supabase.from("session_plans").select("id, storage_path").eq("session_id", s.id);
+    const oldPaths = (olds || []).map((p) => p.storage_path).filter(Boolean);
+    if (oldPaths.length) await supabase.storage.from("station-documents").remove(oldPaths);
+    if (olds && olds.length) await supabase.from("session_plans").delete().eq("session_id", s.id);
+    // 3) insert the new plan
+    const { error: insErr } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: s.id, title: file.name, source: "upload", storage_path: path, created_by: me?.name || "Unknown" });
+    if (insErr) { notify({ kind: "error", title: "Couldn't attach the plan", text: "The file uploaded but couldn't be attached. Please try again.", details: insErr.message }); loadSessions(); return; }
+    notify({ kind: "success", title: "Plan attached", text: `"${file.name}" is now the plan for ${s.title}.` });
+    loadSessions();
+  }
+  async function openPlan(plan) {
+    if (!plan?.storage_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
+    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
+  async function detachPlan(plan) {
+    if (!plan?.id) return;
+    if (!window.confirm(`Remove the attached plan “${plan.title}”?`)) return;
+    if (plan.storage_path) { const { error: rmErr } = await supabase.storage.from("station-documents").remove([plan.storage_path]); if (rmErr) { notify({ kind: "error", title: "Couldn't remove the plan", text: "Please try again.", details: rmErr.message }); return; } }
+    const { error } = await supabase.from("session_plans").delete().eq("id", plan.id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove the plan", text: "The file was removed but its record wasn't.", details: error.message }); }
+    loadSessions();
+  }
+
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
+
+  // ============================ MEMBER VIEW (presentational reskin) ============================
+  // Reuses existing reads only (sessions/plan/members/monthSessions, dueInfo helpers). No queries,
+  // no attendance logic, no MonthCalendar internals touched. Leader return below is unchanged.
+  if (memberView) {
+    const DISPLAY = "'Oswald', system-ui, sans-serif";
+    const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
+    const since90 = new Date(t0); since90.setDate(since90.getDate() - 90);
+    const inWindow = (s) => { const d = sessDate(s); return d >= since90 && d <= today; };
+    const catOf = (s) => plan.find((p) => String(p.id) === String(s.planId));
+    // DATA HONESTY: a session only "has a record" once attendance was actually taken (non-empty).
+    // Attendance doesn't persist yet, so today every array is empty → these fall to clean empty states.
+    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s));
+    const totalRecorded = recorded.length;
+    const attendedCount = recorded.filter((s) => (s.attendance || []).includes(me?.id)).length;
+    const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
+    const missed = recorded.filter((s) => !(s.attendance || []).includes(me?.id)).sort((a, b) => sessDate(b) - sessDate(a));
+    const upcoming = sessions.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+
+    // IDENTICAL chip logic to the leader calendar — colors/layout unchanged (do not alter).
+    const renderChip = (s) => {
+      const cat = plan.find((p) => String(p.id) === String(s.planId));
+      const base = cat?.color || "#1F4E79";
+      const mix = (hex, tt) => {
+        const h = hex.replace("#", "");
+        const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+        const tr = 42, tg = 46, tb = 53; // #2A2E35
+        const to2 = (n) => n.toString(16).padStart(2, "0");
+        return "#" + to2(Math.round(r + (tr - r) * tt)) + to2(Math.round(g + (tg - g) * tt)) + to2(Math.round(b + (tb - b) * tt));
+      };
+      const color = s.done ? mix(base, 0.45) : base;
+      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
+    };
+
+    const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
+    const kick = FS.kicker;
+    const num = FS.num;
+
+    return (
+      <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+        {/* 1 — header */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={kick}>MY TRAINING</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your training calendar</h1>
+          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>See what's scheduled, what you've missed, and where your attendance stands.</div>
+        </div>
+
+        {/* 2 — attendance progress */}
+        <div style={card}>
+          <div style={kick}>MY ATTENDANCE · LAST 90 DAYS</div>
+          {totalRecorded === 0 ? (
+            <div style={{ marginTop: 12, fontSize: 13.5, color: FIRE.textMuted }}>No sessions recorded yet.</div>
+          ) : (<>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "12px 0 8px" }}>
+              <span style={{ fontSize: 13.5, color: FIRE.textSecondary, ...num }}>{attendedCount} of {totalRecorded} sessions attended</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.greenText, ...num }}>{pct}%</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 999, background: FIRE.track, overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", background: FIRE.green, borderRadius: 999 }} />
+            </div>
+          </>)}
+        </div>
+
+        {/* 3 — missed / catch up (hidden entirely when no real missed records) */}
+        {missed.length > 0 && (
+          <div style={card}>
+            <div style={kick}>TRAINING YOU MISSED · CATCH UP</div>
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
+              {missed.map((s) => { const cat = catOf(s); return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || "#1F4E79", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>Missed {fmtSess(s)} · {cat?.name || "One-off"}</div>
+                  </div>
+                </div>
+              ); })}
+            </div>
+          </div>
+        )}
+
+        {/* 4 — training calendar (MonthCalendar + chip logic unchanged; dark calendar in dark card) */}
+        <div style={card}>
+          <div style={{ ...kick, marginBottom: 12 }}>TRAINING CALENDAR</div>
+          <div style={{ marginBottom: -10 }}>{/* cancels MonthCalendar's built-in 10px bottom margin → even inset framing */}
+            <MonthCalendar
+              cur={cur} setCur={setCur} dark
+              items={monthSessions}
+              renderChip={renderChip}
+              todayColor="#C8323A"
+              monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
+            />
+          </div>
+        </div>
+
+        {/* 5 — this month's sessions */}
+        <div style={card}>
+          <div style={kick}>THIS MONTH'S SESSIONS</div>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
+            {monthSessions.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div>
+            ) : monthSessions.map((s) => {
+              const cat = catOf(s); const att = s.attendance || []; const hasRecord = att.length > 0; const present = att.includes(me?.id);
+              return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                  <CalendarCheck size={15} color={cat?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d} · {s.planId ? "counts toward the plan" : "one-off"}</div>
+                  </div>
+                  {!s.done ? (
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em" }}>Scheduled</span>
+                  ) : hasRecord ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
+                      <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: present ? FIRE.greenText : FIRE.redText }}>{present ? "You came" : "You missed"}</span>
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
+                  )}
+                  {s.plan && <button onClick={() => openPlan(s.plan)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 6 — upcoming / prep ahead (no "Open plan" control — materials are greenfield) */}
+        <div style={card}>
+          <div style={kick}>UPCOMING · PREP AHEAD</div>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
+            {upcoming.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing on the calendar yet.</div>
+            ) : upcoming.map((s) => { const cat = catOf(s); return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || "#1F4E79", flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{fmtSess(s)} · {cat?.name || "One-off"}</div>
+                </div>
+                {s.plan && <button onClick={() => openPlan(s.plan)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
+              </div>
+            ); })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- leader view: FIRE-palette styles + derived reads (presentational only) ----------
+  const Lcard = { ...FS.card, padding: 16 };                                  // base + leader padding (borderRadius FIRE.cardRadius == 16)
+  const Lkick = { ...FS.kicker, display: "flex", alignItems: "center", gap: 6 };
+  const Lnum = FS.num;
+  const Lbtn = FS.btn;                                                        // FIRE.btnBg/.btnBorder/.btnText == prior literals
+  const LbtnIcon = FIRE.btnIcon;                                             // == "#9AA1AC"
+  const Lfield = { display: "flex", flexDirection: "column", gap: 6 };       // unchanged (not in the consolidation set)
+  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: "#B6BDC8" }; // unchanged (not in the consolidation set)
+  const Linput = FS.input;                                                    // FIRE.inputBorder/.btnBg/.name == prior literals
+  const LprimaryBtn = FS.btnPrimary;                                          // FIRE.white == "#fff"
+  const Lrow = FS.row;                                                        // FIRE.hairline == "rgba(255,255,255,.05)"
+  // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
+  const statusColor = (label) => (label === "On track" || label === "Done") ? "#76C98D" : label === "Due soon" ? "#D6A95E" : "#E58A90";
+  // Card 1 — most recent done session's attendance (empty until persistence lands)
+  const lastDone = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a))[0];
+  const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
+  const totalMembers = members.length;
+  const hasAtt = !!lastDone && lastAtt > 0;
+  const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
+  // Card 3 — next not-done session from today forward (pure read)
+  const t0n = new Date(today); t0n.setHours(0, 0, 0, 0);
+  const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort((a, b) => sessDate(a) - sessDate(b))[0];
+  const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
+  // Card 2 — neither upload-to-session nor AI-draft is built; controls are honest about it
+  const comingSoon = (what) => notify({ title: "Coming soon", text: `${what} isn't available yet — it lands in an upcoming update.` });
 
   return (
     <div>
-      <PageHead S={S} eyebrow={memberView ? "MY TRAINING" : "TRAINING"} title={memberView ? "Your training calendar" : "Keep training on schedule"} sub={memberView ? "See what's scheduled, who came to each session, and your own attendance record." : "Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance."} />
-      {!memberView && (<>
-        <div style={S.statRow}>
-          <Stat S={S} n={String(over)} label="Overdue / unlogged" warn={over > 0} />
-          <Stat S={S} n={String(soon)} label="Due soon" warn={soon > 0} />
-          <Stat S={S} n={String(ok)} label="On track" />
+      {/* header — readable on dark */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={Lkick}>TRAINING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: "#F7F8FA", margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Keep training on schedule</h1>
+        <div style={{ fontSize: 14, color: "#9AA1AC", lineHeight: 1.5 }}>Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.</div>
+      </div>
+
+      {/* TOP ROW — three dark cards (replaces the 3 Stat tiles) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
+        {/* Card 1 — last session attendance (ring or honest empty state) */}
+        <div style={Lcard}>
+          <div style={Lkick}>LAST SESSION ATTENDANCE</div>
+          {hasAtt ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
+              <svg width="72" height="72" viewBox="0 0 72 72" style={{ flexShrink: 0 }}>
+                <circle cx="36" cy="36" r={ringR} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="6" />
+                <circle cx="36" cy="36" r={ringR} fill="none" stroke="#76C98D" strokeWidth="6" strokeLinecap="round" strokeDasharray={ringC} strokeDashoffset={ringC * (1 - ringFrac)} transform="rotate(-90 36 36)" />
+                <text x="36" y="40" textAnchor="middle" fontSize="15" fontWeight="700" fill="#F7F8FA" style={{ fontFeatureSettings: '"tnum"' }}>{lastAtt}/{totalMembers}</text>
+              </svg>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F2F5" }}>{lastDone.title}</div>
+                <div style={{ fontSize: 11.5, color: "#7E8794", marginTop: 2, ...Lnum }}>{fmtSess(lastDone)}</div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, fontSize: 13, color: "#7E8794", lineHeight: 1.5 }}>No attendance recorded yet.<div style={{ fontSize: 11.5, color: "#9AA1AC", marginTop: 3 }}>Activates once session sign-in is saved.</div></div>
+          )}
         </div>
-        {over > 0 && (
-          <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
-            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-            <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
-          </div>
-        )}
-      </>)}
 
-      {role === "Member" && me && (() => {
-        const mine = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
-        const went = mine.filter((s) => (s.attendance || []).includes(me.id)).length;
-        return (
-          <div style={{ marginBottom: 22 }}>
-            <div style={S.cardEyebrow}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MY TRAINING HISTORY</div>
-            <div style={{ fontSize: 13, color: "#3A4750", margin: "2px 0 8px" }}>You attended <b>{went}</b> of <b>{mine.length}</b> recorded sessions.</div>
-            {mine.length === 0 ? <div style={{ fontSize: 13, color: "#6A7178" }}>No training sessions recorded yet.</div> :
-              mine.map((s) => {
-                const present = (s.attendance || []).includes(me.id);
-                return (
-                  <div key={s.id} style={S.certRow}>
-                    <CalendarCheck size={15} color={present ? "#2E7D52" : "#B11E2A"} style={{ flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span>
-                      <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{fmtSess(s)}</div>
-                    </div>
-                    <Pill S={S} color={present ? "#2E7D52" : "#B11E2A"}>{present ? "PRESENT" : "ABSENT"}</Pill>
-                  </div>
-                );
-              })}
-          </div>
-        );
-      })()}
+        {/* Card 2 — training plan (upload + AI draft; neither built → honest "Coming soon") */}
+        <div style={Lcard}>
+          <div style={Lkick}>TRAINING PLAN</div>
+          <div style={{ marginTop: 12, fontSize: 12.5, color: "#B6BDC8", lineHeight: 1.5 }}>Attach a plan or syllabus to a specific session — use <b style={{ color: "#F0F2F5" }}>Attach plan</b> on any session in the calendar below.</div>
+          <button onClick={() => comingSoon("Draft with AI")} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> Draft with AI</button>
+          <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>AI plan drafting — coming soon.</div>
+        </div>
 
-      {!memberView && (<>
-      <div style={S.cardEyebrow}><GraduationCap size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING CATEGORIES</div>
+        {/* Card 3 — next session (pure read of existing sessions) */}
+        <div style={Lcard}>
+          <div style={Lkick}>NEXT SESSION</div>
+          {nextSession ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 999, background: nextCat?.color || "#1F4E79", flexShrink: 0 }} />
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F2F5" }}>{nextSession.title}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "#B6BDC8", marginTop: 4, ...Lnum }}>{fmtSess(nextSession)}</div>
+              {nextCat && <div style={{ fontSize: 11.5, color: "#7E8794", marginTop: 2 }}>Last trained: {nextCat.lastISO ? new Date(nextCat.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>}</div>}
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, fontSize: 13, color: "#7E8794" }}>Nothing scheduled yet.</div>
+          )}
+        </div>
+      </div>
+
+      {/* overdue banner — kept as-is (light alert, per instruction) */}
+      {over > 0 && (
+        <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+          <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
+        </div>
+      )}
+
+      {/* TRAINING CATEGORIES */}
+      <div style={{ ...Lkick, marginBottom: 10 }}><GraduationCap size={13} /> TRAINING CATEGORIES</div>
       {canManage && (addingPlan ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
-          <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
+          <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+          <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setPcolor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? "3px solid #F7F8FA" : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
               ))}
             </div>
           </div>
-          <button style={S.primaryBtn} onClick={addPlan}><Plus size={15} /> Add to plan</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingPlan(false)}>Cancel</button>
+          <button style={LprimaryBtn} onClick={addPlan}><Plus size={15} /> Add to plan</button>
+          <button style={Lbtn} onClick={() => setAddingPlan(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} /> Add a training</button>)}
+      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={LbtnIcon} /> Add a training</button>)}
       <div>
         {planView.length === 0 ? (
-          <div style={{ ...S.opCard, fontSize: 13, color: "#6A7178" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
+          <div style={{ ...Lcard, fontSize: 13, color: "#9AA1AC" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
         ) : planView.map(({ p, info }) => (
           editingPlanId === p.id ? (
-            <div key={p.id} style={{ ...S.opCard, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><input style={S.input} value={ed.name} onChange={(e) => setEd((v) => ({ ...v, name: e.target.value }))} /></label>
-              <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>How often</span><select style={S.input} value={ed.cadence} onChange={(e) => setEd((v) => ({ ...v, cadence: e.target.value }))}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
-              <div style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Color</span>
+            <div key={p.id} style={{ ...Lcard, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={ed.name} onChange={(e) => setEd((v) => ({ ...v, name: e.target.value }))} /></label>
+              <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={ed.cadence} onChange={(e) => setEd((v) => ({ ...v, cadence: e.target.value }))}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+              <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
                   {CATEGORY_COLORS.map((col) => (
                     <button key={col} title={col} onClick={() => setEd((v) => ({ ...v, color: col }))}
-                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? "3px solid #211C2B" : "2px solid #fff", boxShadow: "0 0 0 1px #E0DEE8" }} />
+                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? "3px solid #F7F8FA" : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
                   ))}
                 </div>
               </div>
-              <button style={S.primaryBtn} onClick={updatePlan}>Save</button>
-              <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setEditingPlanId(null)}>Cancel</button>
+              <button style={LprimaryBtn} onClick={updatePlan}>Save</button>
+              <button style={Lbtn} onClick={() => setEditingPlanId(null)}>Cancel</button>
             </div>
           ) : (
-            <div key={p.id} style={{ ...S.certRow, flexWrap: "wrap" }}>
+            <div key={p.id} style={Lrow}>
               <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color || "#1F4E79", flexShrink: 0, display: "inline-block" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontWeight: 600, color: "#191C20" }}>{p.name}</span> <span style={{ color: "#6A7178", fontSize: 13 }}>· {p.cadence}</span>
-                <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "never logged"} · <span style={{ color: info.color }}>{info.rel}</span></div>
+                <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{p.name}</span> <span style={{ color: "#9AA1AC", fontSize: 13 }}>· {p.cadence}</span>
+                <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>} · <span style={{ color: statusColor(info.label) }}>{info.rel}</span></div>
               </div>
-              <Pill S={S} color={info.color}>{info.label.toUpperCase()}</Pill>
-              {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => logDone(p.id)}><ClipboardCheck size={14} /> Log done</button>}
-              {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => scheduleFor(p)}><CalendarCheck size={14} /> Schedule</button>}
-              {canManage && <button title="Edit" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} /></button>}
-              {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removePlan(p.id)}><X size={14} /></button>}
+              <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
+              {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
+              {canManage && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
+              {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
             </div>
           )
         ))}
       </div>
 
-      </>)}
-      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING CALENDAR</div>
+      {/* TRAINING CALENDAR */}
+      <div style={{ ...Lkick, marginTop: 22, marginBottom: 10 }}><Calendar size={13} /> TRAINING CALENDAR</div>
       {canManage && (showSess ? (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, minWidth: 90 }}><span style={S.fieldLabel}>Day</span><select style={S.input} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 170 }}><span style={S.fieldLabel}>Training</span><select style={S.input} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
-          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={S.fieldLabel}>Title (optional)</span><input style={S.input} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
-          <button style={S.primaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setShowSess(false)}>Cancel</button>
+        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
+          <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
+          <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>
+          <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...S.ghostBtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} /> Schedule a session</button>)}
+      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
 
-      <MonthCalendar
-        cur={cur} setCur={setCur}
-        items={monthSessions}
-        renderChip={(s) => {
-          // base color = linked category's live color, or fallback blue for one-off / deleted category
-          const cat = plan.find((p) => String(p.id) === String(s.planId));
-          const base = cat?.color || "#1F4E79";
-          // dim toward dark slate for completed (keep dark enough for white text)
-          const mix = (hex, t) => {
-            const h = hex.replace("#", "");
-            const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-            const tr = 42, tg = 46, tb = 53; // #2A2E35
-            const to2 = (n) => n.toString(16).padStart(2, "0");
-            return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
-          };
-          const color = s.done ? mix(base, 0.45) : base;
-          return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
-        }}
-        todayColor="#1F4E79"
-        monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
-      />
+      {/* calendar wrapped in dark card; dark calendar in dark card; red today marker */}
+      <div style={{ ...Lcard, marginBottom: 16 }}>
+        <div style={{ marginBottom: -10 }}>
+          <MonthCalendar
+            cur={cur} setCur={setCur} dark
+            items={monthSessions}
+            renderChip={(s) => {
+              // base color = linked category's live color, or fallback blue for one-off / deleted category
+              const cat = plan.find((p) => String(p.id) === String(s.planId));
+              const base = cat?.color || "#1F4E79";
+              // dim toward dark slate for completed (keep dark enough for white text)
+              const mix = (hex, t) => {
+                const h = hex.replace("#", "");
+                const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+                const tr = 42, tg = 46, tb = 53; // #2A2E35
+                const to2 = (n) => n.toString(16).padStart(2, "0");
+                return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
+              };
+              const color = s.done ? mix(base, 0.45) : base;
+              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
+            }}
+            todayColor="#C8323A"
+            monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
+          />
+        </div>
 
-      <div style={{ marginBottom: 18 }}>
-        {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#6A7178" }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
-          monthSessions.map((s) => {
-            const att = s.attendance || [];
-            const open = openAtt === s.id;
-            return (
-              <div key={s.id}>
-                <div style={S.certRow}>
-                  <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600, color: "#191C20" }}>{s.title}</span>
-                    <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
+        <div>
+          {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#7E8794", marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
+            monthSessions.map((s) => {
+              const att = s.attendance || [];
+              const open = openAtt === s.id;
+              return (
+                <div key={s.id}>
+                  <div style={Lrow}>
+                    <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}</span>
+                      <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
+                    </div>
+                    {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
+                    <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
+                    {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                    {canManage && (s.plan
+                      ? <span style={{ display: "inline-flex", gap: 4 }}>
+                          <button style={Lbtn} onClick={() => openPlan(s.plan)}><FileText size={14} color={LbtnIcon} /> Open plan</button>
+                          <button title="Remove plan" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => detachPlan(s.plan)}><X size={14} color="#C8606A" /></button>
+                        </span>
+                      : <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> Attach plan<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; attachPlan(s, f); }} /></label>)}
+                    {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
+                    {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
-                  <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} /> Attendance {att.length}/{members.length}</button>
-                  {canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5, ...(s.signin?.open ? { color: "#2E7D52", borderColor: "#BFE3CC" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} /> QR sign-in{s.signin?.open ? " · open" : ""}</button>}
-                  {s.done ? <Pill S={S} color="#2E7D52">DONE</Pill> : canManage && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => completeSession(s)}><ClipboardCheck size={14} /> Mark complete</button>}
-                  {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeSession(s.id)}><X size={14} /></button>}
+                  {open && (
+                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
+                      <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked." : "Tap a name to mark who attended.") : "Who attended this session."}</div>
+                      {members.map((m) => {
+                        const present = att.includes(m.id);
+                        return (
+                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
+                            {canManage && !s.done
+                              ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#76C98D" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
+                              : (present ? <CheckCircle2 size={18} color="#76C98D" /> : <X size={16} color="#E58A90" />)}
+                            <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#76C98D" : "#E58A90" }}>{present ? "PRESENT" : "ABSENT"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {canRunSignin && !s.done && openSignin === s.id && (() => {
+                    const liveToken = signinTokens[s.id];
+                    return (
+                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
+                      {!liveToken ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Show the code to display the QR (this generates a fresh code).</> : <>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
+                          <button style={LprimaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> {s.signinOpen ? "Show / refresh code" : "Open sign-in"}</button>
+                          {s.signinOpen && <button style={{ ...Lbtn, marginLeft: 8 }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>}
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                          <div style={{ textAlign: "center" }}>
+                            <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
+                              <QRCodeCanvas value={checkinURL(s, liveToken)} size={172} />
+                            </div>
+                            <div style={{ marginTop: 8, fontSize: 12, color: "#9AA1AC" }}>This session's code: <b style={{ letterSpacing: 2, color: "#F0F2F5" }}>{liveToken}</b></div>
+                            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
+                              <button style={Lbtn} onClick={() => rotateSI(s)}><RefreshCw size={14} color={LbtnIcon} /> Rotate code</button>
+                              <button style={{ ...Lbtn, padding: "7px 11px" }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>
+                            </div>
+                            <button style={{ ...Lbtn, marginTop: 8 }} onClick={async () => { const r = await checkIn(s.id, liveToken, meId); notify(r.ok ? { title: r.already ? "Already checked in" : "Checked in", text: `${me?.name || "You"} ${r.already ? "were already on the list" : "added"}.` } : { kind: "error", title: "Couldn't check in", text: r.reason }); }}>Simulate a scan (check me in)</button>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 190 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#9AA1AC", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
+                            {(s.attendance || []).length === 0 ? <div style={{ fontSize: 12.5, color: "#7E8794" }}>No one's scanned in yet.</div> :
+                              (s.attendance || []).map((id) => { const mm = members.find((x) => x.id === id); const tt = (s.times || {})[id];
+                                return (
+                                  <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
+                                    <CheckCircle2 size={15} color="#76C98D" style={{ flexShrink: 0 }} />
+                                    <span style={{ flex: 1, color: "#F0F2F5" }}>{mm ? mm.name : `Member #${id}`}{id === meId ? " (you)" : ""}</span>
+                                    <span style={{ fontSize: 11.5, color: "#7E8794" }}>{tt || "added"}</span>
+                                  </div>
+                                );
+                              })}
+                            <div style={{ fontSize: 11, color: "#7E8794", marginTop: 12, lineHeight: 1.5 }}>Each session gets its own code; rotate it if it leaks. The code is generated server-side, and a scan records the scanning member's own attendance.</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })()}
                 </div>
-                {open && (
-                  <div style={{ ...S.opCard, margin: "2px 0 10px", padding: 12 }}>
-                    <div style={{ fontSize: 12, color: "#6A7178", marginBottom: 8 }}>{canManage ? "Tap a name to mark who attended." : "Who attended this session."}</div>
-                    {members.map((m) => {
-                      const present = att.includes(m.id);
-                      return (
-                        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "1px solid #F1EFF5" }}>
-                          {canManage
-                            ? <button onClick={() => toggleAttend(s.id, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}</button>
-                            : (present ? <CheckCircle2 size={18} color="#2E7D52" /> : <X size={16} color="#B11E2A" />)}
-                          <span style={{ flex: 1, fontSize: 13.5, color: present ? "#191C20" : "#6A7178" }}>{m.name}{m.id === meId ? " (you)" : ""}</span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#2E7D52" : "#B11E2A" }}>{present ? "PRESENT" : "ABSENT"}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {canManage && openSignin === s.id && (
-                  <div style={{ ...S.opCard, margin: "2px 0 10px", padding: 14 }}>
-                    {!s.signin?.open ? (
-                      <div>
-                        <div style={{ fontSize: 13, color: "#3A4750", marginBottom: 10 }}>Open a QR sign-in for <b>{s.title}</b>. Volunteers scan it to check themselves in — each scan is stamped with the time.</div>
-                        <button style={S.primaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> Open sign-in</button>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-                        <div style={{ textAlign: "center" }}>
-                          <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
-                            <QRCodeCanvas value={checkinURL(s)} size={172} />
-                          </div>
-                          <div style={{ marginTop: 8, fontSize: 12, color: "#6A7178" }}>This week's code: <b style={{ letterSpacing: 2, color: "#191C20" }}>{s.signin.token}</b></div>
-                          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
-                            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5 }} onClick={() => rotateSI(s)}><RefreshCw size={14} /> Rotate code</button>
-                            <button style={{ ...S.ghostBtn, marginTop: 0, padding: "7px 11px", fontSize: 12.5, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => closeSI(s)}><X size={14} /> Close</button>
-                          </div>
-                          <button style={{ ...S.ghostBtn, marginTop: 8, padding: "6px 10px", fontSize: 12 }} onClick={() => checkIn && meId != null && checkIn(s.id, s.signin.token, meId)}>Simulate a scan (check me in)</button>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 190 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "#54506B", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
-                          {(s.attendance || []).length === 0 ? <div style={{ fontSize: 12.5, color: "#6A7178" }}>No one's scanned in yet.</div> :
-                            (s.attendance || []).map((id) => { const mm = members.find((x) => x.id === id); const tt = (s.times || {})[id];
-                              return (
-                                <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
-                                  <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
-                                  <span style={{ flex: 1, color: "#191C20" }}>{mm ? mm.name : `Member #${id}`}{id === meId ? " (you)" : ""}</span>
-                                  <span style={{ fontSize: 11.5, color: "#6A7178" }}>{tt || "added"}</span>
-                                </div>
-                              );
-                            })}
-                          <div style={{ fontSize: 11, color: "#9A96A6", marginTop: 12, lineHeight: 1.5 }}>Each week's session gets its own code; rotate it if it leaks. <i>Prototype note: a production build ties each scan to the volunteer's own login and stores it server-side so it can't be spoofed.</i></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+        </div>
       </div>
     </div>
   );
@@ -2921,68 +3430,72 @@ function BrandKit({ S, role, brand, setBrand }) {
   const set = (k, v) => setBrand((b) => ({ ...b, [k]: v }));
   function onLogo(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => set("logo", r.result); r.readAsDataURL(file); }
   const swatch = (k, label) => (
-    <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>{label}</span>
+    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: "1px solid #E0DEE8", borderRadius: 8, background: "#fff", padding: 2, cursor: canManage ? "pointer" : "default" }} />
-        <input style={{ ...S.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
+        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 8, background: FIRE.btnBg, padding: 2, cursor: canManage ? "pointer" : "default" }} />
+        <input style={{ ...FS.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
       </div>
     </label>
   );
   return (
-    <div>
-      <PageHead S={S} eyebrow="MEDIA BUILDER" title="Build on-brand media" sub="Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too." />
-      {!canManage && <div style={{ ...S.opCard, marginBottom: 14, fontSize: 13, color: "#6A7178" }}>You can view the brand kit. Editing is limited to department admins.</div>}
-      <div style={S.opCard}>
-        <div style={S.cardEyebrow}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>MEDIA BUILDER</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Build on-brand media</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too.</div>
+      </div>
+      {!canManage && <div style={{ ...FS.card, padding: 14, marginBottom: 14, fontSize: 13, color: FIRE.textMuted }}>You can view the brand kit. Editing is limited to department admins.</div>}
+      <div style={{ ...FS.card, padding: 18 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={S.fieldLabel}>Department name</span><input style={S.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Station</span><input style={S.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
           {swatch("primary", "Primary color")}
           {swatch("accent", "Accent color")}
-          <label style={{ ...S.field, minWidth: 170 }}><span style={S.fieldLabel}>Headline font</span><select style={S.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Headline font</span><select style={FS.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
         </div>
       </div>
-      <div style={{ ...S.opCard, marginTop: 12 }}>
-        <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />LOGO</div>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />LOGO</div>
         <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ width: 84, height: 84, borderRadius: 12, border: "1px solid #E7E5EE", background: "#F7F6FA", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-            {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color="#B6B2C0" />}
+          <div style={{ width: 84, height: 84, borderRadius: 12, border: `0.5px solid ${FIRE.hairline}`, background: FIRE.btnBg, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color={FIRE.textMuted2} />}
           </div>
           {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ ...S.ghostBtn, marginTop: 0, cursor: "pointer" }}><Upload size={15} /> Upload logo<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
-            {brand.logo && <button style={{ ...S.ghostBtn, marginTop: 0, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => set("logo", null)}><X size={14} /> Remove</button>}
+            <label style={{ ...FS.btn, cursor: "pointer" }}><Upload size={15} color={FIRE.btnIcon} /> Upload logo<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
+            {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
           </div>}
         </div>
-        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0 }}>PNG with a transparent background works best. The logo is stored in this session for the prototype.</p>
+        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0, color: FIRE.textMuted }}>PNG with a transparent background works best. The logo is stored in this session for the prototype.</p>
       </div>
-      <div style={{ ...S.opCard, marginTop: 12 }}>
-        <div style={S.cardEyebrow}>VOICE & TAGLINE</div>
-        <label style={S.field}><span style={S.fieldLabel}>Tagline</span><input style={S.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
-        <label style={{ ...S.field, marginTop: 8 }}><span style={S.fieldLabel}>How the department sounds</span><textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
-        <p style={{ ...S.helpP, marginBottom: 0 }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}>VOICE & TAGLINE</div>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tagline</span><input style={FS.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
+        <label style={{ ...S.field, marginTop: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How the department sounds</span><textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
+        <p style={{ ...S.helpP, marginBottom: 0, color: FIRE.textMuted }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
       </div>
-      <div style={{ ...S.opCard, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.primary }} /><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.accent }} /></div>
-        <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: "#16181C" }}>{brand.name}</div>
-        <div style={{ fontSize: 13, color: "#6A7178", flex: 1, minWidth: 140 }}>{brand.tagline}</div>
+        <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: FIRE.textPrimary }}>{brand.name}</div>
+        <div style={{ fontSize: 13, color: FIRE.textMuted, flex: 1, minWidth: 140 }}>{brand.tagline}</div>
       </div>
 
-      <div style={{ ...S.opCard, marginTop: 12 }}>
-        <div style={S.cardEyebrow}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DEPARTMENT GUIDELINES</div>
-        <p style={{ ...S.helpP, marginTop: 0 }}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DEPARTMENT GUIDELINES</div>
+        <p style={{ ...S.helpP, marginTop: 0, color: FIRE.textMuted }}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
         {canManage && (
-          <label style={{ ...S.ghostBtn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload guideline
+          <label style={{ ...FS.btn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} color={FIRE.btnIcon} /> Upload guideline
             <input type="file" accept=".pdf,.doc,.docx,image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; set("guidelines", [...(brand.guidelines || []), { id: Date.now(), name: f.name }]); e.target.value = ""; }} /></label>
         )}
         <div style={{ marginTop: 10 }}>
-          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: "#6A7178" }}>No guidelines uploaded yet.</div> :
+          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No guidelines uploaded yet.</div> :
             (brand.guidelines || []).map((g) => (
-              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid #F1EFF5" }}>
-                <FileText size={15} color="#54506B" style={{ flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: 13.5, color: "#191C20" }}>{g.name}</span>
-                {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => set("guidelines", (brand.guidelines || []).filter((x) => x.id !== g.id))}><X size={13} /></button>}
+              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13.5, color: FIRE.textPrimary }}>{g.name}</span>
+                {canManage && <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => set("guidelines", (brand.guidelines || []).filter((x) => x.id !== g.id))}><X size={13} color={FIRE.deleteRed} /></button>}
               </div>
             ))}
         </div>
@@ -3259,6 +3772,7 @@ const DUTYLOG_SEED = [
 ];
 function StationDuties({ S, role, members, meId, notify }) {
   const canManage = isLeader(role); // board members + officers + admins assign duties
+  const canCreate = ["Board Member", "Department Admin", "Training Officer"].includes(role); // matches create_duty's DB gate (excludes Project Admin)
   const me = members.find((m) => m.id === meId);
   const nameById = new Map(members.map((m) => [m.id, m.name]));
   const fmtDoneAt = (v) => {
@@ -3274,8 +3788,8 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [view, setView] = useState("checklist");                // "checklist" | "history"
   const [logEntries, setLogEntries] = useState([]);
   const [weekOffset, setWeekOffset] = useState(0);              // 0 = most recent week with entries
-  useEffect(() => {
-    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids").then(({ data, error }) => {
+  function loadDuties() {
+    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids, assigned_to, due_date").then(({ data, error }) => {
       if (error || !data) return;
       setDuties(data.map((d) => ({
         id: d.id,
@@ -3286,9 +3800,12 @@ function StationDuties({ S, role, members, meId, notify }) {
         doneBy: d.done_by,   // raw member UUID (or null) for now — name resolution is a later slice
         doneAt: d.done_at,   // raw timestamptz string for now — formatting is a later slice
         helperIds: d.helper_ids ?? [],
+        assignedTo: d.assigned_to ?? null,   // null = station-wide; set = person-assigned
+        dueDate: d.due_date ?? null,
       })));
     });
-  }, []);
+  }
+  useEffect(() => { loadDuties(); }, []);
   useEffect(() => {
     if (!canManage) return;
     supabase.from("duty_log")
@@ -3308,6 +3825,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   }, [canManage]);
   const [addingA, setAddingA] = useState(false);
   const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [acatNew, setAcatNew] = useState(""); const [arec, setArec] = useState("Weekly");
+  const [assignee, setAssignee] = useState(""); const [due, setDue] = useState("");   // "" = station-wide / no due date
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
   const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
   const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
@@ -3354,7 +3872,14 @@ function StationDuties({ S, role, members, meId, notify }) {
     setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: false, doneBy: null, doneAt: null, helperIds: [] } : x)));
   }
   function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
-  function addDuty() { if (!ad.trim()) return; const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat; setDuties((ds) => [...ds, { id: Date.now(), duty: ad.trim(), category: cat, recurrence: arec, done: false, doneBy: null, doneAt: null }]); setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAddingA(false); }
+  async function addDuty() {
+    if (!ad.trim()) return;
+    const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat;
+    const { error } = await supabase.rpc("create_duty", { p_title: ad.trim(), p_category: cat, p_recurrence: arec, p_assigned_to: assignee || null, p_due_date: due || null });
+    if (error) { notify({ kind: "error", title: "Couldn't add the duty", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    loadDuties();   // re-fetch so the persisted row (real uuid + server-applied recurrence) appears — no optimistic numeric id
+    setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAssignee(""); setDue(""); setAddingA(false);
+  }
   function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
   function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
   function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
@@ -3391,48 +3916,57 @@ function StationDuties({ S, role, members, meId, notify }) {
     URL.revokeObjectURL(url);
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own." />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* header (inline FS — shared PageHead not mutated) */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION DUTIES</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Everyone pitches in</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own.</div>
+      </div>
 
       {canManage && (
-        <div style={S.segRow}>
-          <button onClick={() => setView("checklist")} style={{ ...S.segBtn, ...(view === "checklist" ? S.segBtnOn : {}) }}>Checklist</button>
-          <button onClick={() => setView("history")} style={{ ...S.segBtn, ...(view === "history" ? S.segBtnOn : {}) }}>History</button>
+        <div style={{ display: "inline-flex", gap: 6, marginBottom: 14 }}>
+          {[["checklist", "Checklist"], ["history", "History"]].map(([k, l]) => {
+            const on = view === k;
+            return <button key={k} onClick={() => setView(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 14px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.btnBg : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? FIRE.red : FIRE.btnBorder}` }}>{l}</button>;
+          })}
         </div>
       )}
 
       {view === "checklist" && (<>
-      <div style={{ ...S.opCard, marginBottom: 14 }}>
+      <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#3A4750", marginBottom: 4 }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: "#191C20" }}>{doneCount}</b> of {duties.length} done</span></div>
-            <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color="#2E7D52" />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 4, ...FS.num }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: FIRE.textPrimary }}>{doneCount}</b> of {duties.length} done</span></div>
+            <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color={FIRE.green} track={FIRE.track} />
           </div>
-          {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={resetWeek}><RefreshCw size={14} /> Reset now</button>}
-          {canManage && <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(true)}><Plus size={15} /> Add a duty</button>}
+          {canManage && <button style={FS.btn} onClick={resetWeek}><RefreshCw size={14} color={FIRE.btnIcon} /> Reset now</button>}
+          {canCreate && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F1EFF5", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: "#6A7178" }}>
-          <RefreshCw size={13} style={{ flexShrink: 0 }} />
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
+          <RefreshCw size={13} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
           <span>Recurring duties roll over on their own — weekly, monthly, or quarterly. One-time duties stay until done.</span>
           {canManage
-            ? <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>Week starts on
-                <select style={{ ...S.input, width: "auto", padding: "5px 8px" }} value={weekStartDay} onChange={(e) => setStartDay(e.target.value)}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select>
+            ? <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, color: FIRE.textSecondary }}>Week starts on
+                <select style={{ ...FS.input, width: "auto", padding: "5px 8px" }} value={weekStartDay} onChange={(e) => setStartDay(e.target.value)}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select>
               </label>
-            : <span style={{ marginLeft: "auto" }}>Resets every {DOW[weekStartDay]}</span>}
+            : <span style={{ marginLeft: "auto", color: FIRE.textMuted }}>Resets every {DOW[weekStartDay]}</span>}
         </div>
       </div>
 
-      {canManage && addingA && (
-        <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={S.fieldLabel}>Duty</span><input style={S.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Category</span><select style={S.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
-          {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>New category name</span><input style={S.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
-          <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Recurs</span><select style={S.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
-          <button style={S.primaryBtn} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
-          <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setAddingA(false)}>Cancel</button>
+      {canCreate && addingA && (
+        <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Duty</span><input style={FS.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
+          {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
+          <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={due} onChange={(e) => setDue(e.target.value)} /></label>
+          <button style={FS.btnPrimary} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
+          <button style={FS.btn} onClick={() => setAddingA(false)}>Cancel</button>
         </div>
       )}
-      {canManage && <p style={{ ...S.helpP, marginTop: -2 }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
+      {canCreate && <p style={{ ...S.helpP, marginTop: -2, color: FIRE.textMuted }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
       {categories.map((cat) => {
         const items = duties.filter((d) => d.category === cat);
@@ -3440,53 +3974,64 @@ function StationDuties({ S, role, members, meId, notify }) {
         const dn = items.filter((d) => d.done).length;
         return (
           <div key={cat} style={{ marginBottom: 16 }}>
-            <div style={{ ...S.cardEyebrow, display: "flex", alignItems: "center" }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? "#2E7D52" : "#9A96A6" }}>{dn}/{items.length}</span></div>
+            <div style={{ ...FS.kicker, display: "flex", alignItems: "center", marginBottom: 8 }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary }}>{dn}/{items.length}</span></div>
             {items.map((a) => {
               const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
               return (
               <div key={a.id}>
-                <div style={S.certRow}>
+                <div style={FS.row}>
                   {(() => {
                     const canUncheck = canManage || a.doneBy === me?.id;
-                    if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
+                    const canCompleteThis = a.assignedTo == null || a.assignedTo === me?.id || canManage;
+                    if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color={FIRE.green} /></span>;
+                    if (!a.done && !canCompleteThis) return <span title={`Assigned to ${nameById.get(a.assignedTo) ?? "a member"} — only they or a leader can complete this`} style={{ display: "inline-flex", flexShrink: 0 }}><span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block", opacity: 0.5 }} /></span>;
                     return (
                       <button onClick={() => a.done ? uncompleteDuty(a.id) : openPicker(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                        {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+                        {a.done ? <CheckCircle2 size={22} color={FIRE.green} /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
                       </button>
                     );
                   })()}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
-                    {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
+                    <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
+                    {a.done && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
                   </div>
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: a.recurrence === "One-time" ? "#9A6B12" : "#6A7178", background: a.recurrence === "One-time" ? "#FBF1DC" : "#F1EFF5", borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
-                  {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
+                  {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
+                  {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
+                    const d = new Date(a.dueDate + "T00:00:00");
+                    const t = new Date(); t.setHours(0, 0, 0, 0);
+                    const days = Math.round((d - t) / 86400000);
+                    const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted
+                    const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                  })()}
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                  {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
                 {pickerForDutyId === a.id && (
-                  <div style={{ ...S.opCard, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                     {pickerStage === "ask" ? (<>
-                      <span style={S.fieldLabel}>Did you have help?</span>
+                      <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Did you have help?</span>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> No, just me</button>
-                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => setPickerStage("pick")}>Yes</button>
-                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                        <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> No, just me</button>
+                        <button style={FS.btn} onClick={() => setPickerStage("pick")}>Yes</button>
+                        <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
                       </div>
                     </>) : (<>
-                      <span style={S.fieldLabel}>Who helped?</span>
+                      <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Who helped?</span>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                         {members.filter((m) => m.id !== me?.id).map((m) => {
                           const sel = selectedHelpers.includes(m.id);
                           return (
                             <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
-                              style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: "#2E7D52", borderColor: "#2E7D52", background: "#EAF5EE" } : { color: "#6A7178", borderColor: "#E3E0EA", background: "transparent" }) }}>
+                              style={{ ...FS.btn, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: FIRE.greenText, border: `0.5px solid ${FIRE.greenText}` } : {}) }}>
                               {m.name}
                             </button>
                           );
                         })}
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button style={S.primaryBtn} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
-                        <button style={{ ...S.ghostBtn, marginTop: 0 }} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                        <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
+                        <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
                       </div>
                     </>)}
                   </div>
@@ -3498,22 +4043,22 @@ function StationDuties({ S, role, members, meId, notify }) {
         );
       })}
 
-      <div style={{ ...S.cardEyebrow, marginTop: 22 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />OTHER WORK LOGGED</div>
-      <p style={S.helpP}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
-      <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>What got done</span><input style={S.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Who</span><input style={S.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
-        <button style={S.primaryBtn} onClick={addLog}><Plus size={15} /> Log it</button>
+      <div style={{ ...FS.kicker, marginTop: 22, marginBottom: 8 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />OTHER WORK LOGGED</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
+      <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What got done</span><input style={FS.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span><input style={FS.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
+        <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
       </div>
       <div>
         {log.map((e) => (
-          <div key={e.id} style={S.certRow}>
-            <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
+          <div key={e.id} style={FS.row}>
+            <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: "#191C20" }}>{e.what}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{e.who} · {e.when}</div>
+              <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.who} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span></div>
             </div>
-            {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeLog(e.id)}><X size={14} /></button>}
+            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
       </div>
@@ -3521,24 +4066,24 @@ function StationDuties({ S, role, members, meId, notify }) {
 
       {view === "history" && canManage && (
         historyWeeks.length === 0 ? (
-          <div style={{ ...S.opCard, marginBottom: 14, fontSize: 13.5, color: "#6A7178" }}>No completions logged yet.</div>
+          <div style={{ ...FS.card, padding: 16, marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>No completions logged yet.</div>
         ) : (
           <>
-            <div style={{ ...S.opCard, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
-              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset >= historyWeeks.length - 1} onClick={() => setWeekOffset((o) => Math.min(o + 1, historyWeeks.length - 1))}>◀</button>
-              <div style={{ flex: 1, textAlign: "center", fontWeight: 600, color: "#191C20" }}>Week of {fmtWeek(currentWeek.wk)}</div>
-              <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 11px" }} disabled={weekOffset <= 0} onClick={() => setWeekOffset((o) => Math.max(o - 1, 0))}>▶</button>
-              {currentWeek && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} /> Download CSV</button>}
+            <div style={{ ...FS.card, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+              <button style={{ ...FS.btn, padding: "6px 11px" }} disabled={weekOffset >= historyWeeks.length - 1} onClick={() => setWeekOffset((o) => Math.min(o + 1, historyWeeks.length - 1))}>◀</button>
+              <div style={{ flex: 1, textAlign: "center", fontWeight: 600, color: FIRE.textPrimary }}>Week of {fmtWeek(currentWeek.wk)}</div>
+              <button style={{ ...FS.btn, padding: "6px 11px" }} disabled={weekOffset <= 0} onClick={() => setWeekOffset((o) => Math.max(o - 1, 0))}>▶</button>
+              {currentWeek && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>}
             </div>
             <div>
               {currentWeek.entries.map((e) => {
                 const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
                 return (
-                  <div key={e.id} style={S.certRow}>
-                    <CheckCircle2 size={15} color="#2E7D52" style={{ flexShrink: 0 }} />
+                  <div key={e.id} style={FS.row}>
+                    <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, color: "#191C20" }}>{e.dutyName}</span>
-                      <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{names || "A member"} · {fmtDoneAt(e.doneAt)}</div>
+                      <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.dutyName}</span>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{names || "A member"} · <span style={FS.num}>{fmtDoneAt(e.doneAt)}</span></div>
                     </div>
                   </div>
                 );
@@ -3559,17 +4104,22 @@ function RequestForm({ S, requests, setRequests }) {
     setRequests([{ topic, notes, when: "Just now" }, ...requests]); setTopic(""); setNotes(""); setDone(true); setTimeout(() => setDone(false), 2500);
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="CUSTOM TRAINING" title="Request a custom packet" sub="Tell us what your crew needs. We build it into the next monthly drop." />
-      <div style={S.formCard}>
-        <label style={S.field}><span style={S.fieldLabel}>Topic or scenario</span><input style={S.input} placeholder="e.g. Rural water shuttle with one tender" value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
-        <label style={S.field}><span style={S.fieldLabel}>Anything specific to your department?</span><textarea style={{ ...S.input, minHeight: 88, resize: "vertical" }} placeholder="Apparatus, member count, local hazards, constraints…" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
-        <button style={S.primaryBtn} onClick={submit}><Send size={16} /> Submit request</button>
-        {done && <div style={S.successBox}><CheckCircle2 size={16} /> Request received. We'll confirm by email.</div>}
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* header (inline FS — shared PageHead not used/mutated) */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={FS.kicker}>CUSTOM TRAINING</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Request a custom packet</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Tell us what your crew needs. We build it into the next monthly drop.</div>
+      </div>
+      <div style={{ ...FS.card, padding: 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 620 }}>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Topic or scenario</span><input style={FS.input} placeholder="e.g. Rural water shuttle with one tender" value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Anything specific to your department?</span><textarea style={{ ...FS.input, minHeight: 88, resize: "vertical" }} placeholder="Apparatus, member count, local hazards, constraints…" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        <button style={FS.btnPrimary} onClick={submit}><Send size={16} /> Submit request</button>
+        {done && <div style={{ display: "flex", alignItems: "center", gap: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText, borderRadius: 8, padding: "10px 12px", fontSize: 13.5 }}><CheckCircle2 size={16} color={FIRE.green} /> Request received. We'll confirm by email.</div>}
       </div>
       {requests.length > 0 && (
-        <div style={{ marginTop: 24 }}><div style={S.cardEyebrow}>YOUR REQUESTS</div>
-          {requests.map((r, i) => <div key={i} style={S.reqRow}><div><strong>{r.topic}</strong>{r.notes ? <div style={S.reqNotes}>{r.notes}</div> : null}</div><span style={S.reqWhen}>{r.when}</span></div>)}
+        <div style={{ marginTop: 24 }}><div style={{ ...FS.kicker, marginBottom: 8 }}>YOUR REQUESTS</div>
+          {requests.map((r, i) => <div key={i} style={{ ...FS.card, padding: "14px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14 }}><div><strong style={{ color: FIRE.textPrimary }}>{r.topic}</strong>{r.notes ? <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 3 }}>{r.notes}</div> : null}</div><span style={{ fontSize: 11.5, color: FIRE.textMuted2, flexShrink: 0, ...FS.num }}>{r.when}</span></div>)}
         </div>
       )}
     </div>
@@ -3628,11 +4178,11 @@ function Admin({ S, library, setLibrary, feedback }) {
 function PageHead({ S, eyebrow, title, sub }) {
   return <div style={S.pageHead}><div style={S.cardEyebrow}>{eyebrow}</div><h1 style={S.pageTitle}>{title}</h1>{sub && <p style={S.pageSub}>{sub}</p>}</div>;
 }
-function Stat({ S, n, label, warn }) {
-  return <div style={S.stat}><div style={{ ...S.statN, color: warn ? "#B11E2A" : "#191C20" }}>{n}</div><div style={S.statLabel}>{label}</div></div>;
+function Stat({ S, n, label, warn, dark }) {
+  return <div style={dark ? { ...S.stat, ...FS.card } : S.stat}><div style={{ ...S.statN, color: warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20") }}>{n}</div><div style={dark ? { ...S.statLabel, color: FIRE.textMuted } : S.statLabel}>{label}</div></div>;
 }
-function Meta({ Icon, text }) {
-  return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "#6A7178" }}><Icon size={14} /> {text}</span>;
+function Meta({ Icon, text, dark }) {
+  return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: dark ? FIRE.textMuted : "#6A7178" }}><Icon size={14} /> {text}</span>;
 }
 function TrackPill({ S, track }) {
   const T = TRACKS[track];
@@ -3644,8 +4194,8 @@ function Chip({ S, active, accent, onClick, children }) {
 function Section({ S, Icon, title, children }) {
   return <div style={S.section}><div style={S.sectionHead}><Icon size={16} color="#54506B" /> {title}</div>{children}</div>;
 }
-function Disclaimer({ S, compact }) {
-  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}) }}><AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
+function Disclaimer({ S, compact, dark }) {
+  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
 }
 function Logo() {
   return <img src="/b4c-logo.png" alt="Before the Call" style={{ height: 34, width: "auto", flexShrink: 0, display: "block" }} />;
@@ -3673,9 +4223,9 @@ function baseStyles() {
   const INK = "#191C20", SLATE = "#3A4750", ENGINE = "#B11E2A", EMS = "#1F4E79", PAPER = "#E9EBEC", CARD = "#FFFFFF", LINE = "#D9DCDF", MUTED = "#6A7178";
   const chevron = "repeating-linear-gradient(135deg, #B11E2A 0 14px, #191C20 14px 28px)";
   return {
-    app: { display: "flex", minHeight: "100vh", background: PAPER, fontFamily: body, color: INK },
+    app: { display: "flex", minHeight: "100vh", background: FIRE.pageBg, fontFamily: body, color: INK },
     scrim: { position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 35 },
-    sidebar: { width: 262, background: INK, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, flexShrink: 0 },
+    sidebar: { width: 262, background: FIRE.sidebar, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, flexShrink: 0 },
     brandRow: { display: "flex", alignItems: "center", gap: 11, paddingBottom: 18, borderBottom: "1px solid #2A2F35" },
     brandName: { fontFamily: display, fontWeight: 700, fontSize: 19, letterSpacing: ".5px", lineHeight: 1 },
     brandSub: { fontSize: 10, color: "#8A929B", letterSpacing: ".9px", marginTop: 3, fontFamily: mono },
@@ -3688,7 +4238,7 @@ function baseStyles() {
     deptName: { fontFamily: display, fontWeight: 600, fontSize: 16, marginTop: 4 },
     deptMeta: { fontSize: 12, color: "#9AA1A9", marginTop: 2 },
     main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0 },
-    topbar: { height: 60, background: CARD, borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", gap: 14, padding: "0 18px", position: "sticky", top: 0, zIndex: 20 },
+    topbar: { height: 60, background: FIRE.sidebar, borderBottom: `1px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 14, padding: "0 18px", position: "sticky", top: 0, zIndex: 20 },
     menuBtn: { display: "none", alignItems: "center", justifyContent: "center", width: 38, height: 38, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: INK },
     chevronBand: { flex: 1, height: 8, borderRadius: 2, background: chevron, opacity: .9 },
     viewAs: { display: "flex", alignItems: "center", gap: 8 },

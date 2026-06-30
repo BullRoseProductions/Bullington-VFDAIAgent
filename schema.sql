@@ -347,6 +347,19 @@ CREATE TABLE public.training_sessions (
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
+-- Training-plan documents/AI plans attached to a specific session (separate from Station Documents).
+CREATE TABLE public.session_plans (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  department_id uuid NOT NULL,
+  session_id uuid REFERENCES public.training_sessions(id) ON DELETE SET NULL,  -- the link; no UNIQUE (reuse left open)
+  title text,
+  source text,                          -- 'upload' | 'ai' (CHECK: source is null or in ('upload','ai'))
+  storage_path text,                    -- null for AI plans (reuses station-documents bucket, plans/ prefix)
+  ai_text text,                         -- null for uploaded files
+  created_by text,
+  created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
 
 -- =============================================================================
 -- SECTION 2 — CUSTOM FUNCTIONS
@@ -622,6 +635,7 @@ ALTER TABLE public.recruitment_events  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_attendance  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.training_plans      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.training_sessions   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.session_plans       ENABLE ROW LEVEL SECURITY;
 -- profiles: review intended RLS before pilot (no policy captured).
 
 -- --- Department-scoped leader reads -----------------------------------------
@@ -786,6 +800,28 @@ CREATE POLICY "leaders update training_sessions" ON public.training_sessions FOR
     WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
 
 CREATE POLICY "leaders delete training_sessions" ON public.training_sessions FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+-- session_plans: read = all dept members; insert/update/delete = canManage (Board Member + Department Admin + Training Officer).
+CREATE POLICY "members read session_plans" ON public.session_plans FOR SELECT TO authenticated
+  USING ((department_id = my_department_id()));
+
+CREATE POLICY "canmanage insert session_plans" ON public.session_plans FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "canmanage update session_plans" ON public.session_plans FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))))
+  WITH CHECK (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+CREATE POLICY "canmanage delete session_plans" ON public.session_plans FOR DELETE TO authenticated
   USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
      FROM members
     WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
