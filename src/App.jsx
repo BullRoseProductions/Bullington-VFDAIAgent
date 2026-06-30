@@ -38,6 +38,28 @@ const FIRE = {
   amberText: "#D6A95E",
   redText: "#E58A90",
   track: "rgba(255,255,255,.06)",
+  // --- Phase 0 additive tokens (values previously hardcoded in the Training reskins) ---
+  name: "#F0F2F5",                       // near-white for NAMES (kept distinct from textPrimary #F7F8FA)
+  btnBg: "rgba(255,255,255,.04)",        // dark control fill
+  btnBorder: "rgba(255,255,255,.1)",     // dark control border
+  inputBorder: "rgba(255,255,255,.12)",
+  btnText: "#E7EAEF",
+  btnIcon: "#9AA1AC",                    // == textMuted2
+  navLabel: "#C7CDD6",
+  neverLogged: "#D08A8F",
+  deleteRed: "#C8606A",
+  white: "#fff",
+};
+
+/* ---------------- Fire-luxury shared style recipes (reference FIRE tokens; reused across reskinned pages) ---------------- */
+const FS = {
+  kicker: { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 },
+  card: { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
+  num: { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" },
+  btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
+  btnPrimary: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: FIRE.white, border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  input: { border: `0.5px solid ${FIRE.inputBorder}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: FIRE.btnBg, color: FIRE.name, width: "100%" },
+  row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `0.5px solid ${FIRE.hairline}` },
 };
 
 const ROLES = ["Project Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
@@ -2823,9 +2845,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
     };
 
-    const card = { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow, padding: 18, marginBottom: 14 };
-    const kick = { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 };
-    const num = { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" };
+    const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
+    const kick = FS.kicker;
+    const num = FS.num;
 
     return (
       <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -2939,16 +2961,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
 
   // ---------- leader view: FIRE-palette styles + derived reads (presentational only) ----------
-  const Lcard = { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 16, boxShadow: FIRE.cardShadow, padding: 16 };
-  const Lkick = { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: 6 };
-  const Lnum = { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" };
-  const Lbtn = { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 9, color: "#E7EAEF", cursor: "pointer", fontFamily: "inherit" };
-  const LbtnIcon = "#9AA1AC";
-  const Lfield = { display: "flex", flexDirection: "column", gap: 6 };
-  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: "#B6BDC8" };
-  const Linput = { border: "0.5px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: "rgba(255,255,255,.04)", color: "#F0F2F5", width: "100%" };
-  const LprimaryBtn = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: "#fff", border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" };
-  const Lrow = { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: "0.5px solid rgba(255,255,255,.05)" };
+  const Lcard = { ...FS.card, padding: 16 };                                  // base + leader padding (borderRadius FIRE.cardRadius == 16)
+  const Lkick = { ...FS.kicker, display: "flex", alignItems: "center", gap: 6 };
+  const Lnum = FS.num;
+  const Lbtn = FS.btn;                                                        // FIRE.btnBg/.btnBorder/.btnText == prior literals
+  const LbtnIcon = FIRE.btnIcon;                                             // == "#9AA1AC"
+  const Lfield = { display: "flex", flexDirection: "column", gap: 6 };       // unchanged (not in the consolidation set)
+  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: "#B6BDC8" }; // unchanged (not in the consolidation set)
+  const Linput = FS.input;                                                    // FIRE.inputBorder/.btnBg/.name == prior literals
+  const LprimaryBtn = FS.btnPrimary;                                          // FIRE.white == "#fff"
+  const Lrow = FS.row;                                                        // FIRE.hairline == "rgba(255,255,255,.05)"
   // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
   const statusColor = (label) => (label === "On track" || label === "Done") ? "#76C98D" : label === "Due soon" ? "#D6A95E" : "#E58A90";
   // Card 1 — most recent done session's attendance (empty until persistence lands)
