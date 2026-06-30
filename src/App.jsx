@@ -744,19 +744,25 @@ function Library({ S, library, openPacket }) {
     return okT && okQ;
   }), [library, q, track]);
   return (
-    <div>
-      <PageHead S={S} eyebrow="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight." />
-      <div style={S.searchBox}>
-        <Search size={18} color="#6A7178" />
-        <input style={S.searchInput} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {q && <button style={S.clearBtn} onClick={() => setQ("")}><X size={15} /></button>}
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>TRAINING LIBRARY</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Find a packet</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Search by topic or filter by track. Every packet is ready to run tonight.</div>
+      </div>
+      <div style={{ ...S.searchBox, ...FS.card, marginBottom: 14 }}>
+        <Search size={18} color={FIRE.btnIcon} />
+        <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {q && <button style={{ ...S.clearBtn, color: FIRE.textMuted }} onClick={() => setQ("")}><X size={15} /></button>}
       </div>
       <div style={S.chipRow}>
-        <Chip S={S} active={track === "All"} onClick={() => setTrack("All")}>All</Chip>
-        {Object.keys(TRACKS).map((k) => <Chip key={k} S={S} active={track === k} accent={TRACKS[k].accent} onClick={() => setTrack(k)}>{TRACKS[k].label}</Chip>)}
+        {[["All", "All", null], ...Object.keys(TRACKS).map((k) => [k, TRACKS[k].label, TRACKS[k].accent])].map(([k, label, accent]) => {
+          const on = track === k;
+          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.btnBg : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? (accent || FIRE.red) : FIRE.btnBorder}` }}>{label}</button>;
+        })}
       </div>
       {results.length === 0 ? (
-        <div style={S.empty}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</div>
+        <div style={{ ...FS.card, padding: 36, textAlign: "center", color: FIRE.textMuted }}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</div>
       ) : (
         <div style={S.cardGrid}>{results.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} />)}</div>
       )}
@@ -766,11 +772,11 @@ function Library({ S, library, openPacket }) {
 function RunCard({ S, p, onClick }) {
   const T = TRACKS[p.track];
   return (
-    <button style={{ ...S.runCard, borderLeft: `4px solid ${T.accent}` }} onClick={onClick}>
+    <button style={{ ...S.runCard, ...FS.card, cursor: "pointer", textAlign: "left", borderLeft: `4px solid ${T.accent}` }} onClick={onClick}>
       <div style={S.runTop}><span style={{ ...S.runCode, color: T.accent }}>{p.code}</span><T.Icon size={16} color={T.accent} /></div>
-      <h3 style={S.runTitle}>{p.title}</h3>
-      <p style={S.runObj}>{p.objective}</p>
-      <div style={S.runFoot}><span><Clock size={13} /> {p.time}</span><span style={S.runUpdated}>Updated {p.updated}</span></div>
+      <h3 style={{ ...S.runTitle, color: FIRE.textPrimary }}>{p.title}</h3>
+      <p style={{ ...S.runObj, color: FIRE.textMuted }}>{p.objective}</p>
+      <div style={{ ...S.runFoot, color: FIRE.textMuted }}><span><Clock size={13} /> {p.time}</span><span style={S.runUpdated}>Updated {p.updated}</span></div>
     </button>
   );
 }
@@ -3385,68 +3391,72 @@ function BrandKit({ S, role, brand, setBrand }) {
   const set = (k, v) => setBrand((b) => ({ ...b, [k]: v }));
   function onLogo(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => set("logo", r.result); r.readAsDataURL(file); }
   const swatch = (k, label) => (
-    <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>{label}</span>
+    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: "1px solid #E0DEE8", borderRadius: 8, background: "#fff", padding: 2, cursor: canManage ? "pointer" : "default" }} />
-        <input style={{ ...S.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
+        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 8, background: FIRE.btnBg, padding: 2, cursor: canManage ? "pointer" : "default" }} />
+        <input style={{ ...FS.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
       </div>
     </label>
   );
   return (
-    <div>
-      <PageHead S={S} eyebrow="MEDIA BUILDER" title="Build on-brand media" sub="Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too." />
-      {!canManage && <div style={{ ...S.opCard, marginBottom: 14, fontSize: 13, color: "#6A7178" }}>You can view the brand kit. Editing is limited to department admins.</div>}
-      <div style={S.opCard}>
-        <div style={S.cardEyebrow}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>MEDIA BUILDER</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Build on-brand media</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too.</div>
+      </div>
+      {!canManage && <div style={{ ...FS.card, padding: 14, marginBottom: 14, fontSize: 13, color: FIRE.textMuted }}>You can view the brand kit. Editing is limited to department admins.</div>}
+      <div style={{ ...FS.card, padding: 18 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={S.fieldLabel}>Department name</span><input style={S.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={S.fieldLabel}>Station</span><input style={S.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
           {swatch("primary", "Primary color")}
           {swatch("accent", "Accent color")}
-          <label style={{ ...S.field, minWidth: 170 }}><span style={S.fieldLabel}>Headline font</span><select style={S.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Headline font</span><select style={FS.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
         </div>
       </div>
-      <div style={{ ...S.opCard, marginTop: 12 }}>
-        <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />LOGO</div>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />LOGO</div>
         <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ width: 84, height: 84, borderRadius: 12, border: "1px solid #E7E5EE", background: "#F7F6FA", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-            {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color="#B6B2C0" />}
+          <div style={{ width: 84, height: 84, borderRadius: 12, border: `0.5px solid ${FIRE.hairline}`, background: FIRE.btnBg, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color={FIRE.textMuted2} />}
           </div>
           {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ ...S.ghostBtn, marginTop: 0, cursor: "pointer" }}><Upload size={15} /> Upload logo<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
-            {brand.logo && <button style={{ ...S.ghostBtn, marginTop: 0, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => set("logo", null)}><X size={14} /> Remove</button>}
+            <label style={{ ...FS.btn, cursor: "pointer" }}><Upload size={15} color={FIRE.btnIcon} /> Upload logo<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
+            {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
           </div>}
         </div>
-        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0 }}>PNG with a transparent background works best. The logo is stored in this session for the prototype.</p>
+        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0, color: FIRE.textMuted }}>PNG with a transparent background works best. The logo is stored in this session for the prototype.</p>
       </div>
-      <div style={{ ...S.opCard, marginTop: 12 }}>
-        <div style={S.cardEyebrow}>VOICE & TAGLINE</div>
-        <label style={S.field}><span style={S.fieldLabel}>Tagline</span><input style={S.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
-        <label style={{ ...S.field, marginTop: 8 }}><span style={S.fieldLabel}>How the department sounds</span><textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
-        <p style={{ ...S.helpP, marginBottom: 0 }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}>VOICE & TAGLINE</div>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tagline</span><input style={FS.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
+        <label style={{ ...S.field, marginTop: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How the department sounds</span><textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
+        <p style={{ ...S.helpP, marginBottom: 0, color: FIRE.textMuted }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
       </div>
-      <div style={{ ...S.opCard, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.primary }} /><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.accent }} /></div>
-        <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: "#16181C" }}>{brand.name}</div>
-        <div style={{ fontSize: 13, color: "#6A7178", flex: 1, minWidth: 140 }}>{brand.tagline}</div>
+        <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: FIRE.textPrimary }}>{brand.name}</div>
+        <div style={{ fontSize: 13, color: FIRE.textMuted, flex: 1, minWidth: 140 }}>{brand.tagline}</div>
       </div>
 
-      <div style={{ ...S.opCard, marginTop: 12 }}>
-        <div style={S.cardEyebrow}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DEPARTMENT GUIDELINES</div>
-        <p style={{ ...S.helpP, marginTop: 0 }}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
+      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DEPARTMENT GUIDELINES</div>
+        <p style={{ ...S.helpP, marginTop: 0, color: FIRE.textMuted }}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
         {canManage && (
-          <label style={{ ...S.ghostBtn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload guideline
+          <label style={{ ...FS.btn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} color={FIRE.btnIcon} /> Upload guideline
             <input type="file" accept=".pdf,.doc,.docx,image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; set("guidelines", [...(brand.guidelines || []), { id: Date.now(), name: f.name }]); e.target.value = ""; }} /></label>
         )}
         <div style={{ marginTop: 10 }}>
-          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: "#6A7178" }}>No guidelines uploaded yet.</div> :
+          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No guidelines uploaded yet.</div> :
             (brand.guidelines || []).map((g) => (
-              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid #F1EFF5" }}>
-                <FileText size={15} color="#54506B" style={{ flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: 13.5, color: "#191C20" }}>{g.name}</span>
-                {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => set("guidelines", (brand.guidelines || []).filter((x) => x.id !== g.id))}><X size={13} /></button>}
+              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13.5, color: FIRE.textPrimary }}>{g.name}</span>
+                {canManage && <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => set("guidelines", (brand.guidelines || []).filter((x) => x.id !== g.id))}><X size={13} color={FIRE.deleteRed} /></button>}
               </div>
             ))}
         </div>
