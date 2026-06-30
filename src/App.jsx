@@ -600,7 +600,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length;
   const expired = certsAll.filter((c) => c.st.rank === 0).length;
   const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
-  const fireCert = (st) => st.rank === 2 ? FIRE.greenText : st.rank === 1 ? FIRE.amberText : FIRE.redText;
   const dots = [...recorded].sort((a, b) => sessDate(a) - sessDate(b)).map((s) => ({ present: (s.attendance || []).includes(me?.id), date: sessDate(s) }));   // one per recorded drill, oldest→newest — same `recorded` the % uses
   async function openPlan(plan) {
     if (!plan?.storage_path) return;
@@ -652,49 +651,118 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
         <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
         <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
       </div>
-      {/* SLICE-1 TEMP — verify the Next Event loader; becomes a real stat box in slice 2 */}
-      <div style={{ ...FS.card, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, color: FIRE.textMuted2 }}>
-        NEXT EVENT (temp): {nextEvent ? `${nextEvent.type} · ${nextEvent.title || "—"} · ${nextEvent.date}` : "none upcoming"}
-      </div>
-
-      {/* 2 — three stat boxes */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 14 }}>
-        <FireStat label="My attendance" value={hasAtt ? `${pct}%` : "—"} sub={hasAtt ? `${attendedCount} of ${totalRecorded} drills` : "No record yet"} extra={dots.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 8 }}>
-            {dots.map((d, i) => {
-              const t = d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-              return d.present
-                ? <CheckCircle2 key={i} size={13} color={FIRE.green} title={`${t} — present`} />
-                : <XCircle key={i} size={13} color={FIRE.red} title={`${t} — missed`} />;
-            })}
+      {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginBottom: 14 }}>
+        {/* merged: 90-day attendance | this-month trainings, + attendance dots */}
+        <div style={{ ...FS.card, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>ATTENDANCE & TRAINING THIS MONTH</div>
+          <div style={{ display: "flex", gap: 16, marginTop: 8, alignItems: "stretch" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{hasAtt ? `${pct}%` : "—"}</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{hasAtt ? `${attendedCount} of ${totalRecorded} drills · 90 days` : "No record yet"}</div>
+            </div>
+            <div style={{ width: 1, background: FIRE.hairline }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{trainingsThisMonth}</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>scheduled · {TRAIN_MONTHS[today.getMonth()]}</div>
+            </div>
           </div>
-        ) : null} />
-        <FireStat label="Certs current" value={`${certsCurrent}/${certsTotal}`} sub={certAlert.text} subColor={certAlert.color} />
-        <FireStat label="Trainings this month" value={String(trainingsThisMonth)} sub={TRAIN_MONTHS[today.getMonth()]} />
+          {dots.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 10 }}>
+              {dots.map((d, i) => {
+                const t = d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                return d.present
+                  ? <CheckCircle2 key={i} size={13} color={FIRE.green} title={`${t} — present`} />
+                  : <XCircle key={i} size={13} color={FIRE.red} title={`${t} — missed`} />;
+              })}
+            </div>
+          )}
+        </div>
+        {/* next event: soonest across all 4 calendar sources (FireStat reused) */}
+        <FireStat
+          label="NEXT EVENT"
+          value={nextEvent ? new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+          sub={nextEvent ? (nextEvent.title || "—") : "Nothing scheduled"}
+          extra={nextEvent ? <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}</div> : null}
+        />
       </div>
 
-      {/* 4 — two columns: certifications | upcoming training */}
+      {/* 3 — cards (3-up): My Certifications | Assigned Duties | Upcoming Training */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
+        {/* My Certifications — count/status header (merged from old Certs-current stat) + list */}
         <div style={{ ...FS.card, padding: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={FS.kicker}>MY CERTIFICATIONS</div>
-            <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color }}>{certAlert.text}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color, ...FS.num }}>{certsCurrent}/{certsTotal} · {certAlert.text}</span>
           </div>
           <div style={{ marginTop: 10 }}>
             {certsAll.length === 0 ? (
               <div style={{ fontSize: 13, color: FIRE.textMuted }}>No certifications on file yet.</div>
             ) : certsAll.map((c, i) => (
               <div key={c.id ?? i} style={{ ...FS.row, padding: "9px 0" }}>
-                <Award size={15} color={fireCert(c.st)} style={{ flexShrink: 0 }} />
+                <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
                   <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
                 </div>
-                <Pill S={S} color={fireCert(c.st)}>{c.st.label}</Pill>
+                <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
               </div>
             ))}
           </div>
         </div>
+        {/* Assigned Duties — open (interactive) + completed (struck-through via done_at); always shown */}
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={FS.kicker}>ASSIGNED DUTIES</div>
+            {(mineOpen.length + mineDone.length) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted2, ...FS.num }}>{mineDone.length} of {mineOpen.length + mineDone.length} done</span>}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {(mineOpen.length + mineDone.length) === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No duties assigned to you.</div>
+            ) : (
+              <>
+                {mineOpen.map((d) => {
+                  let badge = null;
+                  if (d.due_date) {
+                    const dd = new Date(d.due_date + "T00:00:00");
+                    const tn = new Date(); tn.setHours(0, 0, 0, 0);
+                    const days = Math.round((dd - tn) / 86400000);
+                    const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;
+                    const dl = dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    badge = <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, ...FS.num }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                  }
+                  return (
+                    <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                      <ClipboardCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
+                        {badge && <div style={{ marginTop: 2 }}>{badge}</div>}
+                      </div>
+                      <button onClick={() => markMineDone(d.id)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}><CheckCircle2 size={13} color={FIRE.btnIcon} /> Mark done</button>
+                    </div>
+                  );
+                })}
+                {mineDone.length > 0 && (
+                  <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                    {mineDone.map((d) => {
+                      const dl = d.done_at ? new Date(d.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+                      return (
+                        <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                          <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{d.duty}</div>
+                            {dl && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, ...FS.num }}>Done {dl}</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        {/* Upcoming Training — unchanged */}
         <div style={{ ...FS.card, padding: 18 }}>
           <div style={FS.kicker}>UPCOMING TRAINING</div>
           <div style={{ marginTop: 10 }}>
@@ -713,38 +781,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
           </div>
         </div>
       </div>
-
-      {/* 4b — assigned to me (self-contained loader; hidden entirely when empty) */}
-      {(mineOpen.length > 0 || mineDone.length > 0) && (
-        <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
-          <div style={FS.kicker}>ASSIGNED TO ME</div>
-          <div style={{ marginTop: 10 }}>
-            {mineOpen.map((d) => {
-              let badge = null;
-              if (d.due_date) {
-                const dd = new Date(d.due_date + "T00:00:00");
-                const tn = new Date(); tn.setHours(0, 0, 0, 0);
-                const days = Math.round((dd - tn) / 86400000);
-                const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted — same as the StationDuties badge
-                const dl = dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                badge = <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, ...FS.num }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
-              }
-              return (
-                <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
-                  <ClipboardCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
-                    {badge && <div style={{ marginTop: 2 }}>{badge}</div>}
-                  </div>
-                  <button onClick={() => markMineDone(d.id)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}><CheckCircle2 size={13} color={FIRE.btnIcon} /> Mark done</button>
-                </div>
-              );
-            })}
-            {/* SLICE-1 TEMP — confirms completed duties now load; real open/completed grouping in slice 2 */}
-            {mineDone.length > 0 && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, paddingTop: 6 }}>+ {mineDone.length} completed (temp — grouped layout in slice 2)</div>}
-          </div>
-        </div>
-      )}
 
       {/* 5 — station calendar: shared DashboardCalendar wrapped in a dark FS card (light inset; NOT mutated) */}
       <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
