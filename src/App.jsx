@@ -959,23 +959,23 @@ function AIList({ S, Icon, title, items, warn, dark }) {
 }
 
 /* ---------------- shared: resource library + idea grid ---------------- */
-function ResourceLibrary({ S, items, verb, onOpen, onDelete }) {
+function ResourceLibrary({ S, items, verb, onOpen, onDelete, dark }) {
   return (
     <div style={S.resGrid}>
       {items.map((r) => (
-        <div key={r.id ?? r.name} style={S.resCard}>
-          <FileText size={16} color="#54506B" style={{ flexShrink: 0, marginTop: 1 }} />
+        <div key={r.id ?? r.name} style={dark ? { ...S.resCard, ...FS.card } : S.resCard}>
+          <FileText size={16} color={dark ? FIRE.btnIcon : "#54506B"} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={S.resName}>{r.name}</div>
-            <div style={S.resType}>{r.type}</div>
+            <div style={dark ? { ...S.resName, color: FIRE.textPrimary } : S.resName}>{r.name}</div>
+            <div style={dark ? { ...S.resType, color: FIRE.textMuted } : S.resType}>{r.type}</div>
           </div>
           {onOpen ? (
-            <button onClick={() => onOpen(r)} style={{ ...S.resDl, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit" }}><Download size={13} /> {verb || "Download"}</button>
+            <button onClick={() => onOpen(r)} style={{ ...S.resDl, ...(dark ? { color: FIRE.btnText } : {}), border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit" }}><Download size={13} /> {verb || "Download"}</button>
           ) : (
-            <span style={S.resDl}><Download size={13} /> {verb || "Download"}</span>
+            <span style={dark ? { ...S.resDl, color: FIRE.btnText } : S.resDl}><Download size={13} /> {verb || "Download"}</span>
           )}
           {onDelete && (
-            <button onClick={() => onDelete(r)} title="Delete" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "#B11E2A", display: "inline-flex", alignItems: "center", flexShrink: 0, alignSelf: "center", marginLeft: 8 }}><X size={14} /></button>
+            <button onClick={() => onDelete(r)} title="Delete" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: dark ? FIRE.deleteRed : "#B11E2A", display: "inline-flex", alignItems: "center", flexShrink: 0, alignSelf: "center", marginLeft: 8 }}><X size={14} /></button>
           )}
         </div>
       ))}
@@ -1232,51 +1232,55 @@ function Documents({ S, role, notify, uploaderName }) {
     catch { setErr("Couldn't draft that just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
-    <div>
-      <PageHead S={S} eyebrow="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place" sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."} />
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION DOCUMENTS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your SOPs and guidelines, in one place</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."}</div>
+      </div>
 
       {canManageDocs && (<>
-        <div style={S.cardEyebrow}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
-        <label style={{ ...S.field, maxWidth: 240, marginBottom: 12 }}><span style={S.fieldLabel}>Type for these uploads</span>
-          <select style={{ ...S.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
+        <label style={{ ...S.field, maxWidth: 240, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type for these uploads</span>
+          <select style={{ ...FS.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
             {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select></label>
-        <label style={S.docDrop}
+        <label style={{ ...S.docDrop, background: FIRE.btnBg, border: `2px dashed ${FIRE.btnBorder}` }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); uploadFiles(Array.from(e.dataTransfer.files || [])); }}>
-          <Upload size={22} color="#54506B" />
-          <div style={S.docDropText}>Drop files here or <span style={{ color: "#1F4E79", fontWeight: 600 }}>browse</span></div>
-          <div style={S.docDropSub}>SOPs, SOGs, guidelines, agreements — PDF, Word, or images</div>
+          <Upload size={22} color={FIRE.btnIcon} />
+          <div style={{ ...S.docDropText, color: FIRE.textSecondary }}>Drop files here or <span style={{ color: FIRE.redBright, fontWeight: 600 }}>browse</span></div>
+          <div style={{ ...S.docDropSub, color: FIRE.textMuted }}>SOPs, SOGs, guidelines, agreements — PDF, Word, or images</div>
           <input type="file" multiple style={{ display: "none" }} onChange={onFiles} />
         </label>
 
-        <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FilePlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT</div>
-        <div style={S.aiBanner}>
+        <div style={{ ...FS.kicker, marginTop: 24, marginBottom: 8 }}><FilePlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT</div>
+        <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
           <div style={{ flex: 1 }}>
-            <label style={S.field}><span style={S.fieldLabel}>Document type</span>
-              <select style={{ ...S.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Document type</span>
+              <select style={{ ...FS.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
                 {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select></label>
-            <label style={{ ...S.field, marginTop: 12 }}><span style={S.fieldLabel}>What should it cover?</span>
-              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
-            <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+            <label style={{ ...S.field, marginTop: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What should it cover?</span>
+              <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+            <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><FilePlus size={16} /> Draft document</>}
             </button>
-            {err && <div style={S.errBox}>{err}</div>}
-            {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact /><RichOutput S={S} text={out} /></div>}
+            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact dark /><RichOutput S={S} text={out} dark /></div>}
           </div>
         </div>
       </>)}
 
-      <div style={{ ...S.cardEyebrow, marginTop: 24 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
+      <div style={{ ...FS.kicker, marginTop: 24, marginBottom: 8 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
       {!docsLoading && docs.length === 0 ? (
-        <div style={S.empty}>
+        <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>
           {canManageDocs
             ? "No documents yet — upload your first above."
             : "No documents have been added yet."}
         </div>
       ) : (
-        <ResourceLibrary S={S} verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
+        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
       )}
     </div>
   );
@@ -2614,43 +2618,47 @@ function Minutes({ S }) {
   function toggle(id) { setActions((a) => a.map((x) => x.id === id ? { ...x, done: !x.done } : x)); }
   function removeA(id) { setActions((a) => a.filter((x) => x.id !== id)); }
   return (
-    <div>
-      <PageHead S={S} eyebrow="MEETING MINUTES" title="From rough notes to clean minutes" sub="Type your notes, get a structured draft to approve, and carry every action item to the next meeting." />
-      <div style={S.aiBanner}>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>MEETING MINUTES</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>From rough notes to clean minutes</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Type your notes, get a structured draft to approve, and carry every action item to the next meeting.</div>
+      </div>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={S.cardEyebrow}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</div>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Meeting</span><input style={S.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
-            <label style={{ ...S.field, minWidth: 140 }}><span style={S.fieldLabel}>Date</span><input style={S.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
+            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+            <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
           </div>
-          <label style={{ ...S.field, marginTop: 10 }}><span style={S.fieldLabel}>Rough notes</span>
-            <textarea style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} value={notes} placeholder={"Who was there, what came up, what was decided, what people agreed to do…"} onChange={(e) => setNotes(e.target.value)} /></label>
-          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
+          <label style={{ ...S.field, marginTop: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rough notes</span>
+            <textarea style={{ ...FS.input, minHeight: 110, resize: "vertical", lineHeight: 1.5 }} value={notes} placeholder={"Who was there, what came up, what was decided, what people agreed to do…"} onChange={(e) => setNotes(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><ClipboardList size={16} /> Draft the minutes</>}
           </button>
-          {err && <div style={S.errBox}>{err}</div>}
-          {out && <RichOutput S={S} text={out} />}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
 
-      <div style={S.cardEyebrow}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
-      <div style={{ ...S.opCard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={S.fieldLabel}>Action</span><input style={S.input} value={at} placeholder="What needs to happen?" onChange={(e) => setAt(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 130 }}><span style={S.fieldLabel}>Owner</span><input style={S.input} value={ao} placeholder="Who?" onChange={(e) => setAo(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 120 }}><span style={S.fieldLabel}>Due</span><input style={S.input} value={ad} placeholder="When?" onChange={(e) => setAd(e.target.value)} /></label>
-        <button style={S.primaryBtn} onClick={addAction}><Plus size={15} /> Add</button>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Action</span><input style={FS.input} value={at} placeholder="What needs to happen?" onChange={(e) => setAt(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span><input style={FS.input} value={ao} placeholder="Who?" onChange={(e) => setAo(e.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input style={FS.input} value={ad} placeholder="When?" onChange={(e) => setAd(e.target.value)} /></label>
+        <button style={FS.btnPrimary} onClick={addAction}><Plus size={15} /> Add</button>
       </div>
       <div>
         {actions.map((a) => (
-          <div key={a.id} style={S.certRow}>
+          <div key={a.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
             <button onClick={() => toggle(a.id)} title={a.done ? "Mark open" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-              {a.done ? <CheckCircle2 size={18} color="#2E7D52" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
+              {a.done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: `2px solid ${FIRE.textMuted}`, display: "inline-block" }} />}
             </button>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: a.done ? "#9A96A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.text}</span>
-              <div style={{ fontSize: 12, color: "#6A7178", marginTop: 1 }}>{a.owner} · due {a.due}</div>
+              <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.text}</span>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{a.owner} · due {a.due}</div>
             </div>
-            <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeA(a.id)}><X size={14} /></button>
+            <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeA(a.id)}><X size={14} color={FIRE.deleteRed} /></button>
           </div>
         ))}
       </div>
