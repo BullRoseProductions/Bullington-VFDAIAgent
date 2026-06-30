@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
-  Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
+  Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, XCircle, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
   ThumbsUp, ThumbsDown, Pencil, MessageSquare,
   FolderOpen, Upload, FilePlus, PartyPopper,
@@ -564,12 +564,13 @@ function QuickAccess({ S, role, go }) {
 
 /* ---------------- Member dashboard (personal view) ---------------- */
 /* FS-based stat box (NEW — does not touch the shared <Stat>) */
-function FireStat({ label, value, sub, subColor }) {
+function FireStat({ label, value, sub, subColor, extra }) {
   return (
     <div style={{ ...FS.card, padding: "14px 16px" }}>
       <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>{label}</div>
       <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{value}</div>
       {sub && <div style={{ fontSize: 11.5, color: subColor || FIRE.textMuted, marginTop: 2 }}>{sub}</div>}
+      {extra}
     </div>
   );
 }
@@ -595,9 +596,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length;
   const expired = certsAll.filter((c) => c.st.rank === 0).length;
   const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
-  const band = pct >= 75 ? { color: FIRE.greenText, label: "On track" } : pct >= 50 ? { color: FIRE.amberText, label: "Keep it up" } : { color: FIRE.redText, label: "Needs attention" };
   const fireCert = (st) => st.rank === 2 ? FIRE.greenText : st.rank === 1 ? FIRE.amberText : FIRE.redText;
-  const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalRecorded ? attendedCount / totalRecorded : 0;
+  const dots = [...recorded].sort((a, b) => sessDate(a) - sessDate(b)).map((s) => ({ present: (s.attendance || []).includes(me?.id), date: sessDate(s) }));   // one per recorded drill, oldest→newest — same `recorded` the % uses
   async function openPlan(plan) {
     if (!plan?.storage_path) return;
     const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
@@ -628,29 +628,18 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
 
       {/* 2 — three stat boxes */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 14 }}>
-        <FireStat label="My attendance" value={hasAtt ? `${pct}%` : "—"} sub={hasAtt ? `${attendedCount} of ${totalRecorded} sessions` : "No record yet"} />
+        <FireStat label="My attendance" value={hasAtt ? `${pct}%` : "—"} sub={hasAtt ? `${attendedCount} of ${totalRecorded} drills` : "No record yet"} extra={dots.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 8 }}>
+            {dots.map((d, i) => {
+              const t = d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+              return d.present
+                ? <CheckCircle2 key={i} size={13} color={FIRE.green} title={`${t} — present`} />
+                : <XCircle key={i} size={13} color={FIRE.red} title={`${t} — missed`} />;
+            })}
+          </div>
+        ) : null} />
         <FireStat label="Certs current" value={`${certsCurrent}/${certsTotal}`} sub={certAlert.text} subColor={certAlert.color} />
         <FireStat label="Trainings this month" value={String(trainingsThisMonth)} sub={TRAIN_MONTHS[today.getMonth()]} />
-      </div>
-
-      {/* 3 — attendance ring (honest empty state when no records) */}
-      <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
-        <div style={FS.kicker}>MY ATTENDANCE · LAST 90 DAYS</div>
-        {!hasAtt ? (
-          <div style={{ marginTop: 12, fontSize: 13.5, color: FIRE.textMuted }}>No attendance recorded yet.<div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Your sign-ins appear here once sessions are recorded.</div></div>
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 12 }}>
-            <svg width="84" height="84" viewBox="0 0 84 84" style={{ flexShrink: 0 }}>
-              <circle cx="42" cy="42" r={ringR} fill="none" stroke={FIRE.track} strokeWidth="7" />
-              <circle cx="42" cy="42" r={ringR} fill="none" stroke={FIRE.green} strokeWidth="7" strokeLinecap="round" strokeDasharray={ringC} strokeDashoffset={ringC * (1 - ringFrac)} transform="rotate(-90 42 42)" />
-              <text x="42" y="46" textAnchor="middle" fontSize="17" fontWeight="700" fill={FIRE.textPrimary} style={{ fontFeatureSettings: '"tnum"' }}>{pct}%</text>
-            </svg>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 14, color: FIRE.textSecondary, ...FS.num }}>You've attended <b style={{ color: FIRE.textPrimary }}>{attendedCount}</b> of <b style={{ color: FIRE.textPrimary }}>{totalRecorded}</b> recorded sessions in the last 90 days.</div>
-              <span style={{ display: "inline-block", marginTop: 8, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: band.color, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 10px", background: FIRE.btnBg }}>{band.label}</span>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* 4 — two columns: certifications | upcoming training */}
