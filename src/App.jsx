@@ -3063,12 +3063,12 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           </div>
         )}
 
-        {/* 4 — training calendar (MonthCalendar + chip logic unchanged; deliberate light inset in dark card) */}
+        {/* 4 — training calendar (MonthCalendar + chip logic unchanged; dark calendar in dark card) */}
         <div style={card}>
           <div style={{ ...kick, marginBottom: 12 }}>TRAINING CALENDAR</div>
           <div style={{ marginBottom: -10 }}>{/* cancels MonthCalendar's built-in 10px bottom margin → even inset framing */}
             <MonthCalendar
-              cur={cur} setCur={setCur}
+              cur={cur} setCur={setCur} dark
               items={monthSessions}
               renderChip={renderChip}
               todayColor="#C8323A"
@@ -3287,11 +3287,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         </div>
       ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
 
-      {/* calendar wrapped in dark card; MonthCalendar internals untouched (light inset); red today marker */}
+      {/* calendar wrapped in dark card; dark calendar in dark card; red today marker */}
       <div style={{ ...Lcard, marginBottom: 16 }}>
         <div style={{ marginBottom: -10 }}>
           <MonthCalendar
-            cur={cur} setCur={setCur}
+            cur={cur} setCur={setCur} dark
             items={monthSessions}
             renderChip={(s) => {
               // base color = linked category's live color, or fallback blue for one-off / deleted category
