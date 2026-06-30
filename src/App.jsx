@@ -306,7 +306,7 @@ export default function App() {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
       supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
-      supabase.from("session_plans").select("id, title, storage_path, session_id").order("created_at", { ascending: false }),
+      supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
     if (sErr || !srows) { setTrainingSessions([]); return; }   // sessions are source of truth; attendance/plan reads are non-fatal
     const byS = {};
@@ -315,13 +315,20 @@ export default function App() {
       e.attendance.push(a.member_id);
       if (a.checked_in_at) e.times[a.member_id] = new Date(a.checked_in_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     });
-    const planByS = {};   // most-recent plan per session wins (query ordered desc; no UNIQUE on session_id)
-    (prows || []).forEach((p) => { if (p.session_id && !planByS[p.session_id]) planByS[p.session_id] = { id: p.id, title: p.title, storage_path: p.storage_path, session_id: p.session_id }; });
+    const plansByS = {};   // ALL plans per session (query ordered desc → newest first); supports multiple files per session
+    (prows || []).forEach((p) => {
+      if (!p.session_id) return;
+      (plansByS[p.session_id] || (plansByS[p.session_id] = [])).push({
+        id: p.id, title: p.title, storage_path: p.storage_path, ai_text: p.ai_text, source: p.source, session_id: p.session_id,
+        kind: p.storage_path ? "file" : "ai",   // uploaded file vs AI-text plan (distinguished for the slice-4 viewer)
+      });
+    });
     setTrainingSessions(
       srows.filter((r) => r.date).map((r) => {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
-        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times, plan: planByS[r.id] || null };
+        const plans = plansByS[r.id] || [];
+        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // plans[] = all; plan = newest (backward-compat alias)
       })
     );
   };
@@ -3022,19 +3029,14 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     if (!file) return;
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
-    // 1) upload the new file FIRST (so the old plan stays intact if upload fails)
+    // 1) upload the file (APPEND — existing plans are NOT removed; a session can now hold multiple)
     const path = `${deptId}/plans/${Date.now()}-${file.name}`;
     const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
     if (upErr) { notify({ kind: "error", title: "Couldn't upload the plan", text: "Something went wrong uploading that. Please try again.", details: upErr.message }); return; }
-    // 2) REPLACE: clear any existing plan(s) for this session — storage-first, then rows (like deleteDoc)
-    const { data: olds } = await supabase.from("session_plans").select("id, storage_path").eq("session_id", s.id);
-    const oldPaths = (olds || []).map((p) => p.storage_path).filter(Boolean);
-    if (oldPaths.length) await supabase.storage.from("station-documents").remove(oldPaths);
-    if (olds && olds.length) await supabase.from("session_plans").delete().eq("session_id", s.id);
-    // 3) insert the new plan
+    // 2) insert a new row (no delete of existing — append). Same canManage RLS, same bucket + plans/ path.
     const { error: insErr } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: s.id, title: file.name, source: "upload", storage_path: path, created_by: me?.name || "Unknown" });
     if (insErr) { notify({ kind: "error", title: "Couldn't attach the plan", text: "The file uploaded but couldn't be attached. Please try again.", details: insErr.message }); loadSessions(); return; }
-    notify({ kind: "success", title: "Plan attached", text: `"${file.name}" is now the plan for ${s.title}.` });
+    notify({ kind: "success", title: "Plan attached", text: `"${file.name}" was attached to ${s.title}.` });
     loadSessions();
   }
   async function openPlan(plan) {
@@ -3400,12 +3402,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
                     <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
                     {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
-                    {canManage && (s.plan
-                      ? <span style={{ display: "inline-flex", gap: 4 }}>
-                          <button style={Lbtn} onClick={() => openPlan(s.plan)}><FileText size={14} color={LbtnIcon} /> Open plan</button>
-                          <button title="Remove plan" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => detachPlan(s.plan)}><X size={14} color="#C8606A" /></button>
-                        </span>
-                      : <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> Attach plan<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; attachPlan(s, f); }} /></label>)}
+                    {canManage && (
+                      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                        {s.plan && <button style={Lbtn} onClick={() => openPlan(s.plan)}><FileText size={14} color={LbtnIcon} /> Open plan</button>}
+                        {s.plan && <button title="Remove newest plan" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => detachPlan(s.plan)}><X size={14} color="#C8606A" /></button>}
+                        {/* SLICE-1: Attach now always available → appends (no longer hidden once a plan exists). Per-file list UI = slice 2. */}
+                        <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> Attach plan<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; attachPlan(s, f); }} /></label>
+                        {s.plans.length > 1 && <span style={{ fontSize: 11, color: "#7E8794" }}>TEMP: {s.plans.length} files</span>}
+                      </span>
+                    )}
                     {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
                     {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
