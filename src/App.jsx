@@ -3883,7 +3883,9 @@ function StationDuties({ S, role, members, meId, notify }) {
                 <div style={S.certRow}>
                   {(() => {
                     const canUncheck = canManage || a.doneBy === me?.id;
+                    const canCompleteThis = a.assignedTo == null || a.assignedTo === me?.id || canManage;
                     if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color="#2E7D52" /></span>;
+                    if (!a.done && !canCompleteThis) return <span title={`Assigned to ${nameById.get(a.assignedTo) ?? "a member"} — only they or a leader can complete this`} style={{ display: "inline-flex", flexShrink: 0 }}><span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block", opacity: 0.5 }} /></span>;
                     return (
                       <button onClick={() => a.done ? uncompleteDuty(a.id) : openPicker(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
                         {a.done ? <CheckCircle2 size={22} color="#2E7D52" /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: "2px solid #C3C0CC", display: "inline-block" }} />}
@@ -3894,6 +3896,15 @@ function StationDuties({ S, role, members, meId, notify }) {
                     <span style={{ fontWeight: 600, color: a.done ? "#9AA0A6" : "#191C20", textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
                     {a.done && <div style={{ fontSize: 12, color: "#2E7D52", marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
                   </div>
+                  {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
+                  {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
+                    const d = new Date(a.dueDate + "T00:00:00");
+                    const t = new Date(); t.setHours(0, 0, 0, 0);
+                    const days = Math.round((d - t) / 86400000);
+                    const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted
+                    const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                  })()}
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: a.recurrence === "One-time" ? "#9A6B12" : "#6A7178", background: a.recurrence === "One-time" ? "#FBF1DC" : "#F1EFF5", borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
                   {canManage && <button title="Remove" style={{ ...S.ghostBtn, marginTop: 0, padding: "6px 8px", color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => removeDuty(a.id)}><X size={14} /></button>}
                 </div>
