@@ -604,6 +604,19 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
     if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
     const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
   }
+  // ---- "Assigned to me" duties (self-contained; no App threading; existing read RLS) ----
+  const [mine, setMine] = useState([]);
+  function loadMine() {
+    if (!meId) return;
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").eq("assigned_to", meId).eq("done", false)
+      .then(({ data }) => setMine(data || []));
+  }
+  useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  async function markMineDone(id) {
+    const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });   // assignee allowed by the RPC rule
+    if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
+    loadMine();   // refetch — the completed duty drops off (done=true no longer matches)
+  }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {/* 1 — greeting */}
@@ -680,6 +693,36 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
           </div>
         </div>
       </div>
+
+      {/* 4b — assigned to me (self-contained loader; hidden entirely when empty) */}
+      {mine.length > 0 && (
+        <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+          <div style={FS.kicker}>ASSIGNED TO ME</div>
+          <div style={{ marginTop: 10 }}>
+            {mine.map((d) => {
+              let badge = null;
+              if (d.due_date) {
+                const dd = new Date(d.due_date + "T00:00:00");
+                const tn = new Date(); tn.setHours(0, 0, 0, 0);
+                const days = Math.round((dd - tn) / 86400000);
+                const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted — same as the StationDuties badge
+                const dl = dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                badge = <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, ...FS.num }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+              }
+              return (
+                <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                  <ClipboardCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
+                    {badge && <div style={{ marginTop: 2 }}>{badge}</div>}
+                  </div>
+                  <button onClick={() => markMineDone(d.id)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}><CheckCircle2 size={13} color={FIRE.btnIcon} /> Mark done</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 5 — station calendar: shared DashboardCalendar wrapped in a dark FS card (light inset; NOT mutated) */}
       <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
