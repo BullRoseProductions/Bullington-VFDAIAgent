@@ -313,7 +313,7 @@ export default function App() {
   const [trainingSessions, setTrainingSessions] = useState([]);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open, series_id"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -337,7 +337,7 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // plans[] = all; plan = newest (backward-compat alias)
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // plans[] = all; plan = newest (backward-compat alias)
       })
     );
   };
@@ -3028,6 +3028,13 @@ function Onboarding({ S, members }) {
 
 /* ---------------- Training Plan + Calendar ---------------- */
 const CADENCE_DAYS = { Weekly: 7, "Bi-weekly": 14, Monthly: 30, Quarterly: 90, "Semi-annual": 180, Annual: 365, Biennial: 730 };
+const N_FOR_CADENCE = { Weekly: 52, "Bi-weekly": 26, Monthly: 12, Quarterly: 4, "Semi-annual": 2, Annual: 1 };   // a year's worth (recurring default N)
+const CADENCE_DAY_STEP = { Weekly: 7, "Bi-weekly": 14 };                              // exact-day cadences
+const CADENCE_MONTH_STEP = { Monthly: 1, Quarterly: 3, "Semi-annual": 6, Annual: 12 };
+function addMonthsKeepDom(y, m0, dom, k) {   // +k calendar months, keep day-of-month, clamp (Jan31+1mo→Feb28/29)
+  const total = m0 + k, yy = y + Math.floor(total / 12), mm = ((total % 12) + 12) % 12;
+  return new Date(yy, mm, Math.min(dom, new Date(yy, mm + 1, 0).getDate()));
+}
 const CADENCES = ["Weekly", "Bi-weekly", "Monthly", "Quarterly", "Semi-annual", "Annual", "One-off"];
 const TRAIN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -3142,6 +3149,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState("");
+  const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
+  const [rCad, setRCad] = useState("Bi-weekly");        // recurring cadence (defaults from the picked category)
+  const [rCount, setRCount] = useState("26");           // N occurrences (defaults from cadence)
   // AI training-plan drafter (Card 2) + ai_text viewer
   const [draftOpen, setDraftOpen] = useState(false);
   const [viewPlan, setViewPlan] = useState(null);
@@ -3163,7 +3173,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
 
   const rank = (l) => (l === "Overdue" || l === "Not logged") ? 0 : l === "Due soon" ? 1 : 2;
-  const planView = plan.map((p) => ({ p, info: dueInfo(p) })).sort((a, b) => rank(a.info.label) - rank(b.info.label));
+  const _t0 = new Date(today); _t0.setHours(0, 0, 0, 0);
+  const upcomingFor = (catId) => sessions.filter((s) => String(s.planId) === String(catId) && !s.done && sessDate(s) >= _t0).sort((a, b) => sessDate(a) - sessDate(b))[0];
+  const reconcile = (p) => {   // a pre-scheduled future session overrides the derived last+cadence guess (no "overdue" while sessions sit on the calendar)
+    const base = dueInfo(p), up = upcomingFor(p.id);
+    if (!up) return base;
+    const nd = sessDate(up), nl = nd.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return { ...base, label: "On track", color: "#2E7D52", rel: `next session ${nl}`, nextLabel: nl, next: nd, urgent: false };
+  };
+  const planView = plan.map((p) => ({ p, info: reconcile(p) })).sort((a, b) => rank(a.info.label) - rank(b.info.label));
   const over = planView.filter((x) => x.info.urgent).length;
   const soon = planView.filter((x) => x.info.label === "Due soon").length;
   const ok = planView.length - over - soon;
@@ -3211,6 +3229,40 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     });
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setShowSess(false); setStitle(""); loadSessions();
+  }
+  function toggleRepeat() {
+    if (!repeat) {   // opening: seed cadence from the selected category, N from cadence
+      const pItem = plan.find((p) => String(p.id) === String(spid));
+      const cad = (pItem?.cadence && pItem.cadence !== "One-off") ? pItem.cadence : "Bi-weekly";
+      setRCad(cad); setRCount(String(N_FOR_CADENCE[cad] || 12));
+    }
+    setRepeat((v) => !v);
+  }
+  async function scheduleRecurring() {
+    const pItem = plan.find((p) => String(p.id) === String(spid));
+    const cad = rCad || pItem?.cadence || "Monthly";
+    const n = Math.max(1, Math.min(Number(rCount) || N_FOR_CADENCE[cad] || 12, 104));   // clamp 1..104 (no fat-finger table bloat)
+    const title = stitle.trim() || pItem?.name || "Training session";
+    const startY = cur.y, startM = cur.m, startD = Number(sd);
+    const dayStep = CADENCE_DAY_STEP[cad], monthStep = CADENCE_MONTH_STEP[cad] || 1;
+    const dates = [];
+    for (let k = 0; k < n; k++) {
+      const d = dayStep ? new Date(startY, startM, startD + k * dayStep) : addMonthsKeepDom(startY, startM, startD, k * monthStep);
+      dates.push(toISO(d));
+    }
+    const existing = new Set((sessions || []).filter((s) => String(s.planId) === String(pItem?.id)).map((s) => toISO(sessDate(s))));
+    const fresh = dates.filter((iso) => !existing.has(iso));   // DEDUPE (plan_id, date)
+    if (!fresh.length) { notify({ kind: "error", title: "Already scheduled", text: "Those dates are already on the calendar." }); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const sid = crypto.randomUUID();
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, done: false, series_id: sid }));
+    const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
+    if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
+    if (pItem) await supabase.from("training_plans").update({ starts_on: toISO(new Date(startY, startM, startD)) }).eq("id", pItem.id);
+    const skipped = dates.length - fresh.length;
+    notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} ${cad.toLowerCase()} session${fresh.length === 1 ? "" : "s"}${skipped ? ` (${skipped} already existed)` : ""}.` });
+    setShowSess(false); setRepeat(false); setStitle(""); loadSessions();
   }
   async function completeSession(s) {
     const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
@@ -3561,10 +3613,17 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       <div style={{ ...Lkick, marginTop: 22, marginBottom: 10 }}><Calendar size={13} /> TRAINING CALENDAR</div>
       {canManage && (showSess ? (
         <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>{repeat ? "Start day" : "Day"}</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
-          <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>
+          <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
+            <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? "#F0F2F5" : "#9AA1AC" }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
+          {repeat && <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>How often</span>
+            <select style={Linput} value={rCad} onChange={(e) => { setRCad(e.target.value); setRCount(String(N_FOR_CADENCE[e.target.value] || 12)); }}>{Object.keys(N_FOR_CADENCE).map((c) => <option key={c}>{c}</option>)}</select></label>}
+          {repeat && <label style={{ ...Lfield, minWidth: 100 }}><span style={LfieldLabel}>Occurrences</span><input type="number" min="1" max="104" style={Linput} value={rCount} onChange={(e) => setRCount(e.target.value)} /></label>}
+          {repeat
+            ? <button style={LprimaryBtn} onClick={scheduleRecurring}><Plus size={15} /> Schedule {Math.min(Number(rCount) || 0, 104) || "…"} sessions</button>
+            : <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>}
           <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
         </div>
       ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
