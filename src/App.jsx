@@ -290,6 +290,14 @@ export default function App() {
       });
     return () => { cancelled = true; };
   }, [authEmail]);
+  const [dept, setDept] = useState(null);   // real department identity (name + logo_url) — header crest + sidebar
+  useEffect(() => {
+    if (!authEmail) { setDept(null); return; }
+    supabase.rpc("my_department_id").then(({ data: id }) => {
+      if (!id) return;
+      supabase.from("departments").select("name, logo_url").eq("id", id).single().then(({ data }) => { if (data) setDept(data); });
+    });
+  }, [authEmail]);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
   const [trainingPlan, setTrainingPlan] = useState([]);
   const loadPlans = () => {
@@ -402,7 +410,7 @@ export default function App() {
         </button>
         <div style={S.deptCard}>
           <div style={S.deptLabel}>DEPARTMENT</div>
-          <div style={S.deptName}>North Hood Country VFD</div>
+          <div style={S.deptName}>{dept?.name || "…"}</div>
           <div style={S.deptMeta}>Premium · 14 members</div>
         </div>
       </aside>
@@ -424,7 +432,7 @@ export default function App() {
         </header>
 
         <main style={S.content}>
-          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} />}
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
@@ -457,8 +465,8 @@ const dashboardGreeting = (me) => {
 };
 
 /* ---------------- Dashboard ---------------- */
-function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify }) {
-  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} />;
+function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
+  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -574,7 +582,15 @@ function QuickAccess({ S, role, go }) {
 }
 
 /* ---------------- Member dashboard (personal view) ---------------- */
-function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
+// Monogram from a department name — initials of the significant words (skips of/the/volunteer/fire/department/…), max 3 letters.
+const DEPT_STOPWORDS = new Set(["of", "the", "and", "volunteer", "fire", "department", "dept", "company", "co", "vfd", "vfrd", "ems", "rescue", "station", "district"]);
+function deptMonogram(name) {
+  if (!name) return "";
+  const words = name.split(/\s+/).map((w) => w.replace(/[^A-Za-z]/g, "")).filter((w) => w && !DEPT_STOPWORDS.has(w.toLowerCase()));
+  const initials = words.map((w) => w[0]).join("").toUpperCase();
+  return (initials || name.replace(/[^A-Za-z]/g, "").toUpperCase()).slice(0, 3);
+}
+function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
   const sess = sessions || [];
@@ -654,11 +670,18 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   const nextPlans = nextSession?.plans || [];
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {/* 1 — greeting */}
-      <div style={{ marginBottom: 18 }}>
-        <div style={FS.kicker}>MY STATION · North Hood Country VFD</div>
-        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
-        <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
+      {/* 1 — greeting + dept crest (real logo_url when set; monogram fallback until logo persistence exists) */}
+      <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 18 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, display: "grid", placeItems: "center", background: FIRE.card, border: `1.5px solid ${FIRE.red}`, boxShadow: "0 0 14px rgba(200,50,58,.30)", overflow: "hidden" }}>
+          {dept?.logo_url
+            ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={FS.kicker}>{dept?.name ? `MY STATION · ${dept.name}` : "MY STATION"}</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+          <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
+        </div>
       </div>
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginBottom: 14 }}>
