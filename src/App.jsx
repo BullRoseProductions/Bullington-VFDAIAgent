@@ -253,6 +253,7 @@ export default function App() {
             email: m.email,
             joined: m.joined,
             participation: m.participation,
+            mentorId: m.mentor_id,
             certs: certsByMember.get(m.id) || [],
             notes: [],
           }))
@@ -440,7 +441,7 @@ export default function App() {
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
-          {screen === "onboarding" && <Onboarding S={S} members={members} />}
+          {screen === "onboarding" && <Onboarding S={S} members={members} notify={notify} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
@@ -2198,7 +2199,7 @@ function Roster({ S, role, members, setMembers, sessions, notify }) {
   const [sel, setSel] = useState(null);
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
-  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} />;
+  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -2281,7 +2282,7 @@ function fmtLongDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1]} ${d}, ${y}`;
 }
-function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
+function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members }) {
   const assign = canAssign(role);
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
@@ -2303,19 +2304,19 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
     return () => { alive = false; };
   }, [member.id, assign]);
   function startEditForm() {
-    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: member.access || "Member", role: member.role || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "" });
+    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: member.access || "Member", role: member.role || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
     setEditing(true);
   }
   async function saveMember() {
     setSaving(true);
     const jd = form.joined_date || null;
     const joinedYear = jd ? jd.slice(0, 4) : member.joined;   // keep member-visible "since [year]" in sync
-    const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear }).eq("id", member.id);
+    const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear, mentor_id: form.mentor_id || null }).eq("id", member.id);
     if (e1) { setSaving(false); notify({ kind: "error", title: "Couldn't save the member", text: "Something went wrong saving those changes. Please try again.", details: e1.message }); return; }
     const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: member.department_id, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
     setSaving(false);
-    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear });
+    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear, mentorId: form.mentor_id || null });
     setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
     setEditing(false);
     notify({ kind: "success", text: "Member updated." });
@@ -2380,6 +2381,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px 18px" }}>
               {[
                 ["Access", member.access || "—"],
+                ["Mentor", (members || []).find((m) => m.id === member.mentorId)?.name || "—"],
                 ["Email", member.email || "—"],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
@@ -2402,6 +2404,11 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station role</span><input style={FS.input} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} placeholder="Firefighter" /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}><option>Active</option><option>Probationary</option><option>Inactive</option></select></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Access</span><select style={FS.input} value={form.access} onChange={(e) => setForm((f) => ({ ...f, access: e.target.value }))}><option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option></select></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Mentor</span>
+                <select style={FS.input} value={form.mentor_id || ""} onChange={(e) => setForm((f) => ({ ...f, mentor_id: e.target.value }))}>
+                  <option value="">— None —</option>
+                  {(members || []).filter((m) => m.id !== member.id && m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Joined (date)</span><input type="date" style={FS.input} value={form.joined_date || ""} onChange={(e) => setForm((f) => ({ ...f, joined_date: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
               <label style={{ ...S.field, gridColumn: "1 / -1" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>
@@ -2961,21 +2968,38 @@ const ONBOARD_TEMPLATE = [
   { group: "Training", items: ["Station orientation & safety walk-through", "SOG / policy review session", "Firefighter I enrollment (if applicable)", "CPR / BLS scheduled"] },
   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
 ];
-function Onboarding({ S, members }) {
+function Onboarding({ S, members, notify }) {
   const candidates = members.length ? members : [{ id: 0, name: "New member", role: "Firefighter" }];
   const probI = candidates.findIndex((m) => m.status === "Probationary");
-  const [who, setWho] = useState(candidates[probI >= 0 ? probI : 0].name);
+  const [selId, setSelId] = useState(candidates[probI >= 0 ? probI : 0].id);
   const [checks, setChecks] = useState({});
+  const [deptId, setDeptId] = useState(null);
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
-  const all = ONBOARD_TEMPLATE.flatMap((g) => g.items.map((_, i) => `${who}::${g.group}::${i}`));
-  const doneCount = all.filter((k) => checks[k]).length;
+  const person = candidates.find((m) => String(m.id) === String(selId)) || candidates[0];
+  const isMentorItem = (group, it) => group === "People & access" && it === "Mentor assigned";
+  const mentorName = person?.mentorId ? (members.find((m) => m.id === person.mentorId)?.name || "assigned") : null;
+  const all = ONBOARD_TEMPLATE.flatMap((g) => g.items.map((it, i) => ({ key: `${g.group}::${i}`, mentor: isMentorItem(g.group, it) })));
+  const doneCount = all.filter((x) => (x.mentor ? !!person?.mentorId : !!checks[x.key])).length;   // mentor item = real mentor_id
   const pct = Math.round((doneCount / all.length) * 100);
-  const person = candidates.find((m) => m.name === who);
-  function toggle(key) { setChecks((c) => ({ ...c, [key]: !c[key] })); }
+  useEffect(() => { supabase.rpc("my_department_id").then(({ data }) => setDeptId(data || null)); }, []);
+  useEffect(() => {   // load this member's saved progress
+    if (!selId) { setChecks({}); return; }
+    let alive = true;
+    supabase.from("onboarding_progress").select("item_key, done").eq("member_id", selId)
+      .then(({ data }) => { if (alive) setChecks(Object.fromEntries((data || []).map((r) => [r.item_key, r.done]))); });
+    return () => { alive = false; };
+  }, [selId]);
+  async function toggle(itemKey) {
+    const next = !checks[itemKey];
+    setChecks((c) => ({ ...c, [itemKey]: next }));   // optimistic
+    if (!selId || !deptId) return;
+    const { error } = await supabase.from("onboarding_progress").upsert({ member_id: selId, department_id: deptId, item_key: itemKey, done: next }, { onConflict: "member_id,item_key" });
+    if (error) { setChecks((c) => ({ ...c, [itemKey]: !next })); notify({ kind: "error", title: "Couldn't save", text: "That didn't save — please try again.", details: error.message }); }
+  }
   async function draftPlan() {
     setLoading(true); setErr(""); setOut("");
     const sys = "You write a warm welcome note and a practical first-30-days onboarding plan for a new volunteer firefighter/EMT joining a small department. Friendly and concrete: a short welcome, then week-by-week steps covering paperwork, gear, orientation, shadowing/mentor, and first trainings. This is a DRAFT for an officer to review and send. Under 320 words, plain headers and bullets.";
-    try { const t = await callClaude(sys, `New member: ${who}${person?.role ? `, joining as ${person.role}` : ""}.`); setOut(t); }
+    try { const t = await callClaude(sys, `New member: ${person?.name || "New member"}${person?.role ? `, joining as ${person.role}` : ""}.`); setOut(t); }
     catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
   }
   return (
@@ -2988,7 +3012,7 @@ function Onboarding({ S, members }) {
       </div>
       <div style={{ ...FS.card, padding: 16, marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Onboarding</span>
-          <select style={FS.input} value={who} onChange={(e) => { setWho(e.target.value); }}>{candidates.map((m) => <option key={m.id}>{m.name}</option>)}</select></label>
+          <select style={FS.input} value={selId} onChange={(e) => setSelId(e.target.value)}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
         <div style={{ flex: 1, minWidth: 180 }}>
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>Onboarding progress</span><span>{pct}%</span></div>
           <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
@@ -2998,13 +3022,15 @@ function Onboarding({ S, members }) {
         <div key={g.group} style={{ marginBottom: 6 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}>{g.group.toUpperCase()}</div>
           {g.items.map((it, i) => {
-            const key = `${who}::${g.group}::${i}`; const done = !!checks[key];
+            const key = `${g.group}::${i}`;
+            const mentor = isMentorItem(g.group, it);
+            const done = mentor ? !!person?.mentorId : !!checks[key];
             return (
               <div key={i} style={FS.row}>
-                <button onClick={() => toggle(key)} title={done ? "Undo" : "Mark complete"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                <button onClick={mentor ? undefined : () => toggle(key)} disabled={mentor} title={mentor ? "Assign in the member's file" : (done ? "Undo" : "Mark complete")} style={{ background: "none", border: "none", cursor: mentor ? "default" : "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
                   {done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
                 </button>
-                <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
+                <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done && !mentor ? "line-through" : "none", fontSize: 14 }}>{it}{mentor && mentorName ? ` · ${mentorName}` : ""}{mentor && !person?.mentorId ? <span style={{ color: FIRE.textMuted, fontSize: 12 }}> — set in the member's file</span> : ""}</div>
               </div>
             );
           })}
@@ -3013,7 +3039,7 @@ function Onboarding({ S, members }) {
       <div style={{ ...FS.card, padding: 18, marginTop: 10 }}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} color={FIRE.red} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI WELCOME & 30-DAY PLAN</div>
-          <h3 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, margin: "0 0 4px" }}>Draft a welcome for {who}</h3>
+          <h3 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, margin: "0 0 4px" }}>Draft a welcome for {person?.name}</h3>
           <p style={{ fontSize: 13, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 10 }}>A friendly welcome note and a week-by-week first-month plan. You review and send.</p>
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftPlan} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><UserPlus size={16} /> Draft welcome & plan</>}
