@@ -3653,7 +3653,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const attendedCount = recorded.filter((s) => (s.attendance || []).includes(me?.id)).length;
     const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
     const missed = recorded.filter((s) => !(s.attendance || []).includes(me?.id)).sort((a, b) => sessDate(b) - sessDate(a));
-    const upcoming = sessions.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
 
     // IDENTICAL chip logic to the leader calendar — colors/layout unchanged (do not alter).
     const renderChip = (s) => {
@@ -3758,29 +3757,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   ) : (
                     <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
                   )}
-                  {s.plan && <button onClick={() => openPlan(s.plan)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
+                  {s.plan && <button onClick={() => openSessionPlans(s)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
                 </div>
               );
             })}
-          </div>
-        </div>
-
-        {/* 6 — upcoming / prep ahead (no "Open plan" control — materials are greenfield) */}
-        <div style={card}>
-          <div style={kick}>UPCOMING · PREP AHEAD</div>
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
-            {upcoming.length === 0 ? (
-              <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing on the calendar yet.</div>
-            ) : upcoming.map((s) => { const cat = catOf(s); return (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || "#1F4E79", flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
-                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{fmtSess(s)} · {cat?.name || "One-off"}</div>
-                </div>
-                {s.plan && <button onClick={() => openPlan(s.plan)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
-              </div>
-            ); })}
           </div>
         </div>
       </div>
