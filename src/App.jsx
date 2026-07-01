@@ -487,7 +487,7 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
         <Stat S={S} dark n="14" label="Active members" />
       </div>
 
-      <DashboardCalendar S={S} />
+      <DashboardCalendar S={S} notify={notify} />
 
       <div style={S.dashGrid}>
         <div style={{ ...S.featCard, ...FS.card }}>
@@ -922,7 +922,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
       <CertProposals S={S} notify={notify} />
       {/* 5 — station calendar: shared DashboardCalendar wrapped in a dark FS card (light inset; NOT mutated) */}
       <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
-        <DashboardCalendar S={S} />
+        <DashboardCalendar S={S} notify={notify} />
       </div>
 
       {/* 6 — quick actions (member-filtered NAV; new FS styling, shared QuickAccess untouched) */}
@@ -1975,26 +1975,32 @@ function FundingCalendar({ S, role, notify }) {
 const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12" };
 const SOURCE_RANK = { training: 0, funding: 1, recruit: 2, social: 3 };
 const SOURCE_TIER = { training: "bar", funding: "pill", recruit: "pill", social: "dot" };
-function DashboardCalendar({ S }) {
+function DashboardCalendar({ S, notify }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("all");
+  const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const loadAll = () => {
     Promise.all([
       supabase.from("content_calendar").select("id, date, caption"),
-      supabase.from("training_sessions").select("id, date, title"),
+      supabase.from("training_sessions").select("id, date, title, session_plans(id, title, storage_path, ai_text, source, created_at)"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("funding_events").select("id, date, title"),
     ]).then(([social, training, recruit, funding]) => {
-      const mapRows = (res, source, labelOf) =>
+      const mapRows = (res, source, labelOf, extraOf) =>
         (res.data || []).filter((r) => r.date).map((r) => {        // null data (source error) → []
           const [yy, mm, dd] = r.date.split("-").map(Number);
-          return { source, id: `${source}-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: labelOf(r), color: SOURCE_COLORS[source], tier: SOURCE_TIER[source] };
+          return { source, id: `${source}-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: labelOf(r), color: SOURCE_COLORS[source], tier: SOURCE_TIER[source], ...(extraOf ? extraOf(r) : {}) };
         });
       setItems([
         ...mapRows(social, "social", (r) => r.caption || ""),
-        ...mapRows(training, "training", (r) => r.title),
+        ...mapRows(training, "training", (r) => r.title, (r) => ({
+          title: r.title,   // SessionPlanChooser header reads session.title (chip items only have `label`)
+          plans: (r.session_plans || [])
+            .slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))   // newest-first, matching Training's loadSessions
+            .map((p) => ({ id: p.id, title: p.title, storage_path: p.storage_path, ai_text: p.ai_text, source: p.source, session_id: r.id, kind: p.storage_path ? "file" : "ai" })),
+        })),
         ...mapRows(recruit, "recruit", (r) => r.title),
         ...mapRows(funding, "funding", (r) => r.title),
       ]);
@@ -2029,11 +2035,12 @@ function DashboardCalendar({ S }) {
       <MonthCalendar
         cur={cur} setCur={setCur} dark
         items={monthItems}
-        renderChip={(it) => ({ color: it.color, label: it.label, title: it.label, ...(filter === "all" ? { tier: it.tier } : {}) })}
+        renderChip={(it) => ({ color: it.color, label: it.label, title: (it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) })}
         todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         overflowIndicator
       />
+      {mounts}
     </div>
   );
 }
