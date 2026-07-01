@@ -442,11 +442,11 @@ export default function App() {
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
-          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} />}
+          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
-          {screen === "funding" && <Funding S={S} role={role} notify={notify} />}
+          {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} />}
           {screen === "minutes" && <Minutes S={S} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
@@ -1226,15 +1226,15 @@ function RichOutput({ S, text, dark }) {
 }
 
 /* ---------------- Recruitment ---------------- */
-function Recruitment({ S, brand, role, notify }) {
-  const [town, setTown] = useState("North Hood Country");
+function Recruitment({ S, brand, role, notify, dept }) {
+  const [town, setTown] = useState("");
   const [size, setSize] = useState("14");
   const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
   const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
   async function draft() {
     setLoading(true); setErr(""); setPlan("");
     const sys = "You are a recruitment advisor for a volunteer fire/EMS department. Build a practical recruitment plan that uses ONLY three channels: (1) community events and an open house, (2) recruiting in person at local places — employers, schools/trade programs, churches, community spots, and (3) social media calls-to-action. Weight the plan HEAVILY toward social media calls-to-action: give it the most space, several specific sample posts, each with a clear ask, a concrete next step, and a tie to a real need. For each of the three channels, give 2-3 concrete steps a tiny crew can actually do, written in the department's voice. Do NOT suggest any other channels. Warm, honest, never desperate. Plain-text headers and bullets. Under 350 words.";
-    try { const t = await callClaude(sys, `Town: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}\nDepartment voice: ${brand?.voice || ""}\nTagline: ${brand?.tagline || ""}`); setPlan(t); }
+    try { const t = await callClaude(sys, `Department: ${dept?.name || ""}\nTown: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}\nDepartment voice: ${brand?.voice || ""}\nTagline: ${brand?.tagline || ""}`); setPlan(t); }
     catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
@@ -2016,7 +2016,7 @@ const FUNDRAISER_IDEAS = [
   { title: "Bingo or game night", key: "bingo", p: "Recurring revenue if you can host it monthly." },
   { title: "Prize raffle", key: "raffle", p: "Strong earner — but check your state's raffle/gaming rules first." },
 ];
-function Funding({ S, role, notify }) {
+function Funding({ S, role, notify, dept }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
@@ -2038,7 +2038,7 @@ function Funding({ S, role, notify }) {
     if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
     else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
     else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
-    try { const t = await callClaude(sys, `Department: North Hood Country VFD\nDetails: ${detail}`); setOut(t); }
+    try { const t = await callClaude(sys, `Department: ${dept?.name || "our department"}\nDetails: ${detail}`); setOut(t); }
     catch { setErr("Couldn't generate that just now. Try again."); } finally { setLoading(false); }
   }
   return (
