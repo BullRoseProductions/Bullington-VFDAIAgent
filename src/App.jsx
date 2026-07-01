@@ -3403,17 +3403,26 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
                     {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                     {canManage && (
-                      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                        {s.plan && <button style={Lbtn} onClick={() => openPlan(s.plan)}><FileText size={14} color={LbtnIcon} /> Open plan</button>}
-                        {s.plan && <button title="Remove newest plan" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => detachPlan(s.plan)}><X size={14} color="#C8606A" /></button>}
-                        {/* SLICE-1: Attach now always available → appends (no longer hidden once a plan exists). Per-file list UI = slice 2. */}
-                        <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> Attach plan<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; attachPlan(s, f); }} /></label>
-                        {s.plans.length > 1 && <span style={{ fontSize: 11, color: "#7E8794" }}>TEMP: {s.plans.length} files</span>}
-                      </span>
+                      <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> {s.plans.length ? "Attach more" : "Attach plan"}<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                     )}
                     {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
                     {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
+                  {s.plans.length > 0 && (
+                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
+                      <div style={{ fontSize: 11, color: "#7E8794", marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
+                      {s.plans.map((p) => (
+                        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
+                          <FileText size={14} color={p.kind === "ai" ? "#D6A95E" : LbtnIcon} style={{ flexShrink: 0 }} />
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}{p.kind === "ai" ? " · AI" : ""}</span>
+                          {p.kind === "file"
+                            ? <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => openPlan(p)}><FileText size={13} color={LbtnIcon} /> Open</button>
+                            : <span style={{ fontSize: 11, color: "#7E8794", padding: "5px 9px" }} title="AI-text plans get an in-app viewer in a later slice">View · soon</span>}
+                          {canManage && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color="#C8606A" /></button>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {open && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
                       <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked." : "Tap a name to mark who attended.") : "Who attended this session."}</div>
