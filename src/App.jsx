@@ -435,7 +435,7 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} dept={dept} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
@@ -645,6 +645,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
   const [nextEvent, setNextEvent] = useState(null);
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
+  const [viewPlan, setViewPlan] = useState(null);    // ai_text plan viewer (shared AiPlanViewer)
   const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
@@ -756,7 +757,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: FIRE.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}</span>
                   {p.kind === "file"
                     ? <button onClick={() => openPlan(p)} style={{ ...FS.btn, padding: "4px 8px", fontSize: 11.5, flexShrink: 0 }}>Open</button>
-                    : <span style={{ fontSize: 11, color: FIRE.textMuted, flexShrink: 0 }} title="AI-text plans get an in-app viewer in a later slice">View · soon</span>}
+                    : <button onClick={() => setViewPlan(p)} style={{ ...FS.btn, padding: "4px 8px", fontSize: 11.5, flexShrink: 0 }}>View</button>}
                 </div>
               ))}
             </div>
@@ -764,6 +765,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
         </div>
       </div>
 
+      {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
       {/* 3 — cards (3-up): My Certifications | Assigned Duties | Upcoming Training */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
         {/* My Certifications — count/status header (merged from old Certs-current stat) + list */}
@@ -3056,7 +3058,23 @@ function CheckinConfirm({ S, result, members, meId, go }) {
     </div>
   );
 }
-function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify }) {
+// Re-viewable AI plan: modal showing an ai_text session_plan (reused by Training + MemberDashboard)
+function AiPlanViewer({ S, plan, onClose }) {
+  if (!plan) return null;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "20px 22px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
+          <div style={{ ...FS.kicker, marginBottom: 0 }}>{plan.title || "AI-drafted plan"}</div>
+          <button style={{ ...FS.btn, padding: "6px 10px", flexShrink: 0 }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /> Close</button>
+        </div>
+        <Disclaimer S={S} compact dark />
+        <RichOutput S={S} text={plan.ai_text || ""} dark />
+      </div>
+    </div>
+  );
+}
+function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const canRunSignin = ["Department Admin", "Training Officer", "Project Admin"].includes(role);   // QR generate-gate (NOT Board Member, NOT Member)
   const memberView = !isLeader(role);
@@ -3091,6 +3109,12 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState("");
+  // AI training-plan drafter (Card 2) + ai_text viewer
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [dTopic, setDTopic] = useState(""); const [dCat, setDCat] = useState(""); const [dDur, setDDur] = useState("");
+  const [dSession, setDSession] = useState("");
+  const [dBusy, setDBusy] = useState(false); const [dErr, setDErr] = useState(""); const [dOut, setDOut] = useState("");
+  const [viewPlan, setViewPlan] = useState(null);
   async function toggleAttend(s, mid) {
     if (s.done) return;   // officer lock (UI also hides the control once done)
     const present = (s.attendance || []).includes(mid);
@@ -3206,6 +3230,27 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     if (plan.storage_path) { const { error: rmErr } = await supabase.storage.from("station-documents").remove([plan.storage_path]); if (rmErr) { notify({ kind: "error", title: "Couldn't remove the plan", text: "Please try again.", details: rmErr.message }); return; } }
     const { error } = await supabase.from("session_plans").delete().eq("id", plan.id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the plan", text: "The file was removed but its record wasn't.", details: error.message }); }
+    loadSessions();
+  }
+
+  async function draftPlan() {
+    if (!dTopic.trim()) { setDErr("Enter a topic to draft."); return; }
+    setDBusy(true); setDErr(""); setDOut("");
+    const sys = "You are helping a volunteer fire/EMS department's training officer draft a single training-session plan. Write a clear, practical DRAFT in plain text: a title; a one-line note to review/adapt to the department's AHJ, local protocols, and safety requirements; then sections — objectives, equipment/props, a time-boxed run of show (warm-up, instruction, hands-on drills, debrief), safety considerations, and how to evaluate competency. Realistic for a small volunteer crew. Under 450 words.";
+    const extra = `${dCat.trim() ? `\nCategory: ${dCat.trim()}` : ""}${dDur.trim() ? `\nTarget duration: ${dDur.trim()}` : ""}${dept?.name ? `\nDepartment: ${dept.name}` : ""}`;
+    try { const t = await callClaude(sys, `Training topic: ${dTopic.trim()}${extra}\nCrew size: ${members.length} members`); setDOut(t); }
+    catch { setDErr("Couldn't draft that just now. Try again in a moment."); } finally { setDBusy(false); }
+  }
+  async function attachAiPlan() {
+    const target = sessions.find((s) => String(s.id) === String(dSession));
+    if (!target) { setDErr("Pick a session to save this plan to."); return; }
+    if (!dOut.trim()) { setDErr("Draft a plan before saving."); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+    const { error } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: target.id, title: `${dTopic.trim()} — AI plan`, source: "ai", ai_text: dOut, created_by: me?.name || "Unknown" });
+    if (error) { notify({ kind: "error", title: "Couldn't save the plan", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Plan saved", text: `AI plan attached to ${target.title}.` });
+    setDraftOpen(false); setDTopic(""); setDCat(""); setDDur(""); setDSession(""); setDOut(""); setDErr("");
     loadSessions();
   }
 
@@ -3382,8 +3427,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const t0n = new Date(today); t0n.setHours(0, 0, 0, 0);
   const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort((a, b) => sessDate(a) - sessDate(b))[0];
   const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
-  // Card 2 — neither upload-to-session nor AI-draft is built; controls are honest about it
-  const comingSoon = (what) => notify({ title: "Coming soon", text: `${what} isn't available yet — it lands in an upcoming update.` });
 
   return (
     <div>
@@ -3420,8 +3463,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         <div style={Lcard}>
           <div style={Lkick}>TRAINING PLAN</div>
           <div style={{ marginTop: 12, fontSize: 12.5, color: "#B6BDC8", lineHeight: 1.5 }}>Attach a plan or syllabus to a specific session — use <b style={{ color: "#F0F2F5" }}>Attach plan</b> on any session in the calendar below.</div>
-          <button onClick={() => comingSoon("Draft with AI")} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> Draft with AI</button>
-          <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>AI plan drafting — coming soon.</div>
+          {canManage && <button onClick={() => setDraftOpen((v) => !v)} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> {draftOpen ? "Close drafter" : "Draft with AI"}</button>}
+          <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>Draft a session plan with AI, then attach it to a session.</div>
         </div>
 
         {/* Card 3 — next session (pure read of existing sessions) */}
@@ -3442,6 +3485,33 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         </div>
       </div>
 
+      {draftOpen && canManage && (
+        <div style={{ ...Lcard, marginBottom: 16 }}>
+          <div style={{ ...Lkick, marginBottom: 10 }}><Sparkles size={13} color={LbtnIcon} /> DRAFT A TRAINING PLAN</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ ...Lfield, flex: 1, minWidth: 180 }}><span style={LfieldLabel}>Topic / subject</span><input style={Linput} value={dTopic} placeholder="e.g. Ladder operations, EMS refresher" onChange={(e) => setDTopic(e.target.value)} /></label>
+            <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category (optional)</span><input style={Linput} value={dCat} placeholder="e.g. Suppression" onChange={(e) => setDCat(e.target.value)} /></label>
+            <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Duration (optional)</span><input style={Linput} value={dDur} placeholder="e.g. 2 hours" onChange={(e) => setDDur(e.target.value)} /></label>
+          </div>
+          <button style={{ ...LprimaryBtn, marginTop: 12, opacity: dBusy ? 0.7 : 1 }} onClick={draftPlan} disabled={dBusy}>{dBusy ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft plan</>}</button>
+          {dErr && <div style={{ marginTop: 10, fontSize: 13, color: "#E58A90" }}>{dErr}</div>}
+          {dOut && (
+            <div style={{ marginTop: 14 }}>
+              <Disclaimer S={S} compact dark />
+              <RichOutput S={S} text={dOut} dark />
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12, paddingTop: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <label style={{ ...Lfield, minWidth: 220 }}><span style={LfieldLabel}>Save to session</span>
+                  <select style={Linput} value={dSession} onChange={(e) => setDSession(e.target.value)}>
+                    <option value="">Choose a session…</option>
+                    {sessions.filter((s) => !s.done).sort((a, b) => sessDate(a) - sessDate(b)).map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)}</option>)}
+                  </select></label>
+                <button style={LprimaryBtn} onClick={attachAiPlan} disabled={!dSession}><FileText size={15} /> Save plan to session</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
         <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
@@ -3572,7 +3642,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}{p.kind === "ai" ? " · AI" : ""}</span>
                           {p.kind === "file"
                             ? <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => openPlan(p)}><FileText size={13} color={LbtnIcon} /> Open</button>
-                            : <span style={{ fontSize: 11, color: "#7E8794", padding: "5px 9px" }} title="AI-text plans get an in-app viewer in a later slice">View · soon</span>}
+                            : <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => setViewPlan(p)}><FileText size={13} color={LbtnIcon} /> View</button>}
                           {canManage && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color="#C8606A" /></button>}
                         </div>
                       ))}
