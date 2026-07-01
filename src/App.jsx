@@ -684,12 +684,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length;
   const expired = certsAll.filter((c) => c.st.rank === 0).length;
   const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
-  async function openPlan(plan) {
-    if (!plan?.storage_path) return;
-    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
-    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
-    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
-  }
   // ---- "Assigned to me" duties (self-contained; no App threading; existing read RLS) ----
   const [mine, setMine] = useState([]);
   function loadMine() {
@@ -708,7 +702,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
   const [nextEvent, setNextEvent] = useState(null);
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
-  const [viewPlan, setViewPlan] = useState(null);    // ai_text plan viewer (shared AiPlanViewer)
+  const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);
   const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
@@ -828,7 +822,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
         </div>
       </div>
 
-      {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
+      {mounts}
       {/* 3 — cards (3-up): My Certifications | Assigned Duties | Upcoming Training */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
         {/* My Certifications — count/status header (merged from old Certs-current stat) + list */}
@@ -917,7 +911,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
                   <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
                 </div>
-                {s.plan && <button onClick={() => openPlan(s.plan)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
+                {s.plan && <button onClick={() => openSessionPlans(s)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
               </div>
             ))}
           </div>
@@ -3426,6 +3420,30 @@ function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
     </div>
   );
 }
+// Shared plan-viewing: ONE scope-safe return — a consumer gets the handlers AND the mounts from the
+// same call, so it can't wire a click without also having the viewer mounted (the white-screen we hit).
+// AiPlanViewer + SessionPlanChooser stay module-level; the hook just renders them.
+function usePlanViewer(S, notify) {
+  const [viewPlan, setViewPlan] = useState(null);
+  const [chooserSession, setChooserSession] = useState(null);
+  async function openPlan(plan) {                                   // single FILE plan → signed URL (deduped from the 2 identical copies)
+    if (!plan?.storage_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
+    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
+  function openSessionPlans(s) {                                    // session-level: 0→toast, 1→open, N→chooser
+    const plans = s.plans || [];
+    if (plans.length === 0) { notify({ title: "No plan attached", text: "No plan is attached to this session yet." }); return; }
+    if (plans.length === 1) { const p = plans[0]; if (p.kind === "ai") setViewPlan(p); else openPlan(p); return; }
+    setChooserSession(s);
+  }
+  const mounts = (<>
+    {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
+    {chooserSession && <SessionPlanChooser S={S} session={chooserSession} onView={(p) => { setViewPlan(p); setChooserSession(null); }} onOpen={(p) => { openPlan(p); setChooserSession(null); }} onClose={() => setChooserSession(null)} />}
+  </>);
+  return { openSessionPlans, openPlan, setViewPlan, mounts };
+}
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept, addFeedback }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const canRunSignin = ["Department Admin", "Training Officer", "Project Admin"].includes(role);   // QR generate-gate (NOT Board Member, NOT Member)
@@ -3467,14 +3485,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [rCount, setRCount] = useState("26");           // N occurrences (defaults from cadence)
   // AI training-plan drafter (Card 2) + ai_text viewer
   const [draftOpen, setDraftOpen] = useState(false);
-  const [viewPlan, setViewPlan] = useState(null);
-  const [chooserSession, setChooserSession] = useState(null);   // N-plan chooser (calendar chip click)
-  function openSessionPlans(s) {   // calendar chip click → view the session's attached plan(s)
-    const plans = s.plans || [];
-    if (plans.length === 0) { notify({ title: "No plan attached", text: "No plan is attached to this session yet." }); return; }
-    if (plans.length === 1) { const p = plans[0]; if (p.kind === "ai") setViewPlan(p); else openPlan(p); return; }
-    setChooserSession(s);   // multiple → chooser
-  }
+  const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);
   async function toggleAttend(s, mid) {
     if (s.done) return;   // officer lock (UI also hides the control once done)
     const present = (s.attendance || []).includes(mid);
@@ -3620,12 +3631,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     notify({ kind: "success", title: "Plan attached", text: `"${file.name}" was attached to ${s.title}.` });
     loadSessions();
   }
-  async function openPlan(plan) {
-    if (!plan?.storage_path) return;
-    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
-    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
-    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
-  }
   async function detachPlan(plan) {
     if (!plan?.id) return;
     if (!window.confirm(`Remove the attached plan “${plan.title}”?`)) return;
@@ -3675,8 +3680,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
     return (
       <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-        {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
-        {chooserSession && <SessionPlanChooser S={S} session={chooserSession} onView={(p) => { setViewPlan(p); setChooserSession(null); }} onOpen={(p) => { openPlan(p); setChooserSession(null); }} onClose={() => setChooserSession(null)} />}
+        {mounts}
         {/* 1 — header */}
         <div style={{ marginBottom: 18 }}>
           <div style={kick}>MY TRAINING</div>
@@ -3849,8 +3853,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       </div>
 
       {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} />}
-      {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
-      {chooserSession && <SessionPlanChooser S={S} session={chooserSession} onView={(p) => { setViewPlan(p); setChooserSession(null); }} onOpen={(p) => { openPlan(p); setChooserSession(null); }} onClose={() => setChooserSession(null)} />}
+      {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
         <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
