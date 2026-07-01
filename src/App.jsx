@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
-  Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, XCircle, Clock,
+  Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
   ThumbsUp, ThumbsDown, Pencil, MessageSquare,
   FolderOpen, Upload, FilePlus, PartyPopper,
@@ -581,13 +581,21 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   // ---- derived (lifted from the member Training branch; no new query/RLS) ----
   const today = new Date();
   const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
-  const since90 = new Date(t0); since90.setDate(since90.getDate() - 90);
-  const inWindow = (s) => { const d = sessDate(s); return d >= since90 && d <= today; };
-  const recorded = sess.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s));
-  const totalRecorded = recorded.length;
-  const attendedCount = me ? recorded.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
-  const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
-  const hasAtt = totalRecorded > 0;
+  // per-CALENDAR-MONTH attendance rate for this member (null when a month has no recorded drills)
+  const monthRate = (Y, M) => {
+    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M);
+    if (!rec.length) return null;
+    const att = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
+    return { total: rec.length, attended: att, pct: Math.round((att / rec.length) * 100) };
+  };
+  const thisMonth = monthRate(today.getFullYear(), today.getMonth());
+  const pM = today.getMonth() === 0 ? 11 : today.getMonth() - 1;
+  const pY = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
+  const lastMonth = monthRate(pY, pM);
+  const ringPct = thisMonth ? thisMonth.pct : 0;                                    // 0–100; only drawn as fill when hasThisMonth
+  const hasThisMonth = !!thisMonth;                                                 // this month has ≥1 recorded drill
+  const trend = (thisMonth && lastMonth) ? thisMonth.pct - lastMonth.pct : null;    // only when BOTH months have data
+  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;                                 // ring geometry (circumference for stroke-dash)
   const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
   const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
@@ -596,7 +604,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length;
   const expired = certsAll.filter((c) => c.st.rank === 0).length;
   const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
-  const dots = [...recorded].sort((a, b) => sessDate(a) - sessDate(b)).map((s) => ({ present: (s.attendance || []).includes(me?.id), date: sessDate(s) }));   // one per recorded drill, oldest→newest — same `recorded` the % uses
   async function openPlan(plan) {
     if (!plan?.storage_path) return;
     const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
@@ -621,6 +628,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
   const [nextEvent, setNextEvent] = useState(null);
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
+  const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
     Promise.all([
@@ -640,6 +648,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
     });
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
+  useEffect(() => { const id = setTimeout(() => setRingOn(true), 50); return () => clearTimeout(id); }, [ringPct]);   // animate ring fill on load / when the rate changes
   // Get prepared: a Training next-event's attachments come from the already-loaded sessions prop (s.plans[] from slice 1) — no extra query.
   const nextSession = nextEvent?.type === "Training" ? sess.find((x) => String(x.id) === String(nextEvent.id)) : null;
   const nextPlans = nextSession?.plans || [];
@@ -653,30 +662,43 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
       </div>
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginBottom: 14 }}>
-        {/* merged: 90-day attendance | this-month trainings, + attendance dots */}
+        {/* attendance ring (per-CALENDAR-MONTH rate) + supporting stats; muted "No drills yet" state, not a red 0% */}
         <div style={{ ...FS.card, padding: "14px 16px" }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>ATTENDANCE & TRAINING THIS MONTH</div>
-          <div style={{ display: "flex", gap: 16, marginTop: 8, alignItems: "stretch" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{hasAtt ? `${pct}%` : "—"}</div>
-              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{hasAtt ? `${attendedCount} of ${totalRecorded} drills · 90 days` : "No record yet"}</div>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>ATTENDANCE</div>
+          <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center" }}>
+            <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
+              <svg width="84" height="84" viewBox="0 0 84 84">
+                <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
+                {hasThisMonth && (
+                  <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.redBright} strokeWidth="7" strokeLinecap="round"
+                    strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - ringPct / 100) : RING_C}
+                    transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
+                )}
+              </svg>
+              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                {hasThisMonth ? (
+                  <>
+                    <div style={{ fontSize: 21, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{ringPct}%</div>
+                    <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>this month</div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: FIRE.textMuted, textAlign: "center", lineHeight: 1.2, padding: "0 8px" }}>No drills yet</div>
+                )}
+              </div>
             </div>
-            <div style={{ width: 1, background: FIRE.hairline }} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{trainingsThisMonth}</div>
-              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>scheduled · {TRAIN_MONTHS[today.getMonth()]}</div>
+              {hasThisMonth
+                ? <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{thisMonth.attended} of {thisMonth.total} drills</div>
+                : <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No drills recorded this month</div>}
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{trainingsThisMonth} scheduled · {TRAIN_MONTHS[today.getMonth()]}</div>
+              {trend != null && (() => {
+                const up = trend > 0, down = trend < 0;
+                const color = up ? FIRE.greenText : down ? FIRE.redText : FIRE.textMuted2;
+                const label = up ? `↑ up from ${lastMonth.pct}% last month` : down ? `↓ down from ${lastMonth.pct}% last month` : `→ level with last month (${lastMonth.pct}%)`;
+                return <div style={{ fontSize: 11.5, fontWeight: 700, marginTop: 7, color }}>{label}</div>;
+              })()}
             </div>
           </div>
-          {dots.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 10 }}>
-              {dots.map((d, i) => {
-                const t = d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                return d.present
-                  ? <CheckCircle2 key={i} size={13} color={FIRE.green} title={`${t} — present`} />
-                  : <XCircle key={i} size={13} color={FIRE.red} title={`${t} — missed`} />;
-              })}
-            </div>
-          )}
         </div>
         {/* next event: soonest across all 4 calendar sources; "Get prepared" surfaces a Training's attachments (members read-only) */}
         <div style={{ ...FS.card, padding: "14px 16px" }}>
