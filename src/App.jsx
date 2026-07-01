@@ -2119,6 +2119,7 @@ const APPARATUS_SEED = [
 // current year-month index (1-indexed month, matches "YYYY-MM" cert expiry) — real "today"; replaces the old hardcoded June-2026 baseline
 function nowYM() { const d = new Date(); return d.getFullYear() * 12 + (d.getMonth() + 1); }
 function certStatus(exp) {
+  // Cert-status rule is ALSO replicated in SQL dept_cert_readiness() — keep in lockstep (≤3mo = EXPIRING).
   if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };
   const [y, m] = exp.split("-").map(Number);
   const diff = (y * 12 + m) - nowYM();
