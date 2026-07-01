@@ -709,6 +709,13 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const [nextEvent, setNextEvent] = useState(null);
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
   const [viewPlan, setViewPlan] = useState(null);    // ai_text plan viewer (shared AiPlanViewer)
+  const [chooserSession, setChooserSession] = useState(null);   // N-plan chooser (calendar chip click)
+  function openSessionPlans(s) {   // calendar chip click → view the session's attached plan(s)
+    const plans = s.plans || [];
+    if (plans.length === 0) { notify({ title: "No plan attached", text: "No plan is attached to this session yet." }); return; }
+    if (plans.length === 1) { const p = plans[0]; if (p.kind === "ai") setViewPlan(p); else openPlan(p); return; }
+    setChooserSession(s);   // multiple → chooser
+  }
   const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
@@ -3402,6 +3409,30 @@ function AiPlanViewer({ S, plan, onClose }) {
     </div>
   );
 }
+// N-plan chooser: lists a session's attached plans with the same View(ai)/Open(file) buttons the session list uses. Reused by member + leader Training.
+function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
+  if (!session) return null;
+  const plans = session.plans || [];
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 520, width: "100%", padding: "18px 20px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
+          <div style={{ ...FS.kicker, marginBottom: 0 }}>{session.title} — PLANS ({plans.length})</div>
+          <button style={{ ...FS.btn, padding: "6px 10px", flexShrink: 0 }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /></button>
+        </div>
+        {plans.map((p) => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <FileText size={14} color={p.kind === "ai" ? FIRE.amberText : FIRE.btnIcon} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}{p.kind === "ai" ? " · AI" : ""}</span>
+            {p.kind === "ai"
+              ? <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => onView(p)}>View</button>
+              : <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => onOpen(p)}>Open</button>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept, addFeedback }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const canRunSignin = ["Department Admin", "Training Officer", "Project Admin"].includes(role);   // QR generate-gate (NOT Board Member, NOT Member)
@@ -3636,7 +3667,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         return "#" + to2(Math.round(r + (tr - r) * tt)) + to2(Math.round(g + (tg - g) * tt)) + to2(Math.round(b + (tb - b) * tt));
       };
       const color = s.done ? mix(base, 0.45) : base;
-      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
+      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
     };
 
     const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
@@ -3645,6 +3676,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
     return (
       <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+        {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
+        {chooserSession && <SessionPlanChooser S={S} session={chooserSession} onView={(p) => { setViewPlan(p); setChooserSession(null); }} onOpen={(p) => { openPlan(p); setChooserSession(null); }} onClose={() => setChooserSession(null)} />}
         {/* 1 — header */}
         <div style={{ marginBottom: 18 }}>
           <div style={kick}>MY TRAINING</div>
@@ -3837,6 +3870,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
       {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} />}
       {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
+      {chooserSession && <SessionPlanChooser S={S} session={chooserSession} onView={(p) => { setViewPlan(p); setChooserSession(null); }} onOpen={(p) => { openPlan(p); setChooserSession(null); }} onClose={() => setChooserSession(null)} />}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
         <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
@@ -3936,7 +3970,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
               };
               const color = s.done ? mix(base, 0.45) : base;
-              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}` };
+              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
             }}
             todayColor="#C8323A"
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
