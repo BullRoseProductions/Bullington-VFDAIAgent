@@ -574,17 +574,6 @@ function QuickAccess({ S, role, go }) {
 }
 
 /* ---------------- Member dashboard (personal view) ---------------- */
-/* FS-based stat box (NEW — does not touch the shared <Stat>) */
-function FireStat({ label, value, sub, subColor, extra }) {
-  return (
-    <div style={{ ...FS.card, padding: "14px 16px" }}>
-      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: subColor || FIRE.textMuted, marginTop: 2 }}>{sub}</div>}
-      {extra}
-    </div>
-  );
-}
 function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
@@ -631,16 +620,17 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
   }
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
   const [nextEvent, setNextEvent] = useState(null);
+  const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
   useEffect(() => {
     const todayIso = toISO(today);
     Promise.all([
-      supabase.from("training_sessions").select("title, date"),
+      supabase.from("training_sessions").select("id, title, date"),
       supabase.from("funding_events").select("title, date"),
       supabase.from("recruitment_events").select("title, date"),
       supabase.from("content_calendar").select("caption, date"),
     ]).then(([tr, fu, rc, so]) => {
       const rows = [
-        ...(tr.data || []).map((r) => ({ title: r.title, date: r.date, type: "Training" })),
+        ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, type: "Training" })),
         ...(fu.data || []).map((r) => ({ title: r.title, date: r.date, type: "Fundraiser" })),
         ...(rc.data || []).map((r) => ({ title: r.title, date: r.date, type: "Recruitment" })),
         ...(so.data || []).map((r) => ({ title: r.caption, date: r.date, type: "Social" })),
@@ -650,6 +640,9 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
     });
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
+  // Get prepared: a Training next-event's attachments come from the already-loaded sessions prop (s.plans[] from slice 1) — no extra query.
+  const nextSession = nextEvent?.type === "Training" ? sess.find((x) => String(x.id) === String(nextEvent.id)) : null;
+  const nextPlans = nextSession?.plans || [];
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {/* 1 — greeting */}
@@ -685,13 +678,44 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify }) {
             </div>
           )}
         </div>
-        {/* next event: soonest across all 4 calendar sources (FireStat reused) */}
-        <FireStat
-          label="NEXT EVENT"
-          value={nextEvent ? new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
-          sub={nextEvent ? (nextEvent.title || "—") : "Nothing scheduled"}
-          extra={nextEvent ? <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}</div> : null}
-        />
+        {/* next event: soonest across all 4 calendar sources; "Get prepared" surfaces a Training's attachments (members read-only) */}
+        <div style={{ ...FS.card, padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT EVENT</div>
+              {nextEvent ? (
+                <>
+                  <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                  <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nextEvent.title || "—"}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}</div>
+                </>
+              ) : (
+                <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 10 }}>Nothing scheduled</div>
+              )}
+            </div>
+            {nextPlans.length > 0 && (
+              <button
+                onClick={() => { if (nextPlans.length === 1 && nextPlans[0].kind === "file") openPlan(nextPlans[0]); else setPrepOpen((v) => !v); }}
+                style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, flexShrink: 0, whiteSpace: "nowrap" }}
+              >
+                <FileText size={13} color={FIRE.btnIcon} /> Get prepared{nextPlans.length > 1 ? ` (${nextPlans.length})` : ""}
+              </button>
+            )}
+          </div>
+          {prepOpen && nextPlans.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              {nextPlans.map((p) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+                  <FileText size={13} color={p.kind === "ai" ? FIRE.amberText : FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: FIRE.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}</span>
+                  {p.kind === "file"
+                    ? <button onClick={() => openPlan(p)} style={{ ...FS.btn, padding: "4px 8px", fontSize: 11.5, flexShrink: 0 }}>Open</button>
+                    : <span style={{ fontSize: 11, color: FIRE.textMuted, flexShrink: 0 }} title="AI-text plans get an in-app viewer in a later slice">View · soon</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 3 — cards (3-up): My Certifications | Assigned Duties | Upcoming Training */}
