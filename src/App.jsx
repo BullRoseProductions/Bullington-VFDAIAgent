@@ -2241,15 +2241,57 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
     </div>
   );
 }
+// "YYYY-MM-DD" -> "Mar 14, 2021" (parsed from parts — no Date()/timezone drift)
+function fmtLongDate(iso) {
+  if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1]} ${d}, ${y}`;
+}
 function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
   const assign = canAssign(role);
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [editingCertId, setEditingCertId] = useState(null);
   const [draft, setDraft] = useState({ name: "", exp: "" });
+  const [priv, setPriv] = useState(null);        // member_private (birthday/address/joined_date) — DA/PA only
+  const [notes, setNotes] = useState([]);        // member_notes rows — DA/PA only (RLS-gated)
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
-  const notes = member.notes || [];
-  function addNote() { if (!note.trim()) return; onUpdate({ ...member, notes: [{ text: note.trim(), by: role, when: "Just now" }, ...notes] }); setNote(""); }
+  useEffect(() => {                              // load DA/PA-only data; Board/TO skip (RLS would return nothing anyway)
+    if (!assign) return;
+    let alive = true;
+    supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
+      .then(({ data }) => { if (alive) setPriv(data || {}); });
+    supabase.from("member_notes").select("text, by, created_at").eq("member_id", member.id).order("created_at", { ascending: false })
+      .then(({ data }) => { if (alive) setNotes(data || []); });
+    return () => { alive = false; };
+  }, [member.id, assign]);
+  function startEditForm() {
+    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: member.access || "Member", role: member.role || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "" });
+    setEditing(true);
+  }
+  async function saveMember() {
+    setSaving(true);
+    const jd = form.joined_date || null;
+    const joinedYear = jd ? jd.slice(0, 4) : member.joined;   // keep member-visible "since [year]" in sync
+    const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear }).eq("id", member.id);
+    if (e1) { setSaving(false); notify({ kind: "error", title: "Couldn't save the member", text: "Something went wrong saving those changes. Please try again.", details: e1.message }); return; }
+    const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: member.department_id, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
+    if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
+    setSaving(false);
+    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear });
+    setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
+    setEditing(false);
+    notify({ kind: "success", text: "Member updated." });
+  }
+  async function addNote() {
+    const t = note.trim(); if (!t) return;
+    const { data, error } = await supabase.from("member_notes").insert({ member_id: member.id, department_id: member.department_id, text: t, by: role }).select("text, by, created_at").single();
+    if (error || !data) { notify({ kind: "error", title: "Couldn't add the note", text: "Something went wrong. Please try again.", details: error?.message }); return; }
+    setNotes((ns) => [data, ...ns]); setNote("");
+  }
   async function removeCert(c) {
     if (!window.confirm("Remove this certification? This cannot be undone.")) return;
     setBusyId(c.id);
@@ -2295,13 +2337,46 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation == null ? "—" : `${member.participation}%`}</span></div>
           {member.participation != null && <Bar S={S} pct={member.participation} track={FIRE.track} color={member.participation >= 75 ? FIRE.green : member.participation >= 50 ? FIRE.amberText : FIRE.redText} />}
         </div>
-        {assign && (
+        {assign && !editing && (
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
-            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station role &amp; access</span>
-              <select style={{ ...FS.input, maxWidth: 260 }} value={member.access} onChange={(e) => onUpdate({ ...member, access: e.target.value })}>
-                <option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option>
-              </select></label>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5 }}>Sets what this person can see and do across the platform.</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={FS.kicker}>PROFILE · LEADERSHIP ONLY</div>
+              <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={startEditForm}>Edit member</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px 18px" }}>
+              {[
+                ["Access", member.access || "—"],
+                ["Email", member.email || "—"],
+                ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
+                ["Birthday", fmtLongDate(priv?.birthday) || "—"],
+                ["Address", priv?.address || "—"],
+              ].map(([l, v]) => (
+                <div key={l}>
+                  <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted2, fontWeight: 700 }}>{l}</div>
+                  <div style={{ fontSize: 13, color: FIRE.textSecondary, wordBreak: "break-word" }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {assign && editing && (
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ ...FS.kicker, marginBottom: 10 }}>EDIT MEMBER</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station role</span><input style={FS.input} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} placeholder="Firefighter" /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}><option>Active</option><option>Probationary</option><option>Inactive</option></select></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Access</span><select style={FS.input} value={form.access} onChange={(e) => setForm((f) => ({ ...f, access: e.target.value }))}><option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option></select></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Joined (date)</span><input type="date" style={FS.input} value={form.joined_date || ""} onChange={(e) => setForm((f) => ({ ...f, joined_date: e.target.value }))} /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
+              <label style={{ ...S.field, gridColumn: "1 / -1" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>
+            </div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "8px 0 12px" }}>Email ({member.email || "none"}) is the login identity — it can't be changed here. Access changes take effect on their next sign-in.</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={FS.btnPrimary} disabled={saving} onClick={saveMember}>{saving ? "Saving…" : "Save changes"}</button>
+              <button style={FS.btn} disabled={saving} onClick={() => setEditing(false)}>Cancel</button>
+            </div>
           </div>
         )}
       </div>
@@ -2356,7 +2431,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
         );
       })()}
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — LEADERSHIP ONLY</div>
+      {assign && (<>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — DEPT ADMINS ONLY</div>
       <div style={{ ...S.opCard, ...FS.card }}>
         <div style={{ display: "flex", gap: 8, marginBottom: notes.length ? 14 : 0 }}>
           <input style={{ ...FS.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
@@ -2364,11 +2440,12 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify }) {
         </div>
         {notes.map((n, i) => (
           <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{n.by} · {n.when}</div></div>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{n.by} · {fmtLongDate((n.created_at || "").slice(0, 10)) || "recent"}</div></div>
           </div>
         ))}
-        {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to leadership only — never to the member.</div>}
+        {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to department admins only — never to the member.</div>}
       </div>
+      </>)}
     </div>
   );
 }
