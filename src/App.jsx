@@ -1107,10 +1107,12 @@ function serializeDrillPlan(plan, topic) {
   sec("Evaluation checklist", plan.evaluationChecklist);
   return L.join("\n");
 }
-function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me }) {
+function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories }) {
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
+  const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);   // training_sessions INSERT gate (excludes PA)
+  const [newDate, setNewDate] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null);
@@ -1134,6 +1136,24 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
     if (error) { notify({ kind: "error", title: "Couldn't save the plan", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     notify({ kind: "success", title: "Plan saved", text: `Drill plan attached to ${target.title}.` });
     setSaveSession(""); loadSessions && loadSessions();
+  }
+  async function scheduleOnDate() {
+    if (!newDate) { notify({ kind: "error", title: "Pick a date", text: "Choose a date to schedule this training." }); return; }
+    if (!plan) return;
+    setSaving(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const title = newTitle.trim() || `${form.topic} — AI drill plan`;
+    // a) create the session on the picked date (reuses addSession's insert shape; the type=date value is already YYYY-MM-DD)
+    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, done: false }).select().single();
+    if (e1 || !sess) { setSaving(false); notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong creating that session. Please try again.", details: e1?.message }); return; }
+    // b) attach the plan to the new session (reuses saveToSession's attach). Non-atomic — recoverable if this fails.
+    const { error: e2 } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: sess.id, title, source: "ai", ai_text: serializeDrillPlan(plan, form.topic), created_by: me?.name || "Unknown" });
+    setSaving(false);
+    if (e2) { notify({ kind: "error", title: "Session created — plan didn't attach", text: "The session was scheduled, but attaching the plan failed. You can attach it from the planner's session picker.", details: e2.message }); loadSessions && loadSessions(); return; }
+    notify({ kind: "success", title: "Scheduled", text: `Training scheduled on ${newDate} with its plan.` });
+    setNewDate(""); setNewTitle(""); setNewCat("");
+    loadSessions && loadSessions();
   }
   return (
     <div style={{ ...FS.card, padding: 16, marginBottom: 16 }}>
@@ -1184,6 +1204,15 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                   </select></label>
                 <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveToSession} disabled={!saveSession || saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save plan to session</>}</button>
               </div>
+              {canManage && (
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
+                  <div style={{ width: "100%", fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>— or schedule on a new date —</div>
+                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input type="date" style={FS.input} value={newDate} onChange={(e) => setNewDate(e.target.value)} /></label>
+                  <label style={{ ...S.field, minWidth: 150, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={form.topic} /></label>
+                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={newCat} onChange={(e) => setNewCat(e.target.value)}><option value="">One-off (no category)</option>{(categories || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+                  <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={scheduleOnDate} disabled={!newDate || saving}>{saving ? <><Loader2 size={16} className="spin" /> Scheduling…</> : <><Plus size={16} /> Schedule on date</>}</button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3806,7 +3835,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         </div>
       </div>
 
-      {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} />}
+      {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} />}
       {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
