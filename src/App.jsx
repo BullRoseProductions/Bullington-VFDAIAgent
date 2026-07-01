@@ -709,13 +709,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const [nextEvent, setNextEvent] = useState(null);
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
   const [viewPlan, setViewPlan] = useState(null);    // ai_text plan viewer (shared AiPlanViewer)
-  const [chooserSession, setChooserSession] = useState(null);   // N-plan chooser (calendar chip click)
-  function openSessionPlans(s) {   // calendar chip click → view the session's attached plan(s)
-    const plans = s.plans || [];
-    if (plans.length === 0) { notify({ title: "No plan attached", text: "No plan is attached to this session yet." }); return; }
-    if (plans.length === 1) { const p = plans[0]; if (p.kind === "ai") setViewPlan(p); else openPlan(p); return; }
-    setChooserSession(s);   // multiple → chooser
-  }
   const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
@@ -3475,6 +3468,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   // AI training-plan drafter (Card 2) + ai_text viewer
   const [draftOpen, setDraftOpen] = useState(false);
   const [viewPlan, setViewPlan] = useState(null);
+  const [chooserSession, setChooserSession] = useState(null);   // N-plan chooser (calendar chip click)
+  function openSessionPlans(s) {   // calendar chip click → view the session's attached plan(s)
+    const plans = s.plans || [];
+    if (plans.length === 0) { notify({ title: "No plan attached", text: "No plan is attached to this session yet." }); return; }
+    if (plans.length === 1) { const p = plans[0]; if (p.kind === "ai") setViewPlan(p); else openPlan(p); return; }
+    setChooserSession(s);   // multiple → chooser
+  }
   async function toggleAttend(s, mid) {
     if (s.done) return;   // officer lock (UI also hides the control once done)
     const present = (s.attendance || []).includes(mid);
