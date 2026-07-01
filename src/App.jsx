@@ -166,7 +166,6 @@ const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
-  { key: "ai", label: "AI Training Assistant", Icon: Sparkles, roles: ["Project Admin", "Department Admin", "Training Officer"], premium: true },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
@@ -219,6 +218,7 @@ export default function App() {
   const [myMemberId, setMyMemberId] = useState(null);
   const [identityChecked, setIdentityChecked] = useState(false);
   const [screen, setScreen] = useState("dashboard");
+  useEffect(() => { if (screen === "ai") setScreen("training"); }, [screen]);   // retired AI Training page → redirect any stale deep-link
   const [packetId, setPacketId] = useState(null);
   const [drawer, setDrawer] = useState(false);
   const [library, setLibrary] = useState(SEED);
@@ -435,10 +435,9 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} dept={dept} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
-          {screen === "ai" && <AIAssistant S={S} addFeedback={addFeedback} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} />}
@@ -506,7 +505,7 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
             <div key={i} style={{ ...S.logRow, borderBottom: `0.5px solid ${FIRE.hairline}`, color: FIRE.textSecondary }}><span style={{ ...S.logTime, color: FIRE.textMuted }}>{a.when}</span>
               <span style={S.logText}><strong style={{ color: FIRE.textPrimary }}>{a.who}</strong> {a.action} <span style={{ ...S.logCode, color: FIRE.textMuted }}>{a.code}</span></span></div>
           ))}
-          <button style={FS.btn} onClick={() => go("ai")}><Sparkles size={15} /> Draft a drill with AI</button>
+          <button style={FS.btn} onClick={() => go("training")}><Sparkles size={15} /> Draft a drill with AI</button>
         </div>
       </div>
 
@@ -1028,27 +1027,52 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
 }
 
 /* ---------------- AI Training Assistant ---------------- */
-function AIAssistant({ S, addFeedback }) {
+// structured drill plan → RichOutput-friendly text (## headings, - bullets, 1. ordered) — full plan, nothing dropped
+function serializeDrillPlan(plan, topic) {
+  const L = [`## ${topic || "Drill"} — Drill Plan`];
+  if (plan.summary) L.push("", plan.summary);
+  if (plan.durationMin) L.push("", `Duration: ${plan.durationMin} minutes`);
+  const sec = (title, items) => { if (Array.isArray(items) && items.length) L.push("", `## ${title}`, ...items.map((i) => `- ${i}`)); };
+  sec("Safety notes", plan.safetyNotes);
+  sec("Equipment", plan.equipment);
+  if (Array.isArray(plan.steps) && plan.steps.length) { L.push("", "## Drill steps"); plan.steps.forEach((s, i) => L.push(`${i + 1}. **${s.title}**${s.minutes ? ` (${s.minutes} min)` : ""}${s.detail ? ` — ${s.detail}` : ""}`)); }
+  sec("Instructor talking points", plan.talkingPoints);
+  sec("Debrief questions", plan.debriefQuestions);
+  sec("Evaluation checklist", plan.evaluationChecklist);
+  return L.join("\n");
+}
+function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me }) {
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
+  const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null);
     const sys = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"detail\":string,\"minutes\":number}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Realistic for the stated staffing and apparatus.";
-    const user = `Department size: ${form.size} members\nApparatus/equipment: ${form.apparatus}\nTopic: ${form.topic}\nSkill level: ${form.level}\nTime: ${form.time} minutes\nRecent history: ${form.history}`;
+    const user = `${dept?.name ? `Department: ${dept.name}\n` : ""}Department size: ${form.size} members\nApparatus/equipment: ${form.apparatus}\nTopic: ${form.topic}\nSkill level: ${form.level}\nTime: ${form.time} minutes\nRecent history: ${form.history}`;
     try {
       let t = (await callClaude(sys, user)).replace(/```json|```/g, "").trim();
       let parsed; try { parsed = JSON.parse(t); } catch { const m = t.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : null; }
       if (!parsed) throw new Error("parse"); setPlan(parsed); setGenId((g) => g + 1);
     } catch { setErr("Couldn't generate a plan just now. Check the connection and try again."); } finally { setLoading(false); }
   }
+  async function saveToSession() {
+    const target = (sessions || []).find((s) => String(s.id) === String(saveSession));
+    if (!target) { notify({ kind: "error", title: "Pick a session", text: "Choose which session to attach this plan to." }); return; }
+    if (!plan) return;
+    setSaving(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const { error } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: target.id, title: `${form.topic} — AI drill plan`, source: "ai", ai_text: serializeDrillPlan(plan, form.topic), created_by: me?.name || "Unknown" });
+    setSaving(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the plan", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Plan saved", text: `Drill plan attached to ${target.title}.` });
+    setSaveSession(""); loadSessions && loadSessions();
+  }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>AI TRAINING ASSISTANT</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Draft a drill plan</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Describe your crew and constraints. You'll get a starting plan to adapt — then review it against your protocols.</div>
-      </div>
+    <div style={{ ...FS.card, padding: 16, marginBottom: 16 }}>
+      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><Sparkles size={13} color={FIRE.btnIcon} /> AI DRILL PLANNER</div>
+      <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>Describe your crew and constraints — you'll get a structured drill plan to adapt, then save it to a session.</div>
       <div style={S.aiGrid}>
         <div style={{ ...S.aiForm, ...FS.card }}>
           <AIField S={S} dark label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
@@ -1086,6 +1110,14 @@ function AIAssistant({ S, addFeedback }) {
               <AIList S={S} dark Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
               <AIList S={S} dark Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
               <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save to session</span>
+                  <select style={FS.input} value={saveSession} onChange={(e) => setSaveSession(e.target.value)}>
+                    <option value="">Choose a session…</option>
+                    {(sessions || []).filter((s) => !s.done).sort((a, b) => sessDate(a) - sessDate(b)).map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)}</option>)}
+                  </select></label>
+                <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveToSession} disabled={!saveSession || saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save plan to session</>}</button>
+              </div>
             </div>
           )}
         </div>
@@ -3074,9 +3106,10 @@ function AiPlanViewer({ S, plan, onClose }) {
     </div>
   );
 }
-function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept }) {
+function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept, addFeedback }) {
   const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
   const canRunSignin = ["Department Admin", "Training Officer", "Project Admin"].includes(role);   // QR generate-gate (NOT Board Member, NOT Member)
+  const canPlanAI = ["Project Admin", "Department Admin", "Training Officer"].includes(role);   // AI drill planner — same PA/DA/TO set as the retired standalone AI page (NOT canManage: excludes Board, includes PA)
   const memberView = !isLeader(role);
   const today = new Date();
   const me = members.find((m) => m.id === meId);
@@ -3111,9 +3144,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [stitle, setStitle] = useState("");
   // AI training-plan drafter (Card 2) + ai_text viewer
   const [draftOpen, setDraftOpen] = useState(false);
-  const [dTopic, setDTopic] = useState(""); const [dCat, setDCat] = useState(""); const [dDur, setDDur] = useState("");
-  const [dSession, setDSession] = useState("");
-  const [dBusy, setDBusy] = useState(false); const [dErr, setDErr] = useState(""); const [dOut, setDOut] = useState("");
   const [viewPlan, setViewPlan] = useState(null);
   async function toggleAttend(s, mid) {
     if (s.done) return;   // officer lock (UI also hides the control once done)
@@ -3230,27 +3260,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     if (plan.storage_path) { const { error: rmErr } = await supabase.storage.from("station-documents").remove([plan.storage_path]); if (rmErr) { notify({ kind: "error", title: "Couldn't remove the plan", text: "Please try again.", details: rmErr.message }); return; } }
     const { error } = await supabase.from("session_plans").delete().eq("id", plan.id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the plan", text: "The file was removed but its record wasn't.", details: error.message }); }
-    loadSessions();
-  }
-
-  async function draftPlan() {
-    if (!dTopic.trim()) { setDErr("Enter a topic to draft."); return; }
-    setDBusy(true); setDErr(""); setDOut("");
-    const sys = "You are helping a volunteer fire/EMS department's training officer draft a single training-session plan. Write a clear, practical DRAFT in plain text: a title; a one-line note to review/adapt to the department's AHJ, local protocols, and safety requirements; then sections — objectives, equipment/props, a time-boxed run of show (warm-up, instruction, hands-on drills, debrief), safety considerations, and how to evaluate competency. Realistic for a small volunteer crew. Under 450 words.";
-    const extra = `${dCat.trim() ? `\nCategory: ${dCat.trim()}` : ""}${dDur.trim() ? `\nTarget duration: ${dDur.trim()}` : ""}${dept?.name ? `\nDepartment: ${dept.name}` : ""}`;
-    try { const t = await callClaude(sys, `Training topic: ${dTopic.trim()}${extra}\nCrew size: ${members.length} members`); setDOut(t); }
-    catch { setDErr("Couldn't draft that just now. Try again in a moment."); } finally { setDBusy(false); }
-  }
-  async function attachAiPlan() {
-    const target = sessions.find((s) => String(s.id) === String(dSession));
-    if (!target) { setDErr("Pick a session to save this plan to."); return; }
-    if (!dOut.trim()) { setDErr("Draft a plan before saving."); return; }
-    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
-    const { error } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: target.id, title: `${dTopic.trim()} — AI plan`, source: "ai", ai_text: dOut, created_by: me?.name || "Unknown" });
-    if (error) { notify({ kind: "error", title: "Couldn't save the plan", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    notify({ kind: "success", title: "Plan saved", text: `AI plan attached to ${target.title}.` });
-    setDraftOpen(false); setDTopic(""); setDCat(""); setDDur(""); setDSession(""); setDOut(""); setDErr("");
     loadSessions();
   }
 
@@ -3463,7 +3472,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         <div style={Lcard}>
           <div style={Lkick}>TRAINING PLAN</div>
           <div style={{ marginTop: 12, fontSize: 12.5, color: "#B6BDC8", lineHeight: 1.5 }}>Attach a plan or syllabus to a specific session — use <b style={{ color: "#F0F2F5" }}>Attach plan</b> on any session in the calendar below.</div>
-          {canManage && <button onClick={() => setDraftOpen((v) => !v)} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> {draftOpen ? "Close drafter" : "Draft with AI"}</button>}
+          {canPlanAI && <button onClick={() => setDraftOpen((v) => !v)} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
           <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>Draft a session plan with AI, then attach it to a session.</div>
         </div>
 
@@ -3485,32 +3494,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         </div>
       </div>
 
-      {draftOpen && canManage && (
-        <div style={{ ...Lcard, marginBottom: 16 }}>
-          <div style={{ ...Lkick, marginBottom: 10 }}><Sparkles size={13} color={LbtnIcon} /> DRAFT A TRAINING PLAN</div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <label style={{ ...Lfield, flex: 1, minWidth: 180 }}><span style={LfieldLabel}>Topic / subject</span><input style={Linput} value={dTopic} placeholder="e.g. Ladder operations, EMS refresher" onChange={(e) => setDTopic(e.target.value)} /></label>
-            <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category (optional)</span><input style={Linput} value={dCat} placeholder="e.g. Suppression" onChange={(e) => setDCat(e.target.value)} /></label>
-            <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Duration (optional)</span><input style={Linput} value={dDur} placeholder="e.g. 2 hours" onChange={(e) => setDDur(e.target.value)} /></label>
-          </div>
-          <button style={{ ...LprimaryBtn, marginTop: 12, opacity: dBusy ? 0.7 : 1 }} onClick={draftPlan} disabled={dBusy}>{dBusy ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft plan</>}</button>
-          {dErr && <div style={{ marginTop: 10, fontSize: 13, color: "#E58A90" }}>{dErr}</div>}
-          {dOut && (
-            <div style={{ marginTop: 14 }}>
-              <Disclaimer S={S} compact dark />
-              <RichOutput S={S} text={dOut} dark />
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12, paddingTop: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                <label style={{ ...Lfield, minWidth: 220 }}><span style={LfieldLabel}>Save to session</span>
-                  <select style={Linput} value={dSession} onChange={(e) => setDSession(e.target.value)}>
-                    <option value="">Choose a session…</option>
-                    {sessions.filter((s) => !s.done).sort((a, b) => sessDate(a) - sessDate(b)).map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)}</option>)}
-                  </select></label>
-                <button style={LprimaryBtn} onClick={attachAiPlan} disabled={!dSession}><FileText size={15} /> Save plan to session</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} />}
       {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
