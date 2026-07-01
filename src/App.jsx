@@ -598,7 +598,7 @@ function CertProposals({ S, notify }) {
   const [name, setName] = useState(""); const [exp, setExp] = useState(""); const [note, setNote] = useState("");
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
-  const statusMeta = { pending: { label: "PENDING", color: FIRE.amberText }, approved: { label: "APPROVED", color: FIRE.green }, rejected: { label: "REJECTED", color: FIRE.redText } };
+  const [open, setOpen] = useState(false);   // collapsed by default — the form expands on toggle
   useEffect(() => {
     Promise.all([supabase.rpc("my_member_id"), supabase.rpc("my_department_id")])
       .then(([m, d]) => setIds({ memberId: m.data || null, deptId: d.data || null }));
@@ -625,46 +625,32 @@ function CertProposals({ S, notify }) {
     const { error: insErr } = await supabase.from("cert_submissions").insert({ department_id: ids.deptId, member_id: ids.memberId, name: name.trim(), exp: e || null, status: "pending", source: "self", note: note.trim() || null, proposed_by: user.id, proof_path: path });
     setBusy(false);
     if (insErr) { notify({ kind: "error", title: "Couldn't submit", text: "The proof uploaded but the request couldn't be saved. Please try again.", details: insErr.message }); return; }
-    setName(""); setExp(""); setNote(""); setFile(null);
+    setName(""); setExp(""); setNote(""); setFile(null); setOpen(false);   // auto-collapse after a successful propose
     notify({ kind: "success", text: "Submitted for review." });
     loadSubs(ids.memberId);
   }
-  async function viewProof(sub) {
-    if (!sub.proof_path) return;
-    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(sub.proof_path, 3600);
-    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the proof", text: "Please try again.", details: error?.message }); return; }
-    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
-  }
+  const pendingCount = subs.filter((s) => s.status === "pending").length;
   if (ids && !ids.memberId) return null;   // no member profile → no self-propose (e.g. a non-member admin)
   return (
     <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
-      <div style={FS.kicker}>PROPOSE A CERTIFICATION</div>
-      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, margin: "6px 0 12px" }}>Add a cert to your record — attach a PDF or photo as proof. A leader reviews and approves it.</div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={name} onChange={(e2) => setName(e2.target.value)} placeholder="e.g. EMT-B" /></label>
-        <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={exp} onChange={(e2) => setExp(e2.target.value)} placeholder="2027-06" /></label>
-        <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={note} onChange={(e2) => setNote(e2.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Proof (required)</span><input type="file" accept=".pdf,image/*" onChange={(e2) => setFile(e2.target.files?.[0] || null)} style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
-        <button style={{ ...FS.btnPrimary, opacity: (busy || !file || !name.trim()) ? 0.55 : 1 }} onClick={submit} disabled={busy || !file || !name.trim()}>{busy ? "Submitting…" : "Submit for review"}</button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div style={FS.kicker}>PROPOSE A CERTIFICATION</div>
+        {open
+          ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setOpen(false)}><X size={13} color={FIRE.btnIcon} /> Cancel</button>
+          : <button style={{ ...FS.btn, padding: "5px 12px", fontSize: 12.5 }} onClick={() => setOpen(true)}><Plus size={14} color={FIRE.btnIcon} /> Propose a certification</button>}
       </div>
-      {!file && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 8 }}>Proof required — attach a PDF or photo to submit.</div>}
-      {subs.length > 0 && (<>
-        <div style={{ ...FS.kicker, marginTop: 18, marginBottom: 6 }}>MY PROPOSALS</div>
-        {subs.map((sub) => {
-          const sm = statusMeta[sub.status] || { label: (sub.status || "").toUpperCase(), color: FIRE.textMuted };
-          return (
-            <div key={sub.id} style={{ ...FS.row, padding: "9px 0", flexWrap: "wrap" }}>
-              <Award size={15} color={sm.color} style={{ flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{sub.name}{sub.exp ? <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 12 }}> · exp {sub.exp}</span> : ""}</div>
-                {sub.status === "rejected" && sub.note && <div style={{ fontSize: 11.5, color: FIRE.redText, marginTop: 1 }}>Rejected — {sub.note}</div>}
-              </div>
-              {sub.proof_path && <button style={{ ...FS.btn, padding: "4px 8px", fontSize: 11.5 }} onClick={() => viewProof(sub)}>View proof</button>}
-              <Pill S={S} color={sm.color}>{sm.label}</Pill>
-            </div>
-          );
-        })}
+      {open && (<>
+        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, margin: "8px 0 12px" }}>Add a cert to your record — attach a PDF or photo as proof. A leader reviews and approves it.</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={name} onChange={(e2) => setName(e2.target.value)} placeholder="e.g. EMT-B" /></label>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={exp} onChange={(e2) => setExp(e2.target.value)} placeholder="2027-06" /></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={note} onChange={(e2) => setNote(e2.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Proof (required)</span><input type="file" accept=".pdf,image/*" onChange={(e2) => setFile(e2.target.files?.[0] || null)} style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
+          <button style={{ ...FS.btnPrimary, opacity: (busy || !file || !name.trim()) ? 0.55 : 1 }} onClick={submit} disabled={busy || !file || !name.trim()}>{busy ? "Submitting…" : "Submit for review"}</button>
+        </div>
+        {!file && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 8 }}>Proof required — attach a PDF or photo to submit.</div>}
       </>)}
+      {pendingCount > 0 && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 12, ...FS.num }}>{pendingCount} certification{pendingCount === 1 ? "" : "s"} pending review.</div>}
     </div>
   );
 }
@@ -2575,15 +2561,21 @@ function ProposeCert({ S, role, member, notify }) {
   const [cName, setCName] = useState("");
   const [cExp, setCExp] = useState("");        // "YYYY-MM" string, matches certs.exp
   const [cNote, setCNote] = useState("");
+  const [cFile, setCFile] = useState(null);
   const [busy, setBusy] = useState(false);
 
   async function propose() {
     if (!cName.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name before submitting." }); return; }
     const exp = cExp.trim();
     if (exp && !/^\d{4}-\d{2}$/.test(exp)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
+    if (!cFile) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
     setBusy(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { notify({ kind: "error", title: "You're not signed in", text: "Please sign in again to continue." }); setBusy(false); return; }
+    // upload proof for the TARGET member (leader writes under their dept via the leadership storage policy)
+    const path = `${member.department_id}/cert-proofs/${member.id}/${Date.now()}-${cFile.name}`;
+    const { error: upErr } = await supabase.storage.from("station-documents").upload(path, cFile);
+    if (upErr) { setBusy(false); notify({ kind: "error", title: "Couldn't upload the proof", text: "Something went wrong uploading that. Please try again.", details: upErr.message }); return; }
     const row = {
       department_id: member.department_id,
       member_id: member.id,
@@ -2592,12 +2584,13 @@ function ProposeCert({ S, role, member, notify }) {
       source: "manual",
       note: cNote.trim() || null,
       proposed_by: user.id,
+      proof_path: path,
       // status omitted → defaults to 'pending'
     };
     const { data, error } = await supabase.from("cert_submissions").insert(row).select().single();
     setBusy(false);
     if (error || !data) { notify({ kind: "error", title: "Couldn't submit", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setCName(""); setCExp(""); setCNote(""); setOpen(false);
+    setCName(""); setCExp(""); setCNote(""); setCFile(null); setOpen(false);
     notify({ kind: "success", text: "Submitted for review." });
   }
 
@@ -2607,7 +2600,9 @@ function ProposeCert({ S, role, member, notify }) {
       <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
       <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
-      <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busy} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
+      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Proof (required)</span><input type="file" accept=".pdf,image/*" onChange={(e) => setCFile(e.target.files?.[0] || null)} style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
+      <button style={{ ...FS.btnPrimary, flex: "0 0 auto", opacity: (busy || !cFile || !cName.trim()) ? 0.55 : 1 }} disabled={busy || !cFile || !cName.trim()} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
+      {!cFile && <div style={{ width: "100%", fontSize: 11.5, color: FIRE.amberText }}>Proof required — attach a PDF or photo to submit.</div>}
     </div>
   ) : (
     <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setOpen(true)}>+ Propose certification</button>
