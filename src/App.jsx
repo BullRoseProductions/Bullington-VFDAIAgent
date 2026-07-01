@@ -2093,10 +2093,12 @@ const APPARATUS_SEED = [
   { id: 3, name: "Tanker 1", type: "Tender", lastCheck: "Jun 15", by: "Cole", status: "Needs attention", note: "Low on foam concentrate" },
   { id: 4, name: "Rescue 1", type: "Rescue", lastCheck: "Jun 20", by: "Okafor", status: "Pass", note: "" },
 ];
+// current year-month index (1-indexed month, matches "YYYY-MM" cert expiry) — real "today"; replaces the old hardcoded June-2026 baseline
+function nowYM() { const d = new Date(); return d.getFullYear() * 12 + (d.getMonth() + 1); }
 function certStatus(exp) {
   if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };
   const [y, m] = exp.split("-").map(Number);
-  const diff = (y * 12 + m) - (2026 * 12 + 6);
+  const diff = (y * 12 + m) - nowYM();
   if (diff < 0) return { label: "EXPIRED", color: "#B11E2A", rank: 0 };
   if (diff <= 3) return { label: "EXPIRING", color: "#9A6B12", rank: 1 };
   return { label: "CURRENT", color: "#2E7D52", rank: 2 };
@@ -2113,7 +2115,7 @@ const CLASSES = [
 function expPhrase(exp) {
   if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return "No expiration date";
   const [y, m] = exp.split("-").map(Number);
-  const d = (y * 12 + m) - (2026 * 12 + 6);
+  const d = (y * 12 + m) - nowYM();
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
   if (d < 0) return `expired ${mon} ${y}`;
   if (d === 0) return `expires this month`;
