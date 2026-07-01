@@ -441,7 +441,7 @@ export default function App() {
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
-          {screen === "onboarding" && <Onboarding S={S} members={members} notify={notify} />}
+          {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
@@ -2968,7 +2968,7 @@ const ONBOARD_TEMPLATE = [
   { group: "Training", items: ["Station orientation & safety walk-through", "SOG / policy review session", "Firefighter I enrollment (if applicable)", "CPR / BLS scheduled"] },
   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
 ];
-function Onboarding({ S, members, notify }) {
+function Onboarding({ S, members, setMembers, notify }) {
   const candidates = members.length ? members : [{ id: 0, name: "New member", role: "Firefighter" }];
   const probI = candidates.findIndex((m) => m.status === "Probationary");
   const [selId, setSelId] = useState(candidates[probI >= 0 ? probI : 0].id);
@@ -2977,7 +2977,6 @@ function Onboarding({ S, members, notify }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const person = candidates.find((m) => String(m.id) === String(selId)) || candidates[0];
   const isMentorItem = (group, it) => group === "People & access" && it === "Mentor assigned";
-  const mentorName = person?.mentorId ? (members.find((m) => m.id === person.mentorId)?.name || "assigned") : null;
   const all = ONBOARD_TEMPLATE.flatMap((g) => g.items.map((it, i) => ({ key: `${g.group}::${i}`, mentor: isMentorItem(g.group, it) })));
   const doneCount = all.filter((x) => (x.mentor ? !!person?.mentorId : !!checks[x.key])).length;   // mentor item = real mentor_id
   const pct = Math.round((doneCount / all.length) * 100);
@@ -2995,6 +2994,19 @@ function Onboarding({ S, members, notify }) {
     if (!selId || !deptId) return;
     const { error } = await supabase.from("onboarding_progress").upsert({ member_id: selId, department_id: deptId, item_key: itemKey, done: next }, { onConflict: "member_id,item_key" });
     if (error) { setChecks((c) => ({ ...c, [itemKey]: !next })); notify({ kind: "error", title: "Couldn't save", text: "That didn't save — please try again.", details: error.message }); }
+  }
+  async function assignMentor(mentorId) {   // writes members.mentor_id — SAME path/RLS as the edit form (single-sourced)
+    if (!person?.id) return;
+    const mid = mentorId || null;
+    const prev = person.mentorId ?? null;
+    setMembers((ms) => ms.map((m) => (m.id === person.id ? { ...m, mentorId: mid } : m)));   // optimistic (shared members array → the file stays in sync)
+    const { error } = await supabase.from("members").update({ mentor_id: mid }).eq("id", person.id);
+    if (error) {
+      setMembers((ms) => ms.map((m) => (m.id === person.id ? { ...m, mentorId: prev } : m)));   // revert
+      notify({ kind: "error", title: "Couldn't assign the mentor", text: "Please try again.", details: error.message });
+    } else {
+      notify({ kind: "success", text: mid ? "Mentor assigned." : "Mentor cleared." });
+    }
   }
   async function draftPlan() {
     setLoading(true); setErr(""); setOut("");
@@ -3027,10 +3039,20 @@ function Onboarding({ S, members, notify }) {
             const done = mentor ? !!person?.mentorId : !!checks[key];
             return (
               <div key={i} style={FS.row}>
-                <button onClick={mentor ? undefined : () => toggle(key)} disabled={mentor} title={mentor ? "Assign in the member's file" : (done ? "Undo" : "Mark complete")} style={{ background: "none", border: "none", cursor: mentor ? "default" : "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                <button onClick={mentor ? undefined : () => toggle(key)} disabled={mentor} title={mentor ? "Assign a mentor →" : (done ? "Undo" : "Mark complete")} style={{ background: "none", border: "none", cursor: mentor ? "default" : "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
                   {done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
                 </button>
-                <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done && !mentor ? "line-through" : "none", fontSize: 14 }}>{it}{mentor && mentorName ? ` · ${mentorName}` : ""}{mentor && !person?.mentorId ? <span style={{ color: FIRE.textMuted, fontSize: 12 }}> — set in the member's file</span> : ""}</div>
+                {mentor ? (
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ color: done ? FIRE.textMuted2 : FIRE.textPrimary, fontSize: 14 }}>{it}</span>
+                    <select style={{ ...FS.input, maxWidth: 240, padding: "5px 9px", flex: "0 1 auto" }} value={person?.mentorId || ""} onChange={(e) => assignMentor(e.target.value)}>
+                      <option value="">— None —</option>
+                      {(members || []).filter((m) => m.id !== person?.id && m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
+                )}
               </div>
             );
           })}
