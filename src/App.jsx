@@ -2974,26 +2974,34 @@ function Onboarding({ S, members, setMembers, notify }) {
   const [selId, setSelId] = useState(candidates[probI >= 0 ? probI : 0].id);
   const [checks, setChecks] = useState({});
   const [deptId, setDeptId] = useState(null);
+  const [items, setItems] = useState(null);   // dept's onboarding_items (null = loading, [] = none)
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const person = candidates.find((m) => String(m.id) === String(selId)) || candidates[0];
-  const isMentorItem = (group, it) => group === "People & access" && it === "Mentor assigned";
-  const all = ONBOARD_TEMPLATE.flatMap((g) => g.items.map((it, i) => ({ key: `${g.group}::${i}`, mentor: isMentorItem(g.group, it) })));
-  const doneCount = all.filter((x) => (x.mentor ? !!person?.mentorId : !!checks[x.key])).length;   // mentor item = real mentor_id
-  const pct = Math.round((doneCount / all.length) * 100);
+  // group DB items by category (categories in first-appearance order; items already ordered by sort_order)
+  const grouped = [];
+  (items || []).forEach((it) => { let g = grouped.find((x) => x.category === it.category); if (!g) { g = { category: it.category, items: [] }; grouped.push(g); } g.items.push(it); });
+  const doneCount = (items || []).filter((it) => (it.is_mentor ? !!person?.mentorId : !!checks[it.id])).length;   // mentor item = real mentor_id
+  const pct = (items && items.length) ? Math.round((doneCount / items.length) * 100) : 0;
   useEffect(() => { supabase.rpc("my_department_id").then(({ data }) => setDeptId(data || null)); }, []);
+  useEffect(() => {   // load the dept's editable checklist (RLS scopes to my_department_id())
+    let alive = true;
+    supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true })
+      .then(({ data }) => { if (alive) setItems(data || []); });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {   // load this member's saved progress
     if (!selId) { setChecks({}); return; }
     let alive = true;
-    supabase.from("onboarding_progress").select("item_key, done").eq("member_id", selId)
-      .then(({ data }) => { if (alive) setChecks(Object.fromEntries((data || []).map((r) => [r.item_key, r.done]))); });
+    supabase.from("onboarding_progress").select("item_id, done").eq("member_id", selId)
+      .then(({ data }) => { if (alive) setChecks(Object.fromEntries((data || []).map((r) => [r.item_id, r.done]))); });
     return () => { alive = false; };
   }, [selId]);
-  async function toggle(itemKey) {
-    const next = !checks[itemKey];
-    setChecks((c) => ({ ...c, [itemKey]: next }));   // optimistic
+  async function toggle(itemId) {
+    const next = !checks[itemId];
+    setChecks((c) => ({ ...c, [itemId]: next }));   // optimistic
     if (!selId || !deptId) return;
-    const { error } = await supabase.from("onboarding_progress").upsert({ member_id: selId, department_id: deptId, item_key: itemKey, done: next }, { onConflict: "member_id,item_key" });
-    if (error) { setChecks((c) => ({ ...c, [itemKey]: !next })); notify({ kind: "error", title: "Couldn't save", text: "That didn't save — please try again.", details: error.message }); }
+    const { error } = await supabase.from("onboarding_progress").upsert({ member_id: selId, department_id: deptId, item_id: itemId, done: next }, { onConflict: "member_id,item_id" });
+    if (error) { setChecks((c) => ({ ...c, [itemId]: !next })); notify({ kind: "error", title: "Couldn't save", text: "That didn't save — please try again.", details: error.message }); }
   }
   async function assignMentor(mentorId) {   // writes members.mentor_id — SAME path/RLS as the edit form (single-sourced)
     if (!person?.id) return;
@@ -3030,28 +3038,31 @@ function Onboarding({ S, members, setMembers, notify }) {
           <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
         </div>
       </div>
-      {ONBOARD_TEMPLATE.map((g) => (
-        <div key={g.group} style={{ marginBottom: 6 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}>{g.group.toUpperCase()}</div>
-          {g.items.map((it, i) => {
-            const key = `${g.group}::${i}`;
-            const mentor = isMentorItem(g.group, it);
-            const done = mentor ? !!person?.mentorId : !!checks[key];
+      {items === null ? (
+        <div style={{ ...FS.card, padding: 18, fontSize: 13.5, color: FIRE.textMuted }}>Loading checklist…</div>
+      ) : items.length === 0 ? (
+        <div style={{ ...FS.card, padding: 18, fontSize: 13.5, color: FIRE.textMuted }}>No onboarding checklist yet for your department. Once items are added, they'll appear here.</div>
+      ) : grouped.map((g) => (
+        <div key={g.category} style={{ marginBottom: 6 }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>{g.category.toUpperCase()}</div>
+          {g.items.map((it) => {
+            const mentor = !!it.is_mentor;
+            const done = mentor ? !!person?.mentorId : !!checks[it.id];
             return (
-              <div key={i} style={FS.row}>
-                <button onClick={mentor ? undefined : () => toggle(key)} disabled={mentor} title={mentor ? "Assign a mentor →" : (done ? "Undo" : "Mark complete")} style={{ background: "none", border: "none", cursor: mentor ? "default" : "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+              <div key={it.id} style={FS.row}>
+                <button onClick={mentor ? undefined : () => toggle(it.id)} disabled={mentor} title={mentor ? "Assign a mentor →" : (done ? "Undo" : "Mark complete")} style={{ background: "none", border: "none", cursor: mentor ? "default" : "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
                   {done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
                 </button>
                 {mentor ? (
                   <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <span style={{ color: done ? FIRE.textMuted2 : FIRE.textPrimary, fontSize: 14 }}>{it}</span>
+                    <span style={{ color: done ? FIRE.textMuted2 : FIRE.textPrimary, fontSize: 14 }}>{it.label}</span>
                     <select style={{ ...FS.input, maxWidth: 240, padding: "5px 9px", flex: "0 1 auto" }} value={person?.mentorId || ""} onChange={(e) => assignMentor(e.target.value)}>
                       <option value="">— None —</option>
                       {(members || []).filter((m) => m.id !== person?.id && m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                   </div>
                 ) : (
-                  <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it}</div>
+                  <div style={{ flex: 1, minWidth: 0, color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it.label}</div>
                 )}
               </div>
             );
