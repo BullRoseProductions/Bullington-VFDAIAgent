@@ -4,7 +4,7 @@ import {
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
   Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
-  ThumbsUp, ThumbsDown, Pencil, MessageSquare,
+  ThumbsUp, ThumbsDown, Pencil, MessageSquare, ChevronUp, ChevronDown,
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw, Trash2,
@@ -441,7 +441,7 @@ export default function App() {
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
-          {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} />}
+          {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
@@ -2968,7 +2968,8 @@ const ONBOARD_TEMPLATE = [
   { group: "Training", items: ["Station orientation & safety walk-through", "SOG / policy review session", "Firefighter I enrollment (if applicable)", "CPR / BLS scheduled"] },
   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
 ];
-function Onboarding({ S, members, setMembers, notify }) {
+function Onboarding({ S, members, setMembers, notify, role }) {
+  const canManage = canAssign(role);   // PA/DA — same set as is_dept_admin() (RLS enforces server-side)
   const candidates = members.length ? members : [{ id: 0, name: "New member", role: "Firefighter" }];
   const probI = candidates.findIndex((m) => m.status === "Probationary");
   const [selId, setSelId] = useState(candidates[probI >= 0 ? probI : 0].id);
@@ -2976,19 +2977,23 @@ function Onboarding({ S, members, setMembers, notify }) {
   const [deptId, setDeptId] = useState(null);
   const [items, setItems] = useState(null);   // dept's onboarding_items (null = loading, [] = none)
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [nLabel, setNLabel] = useState(""); const [nCat, setNCat] = useState("");   // new item
+  const [editId, setEditId] = useState(null); const [eLabel, setELabel] = useState(""); const [eCat, setECat] = useState("");   // inline edit
+  const [busy, setBusy] = useState(false);
   const person = candidates.find((m) => String(m.id) === String(selId)) || candidates[0];
   // group DB items by category (categories in first-appearance order; items already ordered by sort_order)
   const grouped = [];
   (items || []).forEach((it) => { let g = grouped.find((x) => x.category === it.category); if (!g) { g = { category: it.category, items: [] }; grouped.push(g); } g.items.push(it); });
   const doneCount = (items || []).filter((it) => (it.is_mentor ? !!person?.mentorId : !!checks[it.id])).length;   // mentor item = real mentor_id
   const pct = (items && items.length) ? Math.round((doneCount / items.length) * 100) : 0;
+  const categories = [...new Set((items || []).map((it) => it.category))];
   useEffect(() => { supabase.rpc("my_department_id").then(({ data }) => setDeptId(data || null)); }, []);
-  useEffect(() => {   // load the dept's editable checklist (RLS scopes to my_department_id())
-    let alive = true;
-    supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true })
-      .then(({ data }) => { if (alive) setItems(data || []); });
-    return () => { alive = false; };
-  }, []);
+  async function loadItems() {   // RLS scopes to my_department_id(); re-fetched after every edit
+    const { data } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true });
+    setItems(data || []);
+  }
+  useEffect(() => { loadItems(); }, []);
   useEffect(() => {   // load this member's saved progress
     if (!selId) { setChecks({}); return; }
     let alive = true;
@@ -3016,6 +3021,79 @@ function Onboarding({ S, members, setMembers, notify }) {
       notify({ kind: "success", text: mid ? "Mentor assigned." : "Mentor cleared." });
     }
   }
+  async function addItem() {
+    const label = nLabel.trim(), category = nCat.trim();
+    if (!label || !category) { notify({ kind: "error", title: "Need a label and a category", text: "Enter both." }); return; }
+    if (!deptId) return;
+    const maxOrder = (items || []).reduce((mx, it) => Math.max(mx, it.sort_order), 0);
+    setBusy(true);
+    const { error } = await supabase.from("onboarding_items").insert({ department_id: deptId, category, label, is_mentor: false, sort_order: maxOrder + 1 });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't add the item", text: "Please try again.", details: error.message }); return; }
+    setNLabel(""); await loadItems();   // keep nCat so you can add several to the same category
+  }
+  function startEdit(it) { setEditId(it.id); setELabel(it.label); setECat(it.category); }
+  async function saveEdit() {
+    const label = eLabel.trim(), category = eCat.trim();
+    if (!label || !category) { notify({ kind: "error", title: "Label & category required", text: "Neither can be blank." }); return; }
+    setBusy(true);
+    const { error } = await supabase.from("onboarding_items").update({ label, category }).eq("id", editId);   // is_mentor never touched here
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save", text: "Please try again.", details: error.message }); return; }
+    setEditId(null); await loadItems();
+  }
+  async function removeItem(it) {
+    if (it.is_mentor) return;   // protected — no delete
+    if (!window.confirm(`Remove "${it.label}"? This also clears members' progress on it.`)) return;
+    setBusy(true);
+    const { error } = await supabase.from("onboarding_items").delete().eq("id", it.id);   // FK cascade removes its onboarding_progress rows
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't remove", text: "Please try again.", details: error.message }); return; }
+    await loadItems();
+  }
+  async function move(it, dir) {   // reorder WITHIN the category — swap sort_order with the same-category neighbor
+    const catItems = (items || []).filter((x) => x.category === it.category);
+    const idx = catItems.findIndex((x) => x.id === it.id);
+    const j = dir === "up" ? idx - 1 : idx + 1;
+    if (j < 0 || j >= catItems.length) return;
+    const other = catItems[j];
+    setBusy(true);
+    const r1 = await supabase.from("onboarding_items").update({ sort_order: other.sort_order }).eq("id", it.id);
+    const r2 = await supabase.from("onboarding_items").update({ sort_order: it.sort_order }).eq("id", other.id);
+    setBusy(false);
+    if (r1.error || r2.error) notify({ kind: "error", title: "Couldn't reorder", text: "Please try again.", details: (r1.error || r2.error).message });
+    await loadItems();
+  }
+  async function renameCategory(oldCat) {
+    const newCat = (window.prompt(`Rename category "${oldCat}" to:`, oldCat) || "").trim();
+    if (!newCat || newCat === oldCat || !deptId) return;
+    setBusy(true);
+    const { error } = await supabase.from("onboarding_items").update({ category: newCat }).eq("department_id", deptId).eq("category", oldCat);   // bulk rename all items in the category
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't rename the category", text: "Please try again.", details: error.message }); return; }
+    await loadItems();
+  }
+  async function loadDefaults() {   // idempotent: skip existing (category+label); never add a 2nd mentor item
+    if (!deptId) return;
+    if (!window.confirm("Add the default checklist items? Existing items are kept; duplicates are skipped.")) return;
+    const existing = new Set((items || []).map((it) => `${it.category}||${it.label}`));
+    const hasMentor = (items || []).some((it) => it.is_mentor);
+    let ord = (items || []).reduce((mx, it) => Math.max(mx, it.sort_order), 0);
+    const rows = [];
+    ONBOARD_TEMPLATE.forEach((g) => g.items.forEach((label) => {
+      if (existing.has(`${g.group}||${label}`)) return;
+      const isMentorDefault = g.group === "People & access" && label === "Mentor assigned";
+      if (isMentorDefault && hasMentor) return;                         // don't add a second mentor slot
+      rows.push({ department_id: deptId, category: g.group, label, is_mentor: isMentorDefault && !hasMentor, sort_order: ++ord });
+    }));
+    if (!rows.length) { notify({ kind: "success", text: "Defaults already present — nothing to add." }); return; }
+    setBusy(true);
+    const { error } = await supabase.from("onboarding_items").insert(rows);
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't load defaults", text: "Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: `Added ${rows.length} default item${rows.length === 1 ? "" : "s"}.` });
+    await loadItems();
+  }
   async function draftPlan() {
     setLoading(true); setErr(""); setOut("");
     const sys = "You write a warm welcome note and a practical first-30-days onboarding plan for a new volunteer firefighter/EMT joining a small department. Friendly and concrete: a short welcome, then week-by-week steps covering paperwork, gear, orientation, shadowing/mentor, and first trainings. This is a DRAFT for an officer to review and send. Under 320 words, plain headers and bullets.";
@@ -3037,8 +3115,48 @@ function Onboarding({ S, members, setMembers, notify }) {
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>Onboarding progress</span><span>{pct}%</span></div>
           <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
         </div>
+        {canManage && <button style={{ ...FS.btn, alignSelf: "flex-end" }} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
       </div>
-      {items === null ? (
+      {editMode && canManage ? (
+        <>
+          <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New item</span><input style={FS.input} value={nLabel} onChange={(e) => setNLabel(e.target.value)} placeholder="e.g. W-4 on file" /></label>
+            <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><input style={FS.input} list="onb-cats" value={nCat} onChange={(e) => setNCat(e.target.value)} placeholder="Paperwork (or a new one)" /></label>
+            <datalist id="onb-cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
+            <button style={FS.btnPrimary} onClick={addItem} disabled={busy}><Plus size={15} /> Add item</button>
+            <button style={FS.btn} onClick={loadDefaults} disabled={busy}>Load default checklist</button>
+          </div>
+          {(items || []).length === 0 && <div style={{ ...FS.card, padding: 18, fontSize: 13.5, color: FIRE.textMuted }}>No items yet — add one above or load the defaults.</div>}
+          {grouped.map((g) => (
+            <div key={g.category} style={{ marginBottom: 6 }}>
+              <div style={{ ...FS.kicker, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{g.category.toUpperCase()}<button style={{ ...FS.btn, padding: "2px 7px", fontSize: 11 }} onClick={() => renameCategory(g.category)} disabled={busy}>Rename</button></div>
+              {g.items.map((it) => {
+                const catItems = items.filter((x) => x.category === it.category);
+                const idx = catItems.findIndex((x) => x.id === it.id);
+                const editing = editId === it.id;
+                return (
+                  <div key={it.id} style={{ ...FS.row, gap: 8, flexWrap: "wrap" }}>
+                    <button disabled={idx === 0 || busy} onClick={() => move(it, "up")} title="Move up" style={{ ...FS.btn, padding: "4px 7px", opacity: idx === 0 ? 0.4 : 1 }}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
+                    <button disabled={idx === catItems.length - 1 || busy} onClick={() => move(it, "down")} title="Move down" style={{ ...FS.btn, padding: "4px 7px", opacity: idx === catItems.length - 1 ? 0.4 : 1 }}><ChevronDown size={14} color={FIRE.btnIcon} /></button>
+                    {editing ? (<>
+                      <input style={{ ...FS.input, flex: 1, minWidth: 140 }} value={eLabel} onChange={(e) => setELabel(e.target.value)} />
+                      <input style={{ ...FS.input, minWidth: 120 }} list="onb-cats" value={eCat} onChange={(e) => setECat(e.target.value)} />
+                      <button style={FS.btnPrimary} onClick={saveEdit} disabled={busy}>Save</button>
+                      <button style={FS.btn} onClick={() => setEditId(null)}>Cancel</button>
+                    </>) : (<>
+                      <span style={{ flex: 1, minWidth: 0, color: FIRE.textPrimary, fontSize: 14 }}>{it.label}{it.is_mentor && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55`, borderRadius: 4, padding: "1px 5px" }}>MENTOR</span>}</span>
+                      <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => startEdit(it)}>Edit</button>
+                      {it.is_mentor
+                        ? <button style={{ ...FS.btn, padding: "5px 9px", opacity: 0.45, cursor: "not-allowed" }} disabled title="Required — reflects the assigned mentor">Remove</button>
+                        : <button style={{ ...FS.btn, padding: "5px 9px", color: FIRE.deleteRed }} onClick={() => removeItem(it)} disabled={busy}>Remove</button>}
+                    </>)}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </>
+      ) : items === null ? (
         <div style={{ ...FS.card, padding: 18, fontSize: 13.5, color: FIRE.textMuted }}>Loading checklist…</div>
       ) : items.length === 0 ? (
         <div style={{ ...FS.card, padding: 18, fontSize: 13.5, color: FIRE.textMuted }}>No onboarding checklist yet for your department. Once items are added, they'll appear here.</div>
