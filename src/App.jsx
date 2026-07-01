@@ -2702,6 +2702,12 @@ function RosterPending({ S, members, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't reject", text: "Something went wrong rejecting that. Please try again.", details: error.message }); return; }
     loadPending();
   }
+  async function viewProof(row) {
+    if (!row.proof_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.proof_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the proof", text: "Please try again.", details: error?.message }); return; }
+    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
 
   if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>Loading…</div>;
   if (rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>No pending items.</div>;
@@ -2714,6 +2720,9 @@ function RosterPending({ S, members, notify }) {
             <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {nameFor(r.member_id)}</span>
             <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
           </div>
+          {r.proof_path
+            ? <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === r.id} onClick={() => viewProof(r)}>View proof</button>
+            : <span style={{ fontSize: 11.5, color: FIRE.textMuted, alignSelf: "center" }}>no proof</span>}
           <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.green }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
           <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
         </div>
