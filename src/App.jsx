@@ -591,6 +591,83 @@ function deptMonogram(name) {
   const initials = words.map((w) => w[0]).join("").toUpperCase();
   return (initials || name.replace(/[^A-Za-z]/g, "").toUpperCase()).slice(0, 3);
 }
+// Member self-propose a cert with mandatory proof + a status view (pending/approved/rejected). Member-facing.
+function CertProposals({ S, notify }) {
+  const [ids, setIds] = useState(null);   // { memberId, deptId } from my_member_id()/my_department_id() — match the RLS guards
+  const [subs, setSubs] = useState([]);
+  const [name, setName] = useState(""); const [exp, setExp] = useState(""); const [note, setNote] = useState("");
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const statusMeta = { pending: { label: "PENDING", color: FIRE.amberText }, approved: { label: "APPROVED", color: FIRE.green }, rejected: { label: "REJECTED", color: FIRE.redText } };
+  useEffect(() => {
+    Promise.all([supabase.rpc("my_member_id"), supabase.rpc("my_department_id")])
+      .then(([m, d]) => setIds({ memberId: m.data || null, deptId: d.data || null }));
+  }, []);
+  async function loadSubs(mid) {
+    const { data } = await supabase.from("cert_submissions").select("id, name, exp, status, note, proof_path, created_at").eq("member_id", mid).order("created_at", { ascending: false });
+    setSubs(data || []);
+  }
+  useEffect(() => { if (ids?.memberId) loadSubs(ids.memberId); }, [ids]);
+  async function submit() {
+    if (!name.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name." }); return; }
+    const e = exp.trim();
+    if (e && !/^\d{4}-\d{2}$/.test(e)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
+    if (!file) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
+    if (!ids?.memberId || !ids?.deptId) { notify({ kind: "error", title: "No member profile", text: "We couldn't find your member profile." }); return; }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { notify({ kind: "error", title: "You're not signed in", text: "Please sign in again." }); return; }
+    setBusy(true);
+    // 1) upload proof — path scoped to {dept}/cert-proofs/{member}/ (matches the storage policy)
+    const path = `${ids.deptId}/cert-proofs/${ids.memberId}/${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
+    if (upErr) { setBusy(false); notify({ kind: "error", title: "Couldn't upload the proof", text: "Something went wrong uploading that. Please try again.", details: upErr.message }); return; }
+    // 2) insert the submission — fields match the INSERT policy guards exactly
+    const { error: insErr } = await supabase.from("cert_submissions").insert({ department_id: ids.deptId, member_id: ids.memberId, name: name.trim(), exp: e || null, status: "pending", source: "self", note: note.trim() || null, proposed_by: user.id, proof_path: path });
+    setBusy(false);
+    if (insErr) { notify({ kind: "error", title: "Couldn't submit", text: "The proof uploaded but the request couldn't be saved. Please try again.", details: insErr.message }); return; }
+    setName(""); setExp(""); setNote(""); setFile(null);
+    notify({ kind: "success", text: "Submitted for review." });
+    loadSubs(ids.memberId);
+  }
+  async function viewProof(sub) {
+    if (!sub.proof_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(sub.proof_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the proof", text: "Please try again.", details: error?.message }); return; }
+    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
+  if (ids && !ids.memberId) return null;   // no member profile → no self-propose (e.g. a non-member admin)
+  return (
+    <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+      <div style={FS.kicker}>PROPOSE A CERTIFICATION</div>
+      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, margin: "6px 0 12px" }}>Add a cert to your record — attach a PDF or photo as proof. A leader reviews and approves it.</div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={name} onChange={(e2) => setName(e2.target.value)} placeholder="e.g. EMT-B" /></label>
+        <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={exp} onChange={(e2) => setExp(e2.target.value)} placeholder="2027-06" /></label>
+        <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={note} onChange={(e2) => setNote(e2.target.value)} /></label>
+        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Proof (required)</span><input type="file" accept=".pdf,image/*" onChange={(e2) => setFile(e2.target.files?.[0] || null)} style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
+        <button style={{ ...FS.btnPrimary, opacity: (busy || !file || !name.trim()) ? 0.55 : 1 }} onClick={submit} disabled={busy || !file || !name.trim()}>{busy ? "Submitting…" : "Submit for review"}</button>
+      </div>
+      {!file && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 8 }}>Proof required — attach a PDF or photo to submit.</div>}
+      {subs.length > 0 && (<>
+        <div style={{ ...FS.kicker, marginTop: 18, marginBottom: 6 }}>MY PROPOSALS</div>
+        {subs.map((sub) => {
+          const sm = statusMeta[sub.status] || { label: (sub.status || "").toUpperCase(), color: FIRE.textMuted };
+          return (
+            <div key={sub.id} style={{ ...FS.row, padding: "9px 0", flexWrap: "wrap" }}>
+              <Award size={15} color={sm.color} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{sub.name}{sub.exp ? <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 12 }}> · exp {sub.exp}</span> : ""}</div>
+                {sub.status === "rejected" && sub.note && <div style={{ fontSize: 11.5, color: FIRE.redText, marginTop: 1 }}>Rejected — {sub.note}</div>}
+              </div>
+              {sub.proof_path && <button style={{ ...FS.btn, padding: "4px 8px", fontSize: 11.5 }} onClick={() => viewProof(sub)}>View proof</button>}
+              <Pill S={S} color={sm.color}>{sm.label}</Pill>
+            </div>
+          );
+        })}
+      </>)}
+    </div>
+  );
+}
 function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
@@ -861,6 +938,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
         </div>
       </div>
 
+      {/* 4b — member self-propose a cert + proof + status */}
+      <CertProposals S={S} notify={notify} />
       {/* 5 — station calendar: shared DashboardCalendar wrapped in a dark FS card (light inset; NOT mutated) */}
       <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
         <DashboardCalendar S={S} />
