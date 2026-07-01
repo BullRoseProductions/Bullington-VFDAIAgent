@@ -6,7 +6,7 @@ import {
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
   ThumbsUp, ThumbsDown, Pencil, MessageSquare,
   FolderOpen, Upload, FilePlus, PartyPopper,
-  Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, ClipboardCheck,
+  Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw, Trash2,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
@@ -250,6 +250,7 @@ export default function App() {
             access: m.access,
             status: m.status,
             phone: m.phone,
+            email: m.email,
             joined: m.joined,
             participation: m.participation,
             certs: certsByMember.get(m.id) || [],
@@ -2219,9 +2220,9 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
               <Initials S={S} dark name={m.name} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div>
-                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}{m.access !== "Member" ? ` · ${m.access}` : ""} · since {m.joined}</div>
+                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role || "Member"} · since {m.joined}</div>
               </div>
-              <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill>
+              {m.status ? <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill> : null}
               {canAdd && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: FIRE.textMuted }}>
@@ -2229,6 +2230,11 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
               {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
                 : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
             </div>
+            {m.email && (
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, fontSize: 13, color: FIRE.textMuted }}>
+                <Mail size={13} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</span>
+              </div>
+            )}
           </div>
         ))}
       </div>
