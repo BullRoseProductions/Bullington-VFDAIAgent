@@ -3124,14 +3124,54 @@ function Reports({ S, role, members, sessions, dept }) {
     </div>
   );
 }
-// Stub — Chunk 2 adds the per-member aggregation + table, Chunk 3 the year selector, Chunk 4 CSV export.
+// Yearly attendance — per-member aggregation from sessions + session_attendance.
+// Source pool excludes done drills with NO recorded attendance (roll never taken → missing data, not absence).
+// eligible denominator is PER MEMBER (audience-aware): leadership-only events count only for leaders.
 function AttendanceReport({ S, members, sessions, dept, back }) {
+  const year = new Date().getFullYear();   // Chunk 3: becomes selectable state
+  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // source pool: done + roll-taken
+  const rows = (members || []).map((m) => {
+    const memberLeader = isLeader(m.access);                                              // score off the member's ACTUAL roles
+    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // PER-MEMBER denominator
+    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
+    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct };
+  }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
+  const rated = rows.filter((r) => r.pct != null);
+  const avgPct = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
+  const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
       <div style={FS.kicker}>REPORTS · ATTENDANCE</div>
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Yearly Attendance Report</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Full-year training attendance per member. Report body built next.</div>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>Full-year training attendance per member for {year}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.</div>
+
+      <div style={S.statRow}>
+        <Stat S={S} dark n={String(year)} label="Report year" />
+        <Stat S={S} dark n={String(doneThisYear.length)} label="Drills held" />
+        <Stat S={S} dark n={`${avgPct}%`} label="Avg attendance" />
+        <Stat S={S} dark n={String(rows.length)} label="Members" />
+      </div>
+
+      <div style={{ ...FS.card, padding: "4px 16px", marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>Member</div>
+          <div style={{ width: 90, textAlign: "right" }}>Attended</div>
+          <div style={{ width: 60, textAlign: "right" }}>Rate</div>
+        </div>
+        {rows.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "12px 0" }}>No members to report.</div> : rows.map((r) => (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.role}</div>
+            </div>
+            <div style={{ width: 90, textAlign: "right", ...FS.num, fontSize: 13, color: FIRE.textSecondary }}>{r.attended} / {r.eligible}</div>
+            <div style={{ width: 60, textAlign: "right", ...FS.num, fontSize: 13.5, fontWeight: 700, color: pctColor(r.pct) }}>{r.pct == null ? "—" : `${r.pct}%`}</div>
+          </div>
+        ))}
+      </div>
+      {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {year} yet.</div>}
     </div>
   );
 }
