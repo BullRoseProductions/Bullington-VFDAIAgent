@@ -3179,9 +3179,22 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const colLabel = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   function exportCsv() {
-    const header = ["Member", "Role", "Status", "Attended", "Eligible", "Attendance rate"];
-    const body = rows.map((r) => [r.name, r.role, r.status, r.attended, r.eligible, r.pct == null ? "—" : `${r.pct}%`]);
-    const csv = [header, ...body].map((r) => r.map(csvField).join(",")).join("\r\n");
+    // Section 1 — summary (unchanged)
+    const sumHeader = ["Member", "Role", "Status", "Attended", "Eligible", "Attendance rate"];
+    const sumBody = rows.map((r) => [r.name, r.role, r.status, r.attended, r.eligible, r.pct == null ? "—" : `${r.pct}%`]);
+    // Section 2 — session-by-session grid; ALWAYS full year (chron), independent of the screen's recent/full toggle
+    const cols = chron;
+    const gridHeader = ["Member", ...cols.map((s) => colLabel(s) + (s.audience === "leadership" ? " (L)" : "")), "Total"];
+    const gridBody = rows.map((r) => [r.name, ...cols.map((s) => ({ present: "P", absent: "A", na: "" }[cellState(r, s)])), `${r.attended}/${r.eligible}`]);
+    const allRows = [
+      sumHeader, ...sumBody,
+      [],                                                        // blank line between the two sections
+      [`Session-by-session — full year ${year}`],
+      gridHeader, ...gridBody,
+      [],
+      ["Legend: P = present, A = absent, blank = not expected (leadership session, non-leader), (L) = leadership session"],
+    ];
+    const csv = allRows.map((r) => r.map(csvField).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
