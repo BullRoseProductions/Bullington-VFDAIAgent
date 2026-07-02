@@ -2506,7 +2506,7 @@ function Initials({ S, name, dark }) {
 function Roster({ S, role, members, setMembers, sessions, notify, meId }) {
   const leader = isLeader(role);
   const tabs = leader
-    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"], ...(hasAny(role, DEPT_ADMIN_ROLES) ? [["pending", "Pending Items"]] : [])]
+    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ...(hasAny(role, DEPT_ADMIN_ROLES) ? [["pending", "Pending Items"]] : [])]
     : [["members", "Members"]];
   const [tab, setTab] = useState("members");
   const [sel, setSel] = useState(null);
@@ -2518,7 +2518,7 @@ function Roster({ S, role, members, setMembers, sessions, notify, meId }) {
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>ROSTER</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your people, all in one place</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Members, certifications, who's showing up — and the reports the chief needs. Tap a member to see their full file." : "Your station directory and contacts."}</div>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}</div>
       </div>
       <div style={S.segRow}>
         {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
@@ -2526,7 +2526,6 @@ function Roster({ S, role, members, setMembers, sessions, notify, meId }) {
       {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
-      {tab === "reports" && leader && <RosterReports S={S} members={members} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={members} notify={notify} />}
     </div>
   );
@@ -3026,15 +3025,36 @@ function RosterAttendance({ S, members }) {
     </div>
   );
 }
-function RosterReports({ S, members }) {
+function RosterReports({ S, members, sessions, dept, back }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const active = members.filter((m) => m.status === "Active").length;
   const prob = members.filter((m) => m.status === "Probationary").length;
   const certs = []; members.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
-  const rated = members.filter((m) => m.participation != null);
-  const avgPart = rated.length ? Math.round(rated.reduce((s, m) => s + m.participation, 0) / rated.length) : 0;
-  const rigsReady = APPARATUS_SEED.filter((r) => r.status === "Pass").length;
+  // Real attendance — SAME audience-aware, attendance-present, current-year math as AttendanceReport (numbers match the Yearly Attendance Report).
+  const yr = new Date().getFullYear();
+  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === yr && (s.attendance || []).length > 0);
+  const attById = new Map((members || []).map((m) => {
+    const memberLeader = isLeader(m.access);                                              // off each member's ACTUAL roles
+    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // per-member denominator
+    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
+    return [m.id, eligible.length ? Math.round((attended / eligible.length) * 100) : null];
+  }));
+  const ratedPcts = [...attById.values()].filter((p) => p != null);
+  const avgPart = ratedPcts.length ? Math.round(ratedPcts.reduce((s, p) => s + p, 0) / ratedPcts.length) : 0;
+  // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
+  const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
+  const recentTraining = (sessions || [])
+    .filter((s) => s.done && (s.attendance || []).length > 0)
+    .sort((a, b) => sessMs(b) - sessMs(a))
+    .slice(0, 6)
+    .map((s) => ({
+      name: s.title,
+      date: new Date(s.y, s.m, s.d).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      type: s.audience === "leadership" ? "Leadership training" : "Training",
+      present: (s.attendance || []).length,
+      total: s.audience === "leadership" ? members.filter((m) => isLeader(m.access)).length : members.length,
+    }));
   function buildReportData() {
     const flaggedCerts = [];
     members.forEach((m) => m.certs.forEach((c) => {
@@ -3042,35 +3062,37 @@ function RosterReports({ S, members }) {
       if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
     }));
     return {
-      deptName: "North Hood Country Volunteer Fire Department",
-      station: "Station 20",
-      kpis: { active, total: members.length, certPct: Math.round((cur / (cur + expg + expd)) * 100), certWarn: expd > 0, avgPart, rigsReady, rigsTotal: APPARATUS_SEED.length },
+      deptName: dept?.name || "Department",
+      station: "",
+      kpis: { active, total: members.length, certPct: Math.round((cur / (cur + expg + expd)) * 100), certWarn: expd > 0, avgPart },
       counts: { active, prob, total: members.length, cur, expg, expd, avgPart },
-      members: members.map((m) => ({ name: m.name, role: m.role, participation: m.participation, status: m.status })),
+      members: members.map((m) => ({ name: m.name, role: m.role, participation: attById.get(m.id), status: m.status })),
       flaggedCerts,
-      apparatus: APPARATUS_SEED.map((r) => ({ name: r.name, type: r.type, lastCheck: r.lastCheck, ready: r.status === "Pass", note: r.note })),
-      activity: EVENTS.map((e) => ({ name: e.name, date: e.date, type: e.type, present: e.present, total: e.total })),
+      activity: recentTraining,
     };
   }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
-    const summary = `North Hood Country VFD snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average participation (90 days): ${avgPart}%\n- Apparatus ready: ${rigsReady} of ${APPARATUS_SEED.length}\n- Recent activity: ${EVENTS.length} events in the last 30 days (drills, a meeting, and a mutual-aid call)`;
-    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board. Use clear sections with bold titles and bullet points: an overview, training & certifications (flag the expiring/expired certs as an action item), participation, and apparatus readiness. Confident, factual tone. Under 350 words.";
+    const summary = `${dept?.name || "Department"} snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average training attendance (this year): ${avgPart}%\n- Recent training: ${recentTraining.length} recent drill${recentTraining.length === 1 ? "" : "s"} with recorded attendance`;
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board. Use clear sections with bold titles and bullet points: an overview, training & certifications (flag the expiring/expired certs as an action item), and participation. Confident, factual tone. Under 350 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <div>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
+      <div style={FS.kicker}>REPORTS · CHIEF'S REPORT</div>
+      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Chief's Report</h1>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
       <div style={S.statRow}>
         <Stat S={S} dark n={`${active}/${members.length}`} label="Active members" />
         <Stat S={S} dark n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
-        <Stat S={S} dark n={`${avgPart}%`} label="Avg participation" />
-        <Stat S={S} dark n={`${rigsReady}/${APPARATUS_SEED.length}`} label="Apparatus ready" />
+        <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
       </div>
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Turn your numbers into a report — in one tap</h3>
-          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, participation, and apparatus.</p>
+          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, and participation.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
@@ -3092,8 +3114,9 @@ function RosterReports({ S, members }) {
 /* ---------------- Reports (leadership reporting hub) ---------------- */
 // Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
 function Reports({ S, role, members, sessions, dept }) {
-  const [view, setView] = useState(null);   // null = hub cards; "attendance" = yearly attendance report
+  const [view, setView] = useState(null);   // null = hub cards; "attendance" | "chief"
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
+  if (view === "chief") return <RosterReports S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -3112,13 +3135,15 @@ function Reports({ S, role, members, sessions, dept }) {
             <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
           </div>
         </div>
-        <div style={{ ...S.opCard, ...FS.card, opacity: 0.6 }}>
+        <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("chief")}>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <BarChart3 size={18} color={FIRE.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />
+            <BarChart3 size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
             <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Chief's Report</div></div>
-            <Pill S={S} color={FIRE.textMuted}>STAGE 2</Pill>
           </div>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — moving here from Roster and wiring to live data. Coming soon.</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
+          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+          </div>
         </div>
       </div>
     </div>
