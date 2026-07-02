@@ -3502,6 +3502,19 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const [extracting, setExtracting] = useState(false);
+  const [review, setReview] = useState([]); const [creating, setCreating] = useState(false);
+  const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items is a write → CANMANAGE (matches is_canmanage())
+  // Map an AI-suggested owner name to a member id — CONSERVATIVE: exact, else a single unambiguous first/last-name token, else blank.
+  function matchOwnerId(name) {
+    const n = (name || "").trim().toLowerCase();
+    if (!n) return "";
+    const exact = members.filter((m) => (m.name || "").toLowerCase() === n);
+    if (exact.length === 1) return exact[0].id;
+    const tok = members.filter((m) => (m.name || "").toLowerCase().split(/\s+/).includes(n));
+    if (tok.length === 1) return tok[0].id;
+    return "";
+  }
+  const normalizeDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim())) ? s.trim() : "";   // only a clean YYYY-MM-DD pre-fills the picker
   const [actions, setActions] = useState([
     { id: 1, text: "Get vendor quote for Engine 2 pump repair", owner: "Chief Reyes", due: "Jun 30", done: false },
     { id: 2, text: "Confirm July EMT-B refresher seats", owner: "T.O. Daniels", due: "Jul 1", done: false },
@@ -3551,9 +3564,22 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
       const raw = await callClaude(sys, out);
       const items = parseActionItems(raw);
       if (items === null) { setErr("Couldn't read the extracted items — please add them manually below."); return; }
-      setActions((cur) => [...items.map((it, i) => ({ id: Date.now() + i, text: it.task, owner: it.suggested_owner || "Unassigned", due: it.suggested_due_date || "—", done: false })), ...cur]);
+      setReview(items.map((it, i) => ({ id: Date.now() + i, task: it.task, ownerId: matchOwnerId(it.suggested_owner), due: normalizeDate(it.suggested_due_date), keep: true })));
     } catch { setErr("Couldn't extract action items just now. Try again, or add them manually."); }
     finally { setExtracting(false); }
+  }
+  async function createActionItems() {
+    const kept = review.filter((r) => r.keep && r.task.trim());
+    if (!kept.length) return;
+    setCreating(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setCreating(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const rows = kept.map((r) => ({ department_id: deptId, text: r.task.trim(), assigned_to: r.ownerId || null, due_date: r.due || null }));   // status defaults 'open'
+    const { error } = await supabase.from("action_items").insert(rows);
+    setCreating(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the action items", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: `${kept.length} action item${kept.length === 1 ? "" : "s"} created.` });
+    setReview([]);   // 3b will loadActionItems() here to refresh the tracked list
   }
   function addAction() { if (!at.trim()) return; setActions((a) => [...a, { id: Date.now(), text: at.trim(), owner: ao.trim() || "Unassigned", due: ad.trim() || "—", done: false }]); setAt(""); setAo(""); setAd(""); }
   function toggle(id) { setActions((a) => a.map((x) => x.id === id ? { ...x, done: !x.done } : x)); }
@@ -3590,6 +3616,28 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
           {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
+
+      {review.length > 0 && (
+        <div style={{ ...FS.card, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>REVIEW EXTRACTED ITEMS — confirm owner &amp; due, then create</div>
+          {review.map((r, i) => (
+            <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <input type="checkbox" checked={r.keep} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x))} title="Include this item" style={{ marginBottom: 10 }} />
+              <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={r.task} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, task: e.target.value } : x))} /></label>
+              <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
+                <select style={FS.input} value={r.ownerId} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, ownerId: e.target.value } : x))}>
+                  <option value="">Unassigned</option>
+                  {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select></label>
+              <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input type="date" style={FS.input} value={r.due} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, due: e.target.value } : x))} /></label>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {canManage && <button style={{ ...FS.btnPrimary, opacity: creating ? 0.7 : 1 }} onClick={createActionItems} disabled={creating}>{creating ? <><Loader2 size={16} className="spin" /> Creating…</> : <><Plus size={16} /> Create {review.filter((r) => r.keep && r.task.trim()).length} action item(s)</>}</button>}
+            <button style={FS.btn} onClick={() => setReview([])} disabled={creating}>Discard</button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ ...FS.kicker, marginBottom: 0 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
