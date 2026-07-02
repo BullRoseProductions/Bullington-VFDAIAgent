@@ -3055,12 +3055,28 @@ function RosterReports({ S, members, sessions, dept, back }) {
       present: (s.attendance || []).length,
       total: s.audience === "leadership" ? members.filter((m) => isLeader(m.access)).length : members.length,
     }));
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
+  const flaggedCerts = [];
+  members.forEach((m) => m.certs.forEach((c) => {
+    const st = certStatus(c.exp);
+    if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
+  }));
+  // Live dept context — the same real sources the agenda builder gathers (dept-scoped by RLS).
+  const [duties, setDuties] = useState([]);
+  const [pendingCerts, setPendingCerts] = useState([]);
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));
+  }, []);
+  const todayISO = toISODate(new Date());
+  const openDuties = duties.filter((d) => !d.done);
+  const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
+  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 5);
+  const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
+  const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
+  const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
   function buildReportData() {
-    const flaggedCerts = [];
-    members.forEach((m) => m.certs.forEach((c) => {
-      const st = certStatus(c.exp);
-      if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
-    }));
     return {
       deptName: dept?.name || "Department",
       station: "",
@@ -3069,12 +3085,37 @@ function RosterReports({ S, members, sessions, dept, back }) {
       members: members.map((m) => ({ name: m.name, role: m.role, participation: attById.get(m.id), status: m.status })),
       flaggedCerts,
       activity: recentTraining,
+      duties: [...openDuties].sort((a, b) => {
+        const ao = a.due_date && a.due_date < todayISO, bo = b.due_date && b.due_date < todayISO;
+        if (ao !== bo) return ao ? -1 : 1;                                  // overdue first
+        return (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99");   // then soonest due, no-due last
+      }).map((d) => ({ duty: d.duty, due: d.due_date || "", who: nameById.get(d.assigned_to) || (d.assigned_to ? "Unassigned" : "Station-wide"), overdue: !!(d.due_date && d.due_date < todayISO) })),
+      upcoming: upcoming.map((s) => ({ title: s.title, date: fmtSess(s), leadership: s.audience === "leadership" })),
+      pendingCerts: pendingCerts.map((p) => ({ member: nameById.get(p.member_id) || "A member", cert: p.name })),
     };
   }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
-    const summary = `${dept?.name || "Department"} snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average training attendance (this year): ${avgPart}%\n- Recent training: ${recentTraining.length} recent drill${recentTraining.length === 1 ? "" : "s"} with recorded attendance`;
-    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board. Use clear sections with bold titles and bullet points: an overview, training & certifications (flag the expiring/expired certs as an action item), and participation. Confident, factual tone. Under 350 words.";
+    const topN = (arr, fmt, n = 3) => {
+      if (!arr.length) return "none";
+      const shown = arr.slice(0, n).map(fmt).join("; ");
+      const extra = arr.length - n;
+      return extra > 0 ? `${shown}; …and ${extra} more` : shown;
+    };
+    const certUrgent = [...flaggedCerts].sort((a, b) => (a.status === "Lapsed" ? 0 : 1) - (b.status === "Lapsed" ? 0 : 1));   // expired/lapsed first
+    const lines = [
+      `${dept?.name || "Department"} — current status. Use ONLY these facts; add nothing not listed.`,
+      `Members: ${active} active, ${prob} probationary (${members.length} total)`,
+      `Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired`,
+      `Average training attendance this year: ${avgPart}%`,
+      `Flagged certifications (most urgent first): ${topN(certUrgent, (f) => `${f.member}'s ${f.cert} (${f.status.toLowerCase()}, ${f.exp})`)}`,
+      `Overdue duties (most overdue first): ${topN(overdueDuties, (d) => `${d.duty} — ${nameById.get(d.assigned_to) || (d.assigned_to ? "unassigned" : "station-wide")}${d.due_date ? `, due ${d.due_date}` : ""}`)}`,
+      `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}`)}`,
+      `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
+      `Recent training: ${recentTraining.length} recent drill${recentTraining.length === 1 ? "" : "s"} with recorded attendance`,
+    ];
+    const summary = lines.join("\n");
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's live data. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
   return (
@@ -3087,6 +3128,17 @@ function RosterReports({ S, members, sessions, dept, back }) {
         <Stat S={S} dark n={`${active}/${members.length}`} label="Active members" />
         <Stat S={S} dark n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
         <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
+      </div>
+      <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
+        <div style={{ ...FS.kicker, marginBottom: 2 }}>DEPARTMENT SNAPSHOT · LIVE</div>
+        <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
+        {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
+        <SubHead>Flagged certifications — {expd} expired · {expg} expiring</SubHead>
+        {flaggedCerts.length === 0 ? <None /> : flaggedCerts.slice(0, 8).map((f, i) => <Line key={i}>{f.member} · {f.cert} · {f.exp} ({f.status})</Line>)}
+        <SubHead>Upcoming training — {upcoming.length}</SubHead>
+        {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+        <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
+        {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
       </div>
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
