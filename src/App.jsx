@@ -3482,6 +3482,9 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const [title, setTitle] = useState("Monthly Business Meeting");
   const [mtgDate, setMtgDate] = useState("");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
+  const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
+  const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
   async function generate() {
     setLoading(true); setErr(""); setOut("");
     const topN = (arr, fmt, n = 4) => {
@@ -3503,7 +3506,38 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
     ];
     const user = lines.join("\n");
     const sys = "You draft a clear, professional meeting agenda for a volunteer fire department's business meeting, for the chief or secretary to run the meeting from. Produce a standard agenda structure with the usual sections — Call to Order, Roll Call, Approval of Previous Minutes, Officer & Committee Reports, Old Business, New Business, Training, Announcements, and Adjournment (with the next meeting) — in a clean, numbered or bulleted format.\n\nYou may write the STANDARD AGENDA STRUCTURE and its section headings freely — those are normal parts of any meeting agenda, not department facts. But every DEPARTMENT-SPECIFIC item that fills those sections — a specific overdue duty and who owns it, a member whose certification is expired or expiring, an upcoming training date, a pending certification approval — must come ONLY from the real context provided below. Slot each into a sensible section: overdue and open duties under Old or New Business as items to address; expired/expiring certifications under New Business or a training/readiness item; upcoming training under Training; pending certification approvals under New Business or Officer Reports. Name the specifics — the duty, the member, the date — so the agenda reads like this department's real meeting, not a template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts in the real context below for department-specific items. NEVER invent or infer a duty, a certification, a member name, a date, a count, or an event that is not listed. Do not add plausible-sounding agenda items to fill space. If a category says 'none', do not create items for it — either omit that line or note there is nothing to report (for example, 'No overdue duties this period'). Where the context shows '…and N more', you may refer to that remaining count without naming them. Keep dates and windows exactly as written in the context. The harm this prevents is real: a chief runs a live meeting from this agenda, and a fabricated duty, certification, member, or date wastes the crew's time or misinforms the department.\n\nWarm but businesslike. Keep it to a runnable one-page agenda. Under 450 words.";
-    try { const t = await callClaude(sys, user); setOut(t); } catch { setErr("Couldn't draft the agenda just now. Try again."); } finally { setLoading(false); }
+    try { const t = await callClaude(sys, user); setOut(t); setSaveTitle(title.trim().slice(0, 60) || `Agenda · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
+    catch { setErr("Couldn't draft the agenda just now. Try again."); } finally { setLoading(false); }
+  }
+  async function saveDraft() {
+    if (!out || !saveTitle.trim()) return;
+    setSaving(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "agenda", title: saveTitle.trim(), ai_text: out, created_by: meId });
+    setSaving(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the agenda", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Agenda saved." });
+    loadDrafts();
+  }
+  async function loadDrafts() {
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "agenda");   // dept-scoped by RLS
+    setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
+  }
+  useEffect(() => { loadDrafts(); }, []);
+  function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
+  function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
+  function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
+  async function saveEdit() {
+    if (!editBuf.trim()) return;
+    setSavingEdit(true);
+    const { data, error } = await supabase.from("ai_outputs")
+      .update({ current_text: editBuf, edited_by: meId, edited_at: new Date().toISOString() })   // ai_text left pristine
+      .eq("id", openDraft.id).select().single();
+    setSavingEdit(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save your edit", text: "Something went wrong saving your changes. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Changes saved." });
+    setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
   }
 
   const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
@@ -3543,8 +3577,56 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
           </button>
           {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
+          {out && canManage && (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+              <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Agenda title" /></label>
+              <button style={{ ...FS.btn, opacity: (saving || !saveTitle.trim()) ? 0.6 : 1 }} onClick={saveDraft} disabled={saving || !saveTitle.trim()}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save agenda</>}</button>
+            </div>
+          )}
         </div>
       </div>
+
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED AGENDAS</div>
+      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
+        {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved agendas yet.</div> : drafts.map((d) => {
+          const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
+          const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
+          const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          return (
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled agenda"}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
+              </div>
+              <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
+            </div>
+          );
+        })}
+      </div>
+      {openDraft && (
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Agenda"}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
+                <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
+              </div>
+            </div>
+            {editing ? (
+              <>
+                <textarea style={{ ...FS.input, minHeight: 260, resize: "vertical", width: "100%", fontFamily: "inherit" }} value={editBuf} onChange={(e) => setEditBuf(e.target.value)} />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                  <button style={FS.btn} onClick={() => { setEditing(false); setEditBuf(""); }} disabled={savingEdit}>Cancel</button>
+                  <button style={{ ...FS.btnPrimary, opacity: (savingEdit || !editBuf.trim()) ? 0.6 : 1 }} onClick={saveEdit} disabled={savingEdit || !editBuf.trim()}>{savingEdit ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save changes</>}</button>
+                </div>
+              </>
+            ) : (
+              <RichOutput S={S} text={openDraft.current_text ?? openDraft.ai_text} dark />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
