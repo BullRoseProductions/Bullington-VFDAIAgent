@@ -3128,7 +3128,9 @@ function Reports({ S, role, members, sessions, dept }) {
 // Source pool excludes done drills with NO recorded attendance (roll never taken → missing data, not absence).
 // eligible denominator is PER MEMBER (audience-aware): leadership-only events count only for leaders.
 function AttendanceReport({ S, members, sessions, dept, back }) {
-  const year = new Date().getFullYear();   // Chunk 3: becomes selectable state
+  const cur = new Date().getFullYear();
+  const [year, setYear] = useState(cur);
+  const years = [...new Set([cur, ...(sessions || []).filter((s) => s.done && (s.attendance || []).length > 0).map((s) => s.y)])].sort((a, b) => b - a);   // current year + any year with reportable drills, newest first
   const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // source pool: done + roll-taken
   const rows = (members || []).map((m) => {
     const memberLeader = isLeader(m.access);                                              // score off the member's ACTUAL roles
@@ -3140,12 +3142,33 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const rated = rows.filter((r) => r.pct != null);
   const avgPct = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
+  const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  function exportCsv() {
+    const header = ["Member", "Role", "Status", "Attended", "Eligible", "Attendance rate"];
+    const body = rows.map((r) => [r.name, r.role, r.status, r.attended, r.eligible, r.pct == null ? "—" : `${r.pct}%`]);
+    const csv = [header, ...body].map((r) => r.map(csvField).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `attendance-${year}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
       <div style={FS.kicker}>REPORTS · ATTENDANCE</div>
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Yearly Attendance Report</h1>
       <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>Full-year training attendance per member for {year}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.</div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Report year</span>
+        <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ ...FS.input, width: "auto", minWidth: 110 }}>
+          {years.map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={exportCsv} disabled={doneThisYear.length === 0}><Download size={15} /> Download CSV</button>
+      </div>
 
       <div style={S.statRow}>
         <Stat S={S} dark n={String(year)} label="Report year" />
