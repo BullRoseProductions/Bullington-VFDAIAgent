@@ -72,8 +72,7 @@ export function buildReportDoc(data) {
   const tiles = [
     { num: `${k.active}/${k.total}`, label: "ACTIVE MEMBERS", sub: `${data.counts.prob} probationary`, sc: GRAY },
     { num: `${k.certPct}%`, label: "CERT COMPLIANCE", sub: `${data.counts.expg} expiring \u00b7 ${data.counts.expd} expired`, sc: k.certWarn ? REDX : AMBER },
-    { num: `${k.avgPart}%`, label: "AVG PARTICIPATION", sub: "last 90 days", sc: GRAY },
-    { num: `${k.rigsReady}/${k.rigsTotal}`, label: "APPARATUS READY", sub: `${k.rigsTotal - k.rigsReady} flagged`, sc: (k.rigsTotal - k.rigsReady) ? AMBER : GREEN },
+    { num: `${k.avgPart}%`, label: "AVG PARTICIPATION", sub: "this year", sc: GRAY },
   ];
   const KH = 64;
   doc.setFillColor(...PANEL); doc.rect(M, y, CW, KH, "F");
@@ -143,8 +142,7 @@ export function buildReportDoc(data) {
   const c = data.counts;
   header("Chief\u2019s Summary");
   para(`As of ${MONTHS[now.getMonth()]} ${now.getFullYear()}, the department has ${c.active} active members of `
-    + `${c.total} on the roster (${c.prob} probationary) and ${c.avgPart}% average participation over the last 90 days. `
-    + `${k.rigsReady} of ${k.rigsTotal} apparatus are ready to roll. `
+    + `${c.total} on the roster (${c.prob} probationary) and ${c.avgPart}% average participation this year. `
     + (c.expd > 0
       ? `${c.expd} certification${c.expd > 1 ? "s are" : " is"} expired and ${c.expg} expiring within 90 days \u2014 flagged below as action items.`
       : `Certifications are in good standing, with ${c.expg} expiring within 90 days to watch.`));
@@ -164,18 +162,12 @@ export function buildReportDoc(data) {
   // ---------- Personnel & Participation ----------
   header("Personnel & Participation");
   table(["Member", "Role", "Participation", "Status"],
-    data.members.map((m) => [m.name, m.role, `${m.participation}%`, m.status]),
+    data.members.map((m) => [m.name, m.role, m.participation == null ? "\u2014" : `${m.participation}%`, m.status]),
     { badgeCol: 3, columnStyles: { 0: { fontStyle: "bold" }, 2: { halign: "right" }, 3: { cellWidth: 90 } } });
 
-  // ---------- Apparatus ----------
-  header("Apparatus Readiness");
-  table(["Unit", "Type", "Last check", "Readiness", "Note"],
-    data.apparatus.map((a) => [a.name, a.type, a.lastCheck, a.ready ? "In service" : "Needs attention", a.note || "\u2014"]),
-    { badgeCol: 3, columnStyles: { 0: { fontStyle: "bold" }, 3: { cellWidth: 84 } } });
-
-  // ---------- Recent Activity ----------
-  header("Recent Activity");
-  table(["Event", "Date", "Type", "Attendance"],
+  // ---------- Recent Training ----------
+  header("Recent Training");
+  table(["Session", "Date", "Type", "Attendance"],
     data.activity.map((e) => [e.name, e.date, e.type, `${e.present} / ${e.total}`]),
     { columnStyles: { 0: { fontStyle: "bold" }, 3: { halign: "right" } } });
 
@@ -183,8 +175,6 @@ export function buildReportDoc(data) {
   const actions = [];
   data.flaggedCerts.filter((f) => f.status === "Lapsed").slice(0, 3).forEach((f) =>
     actions.push(`Schedule ${f.member} for the next ${f.cert} refresher \u2014 certification has lapsed.`));
-  data.apparatus.filter((a) => !a.ready).forEach((a) =>
-    actions.push(`Resolve ${a.name}: ${a.note || "needs attention"} before it returns to service.`));
   if (c.prob > 0) actions.push(`Continue mentoring ${c.prob} probationary member${c.prob > 1 ? "s" : ""}; review status at the next business meeting.`);
   if (data.flaggedCerts.some((f) => f.status === "Expiring")) actions.push("Confirm seats for members with certifications expiring in the next 90 days in upcoming refresher classes.");
   if (actions.length) {
@@ -199,8 +189,8 @@ export function buildReportDoc(data) {
   doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
   doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   const prov = doc.splitTextToSize(
-    "How this report was produced. Drafted automatically from the department\u2019s roster, training, certification, "
-    + "and apparatus records, then reviewed and approved by a qualified officer before release \u2014 the platform\u2019s "
+    "How this report was produced. Drafted automatically from the department\u2019s roster, training, and certification "
+    + "records, then reviewed and approved by a qualified officer before release \u2014 the platform\u2019s "
     + "standing rule: the system drafts, a human approves, then it publishes.", CW - 24);
   let py = y + 13;
   prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
