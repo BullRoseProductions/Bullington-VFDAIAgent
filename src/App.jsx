@@ -1117,6 +1117,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
   const canManage = hasAny(role, CANMANAGE_ROLES);   // training_sessions INSERT gate (excludes PA)
   const [newDate, setNewDate] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
+  const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null);
@@ -1149,14 +1150,14 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const title = newTitle.trim() || `${form.topic} — AI drill plan`;
     // a) create the session on the picked date (reuses addSession's insert shape; the type=date value is already YYYY-MM-DD)
-    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, done: false }).select().single();
+    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, done: false, audience: newAudience }).select().single();
     if (e1 || !sess) { setSaving(false); notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong creating that session. Please try again.", details: e1?.message }); return; }
     // b) attach the plan to the new session (reuses saveToSession's attach). Non-atomic — recoverable if this fails.
     const { error: e2 } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: sess.id, title, source: "ai", ai_text: serializeDrillPlan(plan, form.topic), created_by: me?.name || "Unknown" });
     setSaving(false);
     if (e2) { notify({ kind: "error", title: "Session created — plan didn't attach", text: "The session was scheduled, but attaching the plan failed. You can attach it from the planner's session picker.", details: e2.message }); loadSessions && loadSessions(); return; }
     notify({ kind: "success", title: "Scheduled", text: `Training scheduled on ${newDate} with its plan.` });
-    setNewDate(""); setNewTitle(""); setNewCat("");
+    setNewDate(""); setNewTitle(""); setNewCat(""); setNewAudience("everyone");
     loadSessions && loadSessions();
   }
   return (
@@ -1214,6 +1215,13 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input type="date" style={FS.input} value={newDate} onChange={(e) => setNewDate(e.target.value)} /></label>
                   <label style={{ ...S.field, minWidth: 150, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={form.topic} /></label>
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={newCat} onChange={(e) => setNewCat(e.target.value)}><option value="">One-off (no category)</option>{(categories || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+                  <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Audience</span>
+                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+                      {[["everyone", "Everyone"], ["leadership", "Leadership only"]].map(([val, lbl], i) => {
+                        const on = newAudience === val;
+                        return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                      })}
+                    </div></label>
                   <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={scheduleOnDate} disabled={!newDate || saving}>{saving ? <><Loader2 size={16} className="spin" /> Scheduling…</> : <><Plus size={16} /> Schedule on date</>}</button>
                 </div>
               )}
@@ -3521,6 +3529,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState("");
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
+  const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
   const [rCad, setRCad] = useState("Bi-weekly");        // recurring cadence (defaults from the picked category)
   const [rCount, setRCount] = useState("26");           // N occurrences (defaults from cadence)
   // AI training-plan drafter (Card 2) + ai_text viewer
@@ -3597,6 +3606,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       title,
       date: toISO(new Date(cur.y, cur.m, Number(sd))),
       done: false,
+      audience: sAudience,
     });
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setShowSess(false); setStitle(""); loadSessions();
@@ -3627,7 +3637,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
-    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, done: false, series_id: sid }));
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, done: false, series_id: sid, audience: sAudience }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem) await supabase.from("training_plans").update({ starts_on: toISO(new Date(startY, startM, startD)) }).eq("id", pItem.id);
@@ -3962,6 +3972,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>{repeat ? "Start day" : "Day"}</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
+          <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
+            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+              {[["everyone", "Everyone"], ["leadership", "Leadership only"]].map(([val, lbl], i) => {
+                const on = sAudience === val;
+                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+              })}
+            </div></label>
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
             <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? "#F0F2F5" : "#9AA1AC" }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
           {repeat && <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>How often</span>
@@ -3972,7 +3989,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             : <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>}
           <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
+      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
 
       {/* calendar wrapped in dark card; dark calendar in dark card; red today marker */}
       <div style={{ ...Lcard, marginBottom: 16 }}>
