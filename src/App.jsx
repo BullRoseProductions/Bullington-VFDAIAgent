@@ -4024,16 +4024,21 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             monthSessions.map((s) => {
               const att = s.attendance || [];
               const open = openAtt === s.id;
+              const ldrEvent = s.audience === "leadership";
+              const expected = ldrEvent ? members.filter((m) => isLeader(m.access)) : members;                         // counted population (leaders for leadership events)
+              const roll = ldrEvent ? members.filter((m) => isLeader(m.access) || att.includes(m.id)) : members;      // shown = expected ∪ actual attendees (never hide a real check-in)
+              const expCount = expected.length;                                                                        // denominator M
+              const attCount = expected.filter((m) => att.includes(m.id)).length;                                      // numerator N — expected who attended
               return (
                 <div key={s.id}>
                   <div style={Lrow}>
                     <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<LeadershipTag audience={s.audience} /></span>
-                      <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
+                      <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
-                    <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {att.length}/{members.length}</button>
+                    <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
                     {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                     {canManage && (
                       <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> {s.plans.length ? "Attach more" : "Attach plan"}<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
@@ -4059,14 +4064,14 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   {open && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
                       <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked." : "Tap a name to mark who attended.") : "Who attended this session."}</div>
-                      {members.map((m) => {
+                      {roll.map((m) => {
                         const present = att.includes(m.id);
                         return (
                           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
                             {canManage && !s.done
                               ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#76C98D" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
                               : (present ? <CheckCircle2 size={18} color="#76C98D" /> : <X size={16} color="#E58A90" />)}
-                            <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}</span>
+                            <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}{ldrEvent && !isLeader(m.access) ? <span style={{ color: "#7E8794", fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
                             <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#76C98D" : "#E58A90" }}>{present ? "PRESENT" : "ABSENT"}</span>
                           </div>
                         );
