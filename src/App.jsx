@@ -322,7 +322,7 @@ export default function App() {
   const [trainingSessions, setTrainingSessions] = useState([]);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open, series_id"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open, series_id, audience"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -346,7 +346,7 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // plans[] = all; plan = newest (backward-compat alias)
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // audience: 'everyone' | 'leadership' (default everyone); plans[] = all; plan = newest (backward-compat alias)
       })
     );
   };
@@ -672,7 +672,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
   // per-CALENDAR-MONTH attendance rate for this member (null when a month has no recorded drills)
   const monthRate = (Y, M) => {
-    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M);
+    const meLeader = isLeader(me?.access);   // score off the member's ACTUAL roles (not "View as")
+    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && (meLeader || s.audience !== "leadership"));
     if (!rec.length) return null;
     const att = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
     return { total: rec.length, attended: att, pct: Math.round((att / rec.length) * 100) };
@@ -716,13 +717,13 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   useEffect(() => {
     const todayIso = toISO(today);
     Promise.all([
-      supabase.from("training_sessions").select("id, title, date"),
+      supabase.from("training_sessions").select("id, title, date, audience"),
       supabase.from("funding_events").select("title, date"),
       supabase.from("recruitment_events").select("title, date"),
       supabase.from("content_calendar").select("caption, date"),
     ]).then(([tr, fu, rc, so]) => {
       const rows = [
-        ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, type: "Training" })),
+        ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, type: "Training", audience: r.audience || "everyone" })),
         ...(fu.data || []).map((r) => ({ title: r.title, date: r.date, type: "Fundraiser" })),
         ...(rc.data || []).map((r) => ({ title: r.title, date: r.date, type: "Recruitment" })),
         ...(so.data || []).map((r) => ({ title: r.caption, date: r.date, type: "Social" })),
@@ -800,7 +801,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
                 <>
                   <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nextEvent.title || "—"}</div>
-                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}<LeadershipTag audience={nextEvent.audience} /></div>
                 </>
               ) : (
                 <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 10 }}>Nothing scheduled</div>
@@ -1993,7 +1994,7 @@ function DashboardCalendar({ S, notify }) {
   const loadAll = () => {
     Promise.all([
       supabase.from("content_calendar").select("id, date, caption"),
-      supabase.from("training_sessions").select("id, date, title, session_plans(id, title, storage_path, ai_text, source, created_at)"),
+      supabase.from("training_sessions").select("id, date, title, audience, session_plans(id, title, storage_path, ai_text, source, created_at)"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("funding_events").select("id, date, title"),
     ]).then(([social, training, recruit, funding]) => {
@@ -2006,6 +2007,7 @@ function DashboardCalendar({ S, notify }) {
         ...mapRows(social, "social", (r) => r.caption || ""),
         ...mapRows(training, "training", (r) => r.title, (r) => ({
           title: r.title,   // SessionPlanChooser header reads session.title (chip items only have `label`)
+          audience: r.audience || "everyone",
           plans: (r.session_plans || [])
             .slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))   // newest-first, matching Training's loadSessions
             .map((p) => ({ id: p.id, title: p.title, storage_path: p.storage_path, ai_text: p.ai_text, source: p.source, session_id: r.id, kind: p.storage_path ? "file" : "ai" })),
@@ -2044,7 +2046,7 @@ function DashboardCalendar({ S, notify }) {
       <MonthCalendar
         cur={cur} setCur={setCur} dark
         items={monthItems}
-        renderChip={(it) => ({ color: it.color, label: it.label, title: (it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) })}
+        renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: it.color, label: ldr ? `🔒 ${it.label}` : it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
         todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         overflowIndicator
@@ -2569,7 +2571,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       <ProposeCert S={S} role={role} member={member} notify={notify} />
 
       {(() => {
-        const done = (sessions || []).filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a));
+        const memberLeader = isLeader(member.access);   // score + list off the VIEWED member's actual roles
+        const done = (sessions || []).filter((s) => s.done && (memberLeader || s.audience !== "leadership")).sort((a, b) => sessDate(b) - sessDate(a));
         const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
@@ -2582,7 +2585,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                   return (
                     <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
                       <CalendarCheck size={15} color={present ? FIRE.green : FIRE.redBright} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><LeadershipTag audience={s.audience} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
                       <Pill S={S} color={present ? FIRE.green : FIRE.redBright}>{present ? "PRESENT" : "ABSENT"}</Pill>
                     </div>
                   );
@@ -3477,6 +3480,10 @@ function usePlanViewer(S, notify) {
   </>);
   return { openSessionPlans, openPlan, setViewPlan, mounts };
 }
+function LeadershipTag({ audience }) {   // amber "Leadership" pill for leadership-audience events (list rows); returns null otherwise
+  if (audience !== "leadership") return null;
+  return <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>Leadership</span>;
+}
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept, addFeedback }) {
   const canManage = hasAny(role, CANMANAGE_ROLES);
   const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
@@ -3704,7 +3711,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         return "#" + to2(Math.round(r + (tr - r) * tt)) + to2(Math.round(g + (tg - g) * tt)) + to2(Math.round(b + (tb - b) * tt));
       };
       const color = s.done ? mix(base, 0.45) : base;
-      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+      return { color, label: `${s.done ? "✓ " : ""}${s.audience === "leadership" ? "🔒 " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
     };
 
     const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
@@ -3781,7 +3788,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
                   <CalendarCheck size={15} color={cat?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<LeadershipTag audience={s.audience} /></div>
                     <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d} · {s.planId ? "counts toward the plan" : "one-off"}</div>
                   </div>
                   {!s.done ? (
@@ -3986,7 +3993,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
               };
               const color = s.done ? mix(base, 0.45) : base;
-              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+              return { color, label: `${s.done ? "✓ " : ""}${s.audience === "leadership" ? "🔒 " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
             }}
             todayColor="#C8323A"
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
@@ -4003,7 +4010,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   <div style={Lrow}>
                     <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}</span>
+                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<LeadershipTag audience={s.audience} /></span>
                       <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${att.length}/${members.length} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
