@@ -183,6 +183,7 @@ const NAV = [
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
+  { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Training Officer"] },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
 ];
@@ -458,6 +459,7 @@ export default function App() {
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} />}
+          {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
         </main>
@@ -3083,6 +3085,53 @@ function RosterReports({ S, members }) {
           {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Reports (leadership reporting hub) ---------------- */
+// Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
+function Reports({ S, role, members, sessions, dept }) {
+  const [view, setView] = useState(null);   // null = hub cards; "attendance" = yearly attendance report
+  if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>REPORTS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Reporting hub</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The records your department gets audited on — attendance, readiness, and board reports — in one place.</div>
+      </div>
+      <div style={S.opGrid}>
+        <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("attendance")}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <CalendarCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Yearly Attendance Report</div></div>
+          </div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Full-year training attendance per member — the durable record for audits, not the rolling calendar view.</div>
+          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+          </div>
+        </div>
+        <div style={{ ...S.opCard, ...FS.card, opacity: 0.6 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <BarChart3 size={18} color={FIRE.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Chief's Report</div></div>
+            <Pill S={S} color={FIRE.textMuted}>STAGE 2</Pill>
+          </div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — moving here from Roster and wiring to live data. Coming soon.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// Stub — Chunk 2 adds the per-member aggregation + table, Chunk 3 the year selector, Chunk 4 CSV export.
+function AttendanceReport({ S, members, sessions, dept, back }) {
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
+      <div style={FS.kicker}>REPORTS · ATTENDANCE</div>
+      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Yearly Attendance Report</h1>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Full-year training attendance per member. Report body built next.</div>
     </div>
   );
 }
