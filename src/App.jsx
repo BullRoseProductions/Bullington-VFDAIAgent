@@ -183,6 +183,7 @@ const NAV = [
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
+  { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Training Officer"] },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
 ];
@@ -458,6 +459,7 @@ export default function App() {
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} />}
+          {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
         </main>
@@ -3083,6 +3085,116 @@ function RosterReports({ S, members }) {
           {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Reports (leadership reporting hub) ---------------- */
+// Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
+function Reports({ S, role, members, sessions, dept }) {
+  const [view, setView] = useState(null);   // null = hub cards; "attendance" = yearly attendance report
+  if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>REPORTS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Reporting hub</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The records your department gets audited on — attendance, readiness, and board reports — in one place.</div>
+      </div>
+      <div style={S.opGrid}>
+        <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("attendance")}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <CalendarCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Yearly Attendance Report</div></div>
+          </div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Full-year training attendance per member — the durable record for audits, not the rolling calendar view.</div>
+          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+          </div>
+        </div>
+        <div style={{ ...S.opCard, ...FS.card, opacity: 0.6 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <BarChart3 size={18} color={FIRE.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Chief's Report</div></div>
+            <Pill S={S} color={FIRE.textMuted}>STAGE 2</Pill>
+          </div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — moving here from Roster and wiring to live data. Coming soon.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// Yearly attendance — per-member aggregation from sessions + session_attendance.
+// Source pool excludes done drills with NO recorded attendance (roll never taken → missing data, not absence).
+// eligible denominator is PER MEMBER (audience-aware): leadership-only events count only for leaders.
+function AttendanceReport({ S, members, sessions, dept, back }) {
+  const cur = new Date().getFullYear();
+  const [year, setYear] = useState(cur);
+  const years = [...new Set([cur, ...(sessions || []).filter((s) => s.done && (s.attendance || []).length > 0).map((s) => s.y)])].sort((a, b) => b - a);   // current year + any year with reportable drills, newest first
+  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // source pool: done + roll-taken
+  const rows = (members || []).map((m) => {
+    const memberLeader = isLeader(m.access);                                              // score off the member's ACTUAL roles
+    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // PER-MEMBER denominator
+    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
+    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct };
+  }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
+  const rated = rows.filter((r) => r.pct != null);
+  const avgPct = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
+  const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
+  const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  function exportCsv() {
+    const header = ["Member", "Role", "Status", "Attended", "Eligible", "Attendance rate"];
+    const body = rows.map((r) => [r.name, r.role, r.status, r.attended, r.eligible, r.pct == null ? "—" : `${r.pct}%`]);
+    const csv = [header, ...body].map((r) => r.map(csvField).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `attendance-${year}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
+      <div style={FS.kicker}>REPORTS · ATTENDANCE</div>
+      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Yearly Attendance Report</h1>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>Full-year training attendance per member for {year}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.</div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Report year</span>
+        <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ ...FS.input, width: "auto", minWidth: 110 }}>
+          {years.map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={exportCsv} disabled={doneThisYear.length === 0}><Download size={15} /> Download CSV</button>
+      </div>
+
+      <div style={S.statRow}>
+        <Stat S={S} dark n={String(year)} label="Report year" />
+        <Stat S={S} dark n={String(doneThisYear.length)} label="Drills held" />
+        <Stat S={S} dark n={`${avgPct}%`} label="Avg attendance" />
+        <Stat S={S} dark n={String(rows.length)} label="Members" />
+      </div>
+
+      <div style={{ ...FS.card, padding: "4px 16px", marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>Member</div>
+          <div style={{ width: 90, textAlign: "right" }}>Attended</div>
+          <div style={{ width: 60, textAlign: "right" }}>Rate</div>
+        </div>
+        {rows.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "12px 0" }}>No members to report.</div> : rows.map((r) => (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.role}</div>
+            </div>
+            <div style={{ width: 90, textAlign: "right", ...FS.num, fontSize: 13, color: FIRE.textSecondary }}>{r.attended} / {r.eligible}</div>
+            <div style={{ width: 60, textAlign: "right", ...FS.num, fontSize: 13.5, fontWeight: 700, color: pctColor(r.pct) }}>{r.pct == null ? "—" : `${r.pct}%`}</div>
+          </div>
+        ))}
+      </div>
+      {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {year} yet.</div>}
     </div>
   );
 }
