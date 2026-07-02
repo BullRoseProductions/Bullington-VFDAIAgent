@@ -17,7 +17,7 @@ const MONTHS = ["January", "February", "March", "April", "May", "June",
 
 function badgeColors(text) {
   const t = String(text).toLowerCase();
-  if (/(out of service|lapsed|expired|flag|high)/.test(t)) return [REDX_BG, REDX];
+  if (/(out of service|lapsed|expired|flag|high|overdue)/.test(t)) return [REDX_BG, REDX];
   if (/(expiring|watch|follow|needs|low|medium|probation)/.test(t)) return [AMBER_BG, AMBER];
   if (/(in service|current|healthy|active|ready|on target|pass)/.test(t)) return [GREEN_BG, GREEN];
   return [NEUT_BG, NEUT];
@@ -159,6 +159,22 @@ export function buildReportDoc(data) {
     y += 8;
   }
 
+  // ---------- Pending Certification Approvals ----------
+  header("Pending Certification Approvals");
+  if ((data.pendingCerts || []).length) {
+    table(["Member", "Certification"],
+      data.pendingCerts.map((p) => [p.member, p.cert]),
+      { columnStyles: { 0: { fontStyle: "bold" } } });
+  } else { para("No certification submissions are awaiting approval.", GRAY); y += 8; }
+
+  // ---------- Open & Overdue Duties ----------
+  header("Open & Overdue Duties");
+  if ((data.duties || []).length) {
+    table(["Duty", "Due", "Assigned", "Status"],
+      data.duties.map((d) => [d.duty, d.due || "\u2014", d.who, d.overdue ? "Overdue" : "Open"]),
+      { badgeCol: 3, columnStyles: { 0: { fontStyle: "bold" }, 3: { cellWidth: 74 } } });
+  } else { para("No open station duties — all assigned tasks are complete.", GRAY); y += 8; }
+
   // ---------- Personnel & Participation ----------
   header("Personnel & Participation");
   table(["Member", "Role", "Participation", "Status"],
@@ -170,6 +186,14 @@ export function buildReportDoc(data) {
   table(["Session", "Date", "Type", "Attendance"],
     data.activity.map((e) => [e.name, e.date, e.type, `${e.present} / ${e.total}`]),
     { columnStyles: { 0: { fontStyle: "bold" }, 3: { halign: "right" } } });
+
+  // ---------- Upcoming Training ----------
+  header("Upcoming Training");
+  if ((data.upcoming || []).length) {
+    table(["Session", "Date", "Audience"],
+      data.upcoming.map((u) => [u.title, u.date, u.leadership ? "Leadership" : "All members"]),
+      { columnStyles: { 0: { fontStyle: "bold" } } });
+  } else { para("No upcoming training is currently scheduled.", GRAY); y += 8; }
 
   // ---------- Recommended Actions ----------
   const actions = [];

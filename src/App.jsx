@@ -3055,12 +3055,28 @@ function RosterReports({ S, members, sessions, dept, back }) {
       present: (s.attendance || []).length,
       total: s.audience === "leadership" ? members.filter((m) => isLeader(m.access)).length : members.length,
     }));
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
+  const flaggedCerts = [];
+  members.forEach((m) => m.certs.forEach((c) => {
+    const st = certStatus(c.exp);
+    if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
+  }));
+  // Live dept context — the same real sources the agenda builder gathers (dept-scoped by RLS).
+  const [duties, setDuties] = useState([]);
+  const [pendingCerts, setPendingCerts] = useState([]);
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));
+  }, []);
+  const todayISO = toISODate(new Date());
+  const openDuties = duties.filter((d) => !d.done);
+  const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
+  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 5);
+  const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
+  const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
+  const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
   function buildReportData() {
-    const flaggedCerts = [];
-    members.forEach((m) => m.certs.forEach((c) => {
-      const st = certStatus(c.exp);
-      if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
-    }));
     return {
       deptName: dept?.name || "Department",
       station: "",
@@ -3069,12 +3085,37 @@ function RosterReports({ S, members, sessions, dept, back }) {
       members: members.map((m) => ({ name: m.name, role: m.role, participation: attById.get(m.id), status: m.status })),
       flaggedCerts,
       activity: recentTraining,
+      duties: [...openDuties].sort((a, b) => {
+        const ao = a.due_date && a.due_date < todayISO, bo = b.due_date && b.due_date < todayISO;
+        if (ao !== bo) return ao ? -1 : 1;                                  // overdue first
+        return (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99");   // then soonest due, no-due last
+      }).map((d) => ({ duty: d.duty, due: d.due_date || "", who: nameById.get(d.assigned_to) || (d.assigned_to ? "Unassigned" : "Station-wide"), overdue: !!(d.due_date && d.due_date < todayISO) })),
+      upcoming: upcoming.map((s) => ({ title: s.title, date: fmtSess(s), leadership: s.audience === "leadership" })),
+      pendingCerts: pendingCerts.map((p) => ({ member: nameById.get(p.member_id) || "A member", cert: p.name })),
     };
   }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
-    const summary = `${dept?.name || "Department"} snapshot:\n- Members: ${active} active, ${prob} probationary (${members.length} total)\n- Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired\n- Average training attendance (this year): ${avgPart}%\n- Recent training: ${recentTraining.length} recent drill${recentTraining.length === 1 ? "" : "s"} with recorded attendance`;
-    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board. Use clear sections with bold titles and bullet points: an overview, training & certifications (flag the expiring/expired certs as an action item), and participation. Confident, factual tone. Under 350 words.";
+    const topN = (arr, fmt, n = 3) => {
+      if (!arr.length) return "none";
+      const shown = arr.slice(0, n).map(fmt).join("; ");
+      const extra = arr.length - n;
+      return extra > 0 ? `${shown}; …and ${extra} more` : shown;
+    };
+    const certUrgent = [...flaggedCerts].sort((a, b) => (a.status === "Lapsed" ? 0 : 1) - (b.status === "Lapsed" ? 0 : 1));   // expired/lapsed first
+    const lines = [
+      `${dept?.name || "Department"} — current status. Use ONLY these facts; add nothing not listed.`,
+      `Members: ${active} active, ${prob} probationary (${members.length} total)`,
+      `Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired`,
+      `Average training attendance this year: ${avgPart}%`,
+      `Flagged certifications (most urgent first): ${topN(certUrgent, (f) => `${f.member}'s ${f.cert} (${f.status.toLowerCase()}, ${f.exp})`)}`,
+      `Overdue duties (most overdue first): ${topN(overdueDuties, (d) => `${d.duty} — ${nameById.get(d.assigned_to) || (d.assigned_to ? "unassigned" : "station-wide")}${d.due_date ? `, due ${d.due_date}` : ""}`)}`,
+      `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}`)}`,
+      `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
+      `Recent training: ${recentTraining.length} recent drill${recentTraining.length === 1 ? "" : "s"} with recorded attendance`,
+    ];
+    const summary = lines.join("\n");
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's live data. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
   return (
@@ -3087,6 +3128,17 @@ function RosterReports({ S, members, sessions, dept, back }) {
         <Stat S={S} dark n={`${active}/${members.length}`} label="Active members" />
         <Stat S={S} dark n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
         <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
+      </div>
+      <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
+        <div style={{ ...FS.kicker, marginBottom: 2 }}>DEPARTMENT SNAPSHOT · LIVE</div>
+        <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
+        {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
+        <SubHead>Flagged certifications — {expd} expired · {expg} expiring</SubHead>
+        {flaggedCerts.length === 0 ? <None /> : flaggedCerts.slice(0, 8).map((f, i) => <Line key={i}>{f.member} · {f.cert} · {f.exp} ({f.status})</Line>)}
+        <SubHead>Upcoming training — {upcoming.length}</SubHead>
+        {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+        <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
+        {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
       </div>
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
@@ -3162,16 +3214,39 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // PER-MEMBER denominator
     const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
     const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
-    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct };
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
   }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
   const rated = rows.filter((r) => r.pct != null);
   const avgPct = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
+  const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
+  const [fullYear, setFullYear] = useState(false);  // grid scope: false = recent 10, true = all sessions in year
+  const chron = [...doneThisYear].sort((a, b) => sessDate(a) - sessDate(b));   // chronological columns
+  const gridCols = fullYear ? chron : chron.slice(-10);                        // screen default = recent 10 (CSV always exports full)
+  // Audience-aware cell state — SAME predicate as the summary's eligible denominator, applied per session:
+  const cellState = (r, s) => (r.leader || s.audience !== "leadership")
+    ? ((s.attendance || []).includes(r.id) ? "present" : "absent")            // eligible → attended / eligible-but-absent
+    : "na";                                                                    // not eligible → not expected (leadership session, non-leader)
+  const CELL = { present: { ch: "✓", c: FIRE.green }, absent: { ch: "✗", c: FIRE.redText }, na: { ch: "—", c: FIRE.textMuted } };
+  const colLabel = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   function exportCsv() {
-    const header = ["Member", "Role", "Status", "Attended", "Eligible", "Attendance rate"];
-    const body = rows.map((r) => [r.name, r.role, r.status, r.attended, r.eligible, r.pct == null ? "—" : `${r.pct}%`]);
-    const csv = [header, ...body].map((r) => r.map(csvField).join(",")).join("\r\n");
+    // Section 1 — summary (unchanged)
+    const sumHeader = ["Member", "Role", "Status", "Attended", "Eligible", "Attendance rate"];
+    const sumBody = rows.map((r) => [r.name, r.role, r.status, r.attended, r.eligible, r.pct == null ? "—" : `${r.pct}%`]);
+    // Section 2 — session-by-session grid; ALWAYS full year (chron), independent of the screen's recent/full toggle
+    const cols = chron;
+    const gridHeader = ["Member", ...cols.map((s) => colLabel(s) + (s.audience === "leadership" ? " (L)" : "")), "Total"];
+    const gridBody = rows.map((r) => [r.name, ...cols.map((s) => ({ present: "P", absent: "A", na: "" }[cellState(r, s)])), `${r.attended}/${r.eligible}`]);
+    const allRows = [
+      sumHeader, ...sumBody,
+      [],                                                        // blank line between the two sections
+      [`Session-by-session — full year ${year}`],
+      gridHeader, ...gridBody,
+      [],
+      ["Legend: P = present, A = absent, blank = not expected (leadership session, non-leader), (L) = leadership session"],
+    ];
+    const csv = allRows.map((r) => r.map(csvField).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -3195,6 +3270,20 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={exportCsv} disabled={doneThisYear.length === 0}><Download size={15} /> Download CSV</button>
       </div>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={S.segRow}>
+          {[["summary", "Summary"], ["detail", "By session"]].map(([k, l]) => {
+            const on = detail === (k === "detail");
+            return <button key={k} onClick={() => setDetail(k === "detail")} style={{ ...S.segBtn, background: on ? FIRE.btnBg : "transparent", borderColor: on ? FIRE.red : FIRE.btnBorder, color: on ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>;
+          })}
+        </div>
+        {detail && chron.length > 10 && (
+          <button style={{ ...FS.btn, marginLeft: "auto", fontSize: 12 }} onClick={() => setFullYear((v) => !v)}>
+            {fullYear ? `All ${chron.length} sessions · show recent 10` : `Recent 10 · expand to full year (${chron.length})`}
+          </button>
+        )}
+      </div>
+
       <div style={S.statRow}>
         <Stat S={S} dark n={String(year)} label="Report year" />
         <Stat S={S} dark n={String(doneThisYear.length)} label="Drills held" />
@@ -3202,6 +3291,33 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         <Stat S={S} dark n={String(rows.length)} label="Members" />
       </div>
 
+      {detail ? (
+        <div style={{ ...FS.card, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead>
+              <tr>
+                <th style={{ position: "sticky", left: 0, background: FIRE.card, textAlign: "left", padding: "6px 14px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", zIndex: 1 }}>Member</th>
+                {gridCols.map((s) => (
+                  <th key={s.id} title={s.title} style={{ padding: "6px 9px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>
+                    {colLabel(s)}{s.audience === "leadership" && <span style={{ color: FIRE.amberText }}> ·L</span>}
+                  </th>
+                ))}
+                <th style={{ padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={{ position: "sticky", left: 0, background: FIRE.card, padding: "7px 14px", fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", zIndex: 1 }}>{r.name}</td>
+                  {gridCols.map((s) => { const c = CELL[cellState(r, s)]; return <td key={s.id} style={{ textAlign: "center", padding: "7px 9px", color: c.c, fontWeight: 700 }}>{c.ch}</td>; })}
+                  <td style={{ textAlign: "center", padding: "7px 12px", ...FS.num, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{r.attended}/{r.eligible}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "8px 14px 2px" }}><span style={{ color: FIRE.green, fontWeight: 700 }}>✓</span> attended · <span style={{ color: FIRE.redText, fontWeight: 700 }}>✗</span> absent · <span style={{ fontWeight: 700 }}>—</span> not expected · <span style={{ color: FIRE.amberText }}>·L</span> leadership session</div>
+        </div>
+      ) : (
       <div style={{ ...FS.card, padding: "4px 16px", marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
           <div style={{ flex: 1, minWidth: 0 }}>Member</div>
@@ -3219,6 +3335,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
           </div>
         ))}
       </div>
+      )}
       {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {year} yet.</div>}
     </div>
   );
