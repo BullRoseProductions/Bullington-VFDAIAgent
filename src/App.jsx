@@ -452,7 +452,7 @@ export default function App() {
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} meId={myMemberId} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
-          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} />}
+          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -1335,16 +1335,50 @@ function RichOutput({ S, text, dark }) {
 }
 
 /* ---------------- Recruitment ---------------- */
-function Recruitment({ S, brand, role, notify, dept }) {
+function Recruitment({ S, brand, role, notify, dept, meId, members }) {
   const [town, setTown] = useState("");
   const [size, setSize] = useState("14");
   const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
   const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
+  const canManage = hasAny(role, CANMANAGE_ROLES);   // ai_outputs writes are is_canmanage() (excludes PA, who can still VIEW Recruitment)
+  const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
+  const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
+  const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
   async function draft() {
     setLoading(true); setErr(""); setPlan("");
-    const sys = "You are a recruitment advisor for a volunteer fire/EMS department. Build a practical recruitment plan that uses ONLY three channels: (1) community events and an open house, (2) recruiting in person at local places — employers, schools/trade programs, churches, community spots, and (3) social media calls-to-action. Weight the plan HEAVILY toward social media calls-to-action: give it the most space, several specific sample posts, each with a clear ask, a concrete next step, and a tie to a real need. For each of the three channels, give 2-3 concrete steps a tiny crew can actually do, written in the department's voice. Do NOT suggest any other channels. Warm, honest, never desperate. Plain-text headers and bullets. Under 350 words.";
-    try { const t = await callClaude(sys, `Department: ${dept?.name || ""}\nTown: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}\nDepartment voice: ${brand?.voice || ""}\nTagline: ${brand?.tagline || ""}`); setPlan(t); }
+    const sys = "You are a recruitment advisor for a volunteer fire/EMS department. Build a practical recruitment plan that uses ONLY three channels: (1) community events and an open house, (2) recruiting in person at local places — employers, schools/trade programs, churches, community spots, and (3) social media calls-to-action. Weight the plan HEAVILY toward social media calls-to-action: give it the most space, several specific sample posts, each with a clear ask, a concrete next step, and a tie to a real need. For each of the three channels, give 2-3 concrete steps a tiny crew can actually do, written in the department's voice. Do NOT suggest any other channels.\n\nAlso include these sections:\n- A suggested CAMPAIGN HASHTAG tailored to this specific plan — short, memorable, tied to the department or the need.\n- LOCAL BUSINESSES TO APPROACH: list TYPES/CATEGORIES of local businesses worth asking to help spread the word (for example: hardware stores, feed and farm-supply stores, family diners, auto shops, grocery or convenience stores, banks or credit unions). Categories only.\n- WHERE TO SHOW UP: list TYPES of local events and venues to recruit at (for example: fall festivals, farmers markets, high school games, county fairs, church events). Categories only.\n- A week-by-week outreach plan (about 4-6 weeks) laying out what to post and where to show up each week.\n\nCRITICAL — READ CAREFULLY: You do NOT have real, current information about this town's actual businesses or upcoming events, and you must not pretend to. NEVER invent or name a specific local business, venue, or event — a real department could waste time contacting a business that does not exist or promoting an event that is not happening. Give TYPES and CATEGORIES ONLY, and explicitly prompt the leader to supply their own real local names and dates (for example: 'reach out to 3-4 businesses in these categories — you know the ones in your town' or 'pick 1-2 upcoming events like these from your area'). Near the top of the plan, include one short line noting that the local specifics — actual business names, event names, and dates — are for the leader to fill in from their own community. Warm, honest, never desperate. Plain-text headers and bullets. Under 550 words.";
+    try { const t = await callClaude(sys, `Department: ${dept?.name || ""}\nTown: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}\nDepartment voice: ${brand?.voice || ""}\nTagline: ${brand?.tagline || ""}`); setPlan(t); setSaveTitle(need.trim().slice(0, 60) || `Recruitment plan · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
     catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
+  }
+  async function saveDraft() {
+    if (!plan || !saveTitle.trim()) return;
+    setSaving(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "recruitment", title: saveTitle.trim(), ai_text: plan, created_by: meId });
+    setSaving(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the draft", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Draft saved." });
+    loadDrafts();
+  }
+  async function loadDrafts() {
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "recruitment");   // dept-scoped by RLS
+    setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
+  }
+  useEffect(() => { loadDrafts(); }, []);
+  function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
+  function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
+  function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
+  async function saveEdit() {
+    if (!editBuf.trim()) return;
+    setSavingEdit(true);
+    const { data, error } = await supabase.from("ai_outputs")
+      .update({ current_text: editBuf, edited_by: meId, edited_at: new Date().toISOString() })   // ai_text left pristine
+      .eq("id", openDraft.id).select().single();
+    setSavingEdit(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save your edit", text: "Something went wrong saving your changes. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Changes saved." });
+    setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -1374,6 +1408,12 @@ function Recruitment({ S, brand, role, notify, dept }) {
           </button>
           {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
           {plan && <RichOutput S={S} text={plan} dark />}
+          {plan && canManage && (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+              <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Draft title" /></label>
+              <button style={{ ...FS.btn, opacity: (saving || !saveTitle.trim()) ? 0.6 : 1 }} onClick={saveDraft} disabled={saving || !saveTitle.trim()}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save draft</>}</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1400,6 +1440,48 @@ function Recruitment({ S, brand, role, notify, dept }) {
         { name: "Employer & school outreach emails", type: "Doc · templates" },
         { name: "Open-house checklist & funnel tracker", type: "PDF" },
       ]} />
+
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</div>
+      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
+        {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved drafts yet.</div> : drafts.map((d) => {
+          const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
+          const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
+          const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          return (
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled draft"}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
+              </div>
+              <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
+            </div>
+          );
+        })}
+      </div>
+      {openDraft && (
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Draft"}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
+                <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
+              </div>
+            </div>
+            {editing ? (
+              <>
+                <textarea style={{ ...FS.input, minHeight: 260, resize: "vertical", width: "100%", fontFamily: "inherit" }} value={editBuf} onChange={(e) => setEditBuf(e.target.value)} />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                  <button style={FS.btn} onClick={() => { setEditing(false); setEditBuf(""); }} disabled={savingEdit}>Cancel</button>
+                  <button style={{ ...FS.btnPrimary, opacity: (savingEdit || !editBuf.trim()) ? 0.6 : 1 }} onClick={saveEdit} disabled={savingEdit || !editBuf.trim()}>{savingEdit ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save changes</>}</button>
+                </div>
+              </>
+            ) : (
+              <RichOutput S={S} text={openDraft.current_text ?? openDraft.ai_text} dark />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
