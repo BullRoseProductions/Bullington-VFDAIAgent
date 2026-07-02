@@ -710,7 +710,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
     loadMine();   // refetch — the duty moves from mineOpen → mineDone (loader now returns both)
   }
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
-  const [nextEvent, setNextEvent] = useState(null);
+  const [upcomingAll, setUpcomingAll] = useState([]);   // all sorted upcoming across the 4 calendar sources; nextEvent derived at render (audience-aware)
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
   const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);
   const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
@@ -729,12 +729,14 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
         ...(so.data || []).map((r) => ({ title: r.caption, date: r.date, type: "Social" })),
       ].filter((r) => r.date && r.date >= todayIso);                    // upcoming = date >= today (ISO string compare)
       rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));   // YYYY-MM-DD sorts chronologically
-      setNextEvent(rows[0] || null);                                    // soonest across all 4 sources, or null
+      setUpcomingAll(rows);                                             // store all upcoming; select at render (leadership-aware)
     });
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
   useEffect(() => { const id = setTimeout(() => setRingOn(true), 50); return () => clearTimeout(id); }, [ringPct]);   // animate ring fill on load / when the rate changes
   // Get prepared: a Training next-event's attachments come from the already-loaded sessions prop (s.plans[] from slice 1) — no extra query.
+  // NEXT EVENT: a non-leader's next event skips leadership training (still shown on the calendar). Leader sees it. Scored off actual roles (me.access), not "View as".
+  const nextEvent = upcomingAll.find((e) => isLeader(me?.access) || !(e.type === "Training" && e.audience === "leadership")) || null;
   const nextSession = nextEvent?.type === "Training" ? sess.find((x) => String(x.id) === String(nextEvent.id)) : null;
   const nextPlans = nextSession?.plans || [];
   return (
@@ -2054,7 +2056,7 @@ function DashboardCalendar({ S, notify }) {
       <MonthCalendar
         cur={cur} setCur={setCur} dark
         items={monthItems}
-        renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: it.color, label: ldr ? `🔒 ${it.label}` : it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
+        renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
         todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         overflowIndicator
@@ -3712,7 +3714,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     // IDENTICAL chip logic to the leader calendar — colors/layout unchanged (do not alter).
     const renderChip = (s) => {
       const cat = plan.find((p) => String(p.id) === String(s.planId));
-      const base = cat?.color || "#1F4E79";
+      const base = s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
       const mix = (hex, tt) => {
         const h = hex.replace("#", "");
         const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
@@ -3721,7 +3723,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         return "#" + to2(Math.round(r + (tr - r) * tt)) + to2(Math.round(g + (tg - g) * tt)) + to2(Math.round(b + (tb - b) * tt));
       };
       const color = s.done ? mix(base, 0.45) : base;
-      return { color, label: `${s.done ? "✓ " : ""}${s.audience === "leadership" ? "🔒 " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
     };
 
     const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
@@ -4000,7 +4002,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             renderChip={(s) => {
               // base color = linked category's live color, or fallback blue for one-off / deleted category
               const cat = plan.find((p) => String(p.id) === String(s.planId));
-              const base = cat?.color || "#1F4E79";
+              const base = s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
               // dim toward dark slate for completed (keep dark enough for white text)
               const mix = (hex, t) => {
                 const h = hex.replace("#", "");
@@ -4010,7 +4012,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
               };
               const color = s.done ? mix(base, 0.45) : base;
-              return { color, label: `${s.done ? "✓ " : ""}${s.audience === "leadership" ? "🔒 " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
             }}
             todayColor="#C8323A"
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
