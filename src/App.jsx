@@ -182,7 +182,7 @@ const NAV = [
   { key: "brand", label: "Media Builder", Icon: ImageIcon, roles: LEADERSHIP },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
-  { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
+  { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Training Officer"] },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
@@ -458,7 +458,7 @@ export default function App() {
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
-          {screen === "minutes" && <Minutes S={S} />}
+          {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} />}
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
@@ -3374,7 +3374,12 @@ function MaintenancePanel({ S, role, rigs }) {
   );
 }
 /* ---------------- Meeting Minutes + Action Items ---------------- */
-function Minutes({ S }) {
+function Minutes({ S, role, notify, dept, meId, members, sessions }) {
+  const [mode, setMode] = useState("agenda");
+  // Cert compliance computed HERE in the host from members — SAME certStatus math as the Chief's Report & Roster, so the agenda's numbers match (no drift).
+  const certRows = [];
+  (members || []).forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); certRows.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
+  const certContext = { expired: certRows.filter((r) => r.rank === 0), expiring: certRows.filter((r) => r.rank === 1) };
   const [title, setTitle] = useState("Monthly Business Meeting");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -3399,10 +3404,19 @@ function Minutes({ S }) {
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>MEETING MINUTES</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>From rough notes to clean minutes</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Type your notes, get a structured draft to approve, and carry every action item to the next meeting.</div>
+        <div style={FS.kicker}>MEETINGS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Agendas &amp; minutes</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.</div>
       </div>
+      <div style={S.segRow}>
+        {[["agenda", "Agenda"], ["minutes", "Minutes"]].map(([k, l]) => (
+          <button key={k} onClick={() => setMode(k)} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
+        ))}
+      </div>
+      {mode === "agenda" ? (
+        <MeetingAgenda S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} sessions={sessions} certContext={certContext} />
+      ) : (
+      <>
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</div>
@@ -3440,6 +3454,61 @@ function Minutes({ S }) {
             <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeA(a.id)}><X size={14} color={FIRE.deleteRed} /></button>
           </div>
         ))}
+      </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Meeting Agenda (dept-aware) ---------------- */
+// Gathers REAL context (open/overdue duties, upcoming training, expiring certs, pending cert proposals); AI drafts from ONLY that data,
+// human reviews/edits, saves to ai_outputs (feature:'agenda'). Chunk 1: context-gathering + preview. Generate=Ch2, save=Ch3, edit=Ch4.
+function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certContext }) {
+  const canManage = hasAny(role, CANMANAGE_ROLES);
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const [duties, setDuties] = useState([]);
+  const [pendingCerts, setPendingCerts] = useState([]);
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
+  }, []);
+  const todayISO = toISODate(new Date());
+  const openDuties = duties.filter((d) => !d.done);
+  const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date is YYYY-MM-DD → string compare
+  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 5);
+  const expired = certContext?.expired || [];
+  const expiring = certContext?.expiring || [];
+
+  const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
+  const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
+  const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
+  return (
+    <div>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><ClipboardList size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI AGENDA BUILDER</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft an agenda from your real department data</h3>
+          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Pulled live from your station — the draft references only what's real below, nothing invented.</p>
+
+          <div style={{ ...FS.card, padding: "10px 14px", marginBottom: 12 }}>
+            <div style={{ ...FS.kicker, marginBottom: 2, fontSize: 10.5 }}>CONTEXT WE'LL USE</div>
+
+            <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
+            {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
+
+            <SubHead>Upcoming training — {upcoming.length}</SubHead>
+            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+
+            <SubHead>Certifications — {expired.length} expired · {expiring.length} expiring</SubHead>
+            {expired.length === 0 && expiring.length === 0 ? <None /> : [...expired, ...expiring].slice(0, 8).map((r, i) => <Line key={i}>{r.member} · {r.cert} · {r.phrase}</Line>)}
+
+            <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
+            {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
+          </div>
+
+          <button disabled style={{ ...FS.btnPrimary, opacity: 0.55 }} title="Built in the next chunk"><Sparkles size={16} /> Generate agenda — built next</button>
+        </div>
       </div>
     </div>
   );
