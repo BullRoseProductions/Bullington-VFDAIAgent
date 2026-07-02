@@ -64,8 +64,15 @@ const FS = {
 
 const ROLES = ["Project Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
 const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Training Officer"];
-const isLeader = (role) => LEADERSHIP.includes(role);
-const canAssign = (role) => role === "Project Admin" || role === "Department Admin";
+const DEPT_ADMIN_ROLES = ["Department Admin", "Project Admin"];
+const CANMANAGE_ROLES  = ["Board Member", "Department Admin", "Training Officer"];   // NO Project Admin
+const SIGNIN_ROLES     = ["Project Admin", "Department Admin", "Training Officer"];  // PA/DA/TO — QR sign-in + AI planner
+const GRANTABLE_ROLES  = ["Member", "Training Officer", "Board Member", "Department Admin"];   // roster editor checkboxes — Project Admin NOT grantable
+const hasAny           = (rs, set) => Array.isArray(rs) && rs.some((r) => set.includes(r));
+const isLeader         = (rs) => hasAny(rs, LEADERSHIP);
+const isDeptAdmin      = (rs) => hasAny(rs, DEPT_ADMIN_ROLES);
+const canManage        = (rs) => hasAny(rs, CANMANAGE_ROLES);
+const isTrainingLeader = (rs) => hasAny(rs, SIGNIN_ROLES);
 
 const TRACKS = {
   Fire:        { label: "Fire",        accent: "#B11E2A", Icon: Flame },
@@ -212,8 +219,8 @@ function Notification({ S, kind, title, text, details, onClose }) {
   );
 }
 export default function App() {
-  const [role, setRole] = useState("Member");
-  const [realRole, setRealRole] = useState("Member");
+  const [role, setRole] = useState(["Member"]);
+  const [realRole, setRealRole] = useState(["Member"]);
   const [authEmail, setAuthEmail] = useState(null);
   const [myMemberId, setMyMemberId] = useState(null);
   const [identityChecked, setIdentityChecked] = useState(false);
@@ -273,7 +280,7 @@ export default function App() {
   }, []);
   // Load the real member id + permission tier from the signed-in user's row (authoritative base table).
   useEffect(() => {
-    if (!authEmail) { setRealRole("Member"); setRole("Member"); setMyMemberId(null); setIdentityChecked(false); return; }
+    if (!authEmail) { setRealRole(["Member"]); setRole(["Member"]); setMyMemberId(null); setIdentityChecked(false); return; }
     let cancelled = false;
     setIdentityChecked(false);
     supabase
@@ -284,9 +291,10 @@ export default function App() {
       .then(({ data, error }) => {
         if (cancelled) return;
         const ok = !error && !!data;
-        const access = ok && ROLES.includes(data.access) ? data.access : "Member";
-        setRealRole(access);
-        setRole(access);
+        const roles = (ok && Array.isArray(data.access) ? data.access : []).filter((r) => ROLES.includes(r));
+        const safeRoles = roles.length ? roles : ["Member"];
+        setRealRole(safeRoles);
+        setRole(safeRoles);
         setMyMemberId(ok ? data.id : null);
         setIdentityChecked(true);
       });
@@ -384,7 +392,7 @@ export default function App() {
 
   function go(k) { setScreen(k); setPacketId(null); setDrawer(false); }
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
-  const visibleNav = NAV.filter((n) => n.roles.includes(role));
+  const visibleNav = NAV.filter((n) => hasAny(role, n.roles));
   const packet = library.find((p) => p.id === packetId);
 
   return (
@@ -422,11 +430,12 @@ export default function App() {
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={{ flex: 1 }} />
           <div style={S.viewAs}>
-            {isLeader(realRole) && (
+            {isLeader(realRole) && realRole.length > 1 && (
               <>
                 <span style={S.viewAsLabel}>View as</span>
-                <select value={role} onChange={(e) => { setRole(e.target.value); setScreen("dashboard"); }} style={S.select}>
-                  {ROLES.map((r) => <option key={r}>{r}</option>)}
+                <select value={role.length === realRole.length ? "__all__" : (role[0] || "")} onChange={(e) => { setRole(e.target.value === "__all__" ? [...realRole] : [e.target.value]); setScreen("dashboard"); }} style={S.select}>
+                  <option value="__all__">All my roles</option>
+                  {realRole.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </>
             )}
@@ -440,7 +449,7 @@ export default function App() {
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
-          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} />}
+          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} meId={myMemberId} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} />}
@@ -467,7 +476,7 @@ const dashboardGreeting = (me) => {
 
 /* ---------------- Dashboard ---------------- */
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
-  if (role === "Member") return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
+  if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -559,7 +568,7 @@ const QUICK = {
   admin:   { accent: "#B11E2A", blurb: "Publish new monthly materials to the library." },
 };
 function QuickAccess({ S, role, go }) {
-  const items = NAV.filter((n) => n.key !== "dashboard" && n.roles.includes(role));
+  const items = NAV.filter((n) => n.key !== "dashboard" && hasAny(role, n.roles));
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ ...FS.kicker, marginBottom: 8 }}>EXPLORE THE PLATFORM</div>
@@ -929,7 +938,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
       <div style={{ ...FS.card, padding: 18 }}>
         <div style={FS.kicker}>QUICK ACTIONS</div>
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-          {NAV.filter((n) => n.key !== "dashboard" && n.roles.includes(role)).map((n) => (
+          {NAV.filter((n) => n.key !== "dashboard" && hasAny(role, n.roles)).map((n) => (
             <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
               <n.Icon size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: FIRE.btnText }}>{n.label}</span>
@@ -1105,7 +1114,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
-  const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);   // training_sessions INSERT gate (excludes PA)
+  const canManage = hasAny(role, CANMANAGE_ROLES);   // training_sessions INSERT gate (excludes PA)
   const [newDate, setNewDate] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
@@ -1397,7 +1406,7 @@ function Phase({ S, n, weeks, title, items, accent }) {
 const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
 function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
-  const canManageDocs = ["Board Member", "Department Admin", "Training Officer"].includes(role);
+  const canManageDocs = hasAny(role, CANMANAGE_ROLES);
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [uploadType, setUploadType] = useState("SOP / SOG");
@@ -1553,7 +1562,7 @@ function Documents({ S, role, notify, uploaderName }) {
             : "No documents have been added yet."}
         </div>
       ) : (
-        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={["Board Member", "Department Admin", "Training Officer"].includes(role) ? deleteDoc : undefined} />
+        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={hasAny(role, CANMANAGE_ROLES) ? deleteDoc : undefined} />
       )}
     </div>
   );
@@ -1683,7 +1692,7 @@ function ContentCalendar({ S, role, notify }) {
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthPosts = posts.filter((p) => p.y === cur.y && p.m === cur.m);
-  const canEditCategories = ["Board Member", "Department Admin", "Training Officer"].includes(role);
+  const canEditCategories = hasAny(role, CANMANAGE_ROLES);
   function quickAdd(catId) {
     const cat = categories.find((c) => c.id === catId);
     setFi(catId); setFt(cat ? cat.t : ""); setFd(Math.min(fd, dim)); setShow(true);
@@ -1827,7 +1836,7 @@ function RecruitmentCalendar({ S, role, notify }) {
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
-  const canEdit = ["Board Member", "Department Admin", "Training Officer"].includes(role);
+  const canEdit = hasAny(role, CANMANAGE_ROLES);
 
   async function addEvent() {
     const t = evTitle.trim();
@@ -1912,7 +1921,7 @@ function FundingCalendar({ S, role, notify }) {
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
-  const canEdit = ["Board Member", "Department Admin", "Training Officer"].includes(role);
+  const canEdit = hasAny(role, CANMANAGE_ROLES);
 
   async function addEvent() {
     const t = evTitle.trim();
@@ -2228,12 +2237,12 @@ function Funding({ S, role, notify, dept }) {
 
 /* ---------------- Roster & Operations ---------------- */
 const MEMBERS = [
-  { id: 1, name: "Maria Reyes", role: "Chief", access: "Department Admin", status: "Active", phone: "(817) 555-0142", joined: "2014", participation: 96, certs: [{ name: "Firefighter II", exp: "2027-03" }, { name: "EMT-B", exp: "2026-08" }, { name: "Hazmat Ops", exp: "2027-01" }], notes: [{ text: "Completed officer development course. Strong candidate for deputy chief.", by: "Department Admin", when: "May 2026" }] },
-  { id: 2, name: "Tom Daniels", role: "Training Officer", access: "Training Officer", status: "Active", phone: "(817) 555-0188", joined: "2017", participation: 91, certs: [{ name: "Firefighter II", exp: "2026-09" }, { name: "EMT-B", exp: "2026-05" }, { name: "Fire Instructor I", exp: "2027-06" }], notes: [] },
-  { id: 3, name: "Janelle Okafor", role: "Asst. Chief", access: "Board Member", status: "Active", phone: "(817) 555-0119", joined: "2015", participation: 88, certs: [{ name: "Firefighter II", exp: "2027-02" }, { name: "Paramedic", exp: "2026-07" }], notes: [] },
-  { id: 4, name: "Cody Pearson", role: "Firefighter", access: "Member", status: "Active", phone: "(817) 555-0173", joined: "2021", participation: 76, certs: [{ name: "Firefighter I", exp: "2026-12" }, { name: "EMT-B", exp: "2026-04" }], notes: [{ text: "EMT-B lapsed — reminded to register for the July refresher.", by: "Training Officer", when: "Jun 2026" }] },
-  { id: 5, name: "Sam Whitfield", role: "Firefighter", access: "Member", status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Training Officer", when: "Jun 2026" }] },
-  { id: 6, name: "Dana Cole", role: "Firefighter / EMT", access: "Member", status: "Active", phone: "(817) 555-0150", joined: "2019", participation: 84, certs: [{ name: "Firefighter II", exp: "2026-08" }, { name: "EMT-B", exp: "2027-04" }], notes: [] },
+  { id: 1, name: "Maria Reyes", role: "Chief", access: ["Department Admin"], status: "Active", phone: "(817) 555-0142", joined: "2014", participation: 96, certs: [{ name: "Firefighter II", exp: "2027-03" }, { name: "EMT-B", exp: "2026-08" }, { name: "Hazmat Ops", exp: "2027-01" }], notes: [{ text: "Completed officer development course. Strong candidate for deputy chief.", by: "Department Admin", when: "May 2026" }] },
+  { id: 2, name: "Tom Daniels", role: "Training Officer", access: ["Training Officer"], status: "Active", phone: "(817) 555-0188", joined: "2017", participation: 91, certs: [{ name: "Firefighter II", exp: "2026-09" }, { name: "EMT-B", exp: "2026-05" }, { name: "Fire Instructor I", exp: "2027-06" }], notes: [] },
+  { id: 3, name: "Janelle Okafor", role: "Asst. Chief", access: ["Board Member"], status: "Active", phone: "(817) 555-0119", joined: "2015", participation: 88, certs: [{ name: "Firefighter II", exp: "2027-02" }, { name: "Paramedic", exp: "2026-07" }], notes: [] },
+  { id: 4, name: "Cody Pearson", role: "Firefighter", access: ["Member"], status: "Active", phone: "(817) 555-0173", joined: "2021", participation: 76, certs: [{ name: "Firefighter I", exp: "2026-12" }, { name: "EMT-B", exp: "2026-04" }], notes: [{ text: "EMT-B lapsed — reminded to register for the July refresher.", by: "Training Officer", when: "Jun 2026" }] },
+  { id: 5, name: "Sam Whitfield", role: "Firefighter", access: ["Member"], status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Training Officer", when: "Jun 2026" }] },
+  { id: 6, name: "Dana Cole", role: "Firefighter / EMT", access: ["Member"], status: "Active", phone: "(817) 555-0150", joined: "2019", participation: 84, certs: [{ name: "Firefighter II", exp: "2026-08" }, { name: "EMT-B", exp: "2027-04" }], notes: [] },
 ];
 const EVENTS = [
   { id: 1, name: "Tuesday Drill — Ladder Throws", date: "Jun 17", type: "Drill", present: 11, total: 14 },
@@ -2285,16 +2294,16 @@ function Initials({ S, name, dark }) {
   return <span style={dark ? { ...S.avatar, border: `0.5px solid ${FIRE.btnBorder}` } : S.avatar}>{i}</span>;
 }
 
-function Roster({ S, role, members, setMembers, sessions, notify }) {
+function Roster({ S, role, members, setMembers, sessions, notify, meId }) {
   const leader = isLeader(role);
   const tabs = leader
-    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"], ...(canAssign(role) ? [["pending", "Pending Items"]] : [])]
+    ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ["reports", "Chief's Reports"], ...(hasAny(role, DEPT_ADMIN_ROLES) ? [["pending", "Pending Items"]] : [])]
     : [["members", "Members"]];
   const [tab, setTab] = useState("members");
   const [sel, setSel] = useState(null);
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
-  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} />;
+  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -2309,18 +2318,18 @@ function Roster({ S, role, members, setMembers, sessions, notify }) {
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
       {tab === "reports" && leader && <RosterReports S={S} members={members} />}
-      {tab === "pending" && canAssign(role) && <RosterPending S={S} members={members} notify={notify} />}
+      {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={members} notify={notify} />}
     </div>
   );
 }
 function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
-  const canAdd = canAssign(role);
+  const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState("");
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   async function add() {
     if (!nm.trim()) return;
     const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
-    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: "Member", status: "Probationary", phone: ph.trim() || "—", email: em.trim() || null, joined: "2026", participation: 0 };
+    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: ["Member"], status: "Probationary", phone: ph.trim() || "—", email: em.trim() || null, joined: "2026", participation: 0 };
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
     if (error || !data) { notify({ kind: "error", title: "Couldn't add the member", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
@@ -2377,8 +2386,8 @@ function fmtLongDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1]} ${d}, ${y}`;
 }
-function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members }) {
-  const assign = canAssign(role);
+function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members, meId }) {
+  const assign = hasAny(role, DEPT_ADMIN_ROLES);
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [editingCertId, setEditingCertId] = useState(null);
@@ -2399,19 +2408,26 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     return () => { alive = false; };
   }, [member.id, assign]);
   function startEditForm() {
-    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: member.access || "Member", role: member.role || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
+    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
     setEditing(true);
   }
   async function saveMember() {
+    const checkedRoles = form.access;   // grantable roles the checkboxes hold
+    const finalAccess = [...checkedRoles, ...(Array.isArray(member.access) && member.access.includes("Project Admin") ? ["Project Admin"] : [])];   // merge PA back (not a checkbox)
+    const access = finalAccess.length ? finalAccess : ["Member"];   // never save an empty array
+    if (member.id === meId && !isDeptAdmin(access)) {   // self-lockout guard — runs on the merged array, only when editing yourself
+      notify({ kind: "error", title: "Can't remove your own admin access", text: "That change would leave you without Department/Project Admin. Have another admin make it." });
+      return;
+    }
     setSaving(true);
     const jd = form.joined_date || null;
     const joinedYear = jd ? jd.slice(0, 4) : member.joined;   // keep member-visible "since [year]" in sync
-    const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear, mentor_id: form.mentor_id || null }).eq("id", member.id);
+    const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentor_id: form.mentor_id || null }).eq("id", member.id);
     if (e1) { setSaving(false); notify({ kind: "error", title: "Couldn't save the member", text: "Something went wrong saving those changes. Please try again.", details: e1.message }); return; }
     const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: member.department_id, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
     setSaving(false);
-    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access: form.access, role: form.role.trim() || null, joined: joinedYear, mentorId: form.mentor_id || null });
+    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentorId: form.mentor_id || null });
     setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
     setEditing(false);
     notify({ kind: "success", text: "Member updated." });
@@ -2475,7 +2491,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px 18px" }}>
               {[
-                ["Access", member.access || "—"],
+                ["Access", member.access?.length ? member.access.join(", ") : "—"],
                 ["Mentor", (members || []).find((m) => m.id === member.mentorId)?.name || "—"],
                 ["Email", member.email || "—"],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
@@ -2498,7 +2514,17 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station role</span><input style={FS.input} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} placeholder="Firefighter" /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}><option>Active</option><option>Probationary</option><option>Inactive</option></select></label>
-              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Access</span><select style={FS.input} value={form.access} onChange={(e) => setForm((f) => ({ ...f, access: e.target.value }))}><option>Member</option><option>Training Officer</option><option>Board Member</option><option>Department Admin</option></select></label>
+              <div style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Access (roles)</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 5 }}>
+                  {GRANTABLE_ROLES.map((r) => (
+                    <label key={r} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: FIRE.textPrimary, cursor: "pointer" }}>
+                      <input type="checkbox" checked={form.access.includes(r)} onChange={(e) => setForm((f) => ({ ...f, access: e.target.checked ? [...f.access, r] : f.access.filter((x) => x !== r) }))} />
+                      {r}
+                    </label>
+                  ))}
+                </div>
+                {Array.isArray(member.access) && member.access.includes("Project Admin") && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 5 }}>Also holds Project Admin — preserved on save (not editable here).</div>}
+              </div>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Mentor</span>
                 <select style={FS.input} value={form.mentor_id || ""} onChange={(e) => setForm((f) => ({ ...f, mentor_id: e.target.value }))}>
                   <option value="">— None —</option>
@@ -2857,7 +2883,7 @@ function RosterReports({ S, members }) {
 const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "Ladder / Aerial", "Squad", "Command", "Ambulance", "Other"];
 function Apparatus({ S, role }) {
   const [rigs, setRigs] = useState(APPARATUS_SEED);
-  const canManage = canAssign(role);
+  const canManage = hasAny(role, DEPT_ADMIN_ROLES);
   const [adding, setAdding] = useState(false);
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
   const ready = rigs.filter((r) => r.status === "Pass").length;
@@ -2938,7 +2964,7 @@ const MAINT_SEED = [
 const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
 function MaintenancePanel({ S, role, rigs }) {
-  const canManage = canAssign(role);
+  const canManage = hasAny(role, DEPT_ADMIN_ROLES);
   const [items, setItems] = useState(MAINT_SEED);
   const [adding, setAdding] = useState(false);
   const [u, setU] = useState(rigs[0]?.name || "All units"); const [t, setT] = useState(""); const [cad, setCad] = useState("Monthly");
@@ -3082,7 +3108,7 @@ const ONBOARD_TEMPLATE = [
   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
 ];
 function Onboarding({ S, members, setMembers, notify, role }) {
-  const canManage = canAssign(role);   // PA/DA — same set as is_dept_admin() (RLS enforces server-side)
+  const canManage = hasAny(role, DEPT_ADMIN_ROLES);   // PA/DA — same set as is_dept_admin() (RLS enforces server-side)
   const candidates = members.length ? members : [{ id: 0, name: "New member", role: "Firefighter" }];
   const probI = candidates.findIndex((m) => m.status === "Probationary");
   const [selId, setSelId] = useState(candidates[probI >= 0 ? probI : 0].id);
@@ -3452,9 +3478,9 @@ function usePlanViewer(S, notify) {
   return { openSessionPlans, openPlan, setViewPlan, mounts };
 }
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept, addFeedback }) {
-  const canManage = ["Board Member", "Department Admin", "Training Officer"].includes(role);
-  const canRunSignin = ["Department Admin", "Training Officer", "Project Admin"].includes(role);   // QR generate-gate (NOT Board Member, NOT Member)
-  const canPlanAI = ["Project Admin", "Department Admin", "Training Officer"].includes(role);   // AI drill planner — same PA/DA/TO set as the retired standalone AI page (NOT canManage: excludes Board, includes PA)
+  const canManage = hasAny(role, CANMANAGE_ROLES);
+  const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
+  const canPlanAI = hasAny(role, SIGNIN_ROLES);   // AI drill planner — same PA/DA/TO set as the retired standalone AI page (NOT canManage: excludes Board, includes PA)
   const memberView = !isLeader(role);
   const today = new Date();
   const me = members.find((m) => m.id === meId);
@@ -4086,7 +4112,7 @@ const DEFAULT_BRAND = {
   logo: null, guidelines: [],
 };
 function BrandKit({ S, role, brand, setBrand }) {
-  const canManage = canAssign(role);
+  const canManage = hasAny(role, DEPT_ADMIN_ROLES);
   const set = (k, v) => setBrand((b) => ({ ...b, [k]: v }));
   function onLogo(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => set("logo", r.result); r.readAsDataURL(file); }
   const swatch = (k, label) => (
@@ -4432,7 +4458,7 @@ const DUTYLOG_SEED = [
 ];
 function StationDuties({ S, role, members, meId, notify }) {
   const canManage = isLeader(role); // board members + officers + admins assign duties
-  const canCreate = ["Board Member", "Department Admin", "Training Officer"].includes(role); // matches create_duty's DB gate (excludes Project Admin)
+  const canCreate = hasAny(role, CANMANAGE_ROLES); // matches create_duty's DB gate (excludes Project Admin)
   const me = members.find((m) => m.id === meId);
   const nameById = new Map(members.map((m) => [m.id, m.name]));
   const fmtDoneAt = (v) => {
