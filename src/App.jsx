@@ -3501,6 +3501,20 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [review, setReview] = useState([]); const [creating, setCreating] = useState(false);
+  const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items is a write → CANMANAGE (matches is_canmanage())
+  // Map an AI-suggested owner name to a member id — CONSERVATIVE: exact, else a single unambiguous first/last-name token, else blank.
+  function matchOwnerId(name) {
+    const n = (name || "").trim().toLowerCase();
+    if (!n) return "";
+    const exact = members.filter((m) => (m.name || "").toLowerCase() === n);
+    if (exact.length === 1) return exact[0].id;
+    const tok = members.filter((m) => (m.name || "").toLowerCase().split(/\s+/).includes(n));
+    if (tok.length === 1) return tok[0].id;
+    return "";
+  }
+  const normalizeDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim())) ? s.trim() : "";   // only a clean YYYY-MM-DD pre-fills the picker
   const [actions, setActions] = useState([
     { id: 1, text: "Get vendor quote for Engine 2 pump repair", owner: "Chief Reyes", due: "Jun 30", done: false },
     { id: 2, text: "Confirm July EMT-B refresher seats", owner: "T.O. Daniels", due: "Jul 1", done: false },
@@ -3514,6 +3528,58 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
     const sys = "You turn a volunteer fire department's rough meeting notes into clean, structured DRAFT minutes for the secretary and board to review and approve. Use plain headers: Attendees, Old Business, New Business, Decisions, and Action Items (each action with an owner and a due date if implied). Keep it factual to the notes — never invent attendance, votes, or decisions that aren't there. Under 350 words.";
     try { const t = await callClaude(sys, `Meeting: ${title}${date ? ` on ${date}` : ""}\nRough notes:\n${notes}`); setOut(t); }
     catch { setErr("Couldn't draft the minutes just now. Try again."); } finally { setLoading(false); }
+  }
+  // Crash-safe parse of the AI's extraction response. Returns an array (possibly empty for a valid "no items"),
+  // or null on total failure so extractActions() shows the friendly "add manually" message. NEVER throws.
+  function parseActionItems(raw) {
+    if (typeof raw !== "string" || !raw.trim()) return null;
+    // 1) strip code fences (```json … ``` or ``` … ```)
+    const t = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+    // 2) parse whole string; on failure, fall back to the outermost { … } block (tolerates preamble/postamble text)
+    let parsed = null;
+    try { parsed = JSON.parse(t); }
+    catch {
+      const m = t.match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = null; } }
+    }
+    // 3) accept {items:[…]} OR a bare […]; anything else → total failure → null
+    const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : null);
+    if (!arr) return null;
+    // 4) per-item sanitize: task must be a non-empty string; owner/date coerced to trimmed-string-or-null; drop malformed items (never throw)
+    const str = (v) => (typeof v === "string" && v.trim()) ? v.trim() : null;
+    const clean = [];
+    for (const it of arr) {
+      if (!it || typeof it !== "object") continue;                 // drop non-objects
+      const task = typeof it.task === "string" ? it.task.trim() : "";
+      if (!task) continue;                                          // no task → drop, don't crash
+      clean.push({ task, suggested_owner: str(it.suggested_owner), suggested_due_date: str(it.suggested_due_date) });
+    }
+    return clean;                                                   // [] is valid (empty extraction) — distinct from null (parse failure)
+  }
+  async function extractActions() {
+    if (!out.trim()) return;
+    setExtracting(true); setErr("");
+    const sys = "You extract the ACTION ITEMS from a volunteer fire department's approved meeting minutes, so they can be tracked. Return ONLY the concrete action items that were actually decided or assigned in the minutes — tasks someone agreed to do.\n\nRespond with ONLY one valid JSON object, no markdown, no code fences, no commentary before or after. Schema: {\"items\":[{\"task\":string,\"suggested_owner\":string|null,\"suggested_due_date\":string|null}]}.\n- task: the action, stated concisely (for example, 'Get a vendor quote for the Engine 2 pump repair').\n- suggested_owner: the person's name ONLY if the minutes name who is responsible; otherwise null. Do NOT guess or infer an owner — if the minutes say 'someone should follow up', suggested_owner is null.\n- suggested_due_date: a date ONLY if the minutes state one (YYYY-MM-DD if you can determine it, otherwise the date text as written); if no date is stated, null. Do NOT invent a deadline.\n\nCRITICAL — TRUTH GUARDRAIL: Extract ONLY action items actually present in the minutes. NEVER invent a task, an owner, or a date that is not there. These become real assigned work — a fabricated item, or a guessed owner, assigns someone a job they never agreed to. Suggest an owner or date ONLY when the minutes state it; leave it null otherwise for a human to fill in. If the minutes contain no action items, return {\"items\":[]}. Do not include discussion, decisions, or announcements that are not action items.";
+    try {
+      const raw = await callClaude(sys, out);
+      const items = parseActionItems(raw);
+      if (items === null) { setErr("Couldn't read the extracted items — please add them manually below."); return; }
+      setReview(items.map((it, i) => ({ id: Date.now() + i, task: it.task, ownerId: matchOwnerId(it.suggested_owner), due: normalizeDate(it.suggested_due_date), keep: true })));
+    } catch { setErr("Couldn't extract action items just now. Try again, or add them manually."); }
+    finally { setExtracting(false); }
+  }
+  async function createActionItems() {
+    const kept = review.filter((r) => r.keep && r.task.trim());
+    if (!kept.length) return;
+    setCreating(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setCreating(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const rows = kept.map((r) => ({ department_id: deptId, text: r.task.trim(), assigned_to: r.ownerId || null, due_date: r.due || null }));   // status defaults 'open'
+    const { error } = await supabase.from("action_items").insert(rows);
+    setCreating(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the action items", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: `${kept.length} action item${kept.length === 1 ? "" : "s"} created.` });
+    setReview([]);   // 3b will loadActionItems() here to refresh the tracked list
   }
   function addAction() { if (!at.trim()) return; setActions((a) => [...a, { id: Date.now(), text: at.trim(), owner: ao.trim() || "Unassigned", due: ad.trim() || "—", done: false }]); setAt(""); setAo(""); setAd(""); }
   function toggle(id) { setActions((a) => a.map((x) => x.id === id ? { ...x, done: !x.done } : x)); }
@@ -3551,7 +3617,32 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
         </div>
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
+      {review.length > 0 && (
+        <div style={{ ...FS.card, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>REVIEW EXTRACTED ITEMS — confirm owner &amp; due, then create</div>
+          {review.map((r, i) => (
+            <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <input type="checkbox" checked={r.keep} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x))} title="Include this item" style={{ marginBottom: 10 }} />
+              <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={r.task} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, task: e.target.value } : x))} /></label>
+              <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
+                <select style={FS.input} value={r.ownerId} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, ownerId: e.target.value } : x))}>
+                  <option value="">Unassigned</option>
+                  {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select></label>
+              <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input type="date" style={FS.input} value={r.due} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, due: e.target.value } : x))} /></label>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {canManage && <button style={{ ...FS.btnPrimary, opacity: creating ? 0.7 : 1 }} onClick={createActionItems} disabled={creating}>{creating ? <><Loader2 size={16} className="spin" /> Creating…</> : <><Plus size={16} /> Create {review.filter((r) => r.keep && r.task.trim()).length} action item(s)</>}</button>}
+            <button style={FS.btn} onClick={() => setReview([])} disabled={creating}>Discard</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ ...FS.kicker, marginBottom: 0 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
+        {out && <button style={{ ...FS.btn, marginLeft: "auto", opacity: extracting ? 0.7 : 1 }} onClick={extractActions} disabled={extracting}>{extracting ? <><Loader2 size={16} className="spin" /> Reading minutes…</> : <><Sparkles size={16} /> Extract from minutes</>}</button>}
+      </div>
       <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Action</span><input style={FS.input} value={at} placeholder="What needs to happen?" onChange={(e) => setAt(e.target.value)} /></label>
         <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span><input style={FS.input} value={ao} placeholder="Who?" onChange={(e) => setAo(e.target.value)} /></label>
