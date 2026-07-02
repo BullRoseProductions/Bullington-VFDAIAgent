@@ -3503,6 +3503,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [review, setReview] = useState([]); const [creating, setCreating] = useState(false);
+  const [showDone, setShowDone] = useState(false);   // Completed section — collapsed by default
   const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items is a write → CANMANAGE (matches is_canmanage())
   // Map an AI-suggested owner name to a member id — CONSERVATIVE: exact, else a single unambiguous first/last-name token, else blank.
   function matchOwnerId(name) {
@@ -3599,6 +3600,25 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
     if (error) { notify({ kind: "error", title: "Couldn't reopen that", text: "Something went wrong. Please try again.", details: error.message }); return; }
     loadActionItems();
   }
+  const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  function exportCompletedCsv() {
+    const header = ["Action item", "Completed by", "Completed"];
+    const rows = [...doneItems]
+      .sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || ""))
+      .map((it) => {
+        const who = it.completed_by ? (nameById.get(it.completed_by) || "Unknown") : "";
+        const when = it.completed_at ? new Date(it.completed_at).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+        return [it.text, who, when];
+      });
+    const csv = [header, ...rows].map((r) => r.map(csvField).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "action-items-completed.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -3680,6 +3700,35 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
             );
           })}
       </div>
+      {canManage && doneItems.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <button onClick={() => setShowDone((v) => !v)} style={{ ...FS.btn, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>Completed ({doneItems.length})</span>
+            {showDone ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          </button>
+          {showDone && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+                <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCompletedCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>
+              </div>
+              {[...doneItems].sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")).map((it) => {
+                const who = it.completed_by ? (nameById.get(it.completed_by) || "Unknown") : "—";
+                const when = it.completed_at ? new Date(it.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+                return (
+                  <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <CheckCircle2 size={16} color={FIRE.green} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{who} · {when}</div>
+                    </div>
+                    <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopenItem(it)}>Reopen</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       </>
       )}
     </div>
