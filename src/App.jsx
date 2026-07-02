@@ -3503,6 +3503,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [review, setReview] = useState([]); const [creating, setCreating] = useState(false);
+  const [showDone, setShowDone] = useState(false);   // Completed section — collapsed by default
   const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items is a write → CANMANAGE (matches is_canmanage())
   // Map an AI-suggested owner name to a member id — CONSERVATIVE: exact, else a single unambiguous first/last-name token, else blank.
   function matchOwnerId(name) {
@@ -3515,13 +3516,11 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
     return "";
   }
   const normalizeDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim())) ? s.trim() : "";   // only a clean YYYY-MM-DD pre-fills the picker
-  const [actions, setActions] = useState([
-    { id: 1, text: "Get vendor quote for Engine 2 pump repair", owner: "Chief Reyes", due: "Jun 30", done: false },
-    { id: 2, text: "Confirm July EMT-B refresher seats", owner: "T.O. Daniels", due: "Jul 1", done: false },
-    { id: 3, text: "Post open-house recap to socials", owner: "Okafor", due: "Jun 20", done: true },
-  ]);
-  const [at, setAt] = useState(""); const [ao, setAo] = useState(""); const [ad, setAd] = useState("");
-  const open = actions.filter((a) => !a.done).length;
+  const [items, setItems] = useState([]);
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const openItems = items.filter((i) => i.status !== "done");
+  const doneItems = items.filter((i) => i.status === "done");
+  const open = openItems.length;
   async function draft() {
     if (!notes.trim()) { setErr("Add a few rough notes first and I'll shape them into minutes."); return; }
     setLoading(true); setErr(""); setOut("");
@@ -3579,11 +3578,47 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
     setCreating(false);
     if (error) { notify({ kind: "error", title: "Couldn't save the action items", text: "Something went wrong. Please try again.", details: error.message }); return; }
     notify({ kind: "success", text: `${kept.length} action item${kept.length === 1 ? "" : "s"} created.` });
-    setReview([]);   // 3b will loadActionItems() here to refresh the tracked list
+    setReview([]); loadActionItems();
   }
-  function addAction() { if (!at.trim()) return; setActions((a) => [...a, { id: Date.now(), text: at.trim(), owner: ao.trim() || "Unassigned", due: ad.trim() || "—", done: false }]); setAt(""); setAo(""); setAd(""); }
-  function toggle(id) { setActions((a) => a.map((x) => x.id === id ? { ...x, done: !x.done } : x)); }
-  function removeA(id) { setActions((a) => a.filter((x) => x.id !== id)); }
+  function addReviewRow() { setReview((rv) => [...rv, { id: Date.now(), task: "", ownerId: "", due: "", keep: true }]); }   // human backstop — blank editable row, same shape as extracted rows
+  async function loadActionItems() {
+    const { data } = await supabase.from("action_items").select("*");                       // dept-scoped by RLS
+    setItems((data || []).sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99")));   // soonest due first
+  }
+  useEffect(() => { loadActionItems(); }, []);
+  async function completeItem(it) {
+    if (!canManage) return;
+    const { error } = await supabase.from("action_items")
+      .update({ status: "done", completed_by: meId, completed_at: new Date().toISOString() }).eq("id", it.id);   // client-set stamp (matches ai_outputs)
+    if (error) { notify({ kind: "error", title: "Couldn't update that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    loadActionItems();
+  }
+  async function reopenItem(it) {
+    if (!canManage) return;
+    const { error } = await supabase.from("action_items")
+      .update({ status: "open", completed_by: null, completed_at: null }).eq("id", it.id);   // clears the stamp on reopen
+    if (error) { notify({ kind: "error", title: "Couldn't reopen that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    loadActionItems();
+  }
+  const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  function exportCompletedCsv() {
+    const header = ["Action item", "Completed by", "Completed"];
+    const rows = [...doneItems]
+      .sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || ""))
+      .map((it) => {
+        const who = it.completed_by ? (nameById.get(it.completed_by) || "Unknown") : "";
+        const when = it.completed_at ? new Date(it.completed_at).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+        return [it.text, who, when];
+      });
+    const csv = [header, ...rows].map((r) => r.map(csvField).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "action-items-completed.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -3634,6 +3669,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
           ))}
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
             {canManage && <button style={{ ...FS.btnPrimary, opacity: creating ? 0.7 : 1 }} onClick={createActionItems} disabled={creating}>{creating ? <><Loader2 size={16} className="spin" /> Creating…</> : <><Plus size={16} /> Create {review.filter((r) => r.keep && r.task.trim()).length} action item(s)</>}</button>}
+            <button style={FS.btn} onClick={addReviewRow}><Plus size={14} /> Add action item</button>
             <button style={FS.btn} onClick={() => setReview([])} disabled={creating}>Discard</button>
           </div>
         </div>
@@ -3641,28 +3677,58 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ ...FS.kicker, marginBottom: 0 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
-        {out && <button style={{ ...FS.btn, marginLeft: "auto", opacity: extracting ? 0.7 : 1 }} onClick={extractActions} disabled={extracting}>{extracting ? <><Loader2 size={16} className="spin" /> Reading minutes…</> : <><Sparkles size={16} /> Extract from minutes</>}</button>}
-      </div>
-      <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Action</span><input style={FS.input} value={at} placeholder="What needs to happen?" onChange={(e) => setAt(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span><input style={FS.input} value={ao} placeholder="Who?" onChange={(e) => setAo(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input style={FS.input} value={ad} placeholder="When?" onChange={(e) => setAd(e.target.value)} /></label>
-        <button style={FS.btnPrimary} onClick={addAction}><Plus size={15} /> Add</button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {out && <button style={{ ...FS.btn, opacity: extracting ? 0.7 : 1 }} onClick={extractActions} disabled={extracting}>{extracting ? <><Loader2 size={16} className="spin" /> Reading minutes…</> : <><Sparkles size={16} /> Extract from minutes</>}</button>}
+          {canManage && <button style={FS.btn} onClick={addReviewRow}><Plus size={14} /> Add action item</button>}
+        </div>
       </div>
       <div>
-        {actions.map((a) => (
-          <div key={a.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-            <button onClick={() => toggle(a.id)} title={a.done ? "Mark open" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-              {a.done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: `2px solid ${FIRE.textMuted}`, display: "inline-block" }} />}
-            </button>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.text}</span>
-              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{a.owner} · due {a.due}</div>
-            </div>
-            <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeA(a.id)}><X size={14} color={FIRE.deleteRed} /></button>
-          </div>
-        ))}
+        {openItems.length === 0 ? <div style={{ ...S.opCard, ...FS.card, fontSize: 13, color: FIRE.textMuted }}>No open action items. Extract them from minutes above.</div> :
+          openItems.map((it) => {
+            const who = it.assigned_to ? (nameById.get(it.assigned_to) || "Unknown") : "Unassigned";
+            const due = it.due_date ? new Date(it.due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "no due date";
+            return (
+              <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <button onClick={() => completeItem(it)} disabled={!canManage} title={canManage ? "Mark done" : "Leaders only"} style={{ background: "none", border: "none", cursor: canManage ? "pointer" : "default", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                  <span style={{ width: 16, height: 16, borderRadius: 999, border: `2px solid ${FIRE.textMuted}`, display: "inline-block" }} />
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{it.text}</span>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{who} · due {due}</div>
+                </div>
+              </div>
+            );
+          })}
       </div>
+      {canManage && doneItems.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <button onClick={() => setShowDone((v) => !v)} style={{ ...FS.btn, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>Completed ({doneItems.length})</span>
+            {showDone ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          </button>
+          {showDone && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+                <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCompletedCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>
+              </div>
+              {[...doneItems].sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")).map((it) => {
+                const who = it.completed_by ? (nameById.get(it.completed_by) || "Unknown") : "—";
+                const when = it.completed_at ? new Date(it.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+                return (
+                  <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <CheckCircle2 size={16} color={FIRE.green} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{who} · {when}</div>
+                    </div>
+                    <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopenItem(it)}>Reopen</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       </>
       )}
     </div>
