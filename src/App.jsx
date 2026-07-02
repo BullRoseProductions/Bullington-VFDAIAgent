@@ -182,7 +182,7 @@ const NAV = [
   { key: "brand", label: "Media Builder", Icon: ImageIcon, roles: LEADERSHIP },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
-  { key: "minutes", label: "Meeting Minutes", Icon: ClipboardList, roles: LEADERSHIP },
+  { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
   { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Training Officer"] },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
@@ -458,7 +458,7 @@ export default function App() {
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
-          {screen === "minutes" && <Minutes S={S} />}
+          {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} />}
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
@@ -3491,7 +3491,12 @@ function MaintenancePanel({ S, role, rigs }) {
   );
 }
 /* ---------------- Meeting Minutes + Action Items ---------------- */
-function Minutes({ S }) {
+function Minutes({ S, role, notify, dept, meId, members, sessions }) {
+  const [mode, setMode] = useState("agenda");
+  // Cert compliance computed HERE in the host from members — SAME certStatus math as the Chief's Report & Roster, so the agenda's numbers match (no drift).
+  const certRows = [];
+  (members || []).forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); certRows.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
+  const certContext = { expired: certRows.filter((r) => r.rank === 0), expiring: certRows.filter((r) => r.rank === 1) };
   const [title, setTitle] = useState("Monthly Business Meeting");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -3516,10 +3521,19 @@ function Minutes({ S }) {
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>MEETING MINUTES</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>From rough notes to clean minutes</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Type your notes, get a structured draft to approve, and carry every action item to the next meeting.</div>
+        <div style={FS.kicker}>MEETINGS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Agendas &amp; minutes</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.</div>
       </div>
+      <div style={S.segRow}>
+        {[["agenda", "Agenda"], ["minutes", "Minutes"]].map(([k, l]) => (
+          <button key={k} onClick={() => setMode(k)} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
+        ))}
+      </div>
+      {mode === "agenda" ? (
+        <MeetingAgenda S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} sessions={sessions} certContext={certContext} />
+      ) : (
+      <>
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</div>
@@ -3558,6 +3572,183 @@ function Minutes({ S }) {
           </div>
         ))}
       </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Meeting Agenda (dept-aware) ---------------- */
+// Gathers REAL context (open/overdue duties, upcoming training, expiring certs, pending cert proposals); AI drafts from ONLY that data,
+// human reviews/edits, saves to ai_outputs (feature:'agenda'). Chunk 1: context-gathering + preview. Generate=Ch2, save=Ch3, edit=Ch4.
+function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certContext }) {
+  const canManage = hasAny(role, CANMANAGE_ROLES);
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const [duties, setDuties] = useState([]);
+  const [pendingCerts, setPendingCerts] = useState([]);
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
+  }, []);
+  const todayISO = toISODate(new Date());
+  const openDuties = duties.filter((d) => !d.done);
+  const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date is YYYY-MM-DD → string compare
+  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 5);
+  const expired = certContext?.expired || [];
+  const expiring = certContext?.expiring || [];
+  const [title, setTitle] = useState("Monthly Business Meeting");
+  const [mtgDate, setMtgDate] = useState("");
+  const [topics, setTopics] = useState("");   // leader's own meeting items — real intent, woven into the agenda
+  const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
+  const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
+  const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
+  async function generate() {
+    setLoading(true); setErr(""); setOut("");
+    const topN = (arr, fmt, n = 4) => {
+      if (!arr.length) return "none";
+      const shown = arr.slice(0, n).map(fmt).join("; ");
+      const extra = arr.length - n;
+      return extra > 0 ? `${shown}; …and ${extra} more` : shown;
+    };
+    const otherOpen = openDuties.filter((d) => !(d.due_date && d.due_date < todayISO));   // open but not overdue
+    const lines = [
+      `${dept?.name || "Department"} — real context for the agenda. Use ONLY these facts for department-specific items; add nothing not listed.`,
+      `Meeting: ${title.trim() || "Business Meeting"}${mtgDate.trim() ? ` on ${mtgDate.trim()}` : ""}`,
+      `Leader-provided topics to include: ${topics.trim() || "(none)"}`,
+      `Overdue duties (most overdue first): ${topN(overdueDuties, (d) => `${d.duty} — ${nameById.get(d.assigned_to) || (d.assigned_to ? "unassigned" : "station-wide")}${d.due_date ? `, due ${d.due_date}` : ""}`)}`,
+      `Other open duties: ${topN(otherOpen, (d) => `${d.duty}${d.assigned_to ? ` — ${nameById.get(d.assigned_to) || "unassigned"}` : ""}`)}`,
+      `Certifications expired: ${topN(expired, (r) => `${r.member}'s ${r.cert} (${r.phrase})`)}`,
+      `Certifications expiring within 90 days: ${topN(expiring, (r) => `${r.member}'s ${r.cert} (${r.phrase})`)}`,
+      `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}${s.audience === "leadership" ? " (leadership)" : ""}`)}`,
+      `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
+    ];
+    const user = lines.join("\n");
+    const sys = "You draft a clear, professional meeting agenda for a volunteer fire department's business meeting, for the chief or secretary to run the meeting from. Produce a standard agenda structure with the usual sections — Call to Order, Roll Call, Approval of Previous Minutes, Officer & Committee Reports, Old Business, New Business, Training, Announcements, and Adjournment (with the next meeting) — in a clean, numbered or bulleted format.\n\nYou may write the STANDARD AGENDA STRUCTURE and its section headings freely — those are normal parts of any meeting agenda, not department facts. But every DEPARTMENT-SPECIFIC item that fills those sections — a specific overdue duty and who owns it, a member whose certification is expired or expiring, an upcoming training date, a pending certification approval — must come ONLY from the real context provided below. Slot each into a sensible section: overdue and open duties under Old or New Business as items to address; expired/expiring certifications under New Business or a training/readiness item; upcoming training under Training; pending certification approvals under New Business or Officer Reports. Name the specifics — the duty, the member, the date — so the agenda reads like this department's real meeting, not a template.\n\nThe context below may also include 'Leader-provided topics to include' — items the meeting leader typed themselves. These are real meeting intent, not system data, so you may use them freely: add each as an agenda item under the most sensible section (New Business, Old Business, or Announcements), and you may lightly reword or group them to read cleanly. BUT do NOT invent any DETAIL the leader did not provide about a topic. For example, if the leader writes 'tanker purchase', list it as a discussion item like 'Tanker purchase — discussion'; do NOT invent a price, a vendor, a dollar amount, or a decision. If they write 'Johnson recognition', list 'Recognition — Johnson'; do not invent what it is for. Add each topic as stated, placed in the right section, and nothing more.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts in the real context below for department-specific items. NEVER invent or infer a duty, a certification, a member name, a date, a count, or an event that is not listed. Do not add plausible-sounding agenda items to fill space. If a category says 'none', do not create items for it — either omit that line or note there is nothing to report (for example, 'No overdue duties this period'). Where the context shows '…and N more', you may refer to that remaining count without naming them. Keep dates and windows exactly as written in the context. The harm this prevents is real: a chief runs a live meeting from this agenda, and a fabricated duty, certification, member, or date wastes the crew's time or misinforms the department.\n\nWarm but businesslike. Keep it to a runnable one-page agenda. Under 450 words.";
+    try { const t = await callClaude(sys, user); setOut(t); setSaveTitle(title.trim().slice(0, 60) || `Agenda · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
+    catch { setErr("Couldn't draft the agenda just now. Try again."); } finally { setLoading(false); }
+  }
+  async function saveDraft() {
+    if (!out || !saveTitle.trim()) return;
+    setSaving(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "agenda", title: saveTitle.trim(), ai_text: out, created_by: meId });
+    setSaving(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the agenda", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Agenda saved." });
+    loadDrafts();
+  }
+  async function loadDrafts() {
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "agenda");   // dept-scoped by RLS
+    setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
+  }
+  useEffect(() => { loadDrafts(); }, []);
+  function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
+  function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
+  function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
+  async function saveEdit() {
+    if (!editBuf.trim()) return;
+    setSavingEdit(true);
+    const { data, error } = await supabase.from("ai_outputs")
+      .update({ current_text: editBuf, edited_by: meId, edited_at: new Date().toISOString() })   // ai_text left pristine
+      .eq("id", openDraft.id).select().single();
+    setSavingEdit(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save your edit", text: "Something went wrong saving your changes. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Changes saved." });
+    setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
+  }
+
+  const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
+  const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
+  const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
+  return (
+    <div>
+      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}><ClipboardList size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI AGENDA BUILDER</div>
+          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft an agenda from your real department data</h3>
+          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Pulled live from your station — the draft references only what's real below, nothing invented.</p>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+            <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={mtgDate} placeholder="e.g. Jul 8, 2026" onChange={(e) => setMtgDate(e.target.value)} /></label>
+          </div>
+
+          <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Additional topics <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>— optional, your own items to add</span></span>
+            <textarea style={{ ...FS.input, minHeight: 52, resize: "vertical" }} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="e.g. tanker purchase decision, fundraiser date vote, Johnson recognition" /></label>
+
+          <div style={{ ...FS.card, padding: "10px 14px", marginBottom: 12 }}>
+            <div style={{ ...FS.kicker, marginBottom: 2, fontSize: 10.5 }}>CONTEXT WE'LL USE</div>
+
+            <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
+            {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
+
+            <SubHead>Upcoming training — {upcoming.length}</SubHead>
+            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+
+            <SubHead>Certifications — {expired.length} expired · {expiring.length} expiring</SubHead>
+            {expired.length === 0 && expiring.length === 0 ? <None /> : [...expired, ...expiring].slice(0, 8).map((r, i) => <Line key={i}>{r.member} · {r.cert} · {r.phrase}</Line>)}
+
+            <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
+            {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
+          </div>
+
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate agenda</>}
+          </button>
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
+          {out && canManage && (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+              <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Agenda title" /></label>
+              <button style={{ ...FS.btn, opacity: (saving || !saveTitle.trim()) ? 0.6 : 1 }} onClick={saveDraft} disabled={saving || !saveTitle.trim()}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save agenda</>}</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED AGENDAS</div>
+      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
+        {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved agendas yet.</div> : drafts.map((d) => {
+          const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
+          const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
+          const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          return (
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled agenda"}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
+              </div>
+              <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
+            </div>
+          );
+        })}
+      </div>
+      {openDraft && (
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Agenda"}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
+                <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
+              </div>
+            </div>
+            {editing ? (
+              <>
+                <textarea style={{ ...FS.input, minHeight: 260, resize: "vertical", width: "100%", fontFamily: "inherit" }} value={editBuf} onChange={(e) => setEditBuf(e.target.value)} />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                  <button style={FS.btn} onClick={() => { setEditing(false); setEditBuf(""); }} disabled={savingEdit}>Cancel</button>
+                  <button style={{ ...FS.btnPrimary, opacity: (savingEdit || !editBuf.trim()) ? 0.6 : 1 }} onClick={saveEdit} disabled={savingEdit || !editBuf.trim()}>{savingEdit ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save changes</>}</button>
+                </div>
+              </>
+            ) : (
+              <RichOutput S={S} text={openDraft.current_text ?? openDraft.ai_text} dark />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
