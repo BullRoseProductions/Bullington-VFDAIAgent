@@ -3162,11 +3162,21 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // PER-MEMBER denominator
     const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
     const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
-    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct };
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
   }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
   const rated = rows.filter((r) => r.pct != null);
   const avgPct = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
+  const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
+  const [fullYear, setFullYear] = useState(false);  // grid scope: false = recent 10, true = all sessions in year
+  const chron = [...doneThisYear].sort((a, b) => sessDate(a) - sessDate(b));   // chronological columns
+  const gridCols = fullYear ? chron : chron.slice(-10);                        // screen default = recent 10 (CSV always exports full)
+  // Audience-aware cell state — SAME predicate as the summary's eligible denominator, applied per session:
+  const cellState = (r, s) => (r.leader || s.audience !== "leadership")
+    ? ((s.attendance || []).includes(r.id) ? "present" : "absent")            // eligible → attended / eligible-but-absent
+    : "na";                                                                    // not eligible → not expected (leadership session, non-leader)
+  const CELL = { present: { ch: "✓", c: FIRE.green }, absent: { ch: "✗", c: FIRE.redText }, na: { ch: "—", c: FIRE.textMuted } };
+  const colLabel = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   function exportCsv() {
     const header = ["Member", "Role", "Status", "Attended", "Eligible", "Attendance rate"];
@@ -3195,6 +3205,20 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={exportCsv} disabled={doneThisYear.length === 0}><Download size={15} /> Download CSV</button>
       </div>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={S.segRow}>
+          {[["summary", "Summary"], ["detail", "By session"]].map(([k, l]) => {
+            const on = detail === (k === "detail");
+            return <button key={k} onClick={() => setDetail(k === "detail")} style={{ ...S.segBtn, background: on ? FIRE.btnBg : "transparent", borderColor: on ? FIRE.red : FIRE.btnBorder, color: on ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>;
+          })}
+        </div>
+        {detail && chron.length > 10 && (
+          <button style={{ ...FS.btn, marginLeft: "auto", fontSize: 12 }} onClick={() => setFullYear((v) => !v)}>
+            {fullYear ? `All ${chron.length} sessions · show recent 10` : `Recent 10 · expand to full year (${chron.length})`}
+          </button>
+        )}
+      </div>
+
       <div style={S.statRow}>
         <Stat S={S} dark n={String(year)} label="Report year" />
         <Stat S={S} dark n={String(doneThisYear.length)} label="Drills held" />
@@ -3202,6 +3226,33 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         <Stat S={S} dark n={String(rows.length)} label="Members" />
       </div>
 
+      {detail ? (
+        <div style={{ ...FS.card, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead>
+              <tr>
+                <th style={{ position: "sticky", left: 0, background: FIRE.card, textAlign: "left", padding: "6px 14px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", zIndex: 1 }}>Member</th>
+                {gridCols.map((s) => (
+                  <th key={s.id} title={s.title} style={{ padding: "6px 9px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>
+                    {colLabel(s)}{s.audience === "leadership" && <span style={{ color: FIRE.amberText }}> ·L</span>}
+                  </th>
+                ))}
+                <th style={{ padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={{ position: "sticky", left: 0, background: FIRE.card, padding: "7px 14px", fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", zIndex: 1 }}>{r.name}</td>
+                  {gridCols.map((s) => { const c = CELL[cellState(r, s)]; return <td key={s.id} style={{ textAlign: "center", padding: "7px 9px", color: c.c, fontWeight: 700 }}>{c.ch}</td>; })}
+                  <td style={{ textAlign: "center", padding: "7px 12px", ...FS.num, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{r.attended}/{r.eligible}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "8px 14px 2px" }}><span style={{ color: FIRE.green, fontWeight: 700 }}>✓</span> attended · <span style={{ color: FIRE.redText, fontWeight: 700 }}>✗</span> absent · <span style={{ fontWeight: 700 }}>—</span> not expected · <span style={{ color: FIRE.amberText }}>·L</span> leadership session</div>
+        </div>
+      ) : (
       <div style={{ ...FS.card, padding: "4px 16px", marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
           <div style={{ flex: 1, minWidth: 0 }}>Member</div>
@@ -3219,6 +3270,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
           </div>
         ))}
       </div>
+      )}
       {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {year} yet.</div>}
     </div>
   );
