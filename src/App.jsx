@@ -2140,6 +2140,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
   const canManage = hasAny(role, CANMANAGE_ROLES);   // ai_outputs writes are is_canmanage() (Board/DA/TO — excludes PA, who can still VIEW Funding)
   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
   const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
+  const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
   const [log, setLog] = useState([
     { id: 1, name: "Pancake Breakfast", date: "May 2026", amount: 2150 },
     { id: 2, name: "Fill-the-Boot Drive", date: "Apr 2026", amount: 980 },
@@ -2177,6 +2178,20 @@ function Funding({ S, role, notify, dept, meId, members }) {
     setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
   }
   useEffect(() => { loadDrafts(); }, []);
+  function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
+  function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
+  function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
+  async function saveEdit() {
+    if (!editBuf.trim()) return;
+    setSavingEdit(true);
+    const { data, error } = await supabase.from("ai_outputs")
+      .update({ current_text: editBuf, edited_by: meId, edited_at: new Date().toISOString() })   // ai_text left pristine
+      .eq("id", openDraft.id).select().single();
+    setSavingEdit(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save your edit", text: "Something went wrong saving your changes. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Changes saved." });
+    setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
+  }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -2281,19 +2296,32 @@ function Funding({ S, role, notify, dept, meId, members }) {
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled draft"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
               </div>
-              <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => setOpenDraft(d)}>Open</button>
+              <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
             </div>
           );
         })}
       </div>
       {openDraft && (
-        <div onClick={() => setOpenDraft(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Draft"}</div>
-              <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={() => setOpenDraft(null)}><X size={14} color={FIRE.btnIcon} /></button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
+                <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
+              </div>
             </div>
-            <RichOutput S={S} text={openDraft.current_text ?? openDraft.ai_text} dark />
+            {editing ? (
+              <>
+                <textarea style={{ ...FS.input, minHeight: 260, resize: "vertical", width: "100%", fontFamily: "inherit" }} value={editBuf} onChange={(e) => setEditBuf(e.target.value)} />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                  <button style={FS.btn} onClick={() => { setEditing(false); setEditBuf(""); }} disabled={savingEdit}>Cancel</button>
+                  <button style={{ ...FS.btnPrimary, opacity: (savingEdit || !editBuf.trim()) ? 0.6 : 1 }} onClick={saveEdit} disabled={savingEdit || !editBuf.trim()}>{savingEdit ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save changes</>}</button>
+                </div>
+              </>
+            ) : (
+              <RichOutput S={S} text={openDraft.current_text ?? openDraft.ai_text} dark />
+            )}
           </div>
         </div>
       )}
