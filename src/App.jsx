@@ -505,6 +505,19 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const todayISO = toISODate(new Date());
   const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b))[0] || null;
   const ringColor = avgPart >= 75 ? FIRE.green : avgPart >= 50 ? FIRE.amberText : FIRE.redText;
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const [duties, setDuties] = useState([]);
+  const [pendingCerts, setPendingCerts] = useState([]);
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
+  }, []);
+  const openDuties = duties.filter((d) => !d.done);
+  const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
+  const flagged = [];
+  members.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
+  flagged.sort((a, b) => a.rank - b.rank);   // expired (0) before expiring (1)
+  const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
@@ -531,7 +544,30 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           {nextEvent ? (<><div style={{ fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, marginTop: 4, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12.5, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 6 }}>Nothing scheduled</div>}
         </div>
       </div>
-      {/* Chunks 2–6 (attention cards, calendar, personal view, quick actions) slot in below */}
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
+      <div style={{ ...FS.card, padding: "4px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Duties — {openDuties.length} open{overdueDuties.length > 0 && <span style={{ color: FIRE.redText }}> · {overdueDuties.length} overdue</span>}</div>
+            {overdueDuties[0] && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("duties")}>View duties</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Certifications — {expd > 0 && <span style={{ color: FIRE.redText }}>{expd} expired · </span>}{expg} expiring</div>
+            {flagged.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>View certs</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Pending approvals — {pendingCerts.length} awaiting review</div>
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>Review approvals</button>
+        </div>
+      </div>
+      {/* Chunks 3–6 (calendar, personal view, quick actions) slot in below */}
     </div>
   );
 }
