@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Before the Call</title>
+    <style>
+      /* Zero the browser's default body margin (8px) so the app's dark
+         background reaches all four viewport edges. Without this, the gap
+         shows the default white canvas as a frame — invisible under the old
+         light login, glaring under the navy one. Dark base bg is a
+         belt-and-suspenders so no light ever peeks at the edges (login + app). */
+      html, body { margin: 0; }
+      body { background: #080A10; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
