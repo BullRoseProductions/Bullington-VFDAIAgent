@@ -477,8 +477,236 @@ const dashboardGreeting = (me) => {
 };
 
 /* ---------------- Dashboard ---------------- */
+// Shared dept attendance calc — per-member eligible/attended/pct (audience-aware) + department average, for one year.
+// Single source for RosterReports (Chief's Report), AttendanceReport (Yearly report), and the Dept Admin dashboard — no drift.
+function deptAttendance(members, sessions, year) {
+  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // done + roll-taken
+  const rows = (members || []).map((m) => {
+    const memberLeader = isLeader(m.access);
+    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");
+    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
+    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
+  });
+  const rated = rows.filter((r) => r.pct != null);
+  const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
+  return { rows, avg, doneThisYear };
+}
+// Shared personal cards (My Certifications / Assigned Duties / Upcoming Training) — self-contained (owns its personal-duties load + plan viewer).
+// Rendered in the Dept Admin dashboard; MemberDashboard keeps its own inline copy for now (switch is a later dedicated change).
+function PersonalView({ S, me, meId, sessions, notify }) {
+  const { openSessionPlans, mounts } = usePlanViewer(S, notify);
+  const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
+  const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length, certsTotal = certsAll.length;
+  const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length, expired = certsAll.filter((c) => c.st.rank === 0).length;
+  const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
+  const [mine, setMine] = useState([]);
+  function loadMine() { if (!meId) return; supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId).then(({ data }) => setMine(data || [])); }
+  useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  const mineOpen = mine.filter((d) => !d.done), mineDone = mine.filter((d) => d.done);
+  async function markMineDone(id) {
+    const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });
+    if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
+    loadMine();
+  }
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+  return (
+    <>
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={FS.kicker}>MY CERTIFICATIONS</div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color, ...FS.num }}>{certsCurrent}/{certsTotal} · {certAlert.text}</span>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {certsAll.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>No certifications on file yet.</div>) : certsAll.map((c, i) => (
+              <div key={c.id ?? i} style={{ ...FS.row, padding: "9px 0" }}>
+                <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
+                </div>
+                <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={FS.kicker}>ASSIGNED DUTIES</div>
+            {(mineOpen.length + mineDone.length) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted2, ...FS.num }}>{mineDone.length} of {mineOpen.length + mineDone.length} done</span>}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {(mineOpen.length + mineDone.length) === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>No duties assigned to you.</div>) : (<>
+              {mineOpen.map((d) => {
+                let badge = null;
+                if (d.due_date) {
+                  const dd = new Date(d.due_date + "T00:00:00"); const tn = new Date(); tn.setHours(0, 0, 0, 0);
+                  const days = Math.round((dd - tn) / 86400000);
+                  const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;
+                  const dl = dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                  badge = <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, ...FS.num }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                }
+                return (
+                  <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                    <ClipboardCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
+                      {badge && <div style={{ marginTop: 2 }}>{badge}</div>}
+                    </div>
+                    <button onClick={() => markMineDone(d.id)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}><CheckCircle2 size={13} color={FIRE.btnIcon} /> Mark done</button>
+                  </div>
+                );
+              })}
+              {mineDone.length > 0 && (
+                <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                  {mineDone.map((d) => {
+                    const dl = d.done_at ? new Date(d.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+                    return (
+                      <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                        <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{d.duty}</div>
+                          {dl && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, ...FS.num }}>Done {dl}</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>)}
+          </div>
+        </div>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={FS.kicker}>UPCOMING TRAINING</div>
+          <div style={{ marginTop: 10 }}>
+            {upcoming.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>) : upcoming.map((s) => (
+              <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
+                <CalendarCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
+                </div>
+                {s.plan && <button onClick={() => openSessionPlans(s)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {mounts}
+    </>
+  );
+}
+function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
+  const me = members.find((m) => m.id === meId) || null;
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const yr = new Date().getFullYear();
+  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
+  const active = members.filter((m) => m.status === "Active").length, total = members.length;
+  const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
+  const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
+  const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
+  const drillsHeld = doneThisYear.length;
+  const todayISO = toISODate(new Date());
+  const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b))[0] || null;
+  const ringColor = avgPart >= 75 ? FIRE.green : avgPart >= 50 ? FIRE.amberText : FIRE.redText;
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const [duties, setDuties] = useState([]);
+  const [pendingCerts, setPendingCerts] = useState([]);
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
+  }, []);
+  const openDuties = duties.filter((d) => !d.done);
+  const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
+  const flagged = [];
+  members.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
+  flagged.sort((a, b) => a.rank - b.rank);   // expired (0) before expiring (1)
+  const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+          {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
+        </div>
+        <div>
+          <div style={FS.kicker}>{dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"}</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+        </div>
+      </div>
+      <div style={{ ...FS.card, padding: "16px 18px", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: ringColor }}>{avgPart}%</div>
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted, fontWeight: 700 }}>Readiness</div>
+        </div>
+        <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
+          <Stat S={S} dark n={`${active}/${total}`} label="Active members" />
+          <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
+          <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
+        </div>
+        <div style={{ marginLeft: "auto", textAlign: "right", minWidth: 140 }}>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
+          {nextEvent ? (<><div style={{ fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, marginTop: 4, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12.5, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 6 }}>Nothing scheduled</div>}
+        </div>
+      </div>
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
+      <div style={{ ...FS.card, padding: "4px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Duties — {openDuties.length} open{overdueDuties.length > 0 && <span style={{ color: FIRE.redText }}> · {overdueDuties.length} overdue</span>}</div>
+            {overdueDuties[0] && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("duties")}>View duties</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Certifications — {expd > 0 && <span style={{ color: FIRE.redText }}>{expd} expired · </span>}{expg} expiring</div>
+            {flagged.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>View certs</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Pending approvals — {pendingCerts.length} awaiting review</div>
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>Review approvals</button>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
+        <div style={{ ...FS.card, padding: 18, flex: "1 1 240px" }}>
+          <div style={FS.kicker}>UPCOMING &amp; FEED</div>
+          <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 10, lineHeight: 1.6 }}>Birthdays, anniversaries, and department announcements will appear here.<div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 8, fontStyle: "italic" }}>Coming soon</div></div>
+        </div>
+        <div style={{ flex: "2 1 340px", minWidth: 0 }}>
+          <DashboardCalendar S={S} notify={notify} withImportanceMode />
+        </div>
+      </div>
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} />
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
+      <div style={S.quickGrid}>
+        {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
+          const n = NAV.find((x) => x.key === k); if (!n) return null;
+          const q = QUICK[n.key] || {};
+          return (
+            <button key={k} style={{ ...S.quickCard, ...FS.card }} onClick={() => go(k)}>
+              <span style={{ ...S.quickIcon, background: q.accent }}><n.Icon size={18} color="#fff" /></span>
+              <div style={{ flex: 1 }}>
+                <div style={{ ...S.quickTitle, color: FIRE.textPrimary }}>{n.label}</div>
+                <div style={{ ...S.quickBlurb, color: FIRE.textMuted }}>{q.blurb}</div>
+              </div>
+              <ChevronRight size={16} color={FIRE.btnIcon} style={{ flexShrink: 0, alignSelf: "center" }} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
   if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
+  if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -2107,14 +2335,15 @@ function FundingCalendar({ S, role, notify }) {
     </div>
   );
 }
-const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12" };
-const SOURCE_RANK = { training: 0, funding: 1, recruit: 2, social: 3 };
-const SOURCE_TIER = { training: "bar", funding: "pill", recruit: "pill", social: "dot" };
-function DashboardCalendar({ S, notify }) {
+const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12", actionitem: "#6E56CF" };
+const SOURCE_RANK = { training: 0, actionitem: 1, funding: 2, recruit: 3, social: 4 };   // action items rank just below Training
+const SOURCE_TIER = { training: "bar", actionitem: "bar", funding: "pill", recruit: "pill", social: "dot" };
+function DashboardCalendar({ S, notify, withImportanceMode }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [view, setView] = useState("grid");   // "grid" | "importance" (only surfaced when withImportanceMode)
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const loadAll = () => {
     Promise.all([
@@ -2122,12 +2351,16 @@ function DashboardCalendar({ S, notify }) {
       supabase.from("training_sessions").select("id, date, title, audience, session_plans(id, title, storage_path, ai_text, source, created_at)"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("funding_events").select("id, date, title"),
-    ]).then(([social, training, recruit, funding]) => {
+      supabase.from("action_items").select("id, text, due_date, status"),                      // 5th source (RLS: leaders only → members get [])
+    ]).then(([social, training, recruit, funding, actions]) => {
       const mapRows = (res, source, labelOf, extraOf) =>
         (res.data || []).filter((r) => r.date).map((r) => {        // null data (source error) → []
           const [yy, mm, dd] = r.date.split("-").map(Number);
           return { source, id: `${source}-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: labelOf(r), color: SOURCE_COLORS[source], tier: SOURCE_TIER[source], ...(extraOf ? extraOf(r) : {}) };
         });
+      const actionRows = (actions.data || [])
+        .filter((r) => r.due_date && r.status === "open")                                        // only OPEN items WITH a due date
+        .map((r) => { const [yy, mm, dd] = r.due_date.split("-").map(Number); return { source: "actionitem", id: `actionitem-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: r.text, color: SOURCE_COLORS.actionitem, tier: SOURCE_TIER.actionitem }; });
       setItems([
         ...mapRows(social, "social", (r) => r.caption || ""),
         ...mapRows(training, "training", (r) => r.title, (r) => ({
@@ -2139,6 +2372,7 @@ function DashboardCalendar({ S, notify }) {
         })),
         ...mapRows(recruit, "recruit", (r) => r.title),
         ...mapRows(funding, "funding", (r) => r.title),
+        ...actionRows,
       ]);
     });
   };
@@ -2149,6 +2383,7 @@ function DashboardCalendar({ S, notify }) {
   const FILTERS = [
     { label: "All", key: "all", color: "#54506B" },                       // neutral — NOT a source color
     { label: "Training", key: "training", color: SOURCE_COLORS.training }, // blue
+    { label: "Action items", key: "actionitem", color: SOURCE_COLORS.actionitem }, // violet
     { label: "Recruitment", key: "recruit", color: SOURCE_COLORS.recruit }, // teal — key is "recruit"
     { label: "Funding", key: "funding", color: SOURCE_COLORS.funding },   // amber
     { label: "Social", key: "social", color: SOURCE_COLORS.social },      // red
@@ -2156,7 +2391,16 @@ function DashboardCalendar({ S, notify }) {
 
   return (
     <div>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ ...FS.kicker, marginBottom: 0 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+        {withImportanceMode && (
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            {[["grid", "Grid"], ["importance", "By importance"]].map(([k, l]) => (
+              <button key={k} onClick={() => setView(k)} style={{ border: `1.5px solid ${view === k ? FIRE.red : FIRE.btnBorder}`, background: view === k ? FIRE.btnBg : "transparent", color: view === k ? FIRE.textPrimary : FIRE.navLabel, borderRadius: 999, padding: "4px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+            ))}
+          </div>
+        )}
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
@@ -2168,14 +2412,37 @@ function DashboardCalendar({ S, notify }) {
           );
         })}
       </div>
-      <MonthCalendar
-        cur={cur} setCur={setCur} dark
-        items={monthItems}
-        renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
-        todayColor={FIRE.red}
-        monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
-        overflowIndicator
-      />
+      {withImportanceMode && view === "importance" ? (
+        <div style={{ ...FS.card, padding: "8px 14px" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 6 }}>{CAL_MONTHS[cur.m]} {cur.y}</div>
+          {monthItems.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>No events this month.</div> :
+            [["training", "Training"], ["actionitem", "Action items"], ["funding", "Funding"], ["recruit", "Recruitment"], ["social", "Social"]].map(([src, lbl]) => {   // priority order = SOURCE_RANK
+              const group = monthItems.filter((it) => it.source === src).slice().sort((a, b) => a.d - b.d);   // date order within a tier
+              if (!group.length) return null;
+              return (
+                <div key={src} style={{ padding: "6px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: SOURCE_COLORS[src], marginBottom: 3 }}>{lbl}</div>
+                  {group.map((it) => (
+                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 999, background: it.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
+                      <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num, flexShrink: 0 }}>{CAL_MONTHS[it.m].slice(0, 3)} {it.d}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+        </div>
+      ) : (
+        <MonthCalendar
+          cur={cur} setCur={setCur} dark
+          items={monthItems}
+          renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
+          todayColor={FIRE.red}
+          monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+          overflowIndicator
+        />
+      )}
       {mounts}
     </div>
   );
@@ -3031,17 +3298,10 @@ function RosterReports({ S, members, sessions, dept, back }) {
   const prob = members.filter((m) => m.status === "Probationary").length;
   const certs = []; members.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
-  // Real attendance — SAME audience-aware, attendance-present, current-year math as AttendanceReport (numbers match the Yearly Attendance Report).
+  // Real attendance — shared deptAttendance calc (same numbers as the Yearly Attendance Report + Dept Admin dashboard).
   const yr = new Date().getFullYear();
-  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === yr && (s.attendance || []).length > 0);
-  const attById = new Map((members || []).map((m) => {
-    const memberLeader = isLeader(m.access);                                              // off each member's ACTUAL roles
-    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // per-member denominator
-    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
-    return [m.id, eligible.length ? Math.round((attended / eligible.length) * 100) : null];
-  }));
-  const ratedPcts = [...attById.values()].filter((p) => p != null);
-  const avgPart = ratedPcts.length ? Math.round(ratedPcts.reduce((s, p) => s + p, 0) / ratedPcts.length) : 0;
+  const { rows: attRows, avg: avgPart } = deptAttendance(members, sessions, yr);
+  const attById = new Map(attRows.map((r) => [r.id, r.pct]));
   // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
   const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
   const recentTraining = (sessions || [])
@@ -3208,16 +3468,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const cur = new Date().getFullYear();
   const [year, setYear] = useState(cur);
   const years = [...new Set([cur, ...(sessions || []).filter((s) => s.done && (s.attendance || []).length > 0).map((s) => s.y)])].sort((a, b) => b - a);   // current year + any year with reportable drills, newest first
-  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // source pool: done + roll-taken
-  const rows = (members || []).map((m) => {
-    const memberLeader = isLeader(m.access);                                              // score off the member's ACTUAL roles
-    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // PER-MEMBER denominator
-    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
-    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
-    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
-  }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
-  const rated = rows.filter((r) => r.pct != null);
-  const avgPct = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
+  const { rows: attRows, avg: avgPct, doneThisYear } = deptAttendance(members, sessions, year);   // shared calc (also RosterReports + Dept Admin dashboard)
+  const rows = [...attRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
   const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
   const [fullYear, setFullYear] = useState(false);  // grid scope: false = recent 10, true = all sessions in year
