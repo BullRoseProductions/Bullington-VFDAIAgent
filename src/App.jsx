@@ -650,25 +650,27 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
-      <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Duties — {openDuties.length} open{overdueDuties.length > 0 && <span style={{ color: FIRE.redText }}> · {overdueDuties.length} overdue</span>}</div>
-          {overdueDuties[0] && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
+        <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Duties — {openDuties.length} open{overdueDuties.length > 0 && <span style={{ color: FIRE.redText }}> · {overdueDuties.length} overdue</span>}</div>
+            {overdueDuties[0] && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("duties")}>View duties</button>
         </div>
-        <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("duties")}>View duties</button>
-      </div>
-      <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Certifications — {expd > 0 && <span style={{ color: FIRE.redText }}>{expd} expired · </span>}{expg} expiring</div>
-          {flagged.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
+        <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Certifications — {expd > 0 && <span style={{ color: FIRE.redText }}>{expd} expired · </span>}{expg} expiring</div>
+            {flagged.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster")}>View certs</button>
         </div>
-        <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>View certs</button>
-      </div>
-      <div style={{ ...FS.card, borderLeft: `3px solid #378ADD`, padding: "12px 16px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Pending approvals — {pendingCerts.length} awaiting review</div>
+        <div style={{ ...FS.card, borderLeft: `3px solid #378ADD`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Pending approvals — {pendingCerts.length} awaiting review</div>
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster")}>Review approvals</button>
         </div>
-        <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>Review approvals</button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
         <div style={{ ...FS.card, padding: 18, flex: "1 1 240px" }}>
