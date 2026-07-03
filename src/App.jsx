@@ -674,9 +674,33 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>Review approvals</button>
         </div>
       </div>
-      {/* Chunk 6: calendar + feed slot in above the personal view */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
+        <div style={{ ...FS.card, padding: 18, flex: "1 1 240px" }}>
+          <div style={FS.kicker}>UPCOMING &amp; FEED</div>
+          <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 10, lineHeight: 1.6 }}>Birthdays, anniversaries, and department announcements will appear here.<div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 8, fontStyle: "italic" }}>Coming soon</div></div>
+        </div>
+        <div style={{ flex: "2 1 340px", minWidth: 0 }}>
+          <DashboardCalendar S={S} notify={notify} withImportanceMode />
+        </div>
+      </div>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} />
-      {/* Chunk 6: Quick Actions slot in below */}
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
+      <div style={S.quickGrid}>
+        {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
+          const n = NAV.find((x) => x.key === k); if (!n) return null;
+          const q = QUICK[n.key] || {};
+          return (
+            <button key={k} style={{ ...S.quickCard, ...FS.card }} onClick={() => go(k)}>
+              <span style={{ ...S.quickIcon, background: q.accent }}><n.Icon size={18} color="#fff" /></span>
+              <div style={{ flex: 1 }}>
+                <div style={{ ...S.quickTitle, color: FIRE.textPrimary }}>{n.label}</div>
+                <div style={{ ...S.quickBlurb, color: FIRE.textMuted }}>{q.blurb}</div>
+              </div>
+              <ChevronRight size={16} color={FIRE.btnIcon} style={{ flexShrink: 0, alignSelf: "center" }} />
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
