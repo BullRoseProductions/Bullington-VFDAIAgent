@@ -66,6 +66,7 @@ const ROLES = ["Project Admin", "Department Admin", "Board Member", "Officer", "
 const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Officer"];
 const DEPT_ADMIN_ROLES = ["Department Admin", "Project Admin"];
 const CANMANAGE_ROLES  = ["Board Member", "Department Admin", "Officer"];   // NO Project Admin
+const CANMANAGE_OPS_ROLES = ["Department Admin", "Officer"];   // ops writes — Board EXCLUDED (governance-only) + no PA; client half of the live is_canmanage_ops() DB gate
 const SIGNIN_ROLES     = ["Project Admin", "Department Admin", "Officer"];  // PA/DA/TO — QR sign-in + AI planner
 const ANNOUNCE_ROLES   = ["Project Admin", "Department Admin", "Officer"];  // who can POST announcements — Project Admin / Department Admin / Officer (NOT Board); matches is_announcer() at the DB
 const GRANTABLE_ROLES  = ["Member", "Officer", "Board Member", "Department Admin"];   // roster editor checkboxes — Project Admin NOT grantable
@@ -1486,7 +1487,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
-  const canManage = hasAny(role, CANMANAGE_ROLES);   // training_sessions INSERT gate (excludes PA)
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)
   const [newDate, setNewDate] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -1731,7 +1732,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
   const [localDates, setLocalDates] = useState("");   // optional — real local events + dates the leader supplies; drives post scheduling
   const [startDate, setStartDate] = useState(() => nextMondayISO());   // Week 1 begins here; app computes all post dates from this
   const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
-  const canManage = hasAny(role, CANMANAGE_ROLES);   // ai_outputs writes are is_canmanage() (excludes PA, who can still VIEW Recruitment)
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Recruitment)
   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
   const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
   const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
@@ -1899,7 +1900,7 @@ function Phase({ S, n, weeks, title, items, accent }) {
 const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
 function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
-  const canManageDocs = hasAny(role, CANMANAGE_ROLES);
+  const canManageDocs = hasAny(role, CANMANAGE_OPS_ROLES);
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [uploadType, setUploadType] = useState("SOP / SOG");
@@ -2055,7 +2056,7 @@ function Documents({ S, role, notify, uploaderName }) {
             : "No documents have been added yet."}
         </div>
       ) : (
-        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={hasAny(role, CANMANAGE_ROLES) ? deleteDoc : undefined} />
+        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={hasAny(role, CANMANAGE_OPS_ROLES) ? deleteDoc : undefined} />
       )}
     </div>
   );
@@ -2185,7 +2186,7 @@ function ContentCalendar({ S, role, notify }) {
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthPosts = posts.filter((p) => p.y === cur.y && p.m === cur.m);
-  const canEditCategories = hasAny(role, CANMANAGE_ROLES);
+  const canEditCategories = hasAny(role, CANMANAGE_OPS_ROLES);
   function quickAdd(catId) {
     const cat = categories.find((c) => c.id === catId);
     setFi(catId); setFt(cat ? cat.t : ""); setFd(Math.min(fd, dim)); setShow(true);
@@ -2329,7 +2330,7 @@ function RecruitmentCalendar({ S, role, notify }) {
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
-  const canEdit = hasAny(role, CANMANAGE_ROLES);
+  const canEdit = hasAny(role, CANMANAGE_OPS_ROLES);
 
   async function addEvent() {
     const t = evTitle.trim();
@@ -2414,7 +2415,7 @@ function FundingCalendar({ S, role, notify }) {
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
-  const canEdit = hasAny(role, CANMANAGE_ROLES);
+  const canEdit = hasAny(role, CANMANAGE_OPS_ROLES);
 
   async function addEvent() {
     const t = evTitle.trim();
@@ -2659,7 +2660,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
-  const canManage = hasAny(role, CANMANAGE_ROLES);   // ai_outputs writes are is_canmanage() (Board/DA/TO — excludes PA, who can still VIEW Funding)
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Funding)
   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
   const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
   const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
@@ -4765,7 +4766,7 @@ function LeadershipTag({ audience }) {   // amber "Leadership" pill for leadersh
   return <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>Leadership</span>;
 }
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept, addFeedback }) {
-  const canManage = hasAny(role, CANMANAGE_ROLES);
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
   const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
   const canPlanAI = hasAny(role, SIGNIN_ROLES);   // AI drill planner — same PA/DA/TO set as the retired standalone AI page (NOT canManage: excludes Board, includes PA)
   const memberView = !isLeader(role);
@@ -5758,8 +5759,8 @@ const DUTYLOG_SEED = [
   { id: 3, what: "Posted open-house recap", who: "Dana Cole", when: "Jun 20" },
 ];
 function StationDuties({ S, role, members, meId, notify }) {
-  const canManage = isLeader(role); // board members + officers + admins assign duties
-  const canCreate = hasAny(role, CANMANAGE_ROLES); // matches create_duty's DB gate (excludes Project Admin)
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES); // assign/manage duties — ops only (DA/Officer, excludes Board + PA)
+  const canCreate = hasAny(role, CANMANAGE_OPS_ROLES); // create duty — ops only (DA/Officer, excludes Board + PA)
   const me = members.find((m) => m.id === meId);
   const nameById = new Map(members.map((m) => [m.id, m.name]));
   const fmtDoneAt = (v) => {
