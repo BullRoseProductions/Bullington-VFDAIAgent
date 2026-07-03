@@ -731,8 +731,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   useEffect(() => {
     const cols = "id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by";
     const newest = (rows) => (rows || []).slice().sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))[0] || null;   // coalesce(edited_at, created_at) desc
-    supabase.from("ai_outputs").select(cols).eq("feature", "agenda").then(({ data }) => setAgendaRow(newest(data)));
-    supabase.from("ai_outputs").select(cols).eq("feature", "minutes").then(({ data }) => setMinutesRow(newest(data)));
+    supabase.from("ai_outputs").select(cols).eq("feature", "agenda").is("deleted_at", null).then(({ data }) => setAgendaRow(newest(data)));
+    supabase.from("ai_outputs").select(cols).eq("feature", "minutes").is("deleted_at", null).then(({ data }) => setMinutesRow(newest(data)));
     supabase.from("action_items").select("*").eq("status", "open")   // full rows (text + due_date) — dept-scoped by RLS
       .then(({ data }) => setOpenItems((data || []).slice().sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"))));   // soonest due first
   }, []);
@@ -1914,7 +1914,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
     loadDrafts();
   }
   async function loadDrafts() {
-    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "recruitment");   // dept-scoped by RLS
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "recruitment").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
     setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
   }
   useEffect(() => { loadDrafts(); }, []);
@@ -2852,7 +2852,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
     loadDrafts();
   }
   async function loadDrafts() {
-    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "fundraiser");   // dept-scoped by RLS
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "fundraiser").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
     setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
   }
   useEffect(() => { loadDrafts(); }, []);
@@ -4100,8 +4100,17 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     loadDrafts();
   }
   async function loadDrafts() {
-    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "minutes");   // dept-scoped by RLS
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "minutes").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
     setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
+  }
+  const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
+  async function softDelete(d) {
+    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    setDeletingId(d.id);
+    const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
+    setDeletingId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't delete", text: "Something went wrong deleting that. Please try again.", details: error.message }); return; }
+    loadDrafts();   // deleted row falls out via the .is("deleted_at", null) filter
   }
   useEffect(() => { loadDrafts(); }, []);
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }
@@ -4339,6 +4348,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
               </div>
               <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
+              {isDeptAdmin(role) && <button title="Delete" disabled={deletingId === d.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => softDelete(d)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
           );
         })}
@@ -4435,8 +4445,17 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
     loadDrafts();
   }
   async function loadDrafts() {
-    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "agenda");   // dept-scoped by RLS
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "agenda").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
     setDrafts((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // coalesce(edited_at, created_at) desc
+  }
+  const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
+  async function softDelete(d) {
+    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    setDeletingId(d.id);
+    const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
+    setDeletingId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't delete", text: "Something went wrong deleting that. Please try again.", details: error.message }); return; }
+    loadDrafts();   // deleted row falls out via the .is("deleted_at", null) filter
   }
   useEffect(() => { loadDrafts(); }, []);
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
@@ -4516,6 +4535,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
               </div>
               <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
+              {isDeptAdmin(role) && <button title="Delete" disabled={deletingId === d.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => softDelete(d)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
           );
         })}
