@@ -636,43 +636,39 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
         </div>
       </div>
-      <div style={{ ...FS.card, padding: "16px 18px", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ ...FS.card, padding: "16px 18px", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: ringColor }}>{avgPart}%</div>
           <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted, fontWeight: 700 }}>Readiness</div>
         </div>
-        <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
-          <Stat S={S} dark n={`${active}/${total}`} label="Active members" />
-          <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
-          <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
-        </div>
-        <div style={{ marginLeft: "auto", textAlign: "right", minWidth: 140 }}>
+        <Stat S={S} dark n={`${active}/${total}`} label="Active members" />
+        <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
+        <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
+        <div style={{ textAlign: "right", minWidth: 140 }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
           {nextEvent ? (<><div style={{ fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, marginTop: 4, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12.5, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 6 }}>Nothing scheduled</div>}
         </div>
       </div>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
-      <div style={{ ...FS.card, padding: "4px 16px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Duties — {openDuties.length} open{overdueDuties.length > 0 && <span style={{ color: FIRE.redText }}> · {overdueDuties.length} overdue</span>}</div>
-            {overdueDuties[0] && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
-          </div>
-          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("duties")}>View duties</button>
+      <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Duties — {openDuties.length} open{overdueDuties.length > 0 && <span style={{ color: FIRE.redText }}> · {overdueDuties.length} overdue</span>}</div>
+          {overdueDuties[0] && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Certifications — {expd > 0 && <span style={{ color: FIRE.redText }}>{expd} expired · </span>}{expg} expiring</div>
-            {flagged.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
-          </div>
-          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>View certs</button>
+        <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("duties")}>View duties</button>
+      </div>
+      <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Certifications — {expd > 0 && <span style={{ color: FIRE.redText }}>{expd} expired · </span>}{expg} expiring</div>
+          {flagged.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Pending approvals — {pendingCerts.length} awaiting review</div>
-          </div>
-          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>Review approvals</button>
+        <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>View certs</button>
+      </div>
+      <div style={{ ...FS.card, borderLeft: `3px solid #378ADD`, padding: "12px 16px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Pending approvals — {pendingCerts.length} awaiting review</div>
         </div>
+        <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>Review approvals</button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
         <div style={{ ...FS.card, padding: 18, flex: "1 1 240px" }}>
