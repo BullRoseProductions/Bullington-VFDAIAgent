@@ -2202,9 +2202,9 @@ function FundingCalendar({ S, role, notify }) {
     </div>
   );
 }
-const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12" };
-const SOURCE_RANK = { training: 0, funding: 1, recruit: 2, social: 3 };
-const SOURCE_TIER = { training: "bar", funding: "pill", recruit: "pill", social: "dot" };
+const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12", actionitem: "#6E56CF" };
+const SOURCE_RANK = { training: 0, actionitem: 1, funding: 2, recruit: 3, social: 4 };   // action items rank just below Training
+const SOURCE_TIER = { training: "bar", actionitem: "bar", funding: "pill", recruit: "pill", social: "dot" };
 function DashboardCalendar({ S, notify }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -2217,12 +2217,16 @@ function DashboardCalendar({ S, notify }) {
       supabase.from("training_sessions").select("id, date, title, audience, session_plans(id, title, storage_path, ai_text, source, created_at)"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("funding_events").select("id, date, title"),
-    ]).then(([social, training, recruit, funding]) => {
+      supabase.from("action_items").select("id, text, due_date, status"),                      // 5th source (RLS: leaders only → members get [])
+    ]).then(([social, training, recruit, funding, actions]) => {
       const mapRows = (res, source, labelOf, extraOf) =>
         (res.data || []).filter((r) => r.date).map((r) => {        // null data (source error) → []
           const [yy, mm, dd] = r.date.split("-").map(Number);
           return { source, id: `${source}-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: labelOf(r), color: SOURCE_COLORS[source], tier: SOURCE_TIER[source], ...(extraOf ? extraOf(r) : {}) };
         });
+      const actionRows = (actions.data || [])
+        .filter((r) => r.due_date && r.status === "open")                                        // only OPEN items WITH a due date
+        .map((r) => { const [yy, mm, dd] = r.due_date.split("-").map(Number); return { source: "actionitem", id: `actionitem-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: r.text, color: SOURCE_COLORS.actionitem, tier: SOURCE_TIER.actionitem }; });
       setItems([
         ...mapRows(social, "social", (r) => r.caption || ""),
         ...mapRows(training, "training", (r) => r.title, (r) => ({
@@ -2234,6 +2238,7 @@ function DashboardCalendar({ S, notify }) {
         })),
         ...mapRows(recruit, "recruit", (r) => r.title),
         ...mapRows(funding, "funding", (r) => r.title),
+        ...actionRows,
       ]);
     });
   };
@@ -2244,6 +2249,7 @@ function DashboardCalendar({ S, notify }) {
   const FILTERS = [
     { label: "All", key: "all", color: "#54506B" },                       // neutral — NOT a source color
     { label: "Training", key: "training", color: SOURCE_COLORS.training }, // blue
+    { label: "Action items", key: "actionitem", color: SOURCE_COLORS.actionitem }, // violet
     { label: "Recruitment", key: "recruit", color: SOURCE_COLORS.recruit }, // teal — key is "recruit"
     { label: "Funding", key: "funding", color: SOURCE_COLORS.funding },   // amber
     { label: "Social", key: "social", color: SOURCE_COLORS.social },      // red
