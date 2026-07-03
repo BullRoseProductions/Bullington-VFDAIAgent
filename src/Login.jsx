@@ -35,51 +35,64 @@ export default function Login() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F4F3F7", fontFamily: "system-ui, sans-serif", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 380, background: "#fff", borderRadius: 16, border: "1px solid #E7E5EE", padding: 28, boxShadow: "0 6px 24px rgba(0,0,0,0.06)" }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: "#16181C", marginBottom: 4 }}>Department Login</div>
-        <div style={{ fontSize: 14, color: "#6A7178", marginBottom: 20 }}>Sign in to continue.</div>
-
-        <input
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid #D9D5E2", marginBottom: 10 }}
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20 }}>
+      <style>{`
+        .b4c-input { transition: border-color .15s ease, box-shadow .15s ease; }
+        .b4c-input:focus { outline: none; border-color: #2E6FC7; box-shadow: 0 0 0 3px rgba(46,111,199,.25); }
+        .b4c-input::placeholder { color: #5D6B85; }
+      `}</style>
+      <div style={{ width: "100%", maxWidth: 380 }}>
+        <img
+          src="/B4C-Main.png"
+          alt="Before the Call — Keeping Responders Prepared"
+          style={{ display: "block", width: "100%", maxWidth: 360, height: "auto", margin: "0 auto 24px" }}
         />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && signInPassword()}
-          style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid #D9D5E2", marginBottom: 12 }}
-        />
+        <div style={{ background: "#0E1220", borderRadius: 16, border: "1px solid rgba(90,130,200,.14)", padding: 26, boxShadow: "0 12px 34px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 13, color: "#8FA3C4", textAlign: "center", margin: "0 0 18px" }}>Sign in to continue.</div>
 
-        {err && <div style={{ fontSize: 13, color: "#B11E2A", marginBottom: 12 }}>{err}</div>}
+          <input
+            className="b4c-input"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid rgba(90,130,200,.22)", background: "#10141F", color: "#EAEEF5", colorScheme: "dark", marginBottom: 10 }}
+          />
+          <input
+            className="b4c-input"
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && signInPassword()}
+            style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid rgba(90,130,200,.22)", background: "#10141F", color: "#EAEEF5", colorScheme: "dark", marginBottom: 12 }}
+          />
 
-        <button
-          onClick={signInPassword}
-          disabled={loading}
-          style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#B11E2A", border: "none", borderRadius: 10, cursor: "pointer", opacity: loading ? 0.7 : 1, marginBottom: 14 }}
-        >
-          {loading ? "Working…" : "Sign in"}
-        </button>
+          {err && <div style={{ fontSize: 13, color: "#E58A90", marginBottom: 12 }}>{err}</div>}
 
-        <div style={{ borderTop: "1px solid #EFEDF3", paddingTop: 14 }}>
-          {sent ? (
-            <div style={{ fontSize: 13.5, color: "#2E7D52", lineHeight: 1.5 }}>
-              Check your email — we sent a sign-in link to <b>{email}</b>.
-            </div>
-          ) : (
-            <button
-              onClick={sendLink}
-              disabled={loading}
-              style={{ width: "100%", padding: "9px", fontSize: 13.5, fontWeight: 600, color: "#3A4750", background: "#fff", border: "1px solid #D9D5E2", borderRadius: 10, cursor: "pointer" }}
-            >
-              Or email me a login link instead
-            </button>
-          )}
+          <button
+            onClick={signInPassword}
+            disabled={loading}
+            style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2E6FC7", border: "none", borderRadius: 10, cursor: "pointer", opacity: loading ? 0.7 : 1, boxShadow: "0 4px 16px rgba(46,111,199,.35)", marginBottom: 14 }}
+          >
+            {loading ? "Working…" : "Sign in"}
+          </button>
+
+          <div style={{ borderTop: "1px solid rgba(90,130,200,.14)", paddingTop: 14 }}>
+            {sent ? (
+              <div style={{ fontSize: 13.5, color: "#76C98D", lineHeight: 1.5 }}>
+                Check your email — we sent a sign-in link to <b>{email}</b>.
+              </div>
+            ) : (
+              <button
+                onClick={sendLink}
+                disabled={loading}
+                style={{ width: "100%", padding: "9px", fontSize: 13.5, fontWeight: 600, color: "#8FA3C4", background: "rgba(90,130,200,.06)", border: "1px solid rgba(90,130,200,.20)", borderRadius: 10, cursor: "pointer" }}
+              >
+                Or email me a login link instead
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
