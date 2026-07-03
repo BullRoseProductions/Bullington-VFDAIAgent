@@ -492,6 +492,113 @@ function deptAttendance(members, sessions, year) {
   const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
   return { rows, avg, doneThisYear };
 }
+// Shared personal cards (My Certifications / Assigned Duties / Upcoming Training) — self-contained (owns its personal-duties load + plan viewer).
+// Rendered in the Dept Admin dashboard; MemberDashboard keeps its own inline copy for now (switch is a later dedicated change).
+function PersonalView({ S, me, meId, sessions, notify }) {
+  const { openSessionPlans, mounts } = usePlanViewer(S, notify);
+  const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
+  const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length, certsTotal = certsAll.length;
+  const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length, expired = certsAll.filter((c) => c.st.rank === 0).length;
+  const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
+  const [mine, setMine] = useState([]);
+  function loadMine() { if (!meId) return; supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId).then(({ data }) => setMine(data || [])); }
+  useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  const mineOpen = mine.filter((d) => !d.done), mineDone = mine.filter((d) => d.done);
+  async function markMineDone(id) {
+    const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });
+    if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
+    loadMine();
+  }
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+  return (
+    <>
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={FS.kicker}>MY CERTIFICATIONS</div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color, ...FS.num }}>{certsCurrent}/{certsTotal} · {certAlert.text}</span>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {certsAll.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>No certifications on file yet.</div>) : certsAll.map((c, i) => (
+              <div key={c.id ?? i} style={{ ...FS.row, padding: "9px 0" }}>
+                <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
+                </div>
+                <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={FS.kicker}>ASSIGNED DUTIES</div>
+            {(mineOpen.length + mineDone.length) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted2, ...FS.num }}>{mineDone.length} of {mineOpen.length + mineDone.length} done</span>}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {(mineOpen.length + mineDone.length) === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>No duties assigned to you.</div>) : (<>
+              {mineOpen.map((d) => {
+                let badge = null;
+                if (d.due_date) {
+                  const dd = new Date(d.due_date + "T00:00:00"); const tn = new Date(); tn.setHours(0, 0, 0, 0);
+                  const days = Math.round((dd - tn) / 86400000);
+                  const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;
+                  const dl = dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                  badge = <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, ...FS.num }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                }
+                return (
+                  <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                    <ClipboardCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
+                      {badge && <div style={{ marginTop: 2 }}>{badge}</div>}
+                    </div>
+                    <button onClick={() => markMineDone(d.id)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}><CheckCircle2 size={13} color={FIRE.btnIcon} /> Mark done</button>
+                  </div>
+                );
+              })}
+              {mineDone.length > 0 && (
+                <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                  {mineDone.map((d) => {
+                    const dl = d.done_at ? new Date(d.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+                    return (
+                      <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
+                        <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{d.duty}</div>
+                          {dl && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, ...FS.num }}>Done {dl}</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>)}
+          </div>
+        </div>
+        <div style={{ ...FS.card, padding: 18 }}>
+          <div style={FS.kicker}>UPCOMING TRAINING</div>
+          <div style={{ marginTop: 10 }}>
+            {upcoming.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>) : upcoming.map((s) => (
+              <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
+                <CalendarCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
+                </div>
+                {s.plan && <button onClick={() => openSessionPlans(s)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {mounts}
+    </>
+  );
+}
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -567,7 +674,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("roster")}>Review approvals</button>
         </div>
       </div>
-      {/* Chunks 3–6 (calendar, personal view, quick actions) slot in below */}
+      {/* Chunk 6: calendar + feed slot in above the personal view */}
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} />
+      {/* Chunk 6: Quick Actions slot in below */}
     </div>
   );
 }
