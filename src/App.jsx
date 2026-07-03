@@ -606,7 +606,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same geometry as the member attendance ring
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const active = members.filter((m) => m.status === "Active").length, total = members.length;
+  const total = members.length;
   const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
   const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
   const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
@@ -666,7 +666,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <Stat S={S} dark n={`${active}/${total}`} label="Active members" />
+        <Stat S={S} dark n={String(total)} label="Members" />
         <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
         <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
         <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" /></div>
