@@ -121,6 +121,24 @@ CREATE TABLE public.ai_feedback (
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
+-- AI-drafted documents/outputs keyed by `feature` (minutes, agenda, recruitment,
+-- fundraiser). ai_text = original draft (kept pristine); current_text = edited body.
+-- Soft-deletable: deleted_at NULL = live, set = hidden but retained (DA/PA only,
+-- via soft_delete_ai_output() + the guard trigger — Sections 2 & 3).
+CREATE TABLE public.ai_outputs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  department_id uuid NOT NULL,
+  feature text NOT NULL,
+  title text,
+  ai_text text NOT NULL,
+  current_text text,
+  created_by uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  edited_by uuid,
+  edited_at timestamp with time zone,
+  deleted_at timestamp with time zone            -- soft-delete stamp; NULL = live
+);
+
 -- Leader-posted announcements shown in the dashboard feed. audience gates
 -- visibility ('everyone' = all dept members; 'leadership' = is_leader() only).
 CREATE TABLE public.announcements (
@@ -652,6 +670,61 @@ begin
 end;
 $function$;
 
+-- --- AI outputs soft-delete (DA/PA only) ------------------------------------
+-- soft_delete_ai_output stamps deleted_at (the app filters deleted_at IS NULL);
+-- guard_ai_outputs_deleted_at (BEFORE UPDATE trigger, Section 3) blocks ANY change
+-- to deleted_at unless DA/PA — so even the canmanage UPDATE policy can't soft-delete
+-- or restore. Both gate on is_dept_admin() (DA/PA) — captured verbatim from live;
+-- note that name differs from is_department_admin() used elsewhere in this file.
+
+CREATE OR REPLACE FUNCTION public.soft_delete_ai_output(p_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_row public.ai_outputs;
+begin
+  -- must be DA or PA
+  if not public.is_dept_admin() then
+    raise exception 'Only a Department Admin or Project Admin can delete this document';
+  end if;
+  select * into v_row from public.ai_outputs where id = p_id;
+  if not found then
+    raise exception 'Document not found';
+  end if;
+  -- must be in the caller's department
+  if v_row.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: document belongs to another department';
+  end if;
+  -- already soft-deleted? no-op guard
+  if v_row.deleted_at is not null then
+    return;
+  end if;
+  update public.ai_outputs
+  set deleted_at = now()
+  where id = p_id;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.guard_ai_outputs_deleted_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  -- if deleted_at is being changed (either direction), require DA/PA
+  if (new.deleted_at is distinct from old.deleted_at) then
+    if not public.is_dept_admin() then
+      raise exception 'Only a Department Admin or Project Admin can change the deleted state of this document';
+    end if;
+  end if;
+  return new;
+end;
+$function$;
+
 
 -- =============================================================================
 -- SECTION 3 — ROW-LEVEL SECURITY POLICIES
@@ -660,6 +733,7 @@ $function$;
 
 ALTER TABLE public.action_items        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_feedback         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_outputs          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcements       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.apparatus           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cert_submissions    ENABLE ROW LEVEL SECURITY;
@@ -911,6 +985,31 @@ CREATE POLICY "author or dept admin update announcements" ON public.announcement
 
 CREATE POLICY "author or dept admin delete announcements" ON public.announcements FOR DELETE TO authenticated
   USING (((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin())));
+
+-- --- AI OUTPUTS (minutes/agenda/recruitment/fundraiser; soft-deletable) ------
+-- READ: any dept member (dept-scoped). INSERT/UPDATE: is_canmanage_ops() OR
+-- (is_canmanage() AND feature in minutes/agenda), with created_by/edited_by pinned.
+-- Hard DELETE: PA ONLY (access && ARRAY['Project Admin']). Soft-delete (deleted_at)
+-- runs through soft_delete_ai_output() and is guarded DA/PA by the trigger below.
+
+CREATE POLICY "dept reads ai_outputs" ON public.ai_outputs FOR SELECT TO public
+  USING ((department_id = my_department_id()));
+
+CREATE POLICY "canmanage insert ai_outputs" ON public.ai_outputs FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (created_by = my_member_id()) AND (is_canmanage_ops() OR (is_canmanage() AND (feature = ANY (ARRAY['minutes'::text, 'agenda'::text]))))));
+
+CREATE POLICY "canmanage update ai_outputs" ON public.ai_outputs FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND (is_canmanage_ops() OR (is_canmanage() AND (feature = ANY (ARRAY['minutes'::text, 'agenda'::text]))))))
+  WITH CHECK (((department_id = my_department_id()) AND (edited_by = my_member_id()) AND (is_canmanage_ops() OR (is_canmanage() AND (feature = ANY (ARRAY['minutes'::text, 'agenda'::text]))))));
+
+CREATE POLICY "pa hard delete ai_outputs" ON public.ai_outputs FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access && ARRAY['Project Admin'::text]))))));
+
+-- Guard trigger: any change to deleted_at (soft-delete OR restore) requires DA/PA.
+CREATE TRIGGER trg_guard_ai_outputs_deleted_at BEFORE UPDATE ON public.ai_outputs
+  FOR EACH ROW EXECUTE FUNCTION guard_ai_outputs_deleted_at();
 
 -- --- Shared / global reads (intentional, NOT department-scoped) --------------
 
