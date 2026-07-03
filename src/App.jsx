@@ -511,7 +511,7 @@ function PersonalView({ S, me, meId, sessions, notify }) {
     loadMine();
   }
   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-  const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+  const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 4);   // next 4 only (display cap)
   return (
     <>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>
@@ -950,7 +950,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const trend = (thisMonth && lastMonth) ? thisMonth.pct - lastMonth.pct : null;    // only when BOTH months have data
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;                                 // ring geometry (circumference for stroke-dash)
   const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
-  const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b));
+  const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 4);   // next 4 only (display cap)
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
   const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length;
   const certsTotal = certsAll.length;
