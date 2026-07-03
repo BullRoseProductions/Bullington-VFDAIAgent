@@ -658,8 +658,8 @@ function Announcements({ role, members, meId, notify, style }) {
     <div style={{ ...FS.card, padding: 18, ...style }}>
       <div style={FS.kicker}>FEED</div>
 
-      {/* Announcements — featured at the top of the feed */}
-      <div style={{ marginTop: 10 }}>
+      {/* Announcements — featured at the top of the feed; bounded so a long feed scrolls internally (~6 rows) instead of growing the page */}
+      <div style={{ marginTop: 10, maxHeight: 372, overflowY: "auto" }}>
         {loading ? (
           <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>
         ) : items.length === 0 ? (
@@ -1296,9 +1296,14 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
 
       {/* 4b — member self-propose a cert + proof + status */}
       <CertProposals S={S} notify={notify} />
-      {/* 5 — station calendar: shared DashboardCalendar wrapped in a dark FS card (light inset; NOT mutated) */}
-      <div style={{ ...FS.card, padding: 16, marginBottom: 14 }}>
-        <DashboardCalendar S={S} notify={notify} />
+      {/* 5 — announcements feed + station calendar, two-column (matches DeptAdmin: feed narrower & bounded/internal-scroll, calendar wider; wraps on narrow) */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+        <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
+        <div style={{ flex: "2 1 340px", minWidth: 0 }}>
+          <div style={{ ...FS.card, padding: 16 }}>
+            <DashboardCalendar S={S} notify={notify} />
+          </div>
+        </div>
       </div>
 
       {/* 6 — quick actions (member-filtered NAV; new FS styling, shared QuickAccess untouched) */}
