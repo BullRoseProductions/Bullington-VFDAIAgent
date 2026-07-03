@@ -2426,14 +2426,15 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ ...FS.kicker, marginBottom: 0 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
         {withImportanceMode && (
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-            {[["grid", "Grid"], ["importance", "By importance"]].map(([k, l]) => (
-              <button key={k} onClick={() => setView(k)} style={{ border: `1.5px solid ${view === k ? FIRE.red : FIRE.btnBorder}`, background: view === k ? FIRE.btnBg : "transparent", color: view === k ? FIRE.textPrimary : FIRE.navLabel, borderRadius: 999, padding: "4px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+          <div style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${FIRE.btnBorder}`, borderRadius: 8, overflow: "hidden" }}>
+            {[["grid", "Grid"], ["importance", "By importance"]].map(([k, l], i) => (
+              <button key={k} onClick={() => setView(k)} style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: view === k ? FIRE.red : FIRE.btnBg, color: view === k ? "#fff" : FIRE.navLabel, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
             ))}
           </div>
         )}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10, alignItems: "center", paddingTop: 9, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+        <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted2, fontWeight: 700, marginRight: 4 }}>Filter</span>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
