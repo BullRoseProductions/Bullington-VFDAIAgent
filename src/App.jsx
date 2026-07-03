@@ -62,13 +62,13 @@ const FS = {
   row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `0.5px solid ${FIRE.hairline}` },
 };
 
-const ROLES = ["Project Admin", "Department Admin", "Board Member", "Training Officer", "Member"];
-const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Training Officer"];
+const ROLES = ["Project Admin", "Department Admin", "Board Member", "Officer", "Member"];
+const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Officer"];
 const DEPT_ADMIN_ROLES = ["Department Admin", "Project Admin"];
-const CANMANAGE_ROLES  = ["Board Member", "Department Admin", "Training Officer"];   // NO Project Admin
-const SIGNIN_ROLES     = ["Project Admin", "Department Admin", "Training Officer"];  // PA/DA/TO — QR sign-in + AI planner
-const ANNOUNCE_ROLES   = ["Project Admin", "Department Admin", "Training Officer"];  // who can POST announcements — DA/PA/TO (NOT Board); matches is_announcer() at the DB
-const GRANTABLE_ROLES  = ["Member", "Training Officer", "Board Member", "Department Admin"];   // roster editor checkboxes — Project Admin NOT grantable
+const CANMANAGE_ROLES  = ["Board Member", "Department Admin", "Officer"];   // NO Project Admin
+const SIGNIN_ROLES     = ["Project Admin", "Department Admin", "Officer"];  // PA/DA/TO — QR sign-in + AI planner
+const ANNOUNCE_ROLES   = ["Project Admin", "Department Admin", "Officer"];  // who can POST announcements — Project Admin / Department Admin / Officer (NOT Board); matches is_announcer() at the DB
+const GRANTABLE_ROLES  = ["Member", "Officer", "Board Member", "Department Admin"];   // roster editor checkboxes — Project Admin NOT grantable
 const hasAny           = (rs, set) => Array.isArray(rs) && rs.some((r) => set.includes(r));
 const isLeader         = (rs) => hasAny(rs, LEADERSHIP);
 const isDeptAdmin      = (rs) => hasAny(rs, DEPT_ADMIN_ROLES);
@@ -185,7 +185,7 @@ const NAV = [
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
-  { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Training Officer"] },
+  { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Officer"] },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
 ];
 
@@ -2854,10 +2854,10 @@ function Funding({ S, role, notify, dept, meId, members }) {
 /* ---------------- Roster & Operations ---------------- */
 const MEMBERS = [
   { id: 1, name: "Maria Reyes", role: "Chief", access: ["Department Admin"], status: "Active", phone: "(817) 555-0142", joined: "2014", participation: 96, certs: [{ name: "Firefighter II", exp: "2027-03" }, { name: "EMT-B", exp: "2026-08" }, { name: "Hazmat Ops", exp: "2027-01" }], notes: [{ text: "Completed officer development course. Strong candidate for deputy chief.", by: "Department Admin", when: "May 2026" }] },
-  { id: 2, name: "Tom Daniels", role: "Training Officer", access: ["Training Officer"], status: "Active", phone: "(817) 555-0188", joined: "2017", participation: 91, certs: [{ name: "Firefighter II", exp: "2026-09" }, { name: "EMT-B", exp: "2026-05" }, { name: "Fire Instructor I", exp: "2027-06" }], notes: [] },
+  { id: 2, name: "Tom Daniels", role: "Officer", access: ["Officer"], status: "Active", phone: "(817) 555-0188", joined: "2017", participation: 91, certs: [{ name: "Firefighter II", exp: "2026-09" }, { name: "EMT-B", exp: "2026-05" }, { name: "Fire Instructor I", exp: "2027-06" }], notes: [] },
   { id: 3, name: "Janelle Okafor", role: "Asst. Chief", access: ["Board Member"], status: "Active", phone: "(817) 555-0119", joined: "2015", participation: 88, certs: [{ name: "Firefighter II", exp: "2027-02" }, { name: "Paramedic", exp: "2026-07" }], notes: [] },
-  { id: 4, name: "Cody Pearson", role: "Firefighter", access: ["Member"], status: "Active", phone: "(817) 555-0173", joined: "2021", participation: 76, certs: [{ name: "Firefighter I", exp: "2026-12" }, { name: "EMT-B", exp: "2026-04" }], notes: [{ text: "EMT-B lapsed — reminded to register for the July refresher.", by: "Training Officer", when: "Jun 2026" }] },
-  { id: 5, name: "Sam Whitfield", role: "Firefighter", access: ["Member"], status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Training Officer", when: "Jun 2026" }] },
+  { id: 4, name: "Cody Pearson", role: "Firefighter", access: ["Member"], status: "Active", phone: "(817) 555-0173", joined: "2021", participation: 76, certs: [{ name: "Firefighter I", exp: "2026-12" }, { name: "EMT-B", exp: "2026-04" }], notes: [{ text: "EMT-B lapsed — reminded to register for the July refresher.", by: "Officer", when: "Jun 2026" }] },
+  { id: 5, name: "Sam Whitfield", role: "Firefighter", access: ["Member"], status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Officer", when: "Jun 2026" }] },
   { id: 6, name: "Dana Cole", role: "Firefighter / EMT", access: ["Member"], status: "Active", phone: "(817) 555-0150", joined: "2019", participation: 84, certs: [{ name: "Firefighter II", exp: "2026-08" }, { name: "EMT-B", exp: "2027-04" }], notes: [] },
 ];
 const EVENTS = [
@@ -2961,7 +2961,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
       {canAdd && (adding ? (
         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><select style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Training Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><select style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span><input style={FS.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
