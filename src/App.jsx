@@ -602,6 +602,7 @@ function PersonalView({ S, me, meId, sessions, notify }) {
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same geometry as the member attendance ring
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
   const active = members.filter((m) => m.status === "Active").length, total = members.length;
@@ -614,9 +615,13 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
+  const [openActions, setOpenActions] = useState(0);
+  const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   useEffect(() => {
     supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
+    supabase.from("action_items").select("id").eq("status", "open").then(({ data }) => setOpenActions((data || []).length));   // dept-scoped by RLS (leaders read own dept)
+    const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
   }, []);
   const openDuties = duties.filter((d) => !d.done);
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
@@ -630,29 +635,42 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
           {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
         </div>
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={FS.kicker}>{dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"}</div>
           <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
         </div>
-      </div>
-      <div style={{ ...FS.card, padding: "16px 18px", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ textAlign: "center" }} title="Readiness = 40% certifications · 40% attendance · 20% duty completion">
-          <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: ringColor }}>{readiness}%</div>
-          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted, fontWeight: 700 }}>Readiness</div>
+        <div style={{ textAlign: "right", minWidth: 130 }}>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
+          {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
         </div>
+      </div>
+      <div style={{ ...FS.card, padding: "18px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
+          <svg width="84" height="84" viewBox="0 0 84 84">
+            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
+            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
+          </svg>
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
+            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={FS.kicker}>DEPARTMENT READINESS</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>40% certifications · 40% attendance · 20% duty completion</div>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat S={S} dark n={`${active}/${total}`} label="Active members" />
         <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
         <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
-        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared"><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" /></div>
+        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" /></div>
         <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
-        <div style={{ textAlign: "right", minWidth: 140 }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
-          {nextEvent ? (<><div style={{ fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, marginTop: 4, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12.5, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 6 }}>Nothing scheduled</div>}
-        </div>
+        <Stat S={S} dark n={String(openActions)} label="Open action items" />
       </div>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
