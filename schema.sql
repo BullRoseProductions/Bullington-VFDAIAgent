@@ -69,7 +69,7 @@
 --   - announcements table: audience 'everyone' | 'leadership'.
 --   - READ (RLS): dept members see 'everyone'; 'leadership' visible to is_leader()
 --     ONLY (Board included — the oversight role reads all, posts none).
---   - POST: is_announcer() = Department Admin / Project Admin / Training Officer
+--   - POST: is_announcer() = Department Admin / Project Admin / Officer
 --     (Board EXCLUDED — is_canmanage() would wrongly include Board). author_id is
 --     pinned to my_member_id() so no one can post as someone else.
 --   - UPDATE/DELETE: the author OR a Department Admin (moderation).
@@ -430,7 +430,7 @@ AS $function$
   );
 $function$;
 
--- --- Announcement post-gate: DA / Project Admin / Training Officer (NO Board).
+-- --- Announcement post-gate: DA / Project Admin / Officer (NO Board).
 -- Mirrors is_leader()/is_department_admin(); uses array overlap because
 -- members.access is text[] live. Board is deliberately excluded from posting.
 CREATE OR REPLACE FUNCTION public.is_announcer()
@@ -443,7 +443,7 @@ AS $function$
     select 1
     from members
     where lower(members.email) = lower(auth.email())
-      and members.access && array['Department Admin', 'Project Admin', 'Training Officer']::text[]
+      and members.access && array['Department Admin', 'Project Admin', 'Officer']::text[]
   );
 $function$;
 
@@ -896,7 +896,7 @@ CREATE POLICY "leaders delete recruitment_events" ON public.recruitment_events F
 -- --- ANNOUNCEMENTS -----------------------------------------------------------
 -- READ: dept members see 'everyone'; 'leadership' audience visible to is_leader()
 -- only (Board included — reads all, posts none). POST: is_announcer() = DA / PA /
--- Training Officer (Board EXCLUDED), author pinned to my_member_id(). UPDATE/
+-- Officer (Board EXCLUDED), author pinned to my_member_id(). UPDATE/
 -- DELETE: the author OR a Department Admin (moderation).
 
 CREATE POLICY "read announcements for my audience" ON public.announcements FOR SELECT TO authenticated
