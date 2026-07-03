@@ -73,6 +73,7 @@ const GRANTABLE_ROLES  = ["Member", "Officer", "Board Member", "Department Admin
 const hasAny           = (rs, set) => Array.isArray(rs) && rs.some((r) => set.includes(r));
 const isLeader         = (rs) => hasAny(rs, LEADERSHIP);
 const isDeptAdmin      = (rs) => hasAny(rs, DEPT_ADMIN_ROLES);
+const isBoard          = (rs) => hasAny(rs, ['Board Member']);
 const canManage        = (rs) => hasAny(rs, CANMANAGE_ROLES);
 const isTrainingLeader = (rs) => hasAny(rs, SIGNIN_ROLES);
 
@@ -461,7 +462,7 @@ export default function App() {
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
-          {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} />}
+          {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} initialMode={navArg} />}
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
@@ -703,6 +704,159 @@ function Announcements({ role, members, meId, notify, style }) {
     </div>
   );
 }
+// Board oversight dashboard — governance/health view (Board is oversight, not ops).
+// Derivations MIRROR DeptAdminDashboard exactly (deptAttendance, cert compliance, readiness 40/40/20).
+// SCAFFOLD: header + raw derived numbers for verification; cards/styling + governance queries land next.
+function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DeptAdminDashboard
+  const me = members.find((m) => m.id === meId) || null;
+  const yr = new Date().getFullYear();
+  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);   // dept attendance % + drills
+  const total = members.length;
+  const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
+  const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
+  const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
+  const drillsHeld = doneThisYear.length;
+  const [duties, setDuties] = useState([]);
+  const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
+  useEffect(() => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));   // dept-scoped by RLS
+    const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
+  }, []);
+  // Governance data (read-only; ai_outputs + action_items are leader-readable, Board included) — reuses the Minutes/Agenda/DeptAdmin patterns.
+  const [agendaRow, setAgendaRow] = useState(null);
+  const [minutesRow, setMinutesRow] = useState(null);
+  const [openItems, setOpenItems] = useState([]);
+  useEffect(() => {
+    const cols = "id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by";
+    const newest = (rows) => (rows || []).slice().sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))[0] || null;   // coalesce(edited_at, created_at) desc
+    supabase.from("ai_outputs").select(cols).eq("feature", "agenda").then(({ data }) => setAgendaRow(newest(data)));
+    supabase.from("ai_outputs").select(cols).eq("feature", "minutes").then(({ data }) => setMinutesRow(newest(data)));
+    supabase.from("action_items").select("*").eq("status", "open")   // full rows (text + due_date) — dept-scoped by RLS
+      .then(({ data }) => setOpenItems((data || []).slice().sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"))));   // soonest due first
+  }, []);
+  const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+  const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
+  const dutyDone = duties.filter((d) => d.done).length;
+  const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;   // no duties = nothing outstanding = 100
+  const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);        // 40% certs · 40% attendance · 20% duty completion
+  const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* HEADER */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={FS.kicker}>{dept?.name ? `BOARD · ${dept.name}` : "BOARD"}</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+          <div style={{ fontSize: 14, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>Department oversight at a glance.</div>
+        </div>
+      </div>
+
+      {/* MEETINGS & GOVERNANCE — governance leads for Board (read-only; ai_outputs/action_items are leader-readable) */}
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>MEETINGS &amp; GOVERNANCE</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
+        {/* Next meeting — newest agenda draft */}
+        <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> NEXT MEETING</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {agendaRow ? (<>
+              <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3 }}>{agendaRow.title || "Untitled agenda"}</div>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{govDate(agendaRow)}</div>
+            </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No agenda yet.</div>}
+          </div>
+          <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "agenda")}>View agenda <ChevronRight size={13} color={FIRE.btnIcon} /></button>
+        </div>
+        {/* Recent minutes — newest minutes draft */}
+        <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><FileText size={13} color={FIRE.red} /> RECENT MINUTES</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {minutesRow ? (<>
+              <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3 }}>{minutesRow.title || "Untitled minutes"}</div>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{govDate(minutesRow)}{minutesAuthor ? ` · by ${minutesAuthor}` : ""}</div>
+            </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No minutes yet.</div>}
+          </div>
+          <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "minutes")}>Read minutes <ChevronRight size={13} color={FIRE.btnIcon} /></button>
+        </div>
+        {/* Action items — MY open items only: assigned-to-me or unassigned (assigned-to-others hidden). meId is members.id (same space as assigned_to) */}
+        <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {(() => {
+            const mine = openItems.filter((it) => it.assigned_to == null || it.assigned_to === meId);   // unassigned or mine (cf. StationDuties canCompleteThis)
+            const fmtDue = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+            return (<>
+              <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> OPEN ACTION ITEMS{mine.length ? ` · ${mine.length}` : ""}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {mine.length === 0 ? (
+                  <div style={{ fontSize: 13, color: FIRE.textMuted }}>No action items for you.</div>
+                ) : mine.slice(0, 3).map((it) => {
+                  const yours = it.assigned_to === meId;
+                  const due = fmtDue(it.due_date);
+                  return (
+                    <div key={it.id} style={{ padding: "4px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, lineHeight: 1.35 }}>{it.text}</div>
+                        <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", padding: "1px 5px", borderRadius: 5, color: yours ? FIRE.greenText : FIRE.textMuted2, border: `0.5px solid ${yours ? FIRE.greenText + "55" : FIRE.hairline}` }}>{yours ? "Yours" : "Unassigned"}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>{due ? `due ${due}` : "no due date"}</div>
+                    </div>
+                  );
+                })}
+                {mine.length > 3 && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 6 }}>+{mine.length - 3} more</div>}
+              </div>
+              <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View items <ChevronRight size={13} color={FIRE.btnIcon} /></button>
+            </>);
+          })()}
+        </div>
+      </div>
+
+      {/* DEPARTMENT HEALTH strip — readiness ring (reused from DeptAdminDashboard) + oversight stats */}
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH · OVERSIGHT</div>
+      <div style={{ ...FS.card, padding: "18px 20px", display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
+          <svg width="84" height="84" viewBox="0 0 84 84">
+            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
+            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
+          </svg>
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
+            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 220, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "14px 20px" }}>
+          {[
+            ["Cert compliance", `${certPct}%`],
+            ["Attendance", `${avgPart}%`],
+            ["Active roster", String(total)],
+            ["Drills held", String(drillsHeld)],
+          ].map(([label, val]) => (
+            <div key={label}>
+              <div style={{ fontFamily: DISPLAY, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1, ...FS.num }}>{val}</div>
+              <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted2, marginTop: 5 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* CHIEF'S REPORT — board-facing summary; opens the Reports hub (Chief's Report card lives there) */}
+      <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "14px 16px", marginTop: 12, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <BarChart3 size={20} color={FIRE.red} style={{ flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>Chief's Report</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>The board-facing summary — readiness, certs, training, finances.</div>
+        </div>
+        <button style={{ ...FS.btn, flexShrink: 0 }} onClick={() => go("reports")}>Open report <ChevronRight size={14} color={FIRE.btnIcon} /></button>
+      </div>
+
+      {/* FEED + CALENDAR — read-only feed (Board not in ANNOUNCE_ROLES) beside the shared station calendar; mirrors DeptAdminDashboard */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
+        <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
+        <div style={{ flex: "2 1 340px", minWidth: 0 }}>
+          <DashboardCalendar S={S} notify={notify} withImportanceMode />
+        </div>
+      </div>
+    </div>
+  );
+}
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -840,6 +994,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
   if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
+  if (isBoard(role) && !hasAny(role, ['Officer'])) return <BoardDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -3884,8 +4039,17 @@ function MaintenancePanel({ S, role, rigs }) {
   );
 }
 /* ---------------- Meeting Minutes + Action Items ---------------- */
-function Minutes({ S, role, notify, dept, meId, members, sessions }) {
-  const [mode, setMode] = useState("agenda");
+function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }) {
+  const [mode, setMode] = useState(() => (initialMode === "agenda" || initialMode === "minutes" || initialMode === "action-items") ? (initialMode === "action-items" ? "minutes" : initialMode) : "agenda");   // role-guarded deep-link seed (via go("minutes", mode)); "action-items" opens the Minutes tab
+  const scrollToActions = initialMode === "action-items";
+  const actionItemsRef = useRef(null);
+  useEffect(() => {
+    if (scrollToActions && mode === "minutes") {
+      const t = setTimeout(() => actionItemsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);   // let the Minutes branch paint first
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Cert compliance computed HERE in the host from members — SAME certStatus math as the Chief's Report & Roster, so the agenda's numbers match (no drift).
   const certRows = [];
   (members || []).forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); certRows.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
@@ -4107,7 +4271,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions }) {
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+      <div ref={actionItemsRef} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ ...FS.kicker, marginBottom: 0 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           {out && <button style={{ ...FS.btn, opacity: extracting ? 0.7 : 1 }} onClick={extractActions} disabled={extracting}>{extracting ? <><Loader2 size={16} className="spin" /> Reading minutes…</> : <><Sparkles size={16} /> Extract from minutes</>}</button>}
