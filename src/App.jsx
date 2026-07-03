@@ -477,8 +477,67 @@ const dashboardGreeting = (me) => {
 };
 
 /* ---------------- Dashboard ---------------- */
+// Shared dept attendance calc — per-member eligible/attended/pct (audience-aware) + department average, for one year.
+// Single source for RosterReports (Chief's Report), AttendanceReport (Yearly report), and the Dept Admin dashboard — no drift.
+function deptAttendance(members, sessions, year) {
+  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // done + roll-taken
+  const rows = (members || []).map((m) => {
+    const memberLeader = isLeader(m.access);
+    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");
+    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
+    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
+  });
+  const rated = rows.filter((r) => r.pct != null);
+  const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
+  return { rows, avg, doneThisYear };
+}
+function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
+  const me = members.find((m) => m.id === meId) || null;
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const yr = new Date().getFullYear();
+  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
+  const active = members.filter((m) => m.status === "Active").length, total = members.length;
+  const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
+  const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
+  const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
+  const drillsHeld = doneThisYear.length;
+  const todayISO = toISODate(new Date());
+  const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b))[0] || null;
+  const ringColor = avgPart >= 75 ? FIRE.green : avgPart >= 50 ? FIRE.amberText : FIRE.redText;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+          {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
+        </div>
+        <div>
+          <div style={FS.kicker}>{dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"}</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+        </div>
+      </div>
+      <div style={{ ...FS.card, padding: "16px 18px", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: ringColor }}>{avgPart}%</div>
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted, fontWeight: 700 }}>Readiness</div>
+        </div>
+        <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
+          <Stat S={S} dark n={`${active}/${total}`} label="Active members" />
+          <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
+          <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
+        </div>
+        <div style={{ marginLeft: "auto", textAlign: "right", minWidth: 140 }}>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
+          {nextEvent ? (<><div style={{ fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, marginTop: 4, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12.5, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 6 }}>Nothing scheduled</div>}
+        </div>
+      </div>
+      {/* Chunks 2–6 (attention cards, calendar, personal view, quick actions) slot in below */}
+    </div>
+  );
+}
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
   if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
+  if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   const featured = library.find((p) => p.id === "fire-118");
   const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
   const next = sorted[0];
@@ -3031,17 +3090,10 @@ function RosterReports({ S, members, sessions, dept, back }) {
   const prob = members.filter((m) => m.status === "Probationary").length;
   const certs = []; members.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
-  // Real attendance — SAME audience-aware, attendance-present, current-year math as AttendanceReport (numbers match the Yearly Attendance Report).
+  // Real attendance — shared deptAttendance calc (same numbers as the Yearly Attendance Report + Dept Admin dashboard).
   const yr = new Date().getFullYear();
-  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === yr && (s.attendance || []).length > 0);
-  const attById = new Map((members || []).map((m) => {
-    const memberLeader = isLeader(m.access);                                              // off each member's ACTUAL roles
-    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // per-member denominator
-    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
-    return [m.id, eligible.length ? Math.round((attended / eligible.length) * 100) : null];
-  }));
-  const ratedPcts = [...attById.values()].filter((p) => p != null);
-  const avgPart = ratedPcts.length ? Math.round(ratedPcts.reduce((s, p) => s + p, 0) / ratedPcts.length) : 0;
+  const { rows: attRows, avg: avgPart } = deptAttendance(members, sessions, yr);
+  const attById = new Map(attRows.map((r) => [r.id, r.pct]));
   // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
   const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
   const recentTraining = (sessions || [])
@@ -3208,16 +3260,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const cur = new Date().getFullYear();
   const [year, setYear] = useState(cur);
   const years = [...new Set([cur, ...(sessions || []).filter((s) => s.done && (s.attendance || []).length > 0).map((s) => s.y)])].sort((a, b) => b - a);   // current year + any year with reportable drills, newest first
-  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // source pool: done + roll-taken
-  const rows = (members || []).map((m) => {
-    const memberLeader = isLeader(m.access);                                              // score off the member's ACTUAL roles
-    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");   // PER-MEMBER denominator
-    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
-    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
-    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
-  }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
-  const rated = rows.filter((r) => r.pct != null);
-  const avgPct = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
+  const { rows: attRows, avg: avgPct, doneThisYear } = deptAttendance(members, sessions, year);   // shared calc (also RosterReports + Dept Admin dashboard)
+  const rows = [...attRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
   const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
   const [fullYear, setFullYear] = useState(false);  // grid scope: false = recent 10, true = all sessions in year
