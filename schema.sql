@@ -65,6 +65,16 @@
 --     color, optional notes). Read = members; INSERT/UPDATE/DELETE = three roles.
 --   - Still to come: a funding/events calendar + a unified dashboard calendar.
 --
+-- ANNOUNCEMENTS (2026-07-03) — leader-posted messages shown in the dashboard feed.
+--   - announcements table: audience 'everyone' | 'leadership'.
+--   - READ (RLS): dept members see 'everyone'; 'leadership' visible to is_leader()
+--     ONLY (Board included — the oversight role reads all, posts none).
+--   - POST: is_announcer() = Department Admin / Project Admin / Training Officer
+--     (Board EXCLUDED — is_canmanage() would wrongly include Board). author_id is
+--     pinned to my_member_id() so no one can post as someone else.
+--   - UPDATE/DELETE: the author OR a Department Admin (moderation).
+--   - Verified one policy at a time against the live DB before shipping.
+--
 -- KNOWN GAPS / FOLLOW-UPS
 --   - profiles : table exists but had no RLS policy in the capture — review
 --     before pilot.
@@ -75,6 +85,12 @@
 --   - The "Board/Dept Admin/Training Officer minus Project Admin" group is now
 --     inlined across many policies (post_categories + all three calendars). If
 --     reused again, consider a can_edit_calendars() helper to define it once.
+--   - members.access is text[] (an ARRAY of roles) in the LIVE db, NOT the scalar
+--     text shown in Section 1 — this snapshot is stale on that column. Role checks
+--     must use array overlap: `access && array['Role', ...]::text[]` (as
+--     is_announcer() does), NOT `access in (...)` / `= ANY(ARRAY[...])` (which
+--     throw "malformed array literal"). Older inline policies here reflect the
+--     scalar assumption and would need the && form live.
 -- =============================================================================
 
 
@@ -102,6 +118,18 @@ CREATE TABLE public.ai_feedback (
   original text,
   edited text,
   by text,
+  created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
+-- Leader-posted announcements shown in the dashboard feed. audience gates
+-- visibility ('everyone' = all dept members; 'leadership' = is_leader() only).
+CREATE TABLE public.announcements (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  department_id uuid NOT NULL,
+  author_id uuid,                       -- members.id (my_member_id()); nullable so deleting a member keeps their posts
+  title text,                           -- optional headline
+  body text NOT NULL,                   -- the message
+  audience text NOT NULL DEFAULT 'everyone'::text,   -- CHECK: audience in ('everyone','leadership')
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
@@ -402,6 +430,23 @@ AS $function$
   );
 $function$;
 
+-- --- Announcement post-gate: DA / Project Admin / Training Officer (NO Board).
+-- Mirrors is_leader()/is_department_admin(); uses array overlap because
+-- members.access is text[] live. Board is deliberately excluded from posting.
+CREATE OR REPLACE FUNCTION public.is_announcer()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select exists (
+    select 1
+    from members
+    where lower(members.email) = lower(auth.email())
+      and members.access && array['Department Admin', 'Project Admin', 'Training Officer']::text[]
+  );
+$function$;
+
 CREATE OR REPLACE FUNCTION public.my_department_id()
  RETURNS uuid
  LANGUAGE sql
@@ -615,6 +660,7 @@ $function$;
 
 ALTER TABLE public.action_items        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_feedback         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcements       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.apparatus           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cert_submissions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.certs               ENABLE ROW LEVEL SECURITY;
@@ -846,6 +892,25 @@ CREATE POLICY "leaders delete recruitment_events" ON public.recruitment_events F
   USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
      FROM members
     WHERE ((lower(members.email) = lower(auth.email())) AND (members.access = ANY (ARRAY['Board Member'::text, 'Department Admin'::text, 'Training Officer'::text])))))));
+
+-- --- ANNOUNCEMENTS -----------------------------------------------------------
+-- READ: dept members see 'everyone'; 'leadership' audience visible to is_leader()
+-- only (Board included — reads all, posts none). POST: is_announcer() = DA / PA /
+-- Training Officer (Board EXCLUDED), author pinned to my_member_id(). UPDATE/
+-- DELETE: the author OR a Department Admin (moderation).
+
+CREATE POLICY "read announcements for my audience" ON public.announcements FOR SELECT TO authenticated
+  USING (((department_id = my_department_id()) AND ((audience = 'everyone'::text) OR is_leader())));
+
+CREATE POLICY "announcers insert announcements" ON public.announcements FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND (author_id = my_member_id()) AND is_announcer()));
+
+CREATE POLICY "author or dept admin update announcements" ON public.announcements FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin())))
+  WITH CHECK (((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin())));
+
+CREATE POLICY "author or dept admin delete announcements" ON public.announcements FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin())));
 
 -- --- Shared / global reads (intentional, NOT department-scoped) --------------
 
