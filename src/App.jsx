@@ -611,7 +611,6 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const drillsHeld = doneThisYear.length;
   const todayISO = toISODate(new Date());
   const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b))[0] || null;
-  const ringColor = avgPart >= 75 ? FIRE.green : avgPart >= 50 ? FIRE.amberText : FIRE.redText;
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
@@ -625,6 +624,10 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   members.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
   flagged.sort((a, b) => a.rank - b.rank);   // expired (0) before expiring (1)
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
+  const dutyDone = duties.filter((d) => d.done).length;
+  const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;   // done/total; no duties = nothing outstanding = 100
+  const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);        // 40% certs · 40% attendance · 20% duty completion
+  const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
@@ -637,12 +640,14 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       <div style={{ ...FS.card, padding: "16px 18px", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: ringColor }}>{avgPart}%</div>
+        <div style={{ textAlign: "center" }} title="Readiness = 40% certifications · 40% attendance · 20% duty completion">
+          <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: ringColor }}>{readiness}%</div>
           <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted, fontWeight: 700 }}>Readiness</div>
         </div>
         <Stat S={S} dark n={`${active}/${total}`} label="Active members" />
         <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
+        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
+        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared"><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" /></div>
         <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
         <div style={{ textAlign: "right", minWidth: 140 }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
