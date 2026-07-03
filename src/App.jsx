@@ -2205,11 +2205,12 @@ function FundingCalendar({ S, role, notify }) {
 const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12", actionitem: "#6E56CF" };
 const SOURCE_RANK = { training: 0, actionitem: 1, funding: 2, recruit: 3, social: 4 };   // action items rank just below Training
 const SOURCE_TIER = { training: "bar", actionitem: "bar", funding: "pill", recruit: "pill", social: "dot" };
-function DashboardCalendar({ S, notify }) {
+function DashboardCalendar({ S, notify, withImportanceMode }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [view, setView] = useState("grid");   // "grid" | "importance" (only surfaced when withImportanceMode)
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const loadAll = () => {
     Promise.all([
@@ -2257,7 +2258,16 @@ function DashboardCalendar({ S, notify }) {
 
   return (
     <div>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ ...FS.kicker, marginBottom: 0 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+        {withImportanceMode && (
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            {[["grid", "Grid"], ["importance", "By importance"]].map(([k, l]) => (
+              <button key={k} onClick={() => setView(k)} style={{ border: `1.5px solid ${view === k ? FIRE.red : FIRE.btnBorder}`, background: view === k ? FIRE.btnBg : "transparent", color: view === k ? FIRE.textPrimary : FIRE.navLabel, borderRadius: 999, padding: "4px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+            ))}
+          </div>
+        )}
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
@@ -2269,14 +2279,37 @@ function DashboardCalendar({ S, notify }) {
           );
         })}
       </div>
-      <MonthCalendar
-        cur={cur} setCur={setCur} dark
-        items={monthItems}
-        renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
-        todayColor={FIRE.red}
-        monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
-        overflowIndicator
-      />
+      {withImportanceMode && view === "importance" ? (
+        <div style={{ ...FS.card, padding: "8px 14px" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 6 }}>{CAL_MONTHS[cur.m]} {cur.y}</div>
+          {monthItems.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>No events this month.</div> :
+            [["training", "Training"], ["actionitem", "Action items"], ["funding", "Funding"], ["recruit", "Recruitment"], ["social", "Social"]].map(([src, lbl]) => {   // priority order = SOURCE_RANK
+              const group = monthItems.filter((it) => it.source === src).slice().sort((a, b) => a.d - b.d);   // date order within a tier
+              if (!group.length) return null;
+              return (
+                <div key={src} style={{ padding: "6px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: SOURCE_COLORS[src], marginBottom: 3 }}>{lbl}</div>
+                  {group.map((it) => (
+                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 999, background: it.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
+                      <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num, flexShrink: 0 }}>{CAL_MONTHS[it.m].slice(0, 3)} {it.d}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+        </div>
+      ) : (
+        <MonthCalendar
+          cur={cur} setCur={setCur} dark
+          items={monthItems}
+          renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
+          todayColor={FIRE.red}
+          monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+          overflowIndicator
+        />
+      )}
       {mounts}
     </div>
   );
