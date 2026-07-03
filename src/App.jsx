@@ -67,6 +67,7 @@ const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Traini
 const DEPT_ADMIN_ROLES = ["Department Admin", "Project Admin"];
 const CANMANAGE_ROLES  = ["Board Member", "Department Admin", "Training Officer"];   // NO Project Admin
 const SIGNIN_ROLES     = ["Project Admin", "Department Admin", "Training Officer"];  // PA/DA/TO — QR sign-in + AI planner
+const ANNOUNCE_ROLES   = ["Project Admin", "Department Admin", "Training Officer"];  // who can POST announcements — DA/PA/TO (NOT Board); matches is_announcer() at the DB
 const GRANTABLE_ROLES  = ["Member", "Training Officer", "Board Member", "Department Admin"];   // roster editor checkboxes — Project Admin NOT grantable
 const hasAny           = (rs, set) => Array.isArray(rs) && rs.some((r) => set.includes(r));
 const isLeader         = (rs) => hasAny(rs, LEADERSHIP);
@@ -600,6 +601,107 @@ function PersonalView({ S, me, meId, sessions, notify }) {
     </>
   );
 }
+/* ---------------- Announcements (shared feed + compose) ---------------- */
+// Feed shows dept announcements, RLS-filtered by audience: members see 'everyone',
+// leaders (is_leader) also see 'leadership'. Compose is gated to ANNOUNCE_ROLES
+// (DA/PA/TO) — the DB (is_announcer + author pin) is the real wall. Delete = author
+// or Dept Admin. Dropped into all three dashboards; announcements are the featured
+// top of the "Feed" card, with room reserved below for birthdays/anniversaries.
+function Announcements({ role, members, meId, notify, style }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [composing, setComposing] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [audience, setAudience] = useState("everyone");
+  const [busy, setBusy] = useState(false);
+  const canPost = hasAny(role, ANNOUNCE_ROLES);
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const canDelete = (it) => it.author_id === meId || isDeptAdmin(role);
+  const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+
+  function load() {
+    supabase.from("announcements")
+      .select("id, author_id, title, body, audience, created_at")
+      .order("created_at", { ascending: false })   // newest first; dept + audience filtered by RLS
+      .then(({ data }) => { setItems(data || []); setLoading(false); });
+  }
+  useEffect(() => { load(); }, []);
+
+  async function post() {
+    const b = body.trim();
+    if (!b) { notify({ kind: "error", title: "Nothing to post", text: "Write an announcement first." }); return; }
+    setBusy(true);
+    const [{ data: deptId }, { data: memberId }] = await Promise.all([
+      supabase.rpc("my_department_id"), supabase.rpc("my_member_id"),
+    ]);
+    if (!deptId || !memberId) { setBusy(false); notify({ kind: "error", title: "Couldn't find your account", text: "Please try again." }); return; }
+    const { data, error } = await supabase.from("announcements")
+      .insert({ department_id: deptId, author_id: memberId, title: title.trim() || null, body: b, audience })
+      .select("id, author_id, title, body, audience, created_at").single();
+    setBusy(false);
+    if (error || !data) { notify({ kind: "error", title: "Couldn't post the announcement", text: "Something went wrong. Please try again.", details: error?.message }); return; }
+    setItems((xs) => [data, ...xs]);                 // optimistic prepend (row already committed)
+    setTitle(""); setBody(""); setAudience("everyone"); setComposing(false);
+    notify({ kind: "success", text: "Announcement posted." });
+  }
+
+  async function remove(id) {
+    if (!window.confirm("Delete this announcement?")) return;
+    const prev = items;
+    setItems((xs) => xs.filter((x) => x.id !== id));   // optimistic
+    const { error } = await supabase.from("announcements").delete().eq("id", id);   // RLS: author or Dept Admin
+    if (error) { setItems(prev); notify({ kind: "error", title: "Couldn't delete", text: "Please try again.", details: error.message }); }
+  }
+
+  return (
+    <div style={{ ...FS.card, padding: 18, ...style }}>
+      <div style={FS.kicker}>FEED</div>
+
+      {/* Announcements — featured at the top of the feed */}
+      <div style={{ marginTop: 10 }}>
+        {loading ? (
+          <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>
+        ) : items.length === 0 ? (
+          <div style={{ fontSize: 13, color: FIRE.textMuted }}>No announcements yet.</div>
+        ) : items.map((it) => (
+          <div key={it.id} style={{ padding: "10px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              {it.title && <span style={{ fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{it.title}</span>}
+              {it.audience === "leadership" && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}55`, borderRadius: 5, padding: "1px 5px" }}>Leadership</span>}
+              {canDelete(it) && <button onClick={() => remove(it.id)} title="Delete" style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", color: FIRE.textMuted }}><X size={13} /></button>}
+            </div>
+            <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: it.title ? 3 : 0 }}>{it.body}</div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{nameById.get(it.author_id) || "Unknown"} · {fmtWhen(it.created_at)}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Compose — posters only (ANNOUNCE_ROLES = DA/PA/TO); the DB enforces the real gate */}
+      {canPost && (composing ? (
+        <div style={{ marginTop: 12, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 12 }}>
+          <input style={{ ...FS.input, marginBottom: 8 }} placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical", marginBottom: 8 }} placeholder="Write an announcement…" value={body} onChange={(e) => setBody(e.target.value)} />
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            {[["everyone", "Everyone"], ["leadership", "Leadership"]].map(([v, l]) => (
+              <button key={v} onClick={() => setAudience(v)} style={{ ...FS.btn, flex: 1, justifyContent: "center", ...(audience === v ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={post}>{busy ? "Posting…" : "Post"}</button>
+            <button style={FS.btn} disabled={busy} onClick={() => { setComposing(false); setTitle(""); setBody(""); setAudience("everyone"); }}>Cancel</button>
+          </div>
+          <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8 }}>{audience === "leadership" ? "Only leaders will see this." : "Everyone in the department will see this."}</div>
+        </div>
+      ) : (
+        <button style={{ ...FS.btn, marginTop: 12 }} onClick={() => setComposing(true)}><Plus size={14} color={FIRE.btnIcon} /> New announcement</button>
+      ))}
+
+      {/* Reserved for future birthday / anniversary content (design-locked) */}
+      <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 14, fontStyle: "italic", borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>Birthdays &amp; anniversaries — coming soon</div>
+    </div>
+  );
+}
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -708,10 +810,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
-        <div style={{ ...FS.card, padding: 18, flex: "1 1 240px" }}>
-          <div style={FS.kicker}>UPCOMING &amp; FEED</div>
-          <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 10, lineHeight: 1.6 }}>Birthdays, anniversaries, and department announcements will appear here.<div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 8, fontStyle: "italic" }}>Coming soon</div></div>
-        </div>
+        <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
@@ -760,6 +859,8 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
       </div>
 
       <DashboardCalendar S={S} notify={notify} />
+
+      <Announcements role={role} members={members} meId={meId} notify={notify} style={{ marginTop: 18 }} />
 
       <div style={S.dashGrid}>
         <div style={{ ...S.featCard, ...FS.card }}>
