@@ -12,6 +12,22 @@
          belt-and-suspenders so no light ever peeks at the edges (login + app). */
       html, body { margin: 0; }
       body { background: #080A10; }
+
+      /* Native form controls: force a dark scheme so browsers never pick a
+         white system popup (fixes white-on-white <option> lists / date
+         pickers on machines whose OS default is light — the app is dark-themed).
+         color-scheme is the root cure; the explicit control/option colors are
+         belt-and-suspenders for Chrome/Firefox on Windows/Linux. */
+      :root { color-scheme: dark; }
+      select,
+      option,
+      input[type="date"],
+      input[type="month"],
+      input[type="time"] {
+        background-color: #13161B;   /* FIRE.card */
+        color: #F7F8FA;              /* FIRE.textPrimary */
+      }
+      option { background-color: #13161B; color: #F7F8FA; }
     </style>
   </head>
   <body>
