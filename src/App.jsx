@@ -653,21 +653,32 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
         <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Duties — {openDuties.length} open{overdueDuties.length > 0 && <span style={{ color: FIRE.redText }}> · {overdueDuties.length} overdue</span>}</div>
-            {overdueDuties[0] && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
+            <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{openDuties.length}</span>
+              {overdueDuties.length > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: FIRE.redText }}>· {overdueDuties.length} overdue</span>}
+            </div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: FIRE.textSecondary, marginTop: 4 }}>Open duties</div>
+            {overdueDuties[0] && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("duties")}>View duties</button>
         </div>
         <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Certifications — {expd > 0 && <span style={{ color: FIRE.redText }}>{expd} expired · </span>}{expg} expiring</div>
-            {flagged.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
+            <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{expg}</span>
+              {expd > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: FIRE.redText }}>· {expd} expired</span>}
+            </div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: FIRE.textSecondary, marginTop: 4 }}>Expiring certs</div>
+            {flagged.length > 0 && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster")}>View certs</button>
         </div>
         <div style={{ ...FS.card, borderLeft: `3px solid #378ADD`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>Pending approvals — {pendingCerts.length} awaiting review</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{pendingCerts.length}</span>
+            </div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: FIRE.textSecondary, marginTop: 4 }}>Pending approvals</div>
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster")}>Review approvals</button>
         </div>
