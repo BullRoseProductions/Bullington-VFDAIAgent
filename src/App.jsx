@@ -3095,17 +3095,19 @@ function Roster({ S, role, members, setMembers, sessions, notify, meId, initialT
 }
 function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
-  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState("");
+  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState("");
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   async function add() {
     const email = em.trim().toLowerCase();
     if (!nm.trim() || !email || !/^\S+@\S+\.\S+$/.test(email)) { notify({ kind: "error", title: "Email required", text: "A valid email is needed so this member can sign in." }); return; }
     const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
-    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: ["Member"], status: "Probationary", phone: ph.trim() || "—", email, joined: "2026", participation: 0 };
+    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl.trim() || null, access: ax.length ? ax : ["Member"], status: st, phone: ph.trim() || "—", email, mentor_id: mt || null, joined: sdate ? sdate.slice(0, 4) : null, participation: 0 };   // joined (year) derived from the start date
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
     if (error || !data) { notify({ kind: "error", title: "Couldn't add the member", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
-    setNm(""); setPh(""); setEm(""); setAdding(false);
+    const { error: e2 } = await supabase.from("member_private").upsert({ member_id: data.id, department_id: data.department_id, birthday: bday || null, address: addr.trim() || null, joined_date: sdate || null }, { onConflict: "member_id" });   // DA/PA-only personal details (same table as the edit form)
+    if (e2) { notify({ kind: "error", title: "Member saved, personal details didn't", text: "The main record saved; birthday/address/start date didn't — add them via the member's file.", details: e2.message }); }
+    setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, mentorId: data.mentor_id ?? null, certs: [], notes: [] }]);
+    setNm(""); setPh(""); setEm(""); setSt("Active"); setAx(["Member"]); setMt(""); setBday(""); setSdate(""); setAddr(""); setAdding(false);
   }
   async function remove(id, name) {
     if (!window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) return;
@@ -3118,9 +3120,28 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
       {canAdd && (adding ? (
         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><select style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><input style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)} placeholder="Firefighter" /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email <span style={{ color: FIRE.deleteRed }}>*</span></span><input type="email" style={FS.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={st} onChange={(e) => setSt(e.target.value)}><option>Active</option><option>Probationary</option><option>Inactive</option></select></label>
+          <div style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Access (roles)</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 5 }}>
+              {GRANTABLE_ROLES.map((r) => (
+                <label key={r} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: FIRE.textPrimary, cursor: "pointer" }}>
+                  <input type="checkbox" checked={ax.includes(r)} onChange={(e) => setAx((a) => e.target.checked ? [...a, r] : a.filter((x) => x !== r))} />
+                  {r}
+                </label>
+              ))}
+            </div>
+          </div>
+          <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Mentor</span>
+            <select style={FS.input} value={mt} onChange={(e) => setMt(e.target.value)}>
+              <option value="">— None —</option>
+              {(members || []).filter((m) => m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Start date</span><input type="date" style={FS.input} value={sdate} onChange={(e) => setSdate(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={bday} onChange={(e) => setBday(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={addr} onChange={(e) => setAddr(e.target.value)} /></label>
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
