@@ -4115,34 +4115,69 @@ function Apparatus({ S, role, members, meId, notify }) {
         })}
       </div>
       )}
-      <MaintenancePanel S={S} role={role} rigs={rigs} />
+      <MaintenancePanel S={S} role={role} rigs={rigs} notify={notify} />
     </div>
   );
 }
 
 /* ---------------- Maintenance reminders + checklists ---------------- */
-const MAINT_SEED = [
-  { id: 1, unit: "Engine 1", task: "Pump & water-tank check", cadence: "Weekly", last: "Jun 22", status: "Current" },
-  { id: 2, unit: "Engine 1", task: "Annual pump service test", cadence: "Annual", last: "Aug 2025", status: "Due soon" },
-  { id: 3, unit: "Brush 2", task: "Equipment & PPE check", cadence: "Weekly", last: "Jun 22", status: "Current" },
-  { id: 4, unit: "Tanker 1", task: "Foam concentrate level", cadence: "Monthly", last: "May 10", status: "Overdue" },
-  { id: 5, unit: "Rescue 1", task: "SCBA flow test", cadence: "Annual", last: "Sep 2025", status: "Due soon" },
-  { id: 6, unit: "All units", task: "Registration & insurance", cadence: "Annual", last: "Jan 2026", status: "Current" },
-];
+const MAINT_CADENCE_DAYS = { Weekly: 7, Monthly: 30, Quarterly: 90, Annual: 365 };
+// Compute a maintenance item's status from cadence + when it was last done (status is NOT stored).
+function maintStatus(cadence, lastDoneAt) {
+  const interval = MAINT_CADENCE_DAYS[cadence] || 30;
+  if (!lastDoneAt) return "Due soon";                 // never done → needs doing, but not "Overdue" on a fresh add
+  const days = (Date.now() - new Date(lastDoneAt).getTime()) / 86400000;
+  if (days > interval) return "Overdue";              // past the full interval
+  if (days >= interval * 0.8) return "Due soon";      // within the last 20% before it's due
+  return "Current";
+}
 const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
-function MaintenancePanel({ S, role, rigs }) {
-  const canManage = hasAny(role, DEPT_ADMIN_ROLES);
-  const [items, setItems] = useState(MAINT_SEED);
+function MaintenancePanel({ S, role, rigs, notify }) {
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops INSERT/DELETE RLS on apparatus_maintenance
+  const [items, setItems] = useState([]);
   const [adding, setAdding] = useState(false);
   const [u, setU] = useState(rigs[0]?.name || "All units"); const [t, setT] = useState(""); const [cad, setCad] = useState("Monthly");
+  const rigNameById = new Map((rigs || []).map((r) => [r.id, r.name]));
+  const loadMaint = () => {
+    supabase.from("apparatus_maintenance")
+      .select("id, rig_id, task, cadence, last_done_at")
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        setItems(data.map((r) => ({
+          id: r.id, rigId: r.rig_id,
+          unit: r.rig_id ? (rigNameById.get(r.rig_id) || "Unknown unit") : "All units",
+          task: r.task, cadence: r.cadence,
+          last: r.last_done_at ? new Date(r.last_done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
+          status: maintStatus(r.cadence, r.last_done_at),
+        })));
+      });
+  };
+  useEffect(() => { loadMaint(); }, [rigs]);   // reload when rigs load/change so rig_id → unit name resolves
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const order = { Overdue: 0, "Due soon": 1, Current: 2 };
   const sorted = [...items].sort((a, b) => order[a.status] - order[b.status]);
   const due = items.filter((i) => i.status !== "Current").length;
-  function markDone(id) { setItems((xs) => xs.map((x) => x.id === id ? { ...x, status: "Current", last: "Just now" } : x)); }
-  function addItem() { if (!t.trim()) return; setItems((xs) => [...xs, { id: Date.now(), unit: u, task: t.trim(), cadence: cad, last: "—", status: "Due soon" }]); setT(""); setAdding(false); }
-  function removeItem(id) { setItems((xs) => xs.filter((x) => x.id !== id)); }
+  async function markDone(id) {
+    const { data, error } = await supabase.from("apparatus_maintenance").update({ last_done_at: new Date().toISOString() }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS block fails loudly
+    loadMaint();
+  }
+  async function addItem() {
+    if (!t.trim()) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const rigId = u === "All units" ? null : (rigs.find((r) => r.name === u)?.id || null);   // "All units" → null; else selected rig's id
+    const { error } = await supabase.from("apparatus_maintenance").insert({ department_id: deptId, rig_id: rigId, task: t.trim(), cadence: cad, last_done_at: null });
+    if (error) { notify({ kind: "error", title: "Couldn't add the item", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setT(""); setAdding(false); loadMaint();
+  }
+  async function removeItem(id) {
+    const { error } = await supabase.from("apparatus_maintenance").delete().eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadMaint();
+  }
   async function draftChecklist() {
     setLoading(true); setErr(""); setOut("");
     const fleet = rigs.map((r) => `${r.name} (${r.type})`).join(", ") || "the department's apparatus";
