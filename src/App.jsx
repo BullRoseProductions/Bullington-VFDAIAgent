@@ -3221,14 +3221,6 @@ function Funding({ S, role, notify, dept, meId, members }) {
           ))}
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>FUNDING LIBRARY</div>
-      <ResourceLibrary S={S} dark items={[
-        { name: "Fundraising idea menu", type: "PDF" },
-        { name: "Sponsor package one-pager", type: "Doc · editable" },
-        { name: "Donor & business outreach letters", type: "Doc · templates" },
-        { name: "Fundraising plan & tracker", type: "PDF" },
-      ]} />
-
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</div>
       <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved drafts yet.</div> : drafts.map((d) => {
@@ -3470,6 +3462,17 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
     setEditing(true);
   }
+  async function toggleActive() {
+    const goInactive = member.status !== "Inactive";
+    if (goInactive && member.id === meId) { notify({ kind: "error", title: "Can't deactivate yourself", text: "Have another leader deactivate your account." }); return; }   // self-lockout, matches saveMember's intent
+    const next = goInactive ? "Inactive" : "Active";
+    if (goInactive && !window.confirm(`Deactivate ${member.name}? They'll drop off the active roster; you can reactivate anytime.`)) return;
+    if (!goInactive && !window.confirm(`Reactivate ${member.name}? They'll return to the active roster.`)) return;
+    const { error } = await supabase.from("members").update({ status: next }).eq("id", member.id);
+    if (error) { notify({ kind: "error", title: goInactive ? "Couldn't deactivate the member" : "Couldn't reactivate the member", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    onUpdate({ ...member, status: next });
+    notify({ kind: "success", text: `${member.name} ${goInactive ? "deactivated" : "reactivated"}.` });
+  }
   async function saveMember() {
     const checkedRoles = form.access;   // grantable roles the checkboxes hold
     const finalAccess = [...checkedRoles, ...(Array.isArray(member.access) && member.access.includes("Project Admin") ? ["Project Admin"] : [])];   // merge PA back (not a checkbox)
@@ -3550,7 +3553,10 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div style={FS.kicker}>PROFILE · LEADERSHIP ONLY</div>
-              <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={startEditForm}>Edit member</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
+                <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={startEditForm}>Edit member</button>
+              </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px 18px" }}>
               {[
