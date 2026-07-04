@@ -996,6 +996,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const [prNext, setPrNext] = useState(null);
   const [fundNext, setFundNext] = useState(null);
   const [raised, setRaised] = useState(0);
+  const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight
   const [ringOn, setRingOn] = useState(false);
   useEffect(() => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
@@ -1005,12 +1006,14 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       supabase.from("content_calendar").select("id, date, caption"),
       supabase.from("funding_events").select("id, date, title"),
       supabase.from("fundraiser_log").select("amount"),
-    ]).then(([du, rc, cc, fe, fl]) => {
+      supabase.from("action_items").select("*").eq("status", "open"),   // for the overdue-assignment insight
+    ]).then(([du, rc, cc, fe, fl, ai]) => {
       setDuties(du.data || []);
       setRecruitNext(firstUpcoming(rc.data, "date"));
       setPrNext(firstUpcoming(cc.data, "date"));
       setFundNext(firstUpcoming(fe.data, "date"));
       setRaised((fl.data || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
+      setOpenItems(ai.data || []);
     });
     const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1020,6 +1023,15 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);   // same formula as DA/Board
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
+  const attendanceGaps = members.filter((m) => m.status === "Active").map((m) => {
+    const attended = (sessions || []).filter((s) => (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();   // ISO strings sort chronologically
+    const lastISO = attended.length ? attended[attended.length - 1] : null;
+    return { type: "attendance", memberId: m.id, memberName: m.name, days: lastISO ? dayDiff(todayISO, lastISO) : null };
+  }).filter((x) => x.days === null || x.days > 30).sort((a, b) => (b.days ?? Infinity) - (a.days ?? Infinity));   // never first, then biggest gap
+  const overdueItems = (openItems || []).filter((r) => r.due_date && r.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")).map((r) => ({ type: "overdue", itemId: r.id, task: r.text, assigneeName: r.assigned_to ? (nameById.get(r.assigned_to) || "Unassigned") : "Unassigned", daysOverdue: dayDiff(todayISO, r.due_date), sourceLabel: r.source_label || null }));
   const cards = [
     { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${nextSession.title}` : null, nav: "training" },
     { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: "#0E6B62", snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
@@ -1078,6 +1090,35 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
+      {attendanceGaps.length === 0 && overdueItems.length === 0 ? (
+        <div style={{ ...FS.card, padding: "14px 16px", fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={15} color={FIRE.green} /> All caught up — no attendance gaps or overdue assignments.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+          {overdueItems.map((ins) => (
+            <div key={`o-${ins.itemId}`} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.assigneeName}</b>'s “{ins.task}” was due {ins.daysOverdue} day{ins.daysOverdue === 1 ? "" : "s"} ago</div>
+                {ins.sourceLabel && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{ins.sourceLabel}</div>}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View task</button>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: 0.55 }} disabled title="AI drafting — Stage 2">Draft reminder</button>
+              </div>
+            </div>
+          ))}
+          {attendanceGaps.map((ins) => (
+            <div key={`a-${ins.memberId}`} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}>{ins.days === null ? <><b>{ins.memberName}</b> hasn't attended any training</> : <><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</>}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: 0.55 }} disabled title="AI drafting — Stage 2">Draft check-in</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
