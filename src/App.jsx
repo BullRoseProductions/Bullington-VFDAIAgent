@@ -2819,18 +2819,35 @@ function Funding({ S, role, notify, dept, meId, members }) {
   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
   const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
   const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
-  const [log, setLog] = useState([
-    { id: 1, name: "Pancake Breakfast", date: "May 2026", amount: 2150 },
-    { id: 2, name: "Fill-the-Boot Drive", date: "Apr 2026", amount: 980 },
-    { id: 3, name: "Spaghetti Dinner", date: "Feb 2026", amount: 1420 },
-  ]);
+  const [log, setLog] = useState([]);
   const [addingLog, setAddingLog] = useState(false);
   const [ln, setLn] = useState(""); const [ld, setLd] = useState(""); const [la, setLa] = useState("");
   const totalRaised = log.reduce((s, e) => s + (e.amount || 0), 0);
   const recentFor = (idea) => log.find((e) => e.name.toLowerCase().includes(idea.key) || idea.title.toLowerCase().includes(e.name.toLowerCase().split(" ")[0]));
   function planThis(idea) { setMode("Plan a fundraiser"); setDetail(`A ${idea.title.toLowerCase()} to raise money for the department.`); setOut(""); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); }
-  function addLog() { if (!ln.trim()) return; setLog((l) => [{ id: Date.now(), name: ln.trim(), date: ld.trim() || "Recent", amount: Number(String(la).replace(/[^0-9.]/g, "")) || 0 }, ...l]); setLn(""); setLd(""); setLa(""); setAddingLog(false); }
-  function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
+  const loadFundraiserLog = () => {
+    supabase.from("fundraiser_log")
+      .select("id, name, event_when, amount, created_by")
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        setLog(data.map((e) => ({ id: e.id, name: e.name, date: e.event_when, amount: Number(e.amount) })));
+      });
+  };
+  useEffect(() => { loadFundraiserLog(); }, []);
+  async function addLog() {
+    if (!ln.trim()) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { error } = await supabase.from("fundraiser_log").insert({ name: ln.trim(), event_when: ld.trim() || "Recent", amount: Number(String(la).replace(/[^0-9.]/g, "")) || 0, department_id: deptId, created_by: meId });
+    if (error) { notify({ kind: "error", title: "Couldn't log that fundraiser", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setLn(""); setLd(""); setLa(""); setAddingLog(false); loadFundraiserLog();
+  }
+  async function removeLog(id) {
+    const { error } = await supabase.from("fundraiser_log").delete().eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadFundraiserLog();   // refetch — UI matches true DB state (covers the silent zero-rows case)
+  }
   async function generate() {
     setLoading(true); setErr(""); setOut("");
     let sys;
