@@ -291,7 +291,7 @@ export default function App() {
     supabase
       .from("members")
       .select("id, access")
-      .eq("email", authEmail)
+      .ilike("email", authEmail)   // case-insensitive to match the DB's lower(email)=lower(auth.email())
       .single()
       .then(({ data, error }) => {
         if (cancelled) return;
