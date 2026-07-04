@@ -3685,6 +3685,24 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     setSaving(false);
     if (error) { notify({ kind: "error", title: "Couldn't save the report", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     notify({ kind: "success", text: "Report saved." });
+    loadReports();   // refresh the saved-reports list
+  }
+  // --- Saved reports (persisted feature="report"; soft-deletable, inherits the Phase 1 failsafe) ---
+  const [reports, setReports] = useState([]);
+  const [openReport, setOpenReport] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
+  async function loadReports() {
+    const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "report").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
+    setReports((data || []).sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at)));   // newest first
+  }
+  useEffect(() => { loadReports(); }, []);
+  async function softDelete(d) {
+    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    setDeletingId(d.id);
+    const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
+    setDeletingId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't delete", text: "Something went wrong deleting that. Please try again.", details: error.message }); return; }
+    loadReports();   // deleted row falls out via the .is("deleted_at", null) filter
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -3732,6 +3750,37 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
           {out && <RichOutput S={S} text={out} dark />}
         </div>
       </div>
+
+      {/* SAVED REPORTS — persisted Chief's Reports (feature="report"); Open to view, DA/PA soft-delete. Mirrors the Minutes saved-drafts list. */}
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED REPORTS</div>
+      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 8 }}>
+        {reports.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved reports yet.</div> : reports.map((d) => {
+          const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
+          const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          return (
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Chief's Report"}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}</div>
+              </div>
+              <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => setOpenReport(d)}>Open</button>
+              {isDeptAdmin(role) && <button title="Delete" disabled={deletingId === d.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => softDelete(d)}><X size={14} color={FIRE.deleteRed} /></button>}
+            </div>
+          );
+        })}
+      </div>
+
+      {openReport && (
+        <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openReport.title || "Chief's Report"}</div>
+              <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={() => setOpenReport(null)}><X size={14} color={FIRE.btnIcon} /></button>
+            </div>
+            <RichOutput S={S} text={openReport.current_text ?? openReport.ai_text} dark />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
