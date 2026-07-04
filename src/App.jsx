@@ -3098,9 +3098,10 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState("");
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   async function add() {
-    if (!nm.trim()) return;
+    const email = em.trim().toLowerCase();
+    if (!nm.trim() || !email || !/^\S+@\S+\.\S+$/.test(email)) { notify({ kind: "error", title: "Email required", text: "A valid email is needed so this member can sign in." }); return; }
     const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
-    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: ["Member"], status: "Probationary", phone: ph.trim() || "—", email: em.trim() || null, joined: "2026", participation: 0 };
+    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl, access: ["Member"], status: "Probationary", phone: ph.trim() || "—", email, joined: "2026", participation: 0 };
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
     if (error || !data) { notify({ kind: "error", title: "Couldn't add the member", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, certs: [], notes: [] }]);
@@ -3119,7 +3120,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><select style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)}><option>Firefighter</option><option>Firefighter / EMT</option><option>Officer</option><option>Asst. Chief</option><option>Chief</option></select></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span><input style={FS.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email <span style={{ color: FIRE.deleteRed }}>*</span></span><input type="email" style={FS.input} value={em} onChange={(e) => setEm(e.target.value)} /></label>
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
@@ -3179,7 +3180,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     return () => { alive = false; };
   }, [member.id, assign]);
   function startEditForm() {
-    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
+    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
     setEditing(true);
   }
   async function saveMember() {
@@ -3190,15 +3191,17 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       notify({ kind: "error", title: "Can't remove your own admin access", text: "That change would leave you without Department/Project Admin. Have another admin make it." });
       return;
     }
+    const email = (form.email || "").trim().toLowerCase();
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) { notify({ kind: "error", title: "Email required", text: "A valid email is needed so this member can sign in." }); return; }
     setSaving(true);
     const jd = form.joined_date || null;
     const joinedYear = jd ? jd.slice(0, 4) : member.joined;   // keep member-visible "since [year]" in sync
-    const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentor_id: form.mentor_id || null }).eq("id", member.id);
+    const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentor_id: form.mentor_id || null, email }).eq("id", member.id);
     if (e1) { setSaving(false); notify({ kind: "error", title: "Couldn't save the member", text: "Something went wrong saving those changes. Please try again.", details: e1.message }); return; }
     const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: member.department_id, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
     setSaving(false);
-    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentorId: form.mentor_id || null });
+    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentorId: form.mentor_id || null, email });
     setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
     setEditing(false);
     notify({ kind: "success", text: "Member updated." });
@@ -3282,6 +3285,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             <div style={{ ...FS.kicker, marginBottom: 10 }}>EDIT MEMBER</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email <span style={{ color: FIRE.deleteRed }}>*</span></span><input type="email" style={FS.input} value={form.email || ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station role</span><input style={FS.input} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} placeholder="Firefighter" /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}><option>Active</option><option>Probationary</option><option>Inactive</option></select></label>
@@ -3305,7 +3309,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
               <label style={{ ...S.field, gridColumn: "1 / -1" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>
             </div>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "8px 0 12px" }}>Email ({member.email || "none"}) is the login identity — it can't be changed here. Access changes take effect on their next sign-in.</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "8px 0 12px" }}>Email is the member's login identity (stored lowercase). Changing it re-links their sign-in — for someone who already logs in, only change it alongside their auth email. Access changes take effect on their next sign-in.</div>
             <div style={{ display: "flex", gap: 8 }}>
               <button style={FS.btnPrimary} disabled={saving} onClick={saveMember}>{saving ? "Saving…" : "Save changes"}</button>
               <button style={FS.btn} disabled={saving} onClick={() => setEditing(false)}>Cancel</button>
