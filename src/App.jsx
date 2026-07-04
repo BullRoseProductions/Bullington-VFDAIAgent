@@ -2847,6 +2847,37 @@ function parseIdeas(raw) {
   } catch { /* fall through to null */ }
   return null;
 }
+// Parse the operationalize response into { action_items:[{task,suggested_owner,suggested_due_date}], calendar_events:[{title,date}] }.
+// Same robust fence-strip → JSON.parse (with {…} fallback) → per-item sanitize → never-throw as parseActionItems; null ONLY on parse failure.
+function parsePlanWork(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const t = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+  let parsed = null;
+  try { parsed = JSON.parse(t); }
+  catch {
+    const m = t.match(/\{[\s\S]*\}/);
+    if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = null; } }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const str = (v) => (typeof v === "string" && v.trim()) ? v.trim() : null;
+  const validDate = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim())) ? v.trim() : null;
+  const action_items = [];
+  for (const it of (Array.isArray(parsed.action_items) ? parsed.action_items : [])) {
+    if (!it || typeof it !== "object") continue;
+    const task = typeof it.task === "string" ? it.task.trim() : "";
+    if (!task) continue;                                              // action items need a non-empty task
+    action_items.push({ task, suggested_owner: str(it.suggested_owner), suggested_due_date: str(it.suggested_due_date) });
+  }
+  const calendar_events = [];
+  for (const ev of (Array.isArray(parsed.calendar_events) ? parsed.calendar_events : [])) {
+    if (!ev || typeof ev !== "object") continue;
+    const title = typeof ev.title === "string" ? ev.title.trim() : "";
+    const date = validDate(ev.date);
+    if (!title || !date) continue;                                    // calendar events need a non-empty title AND a valid YYYY-MM-DD
+    calendar_events.push({ title, date });
+  }
+  return { action_items, calendar_events };                            // both [] is valid; null only on parse failure
+}
 // The full "Plan a fundraiser" system prompt — reused by generate() (CTA/letter path keeps its own) and buildPlan() (step 2 of the two-step flow).
 const PLAN_SYS = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town. CRITICAL — the timeline/checklist MUST start from today's date (given in the details) and fit inside the actual window between today and the target date: do NOT schedule any task in the past or before today, and compress the schedule to the real time available — if only a few weeks or months remain until the event, plan for that window, not a full year.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
 function Funding({ S, role, notify, dept, meId, members }) {
@@ -2855,6 +2886,8 @@ function Funding({ S, role, notify, dept, meId, members }) {
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [goalAmt, setGoalAmt] = useState(""); const [communityType, setCommunityType] = useState("Small town"); const [effortLevel, setEffortLevel] = useState("Medium"); const [targetDate, setTargetDate] = useState("");   // Plan-a-fundraiser inputs
   const [phase, setPhase] = useState("input"); const [ideas, setIdeas] = useState([]); const [chosenIdea, setChosenIdea] = useState(null); const [loadingLabel, setLoadingLabel] = useState("Working…"); const [rawIdeas, setRawIdeas] = useState("");   // two-step brainstorm→plan flow (Plan mode only)
+  const [planReview, setPlanReview] = useState(null); const [operationalizing, setOperationalizing] = useState(false);   // Build 2: { sourceLabel, actionItems[], calendarEvents[] } — operationalize the plan into tracked work
+  const [addingToApp, setAddingToApp] = useState(false); const [fundingReloadKey, setFundingReloadKey] = useState(0);   // Stage 3: dual-insert loading + a key that remounts FundingCalendar so newly-inserted events show
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Funding)
   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
@@ -2918,7 +2951,74 @@ function Funding({ S, role, notify, dept, meId, members }) {
   }
   function backToIdeas() { setPhase("ideas"); setOut(""); setErr(""); }
   function startOver() {
-    setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setOut(""); setErr("");
+    setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setOut(""); setErr(""); setPlanReview(null);
+  }
+  // cloned from Minutes: a suggested owner NAME → member id (exact match, then single-token), else "" (unassigned).
+  function matchOwnerId(name) {
+    const n = (name || "").trim().toLowerCase();
+    if (!n) return "";
+    const exact = members.filter((m) => (m.name || "").toLowerCase() === n);
+    if (exact.length === 1) return exact[0].id;
+    const tok = members.filter((m) => (m.name || "").toLowerCase().split(/\s+/).includes(n));
+    if (tok.length === 1) return tok[0].id;
+    return "";
+  }
+  const normalizeDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim())) ? s.trim() : "";   // only a clean YYYY-MM-DD pre-fills a date picker
+  async function extractPlanWork() {
+    if (!out.trim()) return;
+    setOperationalizing(true); setErr("");
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const sys = "You convert a volunteer fire department's fundraiser plan into trackable work: a list of action items and a list of calendar events. Respond with ONLY one valid JSON object, no markdown, no code fences, no commentary before or after. Schema: {\"action_items\":[{\"task\":string,\"suggested_owner\":string|null,\"suggested_due_date\":\"YYYY-MM-DD\"|null}],\"calendar_events\":[{\"title\":string,\"date\":\"YYYY-MM-DD\"}]}.\n\nDATES: You are given today's date and the event's target date. Resolve EVERY relative timing in the plan (for example '~3 weeks before the event', 'the week of', 'two months out', 'day of') into a real YYYY-MM-DD that falls on or between today and the target date. Never output a date before today or after the target date. RULE: sponsor outreach and sponsor confirmation must land 3-4 weeks BEFORE the target date. The fundraiser event itself is a calendar_event on the target date; also add calendar_events for the major milestones (kickoff, sponsor deadline, setup/day-before) with real dates. calendar_events must be ONLY the 3-5 most important dates (the event itself plus key milestones), NOT one per task — the detailed to-dos belong in action_items, not on the calendar.\n\n- action_items.task: the concrete task, stated concisely.\n- suggested_owner: a person's name ONLY if the plan explicitly names who is responsible; otherwise null. Do NOT guess or infer an owner.\n- suggested_due_date: a real YYYY-MM-DD (resolved as above) for when the task should be done; use null only if it genuinely cannot be placed.\n\nCRITICAL — TRUTH GUARDRAIL: These become REAL assigned work and REAL calendar entries. NEVER invent an owner the plan did not name — leave suggested_owner null for a human to fill in. Do not fabricate tasks or events that are not in the plan. It is always better to leave an owner or date null than to guess. Return ONLY the JSON object.";
+    const user = `Today's date: ${today}. Target date: ${targetDate || "flexible"}.\n\nFundraiser plan:\n${out}`;
+    try {
+      const raw = await callClaude(sys, user);
+      const parsed = parsePlanWork(raw);
+      if (!parsed) {   // fallback: land in the review with empty lists so they can add manually (mirrors minutes)
+        setPlanReview({ sourceLabel: `Fundraiser: ${chosenIdea?.name || "plan"}`, actionItems: [], calendarEvents: [] });
+        setErr("Auto-extraction didn't work — add the tasks and events manually below.");
+        setPhase("operationalize"); setOperationalizing(false); return;
+      }
+      setPlanReview({
+        sourceLabel: `Fundraiser: ${chosenIdea?.name || "plan"}`,   // stored on both tables as source_label in Stage 3
+        actionItems: parsed.action_items.map((it, i) => ({ id: Date.now() + i, task: it.task, ownerId: matchOwnerId(it.suggested_owner), due: normalizeDate(it.suggested_due_date), keep: true })),
+        calendarEvents: parsed.calendar_events.map((ev, i) => ({ id: Date.now() + 5000 + i, title: ev.title, date: normalizeDate(ev.date), keep: true })),
+      });
+      setPhase("operationalize");
+    } catch { setErr("Couldn't turn the plan into tracked work just now. Try again."); }
+    finally { setOperationalizing(false); }
+  }
+  async function addToApp() {
+    if (!planReview) return;
+    const src = planReview.sourceLabel;
+    const validDate = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+    const items = planReview.actionItems.filter((r) => r.keep && r.task.trim());
+    const events = planReview.calendarEvents.filter((r) => r.keep && r.title.trim() && validDate(r.date));
+    if (!items.length && !events.length) { notify({ kind: "error", title: "Nothing to add", text: "Keep at least one action item or calendar event first." }); return; }
+    setAddingToApp(true); setErr("");
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setAddingToApp(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    let itemsErr = null, eventsErr = null;
+    if (items.length) {
+      const rows = items.map((r) => ({ department_id: deptId, text: r.task.trim(), assigned_to: r.ownerId || null, due_date: r.due || null, source_label: src }));
+      const { error } = await supabase.from("action_items").insert(rows);
+      itemsErr = error || null;
+    }
+    if (events.length) {
+      const rows = events.map((r) => ({ department_id: deptId, title: r.title.trim(), date: r.date, color: CATEGORY_COLORS[3], source_label: src }));   // CATEGORY_COLORS[3] = funding gold (#9A6B12)
+      const { error } = await supabase.from("funding_events").insert(rows);
+      eventsErr = error || null;
+    }
+    if (events.length && !eventsErr) setFundingReloadKey((k) => k + 1);   // remount FundingCalendar so the new events show
+    setAddingToApp(false);
+    if (!itemsErr && !eventsErr) {
+      notify({ kind: "success", text: `Added ${items.length} task${items.length === 1 ? "" : "s"} and ${events.length} event${events.length === 1 ? "" : "s"}.` });
+      setPlanReview(null); setErr(""); setPhase("plan");
+      return;
+    }
+    // Partial/total failure — never silently half-succeed. Clear whatever DID save so a retry can't duplicate it.
+    if (!itemsErr && eventsErr) { notify({ kind: "error", title: "Tasks added — calendar events didn't", text: `${items.length} action item(s) created, but the ${events.length} calendar event(s) failed. Fix and retry the events.`, details: eventsErr.message }); setPlanReview((p) => ({ ...p, actionItems: [] })); }
+    else if (itemsErr && !eventsErr) { notify({ kind: "error", title: "Events added — tasks didn't", text: `${events.length} calendar event(s) created, but the ${items.length} action item(s) failed. Fix and retry the tasks.`, details: itemsErr.message }); setPlanReview((p) => ({ ...p, calendarEvents: [] })); }
+    else { notify({ kind: "error", title: "Couldn't add to the app", text: "Neither the tasks nor the calendar events could be saved. Please try again.", details: (itemsErr || eventsErr)?.message }); }
   }
   async function generate() {
     setLoading(true); setErr(""); setOut("");
@@ -3020,9 +3120,47 @@ function Funding({ S, role, notify, dept, meId, members }) {
           )}
           {mode === "Plan a fundraiser" && phase === "plan" && (
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              {!loading && err && <button style={FS.btnPrimary} onClick={() => buildPlan(chosenIdea)}><Sparkles size={15} /> Try again</button>}
+              {out && canManage && <button style={{ ...FS.btnPrimary, opacity: operationalizing ? 0.7 : 1 }} onClick={extractPlanWork} disabled={operationalizing}>{operationalizing ? <><Loader2 size={16} className="spin" /> Turning the plan into tracked work…</> : <><ClipboardList size={16} /> Turn this plan into tasks &amp; calendar</>}</button>}
+              {!loading && err && <button style={FS.btn} onClick={() => buildPlan(chosenIdea)}><Sparkles size={15} /> Rebuild plan</button>}
               <button style={FS.btn} onClick={backToIdeas}><ArrowLeft size={14} /> Back to ideas</button>
               <button style={FS.btn} onClick={startOver}>Start over</button>
+            </div>
+          )}
+          {mode === "Plan a fundraiser" && phase === "operationalize" && planReview && (
+            <div style={{ ...FS.card, padding: "12px 16px", marginTop: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
+              <div style={{ ...FS.kicker, marginBottom: 3 }}>REVIEW &amp; CONFIRM — turn the plan into tracked work</div>
+              <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 12 }}>From: <b style={{ color: FIRE.textSecondary }}>{planReview.sourceLabel}</b></div>
+
+              <div style={{ ...FS.kicker, fontSize: 11, marginBottom: 4 }}>ACTION ITEMS</div>
+              {planReview.actionItems.map((r, i) => (
+                <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                  <input type="checkbox" checked={r.keep} onChange={(e) => setPlanReview((p) => ({ ...p, actionItems: p.actionItems.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x) }))} title="Include this item" style={{ marginBottom: 10 }} />
+                  <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={r.task} onChange={(e) => setPlanReview((p) => ({ ...p, actionItems: p.actionItems.map((x, j) => j === i ? { ...x, task: e.target.value } : x) }))} /></label>
+                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
+                    <select style={FS.input} value={r.ownerId} onChange={(e) => setPlanReview((p) => ({ ...p, actionItems: p.actionItems.map((x, j) => j === i ? { ...x, ownerId: e.target.value } : x) }))}>
+                      <option value="">Unassigned</option>
+                      {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select></label>
+                  <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input type="date" style={FS.input} value={r.due} onChange={(e) => setPlanReview((p) => ({ ...p, actionItems: p.actionItems.map((x, j) => j === i ? { ...x, due: e.target.value } : x) }))} /></label>
+                </div>
+              ))}
+              <button style={{ ...FS.btn, marginTop: 8 }} onClick={() => setPlanReview((p) => ({ ...p, actionItems: [...p.actionItems, { id: Date.now(), task: "", ownerId: "", due: "", keep: true }] }))}><Plus size={14} /> Add action item</button>
+
+              <div style={{ ...FS.kicker, fontSize: 11, margin: "16px 0 4px" }}>CALENDAR EVENTS</div>
+              {planReview.calendarEvents.map((r, i) => (
+                <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                  <input type="checkbox" checked={r.keep} onChange={(e) => setPlanReview((p) => ({ ...p, calendarEvents: p.calendarEvents.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x) }))} title="Include this event" style={{ marginBottom: 10 }} />
+                  <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Event</span><input style={FS.input} value={r.title} onChange={(e) => setPlanReview((p) => ({ ...p, calendarEvents: p.calendarEvents.map((x, j) => j === i ? { ...x, title: e.target.value } : x) }))} /></label>
+                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input type="date" style={FS.input} value={r.date} onChange={(e) => setPlanReview((p) => ({ ...p, calendarEvents: p.calendarEvents.map((x, j) => j === i ? { ...x, date: e.target.value } : x) }))} /></label>
+                </div>
+              ))}
+              <button style={{ ...FS.btn, marginTop: 8 }} onClick={() => setPlanReview((p) => ({ ...p, calendarEvents: [...p.calendarEvents, { id: Date.now(), title: "", date: "", keep: true }] }))}><Plus size={14} /> Add event</button>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+                <button style={{ ...FS.btnPrimary, opacity: addingToApp ? 0.7 : 1 }} onClick={addToApp} disabled={addingToApp}>{addingToApp ? <><Loader2 size={16} className="spin" /> Adding…</> : <><ClipboardList size={16} /> Add to the app</>}</button>
+                <button style={FS.btn} onClick={() => setPhase("plan")}><ArrowLeft size={14} /> Back to plan</button>
+                <button style={FS.btn} onClick={() => { setPlanReview(null); setPhase("plan"); }}>Discard</button>
+              </div>
             </div>
           )}
         </div>
@@ -3052,7 +3190,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
       </>)}
 
       <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
-      <FundingCalendar S={S} role={role} notify={notify} />
+      <FundingCalendar key={fundingReloadKey} S={S} role={role} notify={notify} />
 
       <div style={{ ...FS.kicker, marginBottom: 8, display: "flex", alignItems: "center" }}>
         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
