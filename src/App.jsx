@@ -3151,7 +3151,8 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
         </div>
       )}
       <div style={S.opGrid}>
-        {members.filter((m) => showInactive || m.status !== "Inactive").map((m) => (
+        {/* Ashlea (app owner) is hidden from the roster display only — her row/status/access are untouched */}
+        {members.filter((m) => (showInactive || m.status !== "Inactive") && m.id !== "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4").map((m) => (
           <div key={m.id} style={{ ...S.opCard, ...FS.card, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <Initials S={S} dark name={m.name} />
