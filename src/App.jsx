@@ -6169,7 +6169,12 @@ function StationDuties({ S, role, members, meId, notify }) {
     loadDuties();   // re-fetch so the persisted row (real uuid + server-applied recurrence) appears — no optimistic numeric id
     setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAssignee(""); setDue(""); setAddingA(false);
   }
-  function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
+  async function removeDuty(id, title) {
+    if (!window.confirm(`Remove “${title}” from the duty checklist? Past completions stay in the log.`)) return;
+    const { error } = await supabase.from("duties").delete().eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove the duty", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadDuties();   // refetch — UI matches true DB state (covers the silent zero-rows case)
+  }
   async function addLog() {
     if (!lw.trim()) return;
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
@@ -6305,7 +6310,7 @@ function StationDuties({ S, role, members, meId, notify }) {
                     return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
                   })()}
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
-                  {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+                  {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
                 {pickerForDutyId === a.id && (
                   <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
