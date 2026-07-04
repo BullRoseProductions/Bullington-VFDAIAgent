@@ -456,7 +456,7 @@ export default function App() {
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
-          {screen === "apparatus" && <Apparatus S={S} role={role} />}
+          {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
@@ -3033,12 +3033,6 @@ const MEMBERS = [
   { id: 5, name: "Sam Whitfield", role: "Firefighter", access: ["Member"], status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Officer", when: "Jun 2026" }] },
   { id: 6, name: "Dana Cole", role: "Firefighter / EMT", access: ["Member"], status: "Active", phone: "(817) 555-0150", joined: "2019", participation: 84, certs: [{ name: "Firefighter II", exp: "2026-08" }, { name: "EMT-B", exp: "2027-04" }], notes: [] },
 ];
-const APPARATUS_SEED = [
-  { id: 1, name: "Engine 1", type: "Pumper", lastCheck: "Jun 22", by: "Daniels", status: "Pass", note: "All systems good" },
-  { id: 2, name: "Brush 2", type: "Brush truck", lastCheck: "Jun 22", by: "Pearson", status: "Pass", note: "Water topped off" },
-  { id: 3, name: "Tanker 1", type: "Tender", lastCheck: "Jun 15", by: "Cole", status: "Needs attention", note: "Low on foam concentrate" },
-  { id: 4, name: "Rescue 1", type: "Rescue", lastCheck: "Jun 20", by: "Okafor", status: "Pass", note: "" },
-];
 // current year-month index (1-indexed month, matches "YYYY-MM" cert expiry) — real "today"; replaces the old hardcoded June-2026 baseline
 function nowYM() { const d = new Date(); return d.getFullYear() * 12 + (d.getMonth() + 1); }
 function certStatus(exp) {
@@ -4032,23 +4026,46 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
 
 /* ---------------- Apparatus ---------------- */
 const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "Ladder / Aerial", "Squad", "Command", "Ambulance", "Other"];
-function Apparatus({ S, role }) {
-  const [rigs, setRigs] = useState(APPARATUS_SEED);
-  const canManage = hasAny(role, DEPT_ADMIN_ROLES);
+function Apparatus({ S, role, members, meId, notify }) {
+  const [rigs, setRigs] = useState([]);
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
   const [adding, setAdding] = useState(false);
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const loadRigs = () => {
+    supabase.from("apparatus")
+      .select("id, name, type, status, note, last_check_at, checked_by")
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        setRigs(data.map((r) => ({
+          id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "",
+          lastCheck: r.last_check_at ? new Date(r.last_check_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
+          by: r.checked_by ? (nameById.get(r.checked_by) || "A member") : "—",
+        })));
+      });
+  };
+  useEffect(() => { loadRigs(); }, [members]);   // reload once members resolves so checked_by → name populates
   const ready = rigs.filter((r) => r.status === "Pass").length;
   const flagged = rigs.length - ready;
-  function logCheck(id) { setRigs((rs) => rs.map((r) => r.id === id ? { ...r, lastCheck: "Just now", by: "You", status: "Pass", note: "Checked — all good" } : r)); }
-  function addRig() {
-    if (!nm.trim()) return;
-    setRigs((rs) => [...rs, { id: Date.now(), name: nm.trim(), type: tp, lastCheck: "—", by: "—", status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check" }]);
-    setNm(""); setTp("Pumper"); setRd("Ready"); setAdding(false);
+  async function logCheck(id) {
+    const { data, error } = await supabase.from("apparatus").update({ status: "Pass", note: "Checked — all good", last_check_at: new Date().toISOString(), checked_by: meId }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't log the check", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: a silent RLS block fails loudly, not as false success
+    loadRigs();   // refetch — UI matches true DB state
   }
-  function removeRig(id, name) {
-    if (window.confirm(`Take "${name}" out of the station? This removes it from the apparatus list.`)) {
-      setRigs((rs) => rs.filter((r) => r.id !== id));
-    }
+  async function addRig() {
+    if (!nm.trim()) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { error } = await supabase.from("apparatus").insert({ department_id: deptId, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null });
+    if (error) { notify({ kind: "error", title: "Couldn't add the apparatus", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setNm(""); setTp("Pumper"); setRd("Ready"); setAdding(false); loadRigs();
+  }
+  async function removeRig(id, name) {
+    if (!window.confirm(`Take "${name}" out of the station? This removes it from the apparatus list.`)) return;
+    const { error } = await supabase.from("apparatus").delete().eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove the apparatus", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadRigs();   // refetch — UI matches true DB state
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
