@@ -1026,11 +1026,17 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
-  const attendanceGaps = members.filter((m) => m.status === "Active").map((m) => {
-    const attended = (sessions || []).filter((s) => (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();   // ISO strings sort chronologically
-    const lastISO = attended.length ? attended[attended.length - 1] : null;
-    return { type: "attendance", memberId: m.id, memberName: m.name, days: lastISO ? dayDiff(todayISO, lastISO) : null };
-  }).filter((x) => x.days === null || x.days > 30).sort((a, b) => (b.days ?? Infinity) - (a.days ?? Infinity));   // never first, then biggest gap
+  const eligibleFor = (m, s) => isLeader(m.access) || s.audience !== "leadership";   // same audience rule as deptAttendance / RECENT EVENTS
+  const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
+  const attendanceGaps = pastDone.length === 0 ? [] : members.filter((m) => m.status === "Active").map((m) => {
+    const joinedISO = m.joined ? `${String(m.joined).slice(0, 4)}-01-01` : null;   // members prop only has the join YEAR (member_private.joined_date is DA/PA-scoped, not loaded here)
+    const eligible = pastDone.filter((s) => eligibleFor(m, s) && (!joinedISO || toISODate(sessDate(s)) >= joinedISO));   // eligible sessions on/after they joined
+    if (eligible.length === 0) return null;   // no eligible sessions since joining → don't flag (new member / new dept)
+    const attendedISO = eligible.filter((s) => (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
+    const attendedEver = attendedISO.length > 0;
+    const refISO = attendedEver ? attendedISO[attendedISO.length - 1] : joinedISO;   // gap from last attended, else from join date
+    return { type: "attendance", memberId: m.id, memberName: m.name, days: refISO ? dayDiff(todayISO, refISO) : null, attendedEver };
+  }).filter((x) => x && x.days != null && x.days > 30).sort((a, b) => b.days - a.days);   // real gaps > 30 days, biggest first
   const overdueItems = (openItems || []).filter((r) => r.due_date && r.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")).map((r) => ({ type: "overdue", itemId: r.id, task: r.text, assigneeName: r.assigned_to ? (nameById.get(r.assigned_to) || "Unassigned") : "Unassigned", daysOverdue: dayDiff(todayISO, r.due_date), sourceLabel: r.source_label || null }));
   const cards = [
     { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${nextSession.title}` : null, nav: "training" },
@@ -1110,7 +1116,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           {attendanceGaps.map((ins) => (
             <div key={`a-${ins.memberId}`} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}>{ins.days === null ? <><b>{ins.memberName}</b> hasn't attended any training</> : <><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</>}</div>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}>{ins.attendedEver ? <><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</> : <><b>{ins.memberName}</b> hasn't attended any training since joining ({ins.days} days)</>}</div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: 0.55 }} disabled title="AI drafting — Stage 2">Draft check-in</button>
