@@ -6115,6 +6115,8 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [addingA, setAddingA] = useState(false);
   const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [acatNew, setAcatNew] = useState(""); const [arec, setArec] = useState("Weekly");
   const [assignee, setAssignee] = useState(""); const [due, setDue] = useState("");   // "" = station-wide / no due date
+  const [editingDutyId, setEditingDutyId] = useState(null);   // which duty is being edited inline
+  const [editBuf, setEditBuf] = useState({ title: "", category: "Cleanup", catNew: "", recurrence: "Weekly", assignee: "", due: "" });
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
   const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
   const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
@@ -6139,6 +6141,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   const categories = [...DUTY_CATEGORIES.filter((c) => duties.some((d) => d.category === c)), ...[...new Set(duties.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
   const allCats = [...new Set([...DUTY_CATEGORIES, ...duties.map((d) => d.category)])];
   function openPicker(id) {
+    setEditingDutyId(null);   // close the inline edit card if it's open (mutually exclusive with the completion picker)
     setPickerForDutyId(id);
     setSelectedHelpers([]);
     setPickerStage("ask");
@@ -6174,6 +6177,18 @@ function StationDuties({ S, role, members, meId, notify }) {
     const { error } = await supabase.from("duties").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the duty", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadDuties();   // refetch — UI matches true DB state (covers the silent zero-rows case)
+  }
+  function startEditDuty(a) {
+    setPickerForDutyId(null);   // close the completion picker if it's open on this row
+    setEditingDutyId(a.id);
+    setEditBuf({ title: a.duty || "", category: a.category || "Cleanup", catNew: "", recurrence: a.recurrence || "Weekly", assignee: a.assignedTo || "", due: a.dueDate || "" });
+  }
+  async function saveEditDuty(id) {
+    if (!editBuf.title.trim()) return;
+    const cat = editBuf.category === "__new__" ? (editBuf.catNew.trim() || "Cleanup") : editBuf.category;
+    const { error } = await supabase.from("duties").update({ duty: editBuf.title.trim(), category: cat, recurrence: editBuf.recurrence, assigned_to: editBuf.assignee || null, due_date: editBuf.due || null }).eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't save the duty", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
+    setEditingDutyId(null); loadDuties();   // refetch — UI matches true DB state
   }
   async function addLog() {
     if (!lw.trim()) return;
@@ -6310,6 +6325,7 @@ function StationDuties({ S, role, members, meId, notify }) {
                     return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
                   })()}
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                  {canManage && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
                   {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
                 {pickerForDutyId === a.id && (
@@ -6339,6 +6355,18 @@ function StationDuties({ S, role, members, meId, notify }) {
                         <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
                       </div>
                     </>)}
+                  </div>
+                )}
+                {editingDutyId === a.id && (
+                  <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Duty</span><input style={FS.input} value={editBuf.title} onChange={(e) => setEditBuf((b) => ({ ...b, title: e.target.value }))} /></label>
+                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={editBuf.category} onChange={(e) => setEditBuf((b) => ({ ...b, category: e.target.value }))}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
+                    {editBuf.category === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={editBuf.catNew} onChange={(e) => setEditBuf((b) => ({ ...b, catNew: e.target.value }))} /></label>}
+                    <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={editBuf.recurrence} onChange={(e) => setEditBuf((b) => ({ ...b, recurrence: e.target.value }))}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
+                    <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={editBuf.assignee} onChange={(e) => setEditBuf((b) => ({ ...b, assignee: e.target.value }))}><option value="">Station-wide (everyone)</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={editBuf.due} onChange={(e) => setEditBuf((b) => ({ ...b, due: e.target.value }))} /></label>
+                    <button style={FS.btnPrimary} onClick={() => saveEditDuty(a.id)}><CheckCircle2 size={15} /> Save</button>
+                    <button style={FS.btn} onClick={() => setEditingDutyId(null)}>Cancel</button>
                   </div>
                 )}
               </div>
