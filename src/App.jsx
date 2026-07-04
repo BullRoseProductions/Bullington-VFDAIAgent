@@ -6049,11 +6049,6 @@ const DUTY_SEED = [
   { id: 14, duty: "Check O2 levels & med expirations", category: "EMS", recurrence: "Monthly", done: false, doneBy: null, doneAt: null },
   { id: 15, duty: "Update run & incident logs", category: "Admin", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
 ];
-const DUTYLOG_SEED = [
-  { id: 1, what: "Refilled air bottles, logged 6", who: "Tom Daniels", when: "Jun 22" },
-  { id: 2, what: "Washed Engine 1, restocked EMS bags", who: "Cody Pearson", when: "Jun 21" },
-  { id: 3, what: "Posted open-house recap", who: "Dana Cole", when: "Jun 20" },
-];
 function StationDuties({ S, role, members, meId, notify }) {
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES); // assign/manage duties — ops only (DA/Officer, excludes Board + PA)
   const canCreate = hasAny(role, CANMANAGE_OPS_ROLES); // create duty — ops only (DA/Officer, excludes Board + PA)
@@ -6065,7 +6060,7 @@ function StationDuties({ S, role, members, meId, notify }) {
     return isNaN(d.getTime()) ? v : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
   };
   const [duties, setDuties] = useState([]);
-  const [log, setLog] = useState(DUTYLOG_SEED);
+  const [log, setLog] = useState([]);
   const [pickerForDutyId, setPickerForDutyId] = useState(null); // which duty's picker is open
   const [selectedHelpers, setSelectedHelpers] = useState([]);   // member ids
   const [pickerStage, setPickerStage] = useState("ask");        // "ask" | "pick"
@@ -6090,6 +6085,16 @@ function StationDuties({ S, role, members, meId, notify }) {
     });
   }
   useEffect(() => { loadDuties(); }, []);
+  const loadStationLog = () => {
+    supabase.from("station_log")
+      .select("id, what, done_by, done_at, created_by")
+      .order("done_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, when: fmtDoneAt(e.done_at), createdBy: e.created_by })));
+      });
+  };
+  useEffect(() => { loadStationLog(); }, []);
   useEffect(() => {
     if (!canManage) return;
     supabase.from("duty_log")
@@ -6165,8 +6170,19 @@ function StationDuties({ S, role, members, meId, notify }) {
     setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAssignee(""); setDue(""); setAddingA(false);
   }
   function removeDuty(id) { setDuties((ds) => ds.filter((x) => x.id !== id)); }
-  function addLog() { if (!lw.trim()) return; setLog((l) => [{ id: Date.now(), what: lw.trim(), who: lwho.trim() || "A member", when: "Just now" }, ...l]); setLw(""); }
-  function removeLog(id) { setLog((l) => l.filter((x) => x.id !== id)); }
+  async function addLog() {
+    if (!lw.trim()) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { error } = await supabase.from("station_log").insert({ what: lw.trim(), done_by: lwho.trim() || (me?.name || "A member"), department_id: deptId, created_by: meId, done_at: new Date().toISOString() });
+    if (error) { notify({ kind: "error", title: "Couldn't log that", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setLw(""); loadStationLog();
+  }
+  async function removeLog(id) {
+    const { error } = await supabase.from("station_log").delete().eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadStationLog();   // refetch — UI matches true DB state (covers the silent zero-rows case)
+  }
   const doneCount = duties.filter((d) => d.done).length;
   // History: group duty_log completions by the station's week setting (newest first)
   const historyWeeks = (() => {
