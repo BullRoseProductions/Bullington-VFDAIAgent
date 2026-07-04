@@ -3104,8 +3104,13 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
     const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl.trim() || null, access: ax.length ? ax : ["Member"], status: st, phone: ph.trim() || "—", email, mentor_id: mt || null, joined: sdate ? sdate.slice(0, 4) : null, participation: 0 };   // joined (year) derived from the start date
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
     if (error || !data) { notify({ kind: "error", title: "Couldn't add the member", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    const { error: e2 } = await supabase.from("member_private").upsert({ member_id: data.id, department_id: data.department_id, birthday: bday || null, address: addr.trim() || null, joined_date: sdate || null }, { onConflict: "member_id" });   // DA/PA-only personal details (same table as the edit form)
-    if (e2) { notify({ kind: "error", title: "Member saved, personal details didn't", text: "The main record saved; birthday/address/start date didn't — add them via the member's file.", details: e2.message }); }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");   // authoritative dept id (matches the member_private with_check); convention across all dept-scoped writes
+    if (deptErr || !deptId) {
+      notify({ kind: "error", title: "Member saved, personal details didn't", text: "The main record saved; we couldn't resolve your department to save birthday/address/start date. Add them via the member's file.", details: deptErr?.message });
+    } else {
+      const { error: e2 } = await supabase.from("member_private").upsert({ member_id: data.id, department_id: deptId, birthday: bday || null, address: addr.trim() || null, joined_date: sdate || null }, { onConflict: "member_id" });   // DA/PA-only personal details (same table as the edit form)
+      if (e2) { notify({ kind: "error", title: "Member saved, personal details didn't", text: "The main record saved; birthday/address/start date didn't — add them via the member's file.", details: e2.message }); }
+    }
     setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, mentorId: data.mentor_id ?? null, certs: [], notes: [] }]);
     setNm(""); setPh(""); setEm(""); setSt("Active"); setAx(["Member"]); setMt(""); setBday(""); setSdate(""); setAddr(""); setAdding(false);
   }
@@ -3225,7 +3230,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     const joinedYear = jd ? jd.slice(0, 4) : member.joined;   // keep member-visible "since [year]" in sync
     const { error: e1 } = await supabase.from("members").update({ name: form.name.trim(), phone: form.phone.trim() || null, status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentor_id: form.mentor_id || null, email }).eq("id", member.id);
     if (e1) { setSaving(false); notify({ kind: "error", title: "Couldn't save the member", text: "Something went wrong saving those changes. Please try again.", details: e1.message }); return; }
-    const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: member.department_id, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");   // authoritative dept id (the member_private with_check compares to my_department_id())
+    if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: deptId, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
     setSaving(false);
     onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentorId: form.mentor_id || null, email });
