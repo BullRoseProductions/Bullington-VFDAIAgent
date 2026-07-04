@@ -2811,10 +2811,50 @@ const FUNDRAISER_IDEAS = [
   { title: "Bingo or game night", key: "bingo", p: "Recurring revenue if you can host it monthly." },
   { title: "Prize raffle", key: "raffle", p: "Strong earner — but check your state's raffle/gaming rules first." },
 ];
+// Curated creative-fundraiser bank — Stage 3's brainstorm prompt samples from this as the AI's creative "taste."
+const FUNDRAISER_IDEA_BANK = {
+  "Smash & Demolition": ["Pumpkin Smash Festival","Christmas Tree Toss Competition","Plate Breaking Night","Junk Car Smash Day","TV & Electronics Smash Zone","Watermelon Catapult Challenge","Paint Balloon Demolition","Old Furniture Smash Arena","Christmas Ornament Smash","Appliance Destruction Day"],
+  "Construction Challenges": ["Build-a-Birdhouse Competition","Adult Pinewood Derby","Cardboard Boat Race","Tiny House Build-Off","Firewood Stacking Championship","Pallet Furniture Contest","LEGO Masters Community Competition","Chainsaw Carving Weekend","Birdhouse Auction Festival","Community Bench Build"],
+  "Night Events": ["Glow Dodgeball Tournament","Flashlight Scavenger Hunt","Moonlight Obstacle Course","Firefly Festival","Night Cornhole Championship","Campfire Storytelling Night","Outdoor Movie Under the Stars","Midnight Pancake Run","Lantern Walk","Glow Volleyball"],
+  "Community Challenges": ["Amazing Race Across Town","Escape Room Weekend","Town Trivia Hunt","Mystery Dinner Investigation","Hometown Olympics","Survivor Challenge","Amazing Race for Businesses","Neighborhood Bingo Challenge","Passport Around Town Event","Time Capsule Festival"],
+  "Vehicle Events": ["Antique Tractor Show","Jeep Poker Run","Side-by-Side Trail Ride","Lawnmower Grand Prix","Mini Bike Rally","Classic Truck Cruise","ATV Obstacle Challenge","Decorated Golf Cart Parade","Remote-Control Car Grand Prix","Slow Bicycle Race"],
+  "Family Events": ["Teddy Bear Clinic","Build-a-Kite Festival","Backyard Campout Night","Family Olympics","Bubble Festival","Giant Board Game Day","Giant Slip-and-Slide Day","Kids Construction Zone","Stuffed Animal Sleepover","Community Talent Show"],
+  "Seasonal Events": ["Snowball Festival (artificial if needed)","Ice Cream Crawl","Sunflower Festival","Fall Hay Maze","Pumpkin Catapult","Easter Egg Glow Hunt","Christmas Window Decorating Contest","Holiday Porch Tour","Community Snowman Contest","Scarecrow Building Weekend"],
+  "Competition Events": ["Corn Shucking Championship","Water Balloon Catapult Competition","Tug-of-War Tournament","Beard Competition","Chili Pepper Eating Contest","Ultimate Relay Race","Backyard BBQ Championship","Hot Wing Challenge","Paper Airplane Championship","Puzzle Competition"],
+  "Creative Events": ["Community Art Battle","Sidewalk Chalk Festival","Outdoor Painting Competition","Photography Scavenger Hunt","Chalk Mural Weekend","Community Quilt Project","Scrap Metal Art Competition","Ice Sculpture Weekend","Community Mural Painting","Flower Arrangement Showdown"],
+  "Totally Different": ["Rent-a-Firefighter Day (non-emergency community service)","Community Tool Lending Membership","Mystery Box Auction","Reverse Raffle Adventure Night","Sponsor a Firefighter Calendar","Adopt-a-Hydrant Program","Hidden Golden Ticket Weekend","Community Bucket List Challenge","Local Business Passport Challenge","Hero for a Day Experience (ride-along/station experience where compliant with local policy)"]
+};
+// Sample 2-3 ideas from each bank category (random per call) to seed the brainstorm's creative "taste."
+function sampleIdeaBank() {
+  const out = [];
+  for (const cat of Object.keys(FUNDRAISER_IDEA_BANK)) {
+    const pool = [...FUNDRAISER_IDEA_BANK[cat]].sort(() => Math.random() - 0.5);
+    out.push(...pool.slice(0, 2 + Math.floor(Math.random() * 2)));   // 2 or 3 per category
+  }
+  return out;
+}
+// Parse the brainstorm response into [{name, pitch}] — strips ``` fences / stray prose; null on failure.
+function parseIdeas(raw) {
+  if (!raw) return null;
+  let s = String(raw).trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  const arr = s.match(/\[[\s\S]*\]/);   // grab the first [...] if the model added prose around it
+  if (arr) s = arr[0];
+  try {
+    const parsed = JSON.parse(s);
+    if (Array.isArray(parsed) && parsed.length && parsed.every((x) => x && typeof x.name === "string" && x.name.trim() && typeof x.pitch === "string" && x.pitch.trim())) return parsed;
+  } catch { /* fall through to null */ }
+  return null;
+}
+// The full "Plan a fundraiser" system prompt — reused by generate() (CTA/letter path keeps its own) and buildPlan() (step 2 of the two-step flow).
+const PLAN_SYS = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
 function Funding({ S, role, notify, dept, meId, members }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [ideasOpen, setIdeasOpen] = useState(false);   // Event Ideas collapsed by default
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
+  const [goalAmt, setGoalAmt] = useState(""); const [communityType, setCommunityType] = useState("Small town"); const [effortLevel, setEffortLevel] = useState("Medium"); const [targetDate, setTargetDate] = useState("");   // Plan-a-fundraiser inputs
+  const [phase, setPhase] = useState("input"); const [ideas, setIdeas] = useState([]); const [chosenIdea, setChosenIdea] = useState(null); const [loadingLabel, setLoadingLabel] = useState("Working…"); const [rawIdeas, setRawIdeas] = useState("");   // two-step brainstorm→plan flow (Plan mode only)
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Funding)
   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
@@ -2849,10 +2889,41 @@ function Funding({ S, role, notify, dept, meId, members }) {
     if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadFundraiserLog();   // refetch — UI matches true DB state (covers the silent zero-rows case)
   }
+  async function brainstorm() {
+    setLoading(true); setLoadingLabel("Brainstorming ideas…"); setErr(""); setRawIdeas(""); setIdeas([]); setOut("");
+    const sampled = sampleIdeaBank().join(", ");
+    const recent = log.slice(0, 12).map((e) => `${e.name}${e.date ? ` (${e.date})` : ""}`).join("; ") || "none yet";
+    const brainstormSys = `You help volunteer fire departments brainstorm fundraisers. Given their goal, community type, effort level, and cause, propose EXACTLY 6 ideas spanning a range: ~2 proven/reliable, ~2 fresh, ~2 bold/creative. Reach for memorable, community-scale, VFD-appropriate ideas. Use these examples ONLY as creative inspiration and ADAPT them to this department's specific goal, community type, and effort level — don't just repeat them verbatim: ${sampled}. AVOID anything they ran recently: ${recent}. Return ONLY a valid JSON array of 6 objects: {"name": string, "pitch": one punchy sentence}. No text outside the JSON.`;
+    const userContent = `Goal amount: ${goalAmt || "not specified"}\nCommunity type: ${communityType}\nEffort level: ${effortLevel}\nTarget date: ${targetDate || "flexible"}\nWhat they're raising for: ${detail || "general department needs"}`;
+    try {
+      const raw = await callClaude(brainstormSys, userContent);
+      const parsed = parseIdeas(raw);
+      if (!parsed) { setRawIdeas(raw); setErr("The idea list came back in an unexpected format — showing the raw response below. Tap “Get ideas” to try again."); setLoading(false); return; }
+      setIdeas(parsed); setPhase("ideas");
+    } catch { setErr("Couldn't brainstorm ideas just now. Try again."); }
+    finally { setLoading(false); }
+  }
+  async function chooseIdea(idea) {
+    setChosenIdea(idea); setErr(""); setPhase("plan");
+    await buildPlan(idea);
+  }
+  async function buildPlan(idea) {
+    setLoading(true); setLoadingLabel("Building the plan…"); setErr(""); setOut("");
+    const planUser = `Department: ${dept?.name || "our department"}. Chosen fundraiser: ${idea.name} — ${idea.pitch}. Goal: ${goalAmt || "not specified"}. Community: ${communityType}. Effort: ${effortLevel}. Target date: ${targetDate || "flexible"}. Raising for: ${detail || "general department needs"}.`;
+    try {
+      const t = await callClaude(PLAN_SYS, planUser);   // step 2: stateless call carries the chosen idea + all context forward
+      setOut(t); setSaveTitle(idea.name.slice(0, 60));
+    } catch { setErr("Couldn't build the plan just now. Try again."); }
+    finally { setLoading(false); }
+  }
+  function backToIdeas() { setPhase("ideas"); setOut(""); setErr(""); }
+  function startOver() {
+    setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setOut(""); setErr("");
+  }
   async function generate() {
     setLoading(true); setErr(""); setOut("");
     let sys;
-    if (mode === "Plan a fundraiser") sys = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
+    if (mode === "Plan a fundraiser") sys = PLAN_SYS;
     else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
     else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
     try { const t = await callClaude(sys, `Department: ${dept?.name || "our department"}\nDetails: ${detail}`); setOut(t); setSaveTitle(detail.trim().slice(0, 60) || `${mode} · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
@@ -2901,20 +2972,57 @@ function Funding({ S, role, notify, dept, meId, members }) {
           <div style={{ ...FS.kicker, marginBottom: 8 }}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
           <div style={S.segRow}>
             {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
-              <button key={m} onClick={() => { setMode(m); setOut(""); }} style={{ ...S.segBtn, background: mode === m ? FIRE.btnBg : "transparent", borderColor: mode === m ? FIRE.red : FIRE.btnBorder, color: mode === m ? FIRE.textPrimary : FIRE.navLabel }}>{m}</button>
+              <button key={m} onClick={() => { setMode(m); setOut(""); setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setErr(""); }} style={{ ...S.segBtn, background: mode === m ? FIRE.btnBg : "transparent", borderColor: mode === m ? FIRE.red : FIRE.btnBorder, color: mode === m ? FIRE.textPrimary : FIRE.navLabel }}>{m}</button>
             ))}
           </div>
-          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tell us about it</span>
-            <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
-          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
-            {loading ? <><Loader2 size={16} className="spin" /> Working…</> : <><Sparkles size={16} /> Generate</>}
-          </button>
+          {phase === "input" && (<>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tell us about it</span>
+              <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical" }} value={detail} onChange={(e) => setDetail(e.target.value)} /></label>
+            {mode === "Plan a fundraiser" && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Goal amount</span><input style={FS.input} value={goalAmt} onChange={(e) => setGoalAmt(e.target.value)} placeholder="$5,000" /></label>
+                <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Community type</span><select style={FS.input} value={communityType} onChange={(e) => setCommunityType(e.target.value)}><option>Rural</option><option>Small town</option><option>Suburban</option></select></label>
+                <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Effort level</span><select style={FS.input} value={effortLevel} onChange={(e) => setEffortLevel(e.target.value)}><option>Quick &amp; easy</option><option>Medium</option><option>Big event</option></select></label>
+                <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Target date <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>(roughly when?)</span></span><input type="date" style={FS.input} value={targetDate} onChange={(e) => setTargetDate(e.target.value)} /></label>
+              </div>
+            )}
+            <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={mode === "Plan a fundraiser" ? brainstorm : generate} disabled={loading}>
+              {loading ? <><Loader2 size={16} className="spin" /> {loadingLabel}</> : <><Sparkles size={16} /> {mode === "Plan a fundraiser" ? "Get ideas" : "Generate"}</>}
+            </button>
+            {rawIdeas && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.textSecondary, whiteSpace: "pre-wrap", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, maxHeight: 180, overflowY: "auto" }}>{rawIdeas}</div>}
+          </>)}
+          {mode === "Plan a fundraiser" && phase === "ideas" && (<>
+            <p style={{ ...S.helpP, color: FIRE.textMuted }}>Six ideas across proven, fresh, and bold. Pick one to build a full plan — or start over to change your inputs.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+              {ideas.map((idea, i) => (
+                <div key={i} style={{ ...FS.card, padding: "10px 12px", display: "flex", flexDirection: "column" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{idea.name}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 4, flex: 1, lineHeight: 1.35 }}>{idea.pitch}</div>
+                  <button style={{ ...FS.btn, marginTop: 8, padding: "5px 9px", fontSize: 11.5, width: "100%", justifyContent: "center" }} onClick={() => chooseIdea(idea)}><Sparkles size={13} /> Build the plan</button>
+                </div>
+              ))}
+            </div>
+            <button style={{ ...FS.btn, marginTop: 10 }} onClick={startOver}><ArrowLeft size={14} /> Start over</button>
+          </>)}
+          {mode === "Plan a fundraiser" && phase === "plan" && (
+            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>
+              Building: <b style={{ color: FIRE.textPrimary }}>{chosenIdea?.name}</b>
+              {loading && <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 10, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> {loadingLabel}</span>}
+            </div>
+          )}
           {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Draft title" /></label>
               <button style={{ ...FS.btn, opacity: (saving || !saveTitle.trim()) ? 0.6 : 1 }} onClick={saveDraft} disabled={saving || !saveTitle.trim()}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save draft</>}</button>
+            </div>
+          )}
+          {mode === "Plan a fundraiser" && phase === "plan" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              {!loading && err && <button style={FS.btnPrimary} onClick={() => buildPlan(chosenIdea)}><Sparkles size={15} /> Try again</button>}
+              <button style={FS.btn} onClick={backToIdeas}><ArrowLeft size={14} /> Back to ideas</button>
+              <button style={FS.btn} onClick={startOver}>Start over</button>
             </div>
           )}
         </div>
