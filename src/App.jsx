@@ -454,7 +454,7 @@ export default function App() {
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
-          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} notify={notify} meId={myMemberId} initialTab={navArg} />}
+          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
@@ -3033,12 +3033,6 @@ const MEMBERS = [
   { id: 5, name: "Sam Whitfield", role: "Firefighter", access: ["Member"], status: "Probationary", phone: "(817) 555-0166", joined: "2026", participation: 62, certs: [{ name: "Firefighter I", exp: "2027-05" }], notes: [{ text: "Probationary. Eager, good attitude — pair with a mentor.", by: "Officer", when: "Jun 2026" }] },
   { id: 6, name: "Dana Cole", role: "Firefighter / EMT", access: ["Member"], status: "Active", phone: "(817) 555-0150", joined: "2019", participation: 84, certs: [{ name: "Firefighter II", exp: "2026-08" }, { name: "EMT-B", exp: "2027-04" }], notes: [] },
 ];
-const EVENTS = [
-  { id: 1, name: "Tuesday Drill — Ladder Throws", date: "Jun 17", type: "Drill", present: 11, total: 14 },
-  { id: 2, name: "Monthly Business Meeting", date: "Jun 10", type: "Meeting", present: 12, total: 14 },
-  { id: 3, name: "EMS Refresher — Stroke", date: "Jun 3", type: "Drill", present: 9, total: 14 },
-  { id: 4, name: "Structure Fire — Co. 2 mutual aid", date: "May 28", type: "Call", present: 7, total: 14 },
-];
 const APPARATUS_SEED = [
   { id: 1, name: "Engine 1", type: "Pumper", lastCheck: "Jun 22", by: "Daniels", status: "Pass", note: "All systems good" },
   { id: 2, name: "Brush 2", type: "Brush truck", lastCheck: "Jun 22", by: "Pearson", status: "Pass", note: "Water topped off" },
@@ -3083,7 +3077,7 @@ function Initials({ S, name, dark }) {
   return <span style={dark ? { ...S.avatar, border: `0.5px solid ${FIRE.btnBorder}` } : S.avatar}>{i}</span>;
 }
 
-function Roster({ S, role, members, setMembers, sessions, notify, meId, initialTab }) {
+function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, initialTab }) {
   const leader = isLeader(role);
   const tabs = leader
     ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ...(hasAny(role, DEPT_ADMIN_ROLES) ? [["pending", "Pending Items"]] : [])]
@@ -3105,7 +3099,7 @@ function Roster({ S, role, members, setMembers, sessions, notify, meId, initialT
       </div>
       {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
-      {tab === "attendance" && leader && <RosterAttendance S={S} members={members} />}
+      {tab === "attendance" && leader && <RosterAttendance S={S} members={members} sessions={sessions} plan={plan} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={members} notify={notify} />}
     </div>
   );
@@ -3611,19 +3605,37 @@ function RosterPending({ S, members, notify }) {
 function Bar({ S, pct, color, track }) {
   return <div style={track ? { ...S.bar, background: track } : S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
 }
-function RosterAttendance({ S, members }) {
+function RosterAttendance({ S, members, sessions, plan }) {
   const people = [...members].sort((a, b) => (b.participation ?? -1) - (a.participation ?? -1));
+  const activeMembers = (members || []).filter((m) => m.status === "Active");
+  const activeLeaders = activeMembers.filter((m) => isLeader(m.access));
+  const recentEvents = (sessions || [])
+    .filter((s) => s.done && (s.attendance || []).length > 0)   // real, roll-taken sessions
+    .sort((a, b) => new Date(b.y, b.m, b.d) - new Date(a.y, a.m, a.d))   // newest first
+    .slice(0, 6)
+    .map((s) => ({
+      id: s.id,
+      name: s.title,
+      date: new Date(s.y, s.m, s.d).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      category: (plan || []).find((p) => String(p.id) === String(s.planId))?.name || null,   // plan_id → training_plans.name
+      present: (s.attendance || []).length,
+      total: (s.audience === "leadership" ? activeLeaders : activeMembers).length,   // eligible = Active members under the audience rule
+    }));
   return (
     <div>
       <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
       <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
-        {EVENTS.map((e) => {
-          const pct = Math.round((e.present / e.total) * 100);
+        {recentEvents.length === 0 ? <div style={{ padding: "12px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
+          recentEvents.map((e) => {
+          const pct = e.total ? Math.min(100, Math.round((e.present / e.total) * 100)) : 0;   // cap display + bar at 100%; raw present/total shown as-is
           return (
             <div key={e.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ ...S.personName, color: FIRE.textPrimary }}>{e.name}</div>
-                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{e.type} · {e.date}</div>
+                <div style={{ ...S.personMeta, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span>{e.date}</span>
+                  {e.category && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px" }}>{e.category}</span>}
+                </div>
               </div>
               <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} track={FIRE.track} color={pct >= 75 ? FIRE.green : FIRE.amberText} /></div>
             </div>
