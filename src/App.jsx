@@ -3747,7 +3747,15 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
             )}
           </div>
           {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
+          {out && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+                <div style={{ ...FS.kicker, marginBottom: 0 }}>DRAFT PREVIEW</div>
+                <button title="Clear" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => { setOut(""); setErr(""); }}><X size={14} color={FIRE.deleteRed} /></button>
+              </div>
+              <RichOutput S={S} text={out} dark />
+            </div>
+          )}
         </div>
       </div>
 
