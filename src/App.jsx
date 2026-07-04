@@ -2813,6 +2813,7 @@ const FUNDRAISER_IDEAS = [
 ];
 function Funding({ S, role, notify, dept, meId, members }) {
   const [mode, setMode] = useState("Plan a fundraiser");
+  const [ideasOpen, setIdeasOpen] = useState(false);   // Event Ideas collapsed by default
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Funding)
@@ -2919,25 +2920,28 @@ function Funding({ S, role, notify, dept, meId, members }) {
         </div>
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EVENT IDEAS</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
-      <div style={S.opGrid}>
-        {FUNDRAISER_IDEAS.map((idea) => {
-          const recent = recentFor(idea);
-          return (
-            <div key={idea.title} style={{ ...S.opCard, ...FS.card }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{idea.title}</div></div>
-                {recent && <Pill S={S} color={FIRE.amberText}>DONE {recent.date}</Pill>}
+      <button onClick={() => setIdeasOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: ideasOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+        <PartyPopper size={13} style={{ verticalAlign: "-2px" }} />EVENT IDEAS ({FUNDRAISER_IDEAS.length})
+        <span style={{ marginLeft: "auto", display: "inline-flex" }}>{ideasOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+      </button>
+      {ideasOpen && (<>
+        <p style={{ ...S.helpP, color: FIRE.textMuted }}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8, marginBottom: 22 }}>
+          {FUNDRAISER_IDEAS.map((idea) => {
+            const recent = recentFor(idea);
+            return (
+              <div key={idea.title} style={{ ...FS.card, padding: "10px 12px" }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{idea.title}</div>
+                  {recent && <Pill S={S} color={FIRE.amberText}>DONE {recent.date}</Pill>}
+                </div>
+                <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.3 }}>{idea.p}</div>
+                <button style={{ ...FS.btn, marginTop: 8, padding: "5px 9px", fontSize: 11.5, width: "100%", justifyContent: "center" }} onClick={() => planThis(idea)}><Sparkles size={13} /> Plan this</button>
               </div>
-              <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{idea.p}</div>
-              <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-                <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => planThis(idea)}><Sparkles size={14} /> Plan this</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </>)}
 
       <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
       <FundingCalendar S={S} role={role} notify={notify} />
