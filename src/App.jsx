@@ -3095,7 +3095,7 @@ function Roster({ S, role, members, setMembers, sessions, notify, meId, initialT
 }
 function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
-  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState("");
+  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false);
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   async function add() {
     const email = em.trim().toLowerCase();
@@ -3145,8 +3145,13 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      {members.some((m) => m.status === "Inactive") && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive").length})`}</button>
+        </div>
+      )}
       <div style={S.opGrid}>
-        {members.map((m) => (
+        {members.filter((m) => showInactive || m.status !== "Inactive").map((m) => (
           <div key={m.id} style={{ ...S.opCard, ...FS.card, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <Initials S={S} dark name={m.name} />
