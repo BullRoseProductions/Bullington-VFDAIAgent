@@ -88,14 +88,6 @@ const DISCLAIMER =
   "For training, discussion, and planning only. Your department is responsible for compliance with local protocols, medical direction, state requirements, agency policy, and applicable law. This platform does not provide medical direction, legal advice, or certification.";
 
 /* ---- training roadmap (department memory / gap detection) ---------- */
-const ROADMAP = [
-  { topic: "Mayday Operations",     track: "Fire", months: 18, target: 6 },
-  { topic: "Pediatric Emergencies", track: "EMS",  months: 9,  target: 6 },
-  { topic: "Search & Rescue",       track: "Fire", months: 6,  target: 6 },
-  { topic: "Stroke Recognition",    track: "EMS",  months: 5,  target: 6 },
-  { topic: "Water Supply",          track: "Fire", months: 3,  target: 6 },
-  { topic: "Vehicle Extrication",   track: "Fire", months: 2,  target: 6 },
-];
 function statusOf(m, t) {
   if (m >= t * 2) return { label: "OVERDUE", color: "#B11E2A" };
   if (m >= t) return { label: "DUE NOW", color: "#E0A100" };
@@ -166,11 +158,6 @@ const SEED = [
     debrief: ["Where's your biggest financial risk?", "Who owns this plan after today?"] },
 ];
 
-const ACTIVITY = [
-  { code: "OPS-120", who: "Chief Reyes", action: "downloaded", when: "08:42" },
-  { code: "EMS-114", who: "T/O Daniels", action: "assigned to crew", when: "07:15" },
-  { code: "FIRE-118", who: "Asst. Chief Okafor", action: "saved", when: "Yesterday" },
-];
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
@@ -991,82 +978,114 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     </div>
   );
 }
+function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
+  const me = members.find((m) => m.id === meId) || null;
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DA/Board
+  const yr = new Date().getFullYear();
+  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
+  const activeCount = members.filter((m) => m.status === "Active").length;
+  const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
+  const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
+  const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
+  const drillsHeld = doneThisYear.length;
+  const todayISO = toISODate(new Date());
+  const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b))[0] || null;
+  const [duties, setDuties] = useState([]);
+  const [recruitNext, setRecruitNext] = useState(null);
+  const [prNext, setPrNext] = useState(null);
+  const [fundNext, setFundNext] = useState(null);
+  const [raised, setRaised] = useState(0);
+  const [ringOn, setRingOn] = useState(false);
+  useEffect(() => {
+    const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
+    Promise.all([
+      supabase.from("duties").select("id, done"),
+      supabase.from("recruitment_events").select("id, date, title"),
+      supabase.from("content_calendar").select("id, date, caption"),
+      supabase.from("funding_events").select("id, date, title"),
+      supabase.from("fundraiser_log").select("amount"),
+    ]).then(([du, rc, cc, fe, fl]) => {
+      setDuties(du.data || []);
+      setRecruitNext(firstUpcoming(rc.data, "date"));
+      setPrNext(firstUpcoming(cc.data, "date"));
+      setFundNext(firstUpcoming(fe.data, "date"));
+      setRaised((fl.data || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
+    });
+    const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const dutyDone = duties.filter((d) => d.done).length;
+  const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;
+  const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);   // same formula as DA/Board
+  const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
+  const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  const cards = [
+    { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${nextSession.title}` : null, nav: "training" },
+    { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: "#0E6B62", snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
+    { key: "pr",        title: "Public Relations", Icon: Calendar,      accent: "#54506B", snap: prNext ? `${fmtISO(prNext.date)} · ${prNext.caption}` : null, nav: "visibility" },
+    { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: "#9A6B12", snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
+  ];
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+          {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={FS.kicker}>{dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"}</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
+        </div>
+      </div>
+      <div style={{ ...FS.card, padding: "18px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
+          <svg width="84" height="84" viewBox="0 0 84 84">
+            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
+            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
+          </svg>
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
+            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={FS.kicker}>DEPARTMENT HEALTH</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>40% certifications · 40% attendance · 20% duty completion</div>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        <Stat S={S} dark n={`${certPct}%`} label="Certs current" warn={expdC > 0} />
+        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
+        <Stat S={S} dark n={String(activeCount)} label="Active members" />
+        <Stat S={S} dark n={String(drillsHeld)} label="Drills run" />
+      </div>
+      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+        {cards.map((c) => (
+          <div key={c.key} style={{ ...FS.card, padding: "14px 16px", borderTop: `3px solid ${c.accent}`, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><c.Icon size={16} color={c.accent} /><span style={{ fontWeight: 700, color: FIRE.textPrimary }}>{c.title}</span></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {c.snap ? <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.4 }}>{c.snap}</div> : <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled</div>}
+              {c.extra && <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.greenText, marginTop: 4 }}>{c.extra}</div>}
+            </div>
+            <button style={{ ...FS.btn, marginTop: 10, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12.5 }} onClick={() => go(c.nav)}>Open <ChevronRight size={14} /></button>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 18, marginBottom: 6 }}>
+        <Announcements role={role} members={members} meId={meId} notify={notify} />
+        <div style={{ minWidth: 0 }}>
+          <DashboardCalendar S={S} notify={notify} withImportanceMode />
+        </div>
+      </div>
+    </div>
+  );
+}
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
   if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isBoard(role) && !hasAny(role, ['Officer'])) return <BoardDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
-  const featured = library.find((p) => p.id === "fire-118");
-  const sorted = [...ROADMAP].sort((a, b) => (b.months - b.target) - (a.months - a.target));
-  const next = sorted[0];
-  const me = members.find((m) => m.id === meId) || null;
-  return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>THIS WATCH</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Here's where your crew stands this month.</div>
-      </div>
-
-      <div style={S.statRow}>
-        <Stat S={S} dark n="6" label="Topics tracked" />
-        <Stat S={S} dark n="2" label="Overdue for training" warn />
-        <Stat S={S} dark n="9" label="Packets in library" />
-        <Stat S={S} dark n="14" label="Active members" />
-      </div>
-
-      <DashboardCalendar S={S} notify={notify} />
-
-      <Announcements role={role} members={members} meId={meId} notify={notify} style={{ marginTop: 18 }} />
-
-      <div style={S.dashGrid}>
-        <div style={{ ...S.featCard, ...FS.card }}>
-          <div style={S.featStripe} />
-          <div style={S.featInner}>
-            <div style={{ ...FS.kicker, marginBottom: 8 }}>BUILD THIS WEEK</div>
-            <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{featured.title}</h3>
-            <p style={{ ...S.featObj, color: FIRE.textSecondary }}>{featured.objective}</p>
-            <div style={S.metaRow}><Meta Icon={Clock} dark text={featured.time} /><Meta Icon={Users} dark text={featured.level} /><TrackPill S={S} track={featured.track} /></div>
-            <button style={FS.btnPrimary} onClick={() => openPacket(featured.id)}>Open packet <ChevronRight size={16} /></button>
-          </div>
-        </div>
-        <div style={{ ...S.logCard, ...FS.card }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}>STATION LOG</div>
-          {ACTIVITY.map((a, i) => (
-            <div key={i} style={{ ...S.logRow, borderBottom: `0.5px solid ${FIRE.hairline}`, color: FIRE.textSecondary }}><span style={{ ...S.logTime, color: FIRE.textMuted }}>{a.when}</span>
-              <span style={S.logText}><strong style={{ color: FIRE.textPrimary }}>{a.who}</strong> {a.action} <span style={{ ...S.logCode, color: FIRE.textMuted }}>{a.code}</span></span></div>
-          ))}
-          <button style={FS.btn} onClick={() => go("training")}><Sparkles size={15} /> Draft a drill with AI</button>
-        </div>
-      </div>
-
-      {/* Training roadmap — department memory / gap detection */}
-      <div style={{ ...S.roadCard, ...FS.card }}>
-        <div style={S.roadHead}>
-          <div><div style={{ ...FS.kicker, marginBottom: 8 }}><TrendingUp size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING ROADMAP</div>
-            <h3 style={{ ...S.roadTitle, color: FIRE.textPrimary }}>What your crew hasn't trained lately</h3></div>
-        </div>
-        <div style={{ ...S.roadRecommend, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary }}>
-          <Sparkles size={16} color={FIRE.amberText} />
-          <span>Recommended next: <strong>{next.topic}</strong> — last trained {next.months} months ago.</span>
-        </div>
-        <div style={S.roadList}>
-          {sorted.map((r) => {
-            const st = statusOf(r.months, r.target); const T = TRACKS[r.track];
-            return (
-              <div key={r.topic} style={{ ...S.roadRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-                <T.Icon size={15} color={T.accent} style={{ flexShrink: 0 }} />
-                <span style={{ ...S.roadTopic, color: FIRE.textPrimary }}>{r.topic}</span>
-                <span style={{ ...S.roadAgo, color: FIRE.textMuted }}>{r.months} mo ago</span>
-                <span style={{ ...S.roadChip, color: st.color, borderColor: `${st.color}55`, background: `${st.color}12` }}>{st.label}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <QuickAccess S={S} role={role} go={go} />
-    </div>
-  );
+  return <OfficerDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
 }
 
 /* ---------------- Quick access (home page doorways) ---------------- */
