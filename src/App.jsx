@@ -997,6 +997,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const [fundNext, setFundNext] = useState(null);
   const [raised, setRaised] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight
+  const [draftFor, setDraftFor] = useState(null); const [draftText, setDraftText] = useState(""); const [draftLoading, setDraftLoading] = useState(false); const [draftErr, setDraftErr] = useState(""); const [copied, setCopied] = useState(false);   // Stage 2: AI draft (approve-before-send), one open at a time
   const [ringOn, setRingOn] = useState(false);
   useEffect(() => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
@@ -1038,6 +1039,31 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
     return { type: "attendance", memberId: m.id, memberName: m.name, days: refISO ? dayDiff(todayISO, refISO) : null, attendedEver };
   }).filter((x) => x && x.days != null && x.days > 30).sort((a, b) => b.days - a.days);   // real gaps > 30 days, biggest first
   const overdueItems = (openItems || []).filter((r) => r.due_date && r.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")).map((r) => ({ type: "overdue", itemId: r.id, task: r.text, assigneeName: r.assigned_to ? (nameById.get(r.assigned_to) || "Unassigned") : "Unassigned", daysOverdue: dayDiff(todayISO, r.due_date), sourceLabel: r.source_label || null }));
+  const checkInSys = "You're a volunteer fire department officer writing a brief, WARM, non-punitive check-in text to a member who hasn't been to training in a while. Caring, not scolding — you're glad they're part of the crew and hoping they can make it back. 2-3 sentences, friendly, texting tone. Return ONLY the message.";
+  const reminderSys = "You're a volunteer fire department officer writing a brief, friendly reminder text about a task that's past due. A gentle nudge, not a demand — offer help. 2-3 sentences, texting tone. Return ONLY the message.";
+  async function runDraft(key, sys, ctx) {
+    setDraftFor(key); setDraftText(""); setDraftErr(""); setCopied(false); setDraftLoading(true);
+    try { const t = await callClaude(sys, ctx); setDraftText(t); }
+    catch { setDraftErr("Couldn't draft that just now — try again."); }
+    finally { setDraftLoading(false); }
+  }
+  function closeDraft() { setDraftFor(null); setDraftText(""); setDraftErr(""); setCopied(false); }
+  async function copyDraft() { try { await navigator.clipboard.writeText(draftText); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setDraftErr("Couldn't copy — select the text and copy manually."); } }
+  const draftBox = (key, sys, ctx) => (
+    <div style={{ marginTop: 6, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+      {draftLoading ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Drafting…</div>
+      ) : draftErr ? (
+        <div style={{ fontSize: 12.5, color: FIRE.redText, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span>{draftErr}</span><button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => runDraft(key, sys, ctx)}>Retry</button></div>
+      ) : (<>
+        <textarea style={{ ...FS.input, minHeight: 74, resize: "vertical", fontSize: 13, width: "100%" }} value={draftText} onChange={(e) => setDraftText(e.target.value)} />
+        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+          <button style={FS.btnPrimary} onClick={copyDraft}>{copied ? <><CheckCircle2 size={15} /> Copied!</> : <><ClipboardCheck size={15} /> Copy</>}</button>
+          <button style={FS.btn} onClick={closeDraft}>Close</button>
+        </div>
+      </>)}
+    </div>
+  );
   const cards = [
     { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${nextSession.title}` : null, nav: "training" },
     { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: "#0E6B62", snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
@@ -1101,28 +1127,38 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         <div style={{ ...FS.card, padding: "14px 16px", fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={15} color={FIRE.green} /> All caught up — no attendance gaps or overdue assignments.</div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-          {overdueItems.map((ins) => (
-            <div key={`o-${ins.itemId}`} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {overdueItems.map((ins) => {
+            const key = `o-${ins.itemId}`;
+            const ctx = `Assignee: ${ins.assigneeName}. Task: ${ins.task}. Overdue by ${ins.daysOverdue} day${ins.daysOverdue === 1 ? "" : "s"}.${ins.sourceLabel ? ` Context: ${ins.sourceLabel}.` : ""}`;
+            return (
+            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.assigneeName}</b>'s “{ins.task}” was due {ins.daysOverdue} day{ins.daysOverdue === 1 ? "" : "s"} ago</div>
                 {ins.sourceLabel && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{ins.sourceLabel}</div>}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View task</button>
-                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: 0.55 }} disabled title="AI drafting — Stage 2">Draft reminder</button>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, reminderSys, ctx)}>Draft reminder</button>
               </div>
+              {draftFor === key && draftBox(key, reminderSys, ctx)}
             </div>
-          ))}
-          {attendanceGaps.map((ins) => (
-            <div key={`a-${ins.memberId}`} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            );
+          })}
+          {attendanceGaps.map((ins) => {
+            const key = `a-${ins.memberId}`;
+            const ctx = `Member: ${ins.memberName}. ${ins.attendedEver ? `Hasn't been to training in ${ins.days} days.` : `Hasn't made it to any training since joining (${ins.days} days).`}`;
+            return (
+            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}>{ins.attendedEver ? <><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</> : <><b>{ins.memberName}</b> hasn't attended any training since joining ({ins.days} days)</>}</div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: 0.55 }} disabled title="AI drafting — Stage 2">Draft check-in</button>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, checkInSys, ctx)}>Draft check-in</button>
               </div>
+              {draftFor === key && draftBox(key, checkInSys, ctx)}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
