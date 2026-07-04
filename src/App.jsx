@@ -463,7 +463,7 @@ export default function App() {
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} initialMode={navArg} />}
-          {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />}
+          {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />}
           {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
         </main>
@@ -3588,7 +3588,7 @@ function RosterAttendance({ S, members }) {
     </div>
   );
 }
-function RosterReports({ S, members, sessions, dept, back }) {
+function RosterReports({ S, role, members, sessions, dept, back, meId, notify }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const active = members.filter((m) => m.status === "Active").length;
   const prob = members.filter((m) => m.status === "Probationary").length;
@@ -3674,6 +3674,18 @@ function RosterReports({ S, members, sessions, dept, back }) {
     const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's live data. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
+  const [saving, setSaving] = useState(false);
+  async function saveReport() {
+    if (!out) return;
+    setSaving(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const title = `Chief's Report — ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "report", title, ai_text: out, created_by: meId });   // feature MUST be "report" → DA/PA-only INSERT branch
+    setSaving(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the report", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Report saved." });
+  }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
@@ -3710,6 +3722,11 @@ function RosterReports({ S, members, sessions, dept, back }) {
               onClick={() => downloadDepartmentReport(buildReportData())}>
               <Download size={16} /> Download PDF
             </button>
+            {isDeptAdmin(role) && out && (
+              <button style={{ ...FS.btn, opacity: saving ? 0.7 : 1 }} onClick={saveReport} disabled={saving}>
+                {saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save report</>}
+              </button>
+            )}
           </div>
           {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
@@ -3721,10 +3738,10 @@ function RosterReports({ S, members, sessions, dept, back }) {
 
 /* ---------------- Reports (leadership reporting hub) ---------------- */
 // Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
-function Reports({ S, role, members, sessions, dept }) {
+function Reports({ S, role, members, sessions, dept, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; "attendance" | "chief"
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
-  if (view === "chief") return <RosterReports S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
+  if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
