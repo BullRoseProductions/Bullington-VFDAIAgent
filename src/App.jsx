@@ -4833,6 +4833,8 @@ function Apparatus({ S, role, members, meId, notify }) {
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
   const [adding, setAdding] = useState(false);
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
+  const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
+  const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper" });
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const loadRigs = () => {
     supabase.from("apparatus")
@@ -4854,6 +4856,13 @@ function Apparatus({ S, role, members, meId, notify }) {
     const { data, error } = await supabase.from("apparatus").update({ status, note, last_check_at: new Date().toISOString(), checked_by: meId }).eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't log the check", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: a silent RLS block fails loudly, not as false success
     loadRigs();   // refetch — UI matches true DB state
+  }
+  function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper" }); }
+  async function saveEditRig(id) {
+    if (!rigBuf.name.trim()) return;
+    const { data, error } = await supabase.from("apparatus").update({ name: rigBuf.name.trim(), type: rigBuf.type }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the apparatus", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS block fails loudly
+    setEditingRigId(null); loadRigs();
   }
   async function addRig() {
     if (!nm.trim()) return;
@@ -4905,6 +4914,7 @@ function Apparatus({ S, role, members, meId, notify }) {
                 <Truck size={20} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
                 <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>
+                {canManage && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
                 {canManage && <button title="Take out of station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
               {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
@@ -4915,6 +4925,14 @@ function Apparatus({ S, role, members, meId, notify }) {
                   <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => { const n = window.prompt("What needs attention on this rig? (short note)"); if (n === null) return; logCheck(r.id, "Needs attention", n.trim() || "Flagged — needs attention"); }}><AlertTriangle size={14} color={FIRE.redText} /> Needs attention</button>
                 </div>
               </div>
+              {editingRigId === r.id && (
+                <div style={{ ...FS.card, padding: 14, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={rigBuf.name} onChange={(e) => setRigBuf((b) => ({ ...b, name: e.target.value }))} /></label>
+                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={rigBuf.type} onChange={(e) => setRigBuf((b) => ({ ...b, type: e.target.value }))}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
+                  <button style={FS.btnPrimary} onClick={() => saveEditRig(r.id)}><CheckCircle2 size={15} /> Save</button>
+                  <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -4943,6 +4961,8 @@ function MaintenancePanel({ S, role, rigs, notify }) {
   const [items, setItems] = useState([]);
   const [adding, setAdding] = useState(false);
   const [u, setU] = useState(rigs[0]?.name || "All units"); const [t, setT] = useState(""); const [cad, setCad] = useState("Monthly");
+  const [editingMaintId, setEditingMaintId] = useState(null);   // which maintenance item is in inline edit (separate from rigs)
+  const [maintBuf, setMaintBuf] = useState({ task: "", cadence: "Monthly" });
   const rigNameById = new Map((rigs || []).map((r) => [r.id, r.name]));
   const loadMaint = () => {
     supabase.from("apparatus_maintenance")
@@ -4968,6 +4988,13 @@ function MaintenancePanel({ S, role, rigs, notify }) {
     const { data, error } = await supabase.from("apparatus_maintenance").update({ last_done_at: new Date().toISOString() }).eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS block fails loudly
     loadMaint();
+  }
+  function startEditMaint(i) { setEditingMaintId(i.id); setMaintBuf({ task: i.task || "", cadence: i.cadence || "Monthly" }); }
+  async function saveEditMaint(id) {
+    if (!maintBuf.task.trim()) return;
+    const { data, error } = await supabase.from("apparatus_maintenance").update({ task: maintBuf.task.trim(), cadence: maintBuf.cadence }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the item", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS block fails loudly
+    setEditingMaintId(null); loadMaint();
   }
   async function addItem() {
     if (!t.trim()) return;
@@ -5015,7 +5042,16 @@ function MaintenancePanel({ S, role, rigs, notify }) {
             </div>
             <Pill S={S} color={MAINT_FIRE[i.status]}>{i.status.toUpperCase()}</Pill>
             <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
+            {canManage && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
             {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+            {editingMaintId === i.id && (
+              <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={maintBuf.task} onChange={(e) => setMaintBuf((b) => ({ ...b, task: e.target.value }))} /></label>
+                <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cadence</span><select style={FS.input} value={maintBuf.cadence} onChange={(e) => setMaintBuf((b) => ({ ...b, cadence: e.target.value }))}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
+                <button style={FS.btnPrimary} onClick={() => saveEditMaint(i.id)}><CheckCircle2 size={15} /> Save</button>
+                <button style={FS.btn} onClick={() => setEditingMaintId(null)}>Cancel</button>
+              </div>
+            )}
           </div>
         ))}
       </div>
