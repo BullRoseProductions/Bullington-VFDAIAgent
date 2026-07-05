@@ -862,6 +862,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [pendingCerts, setPendingCerts] = useState([]);
   const [openActions, setOpenActions] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // full open action_items rows → computeInsights
+  const [attnOpen, setAttnOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible; default expanded
   const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   useEffect(() => {
     supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
@@ -881,6 +882,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   const insights = computeInsights({ sessions, members, openItems, todayISO });
   const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0;
+  const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length;   // 3 count-card categories (non-zero) + per-person insight cards
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
@@ -920,7 +922,11 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
         <Stat S={S} dark n={String(openActions)} label="Open action items" />
       </div>
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
+      <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+        <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
+        <span style={{ marginLeft: "auto", display: "inline-flex" }}>{attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+      </button>
+      {attnOpen && (<>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
         <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -956,6 +962,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       </div>
       {hasInsights && <div style={{ ...FS.kicker, marginTop: 14, marginBottom: 8, opacity: 0.7 }}>PEOPLE TO REACH OUT TO</div>}
       <InsightCards insights={insights} go={go} bare />
+      </>)}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
@@ -1041,12 +1048,18 @@ function useInsightDrafts() {
 function InsightCards({ insights, go, bare }) {
   const { attendanceGaps, overdueItems } = insights;
   const { draftFor, runDraft, draftBox } = useInsightDrafts();
+  const [open, setOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible (non-bare mode); default expanded
   const isEmpty = attendanceGaps.length === 0 && overdueItems.length === 0;
   if (bare && isEmpty) return null;   // bare (DA): no kicker, no empty-state — render nothing when there's nothing
   return (
     <>
-      {!bare && <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>}
-      {isEmpty ? (
+      {!bare && (
+        <button onClick={() => setOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: open ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+          <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attendanceGaps.length + overdueItems.length})
+          <span style={{ marginLeft: "auto", display: "inline-flex" }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+        </button>
+      )}
+      {(bare || open) && (isEmpty ? (
         <div style={{ ...FS.card, padding: "14px 16px", fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={15} color={FIRE.green} /> All caught up — no attendance gaps or overdue assignments.</div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
@@ -1083,7 +1096,7 @@ function InsightCards({ insights, go, bare }) {
             );
           })}
         </div>
-      )}
+      ))}
     </>
   );
 }
