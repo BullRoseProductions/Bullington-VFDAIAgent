@@ -159,6 +159,50 @@ const SEED = [
 ];
 
 
+/* ---------------- Settings & Support hub (card → sub-screen, mirrors Reports) ---------------- */
+const SUPPORT_EMAIL = "ashlea@bullroseproductions.com";
+function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests }) {
+  const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
+  const isDA = isDeptAdmin(role);
+  const back = () => setView(null);
+  const backBtn = <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Settings &amp; Support</button>;
+  const shell = (node) => <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>{node}</div>;
+  const doc = (title, body) => shell(<>{backBtn}<h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "0 0 12px", letterSpacing: "-0.01em" }}>{title}</h1><div style={{ ...FS.card, padding: 18, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>{body}</div></>);
+  // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
+  if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
+  if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><div style={{ ...FS.card, padding: 18, marginTop: 12 }}><div style={FS.kicker}>CONTACT SUPPORT</div><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></div></div>;
+  if (view === "dept") return doc("Department Settings", "Edit your department's name, station number, and city — coming in the next update.");
+  if (view === "privacy") return doc("Privacy Policy", "Full text to be added before pilot.");
+  if (view === "terms") return doc("Terms of Agreement", "Full text to be added before pilot.");
+  if (view === "about") return doc("About", <>Before the Call<br />© 2026 BullRose Productions. All rights reserved.</>);
+  const card = (key, Icon, title, desc) => (
+    <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+        <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
+      </div>
+      <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{desc}</div>
+      <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+        <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+      </div>
+    </div>
+  );
+  return shell(<>
+    <div style={{ marginBottom: 16 }}>
+      <div style={FS.kicker}>SETTINGS &amp; SUPPORT</div>
+      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Settings &amp; Support</h1>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Your department settings, brand, and help — all in one place.</div>
+    </div>
+    <div style={S.opGrid}>
+      {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
+      {card("brand", Palette, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
+      {card("support", Mail, "Support & Contact", "Get help, send feedback, or request custom training.")}
+      {card("privacy", ShieldAlert, "Privacy Policy", "How your department's data is handled.")}
+      {card("terms", FileText, "Terms of Agreement", "The terms of using Before the Call.")}
+      {card("about", Award, "About", "App info and copyright.")}
+    </div>
+  </>);
+}
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
@@ -170,13 +214,12 @@ const NAV = [
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
-  { key: "brand", label: "Media Builder", Icon: ImageIcon, roles: LEADERSHIP },
   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
-  { key: "request", label: "Request Custom Training", Icon: Send, roles: ["Project Admin", "Department Admin", "Officer"] },
+  { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
 ];
 
@@ -464,12 +507,11 @@ export default function App() {
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
-          {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} initialMode={navArg} />}
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />}
-          {screen === "request" && <RequestForm S={S} requests={requests} setRequests={setRequests} />}
+          {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
         </main>
       </div>
