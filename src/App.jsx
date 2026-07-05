@@ -1802,7 +1802,12 @@ function StudySession({ S }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const reset = () => { setTurns([]); setInput(""); setErr(""); };
+  const [quizLen, setQuizLen] = useState(5);        // structured-quiz length (5/10/20)
+  const [quizN, setQuizN] = useState(0);            // active structured quiz target (0 = none)
+  const [results, setResults] = useState([]);        // [{ q, verdict: 'CORRECT'|'INCORRECT'|'PARTIAL'|'UNSCORED' }]
+  const [pendingQ, setPendingQ] = useState(null);    // the question currently awaiting an answer
+  const [quizDone, setQuizDone] = useState(false);
+  const reset = () => { setTurns([]); setInput(""); setErr(""); setQuizN(0); setResults([]); setPendingQ(null); setQuizDone(false); };
   const sysFor = (c, m) => {
     const qual = isDeptQual(c);
     const base = qual
@@ -1810,7 +1815,7 @@ function StudySession({ S }) {
       : `You are a cert-aware study tutor for a volunteer firefighter preparing for their ${c} certification. Stay within the scope of ${c}.`;
     const quiz = qual
       ? `SKILL-CHECK MODE: Walk the member through what this qualification requires them to DEMONSTRATE — the practical steps, equipment, and sign-off criteria — one focus area at a time. Ask them to describe how they'd perform it and give feedback. This is a skill check, not a written test.`
-      : `QUIZ MODE: Ask exam-style questions ONE AT A TIME. After the member answers, say whether it's correct, partially correct, or incorrect and briefly explain WHY, then ask the next question. Be encouraging and supportive — this is practice, not a real exam.`;
+      : `QUIZ MODE (one question at a time): If my message asks you to pose a question (for example "ask me question 3 of 10"), ASK exactly that — one exam-style ${c} question, no marker, no evaluation, and do not reveal the answer. Otherwise treat my message as my ANSWER to the question you just asked: your reply MUST begin with a single marker as its very first characters — exactly [CORRECT], [INCORRECT], or [PARTIAL] — then a brief, encouraging explanation of WHY (the correct answer + the reasoning). Do NOT ask a new question inside an evaluation.`;
     const explain = qual
       ? `EXPLAIN MODE: The member asks how to perform or prepare for this qualification's demonstration. Teach the practical skill clearly and answer follow-up questions in context.`
       : `EXPLAIN MODE: The member asks concept questions. Teach clearly and practically at the right level for ${c}, and answer follow-up questions in context.`;
@@ -1839,6 +1844,48 @@ function StudySession({ S }) {
     true
   );
   const submit = () => { const t = input.trim(); if (!t || loading) return; send(t, false); };
+  // --- Structured quiz (regular certs in Quiz mode only; Explain + dept-qual Skill-check use send()/startQuiz above, unchanged) ---
+  const structuredQuiz = mode === "quiz" && !isDeptQual(cert);
+  const VERDICT_RE = /^\s*\[(CORRECT|INCORRECT|PARTIAL)\]/i;
+  const score = results.filter((r) => r.verdict === "CORRECT").length;
+  const missed = results.filter((r) => r.verdict === "INCORRECT" || r.verdict === "PARTIAL");
+  const unscored = results.filter((r) => r.verdict === "UNSCORED");
+  async function askFresh(base, isFirst) {   // build from an explicit base (avoids stale-turns races on start)
+    setTurns(base); setLoading(true); setErr("");
+    try {
+      const q = await callClaudeChat(sysFor(cert, mode), base.map(({ role, content }) => ({ role, content })));
+      setTurns([...base, { role: "assistant", content: q }]);
+      setPendingQ(q);
+    } catch { setErr("Couldn't load the question — try again."); if (isFirst) { setTurns([]); setQuizN(0); } else setTurns(base.slice(0, -1)); }
+    finally { setLoading(false); }
+  }
+  function startStructuredQuiz(len) {
+    setInput(""); setResults([]); setQuizDone(false); setPendingQ(null); setQuizN(len);
+    askFresh([{ role: "user", content: `Start the quiz. Ask me question 1 of ${len} for the ${cert} certification — one exam-style question only. No marker, no evaluation, and do not reveal the answer.`, hidden: true }], true);
+  }
+  function nextQuestion() {
+    const n = results.length + 1;
+    askFresh([...turns, { role: "user", content: `Ask me question ${n} of ${quizN} for the ${cert} certification — one exam-style question only. No marker, no evaluation, and do not reveal the answer.`, hidden: true }], false);
+  }
+  async function submitAnswer() {
+    const answer = input.trim();
+    if (!answer || loading || !pendingQ) return;
+    const q = pendingQ, prev = turns, nextTurns = [...turns, { role: "user", content: answer }];
+    setTurns(nextTurns); setInput(""); setPendingQ(null); setLoading(true); setErr("");
+    try {
+      const raw = await callClaudeChat(sysFor(cert, mode), nextTurns.map(({ role, content }) => ({ role, content })));
+      const mk = raw.match(VERDICT_RE);
+      const verdict = mk ? mk[1].toUpperCase() : "UNSCORED";      // missing/garbled marker → unscored (never crash)
+      const display = raw.replace(VERDICT_RE, "").trim();          // strip the marker from what the member sees
+      const done = results.length + 1 >= quizN;
+      setTurns((t) => [...t, { role: "assistant", content: raw, display }]);
+      setResults((r) => [...r, { q, verdict }]);
+      if (done) setQuizDone(true);
+    } catch {
+      setErr("Couldn't reach the tutor just now — try again.");
+      setTurns(prev); setInput(answer); setPendingQ(q);            // roll back → thread stays alternating, answer restored
+    } finally { setLoading(false); }
+  }
   const visible = turns.filter((t) => !t.hidden);
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -1863,13 +1910,16 @@ function StudySession({ S }) {
         </div>
       </div>
       <Disclaimer S={S} compact dark />
+      {structuredQuiz && quizN > 0 && !quizDone && (
+        <div style={{ ...FS.kicker, marginTop: 12, color: FIRE.textSecondary }}>Question {Math.min(results.length + (pendingQ ? 1 : 0), quizN)} of {quizN} · Score {score}/{results.length}</div>
+      )}
       <div style={{ marginTop: 12 }}>
         {visible.map((t, i) => (
           <div key={i} style={{ marginBottom: 10 }}>
             {t.role === "user" ? (
-              <div style={{ ...FS.card, padding: "10px 14px", fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.content}</div>
+              <div style={{ ...FS.card, padding: "10px 14px", fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.display ?? t.content}</div>
             ) : (
-              <div style={{ ...FS.card, padding: "12px 16px" }}><RichOutput S={S} text={t.content} dark /></div>
+              <div style={{ ...FS.card, padding: "12px 16px" }}><RichOutput S={S} text={t.display ?? t.content} dark /></div>
             )}
           </div>
         ))}
@@ -1877,15 +1927,50 @@ function StudySession({ S }) {
         {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
       </div>
       <div style={{ marginTop: 12 }}>
-        {mode === "quiz" && visible.length === 0 ? (
-          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
+        {structuredQuiz ? (
+          quizN === 0 ? (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length:</span>
+              <div style={S.segRow}>
+                {[5, 10, 20].map((n) => (
+                  <button key={n} onClick={() => setQuizLen(n)} style={{ ...S.segBtn, background: quizLen === n ? FIRE.btnBg : "transparent", borderColor: quizLen === n ? FIRE.red : FIRE.btnBorder, color: quizLen === n ? FIRE.textPrimary : FIRE.navLabel }}>{n}</button>
+                ))}
+              </div>
+              <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={() => startStructuredQuiz(quizLen)} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
+            </div>
+          ) : quizDone ? (
+            <div style={{ ...FS.card, padding: "16px 18px" }}>
+              <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 22, fontWeight: 700, color: FIRE.textPrimary }}>You got {score} of {quizN}</div>
+              {unscored.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{unscored.length} question{unscored.length === 1 ? "" : "s"} couldn't be auto-scored.</div>}
+              {missed.length > 0 ? (<>
+                <div style={{ ...FS.kicker, marginTop: 12, marginBottom: 6 }}>Review these</div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {missed.map((m, i) => <li key={i} style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 4, lineHeight: 1.4 }}>{m.q}</li>)}
+                </ul>
+              </>) : <div style={{ fontSize: 13, color: FIRE.greenText, marginTop: 8 }}>Perfect run — nothing to review. 🎉</div>}
+              <button style={{ ...FS.btnPrimary, marginTop: 14 }} onClick={reset}><BookOpen size={16} /> Start another quiz</button>
+            </div>
+          ) : pendingQ ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder="Type your answer…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitAnswer()} disabled={loading} />
+              <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submitAnswer} disabled={loading || !input.trim()}>Submit answer</button>
+            </div>
+          ) : (
+            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={nextQuestion} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Loading…</> : "Next question →"}</button>
+          )
         ) : (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder={mode === "quiz" ? (isDeptQual(cert) ? "Describe how you'd do it…" : "Type your answer…") : `Ask a ${cert} question…`} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
-            <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>{mode === "quiz" ? "Submit answer" : "Ask"}</button>
-          </div>
+          <>
+            {mode === "quiz" && visible.length === 0 ? (
+              <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
+            ) : (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder={mode === "quiz" ? (isDeptQual(cert) ? "Describe how you'd do it…" : "Type your answer…") : `Ask a ${cert} question…`} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
+                <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>{mode === "quiz" ? "Submit answer" : "Ask"}</button>
+              </div>
+            )}
+            {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Start over</button>}
+          </>
         )}
-        {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Start over</button>}
       </div>
     </div>
   );
