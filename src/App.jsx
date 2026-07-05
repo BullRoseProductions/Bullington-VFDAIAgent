@@ -299,7 +299,21 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, logo_url").eq("id", id).single().then(({ data }) => { if (data) setDept(data); });
+      supabase.from("departments").select("name, station, primary_color, accent_color, font, tagline, voice, logo_url").eq("id", id).single().then(({ data }) => {
+        if (!data) return;
+        setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
+        setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
+          name: data.name ?? DEFAULT_BRAND.name,
+          station: data.station ?? DEFAULT_BRAND.station,
+          primary: data.primary_color ?? DEFAULT_BRAND.primary,
+          accent: data.accent_color ?? DEFAULT_BRAND.accent,
+          font: data.font ?? DEFAULT_BRAND.font,
+          tagline: data.tagline ?? DEFAULT_BRAND.tagline,
+          voice: data.voice ?? DEFAULT_BRAND.voice,
+          logo: data.logo_url ?? DEFAULT_BRAND.logo,
+          guidelines: [],                                 // no departments column yet → stays local (Stage 2 decision)
+        });
+      });
     });
   }, [authEmail]);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
