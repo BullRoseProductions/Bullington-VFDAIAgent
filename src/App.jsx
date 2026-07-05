@@ -1760,6 +1760,17 @@ async function callClaude(system, user) {
   if (!res.ok || data.error) throw new Error(data.error || "AI request failed");
   return data.text || "";
 }
+// Multi-turn variant — posts a full conversation array. messages = [{ role: 'user'|'assistant', content }, …].
+// Backward-compatible with callClaude: same endpoint, same return; the proxy branches on `messages`.
+async function callClaudeChat(system, messages) {
+  const res = await fetch("/api/claude", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ system, messages }),
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) throw new Error(data.error || "AI request failed");
+  return data.text || "";
+}
 
 /* ---------------- Plan feedback loop ---------------- */
 const CRITIQUE_TAGS = ["Too advanced", "Too basic", "Unsafe for our crew", "Wrong equipment", "Didn't fit the time", "Not realistic"];

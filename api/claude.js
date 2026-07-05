@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   if (!key) {
     return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY" });
   }
-  const { system, user } = req.body || {};
+  const { system, user, messages } = req.body || {};
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
         model: "claude-sonnet-4-6",
         max_tokens: 2000,
         system,
-        messages: [{ role: "user", content: user }],
+        messages: Array.isArray(messages) && messages.length ? messages : [{ role: "user", content: user }],   // multi-turn if `messages` given; else the existing single-shot path
       }),
     });
     const data = await r.json();
