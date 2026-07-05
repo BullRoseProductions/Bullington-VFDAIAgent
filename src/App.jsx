@@ -861,11 +861,12 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
   const [openActions, setOpenActions] = useState(0);
+  const [openItems, setOpenItems] = useState([]);   // full open action_items rows → computeInsights
   const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   useEffect(() => {
     supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
-    supabase.from("action_items").select("id").eq("status", "open").then(({ data }) => setOpenActions((data || []).length));   // dept-scoped by RLS (leaders read own dept)
+    supabase.from("action_items").select("*").eq("status", "open").then(({ data }) => { setOpenItems(data || []); setOpenActions((data || []).length); });   // full rows: count for the stat + rows for insights; dept-scoped by RLS
     const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
   }, []);
   const openDuties = duties.filter((d) => !d.done);
@@ -878,6 +879,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;   // done/total; no duties = nothing outstanding = 100
   const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);        // 40% certs · 40% attendance · 20% duty completion
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
+  const insights = computeInsights({ sessions, members, openItems, todayISO });
+  const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
@@ -951,6 +954,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster", "pending")}>Review approvals</button>
         </div>
       </div>
+      {hasInsights && <div style={{ ...FS.kicker, marginTop: 14, marginBottom: 8, opacity: 0.7 }}>PEOPLE TO REACH OUT TO</div>}
+      <InsightCards insights={insights} go={go} bare />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
@@ -978,6 +983,110 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     </div>
   );
 }
+/* ---- Shared 'Needs your attention' insights (Officer + DeptAdmin) ---- */
+const CHECKIN_SYS = "You're a volunteer fire department officer writing a brief, WARM, non-punitive check-in text to a member who hasn't been to training in a while. Caring, not scolding — you're glad they're part of the crew and hoping they can make it back. 2-3 sentences, friendly, texting tone. Return ONLY the message.";
+const REMINDER_SYS = "You're a volunteer fire department officer writing a brief, friendly reminder text about a task that's past due. A gentle nudge, not a demand — offer help. 2-3 sentences, texting tone. Return ONLY the message.";
+// Pure compute — attendanceGaps (guardrailed) + overdueItems. Needs sessions, members, openItems (open action_items rows), todayISO.
+function computeInsights({ sessions, members, openItems, todayISO }) {
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
+  const eligibleFor = (m, s) => isLeader(m.access) || s.audience !== "leadership";   // same audience rule as deptAttendance / RECENT EVENTS
+  const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
+  const isPureBoard = (m) => isBoard(m.access) && !hasAny(m.access, ["Member", "Officer", "Department Admin", "Project Admin"]);   // governance-only → not expected at drills (overdue-items still flags them)
+  const attendanceGaps = pastDone.length === 0 ? [] : (members || []).filter((m) => m.status === "Active" && !isPureBoard(m)).map((m) => {
+    const joinedISO = m.joined ? `${String(m.joined).slice(0, 4)}-01-01` : null;   // members prop only has the join YEAR (member_private.joined_date is DA/PA-scoped)
+    const eligible = pastDone.filter((s) => eligibleFor(m, s) && (!joinedISO || toISODate(sessDate(s)) >= joinedISO));   // eligible sessions on/after they joined
+    if (eligible.length === 0) return null;   // no eligible sessions since joining → don't flag (new member / new dept)
+    const attendedISO = eligible.filter((s) => (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
+    const attendedEver = attendedISO.length > 0;
+    const refISO = attendedEver ? attendedISO[attendedISO.length - 1] : joinedISO;   // gap from last attended, else from join date
+    return { type: "attendance", memberId: m.id, memberName: m.name, days: refISO ? dayDiff(todayISO, refISO) : null, attendedEver };
+  }).filter((x) => x && x.days != null && x.days > 30).sort((a, b) => b.days - a.days);   // real gaps > 30 days, biggest first
+  const overdueItems = (openItems || []).filter((r) => r.due_date && r.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")).map((r) => ({ type: "overdue", itemId: r.id, task: r.text, assigneeName: r.assigned_to ? (nameById.get(r.assigned_to) || "Unassigned") : "Unassigned", daysOverdue: dayDiff(todayISO, r.due_date), sourceLabel: r.source_label || null }));
+  return { attendanceGaps, overdueItems };
+}
+// Draft state + AI actions (approve-before-send); one draft open at a time. Owned by InsightCards.
+function useInsightDrafts() {
+  const [draftFor, setDraftFor] = useState(null);
+  const [draftText, setDraftText] = useState("");
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftErr, setDraftErr] = useState("");
+  const [copied, setCopied] = useState(false);
+  async function runDraft(key, sys, ctx) {
+    setDraftFor(key); setDraftText(""); setDraftErr(""); setCopied(false); setDraftLoading(true);
+    try { const t = await callClaude(sys, ctx); setDraftText(t); }
+    catch { setDraftErr("Couldn't draft that just now — try again."); }
+    finally { setDraftLoading(false); }
+  }
+  function closeDraft() { setDraftFor(null); setDraftText(""); setDraftErr(""); setCopied(false); }
+  async function copyDraft() { try { await navigator.clipboard.writeText(draftText); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setDraftErr("Couldn't copy — select the text and copy manually."); } }
+  const draftBox = (key, sys, ctx) => (
+    <div style={{ marginTop: 6, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+      {draftLoading ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Drafting…</div>
+      ) : draftErr ? (
+        <div style={{ fontSize: 12.5, color: FIRE.redText, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span>{draftErr}</span><button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => runDraft(key, sys, ctx)}>Retry</button></div>
+      ) : (<>
+        <textarea style={{ ...FS.input, minHeight: 74, resize: "vertical", fontSize: 13, width: "100%" }} value={draftText} onChange={(e) => setDraftText(e.target.value)} />
+        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+          <button style={FS.btnPrimary} onClick={copyDraft}>{copied ? <><CheckCircle2 size={15} /> Copied!</> : <><ClipboardCheck size={15} /> Copy</>}</button>
+          <button style={FS.btn} onClick={closeDraft}>Close</button>
+        </div>
+      </>)}
+    </div>
+  );
+  return { draftFor, runDraft, draftBox };
+}
+// Shared 'NEEDS YOUR ATTENTION' card grid (overdue + attendance) with AI-draft actions.
+function InsightCards({ insights, go, bare }) {
+  const { attendanceGaps, overdueItems } = insights;
+  const { draftFor, runDraft, draftBox } = useInsightDrafts();
+  const isEmpty = attendanceGaps.length === 0 && overdueItems.length === 0;
+  if (bare && isEmpty) return null;   // bare (DA): no kicker, no empty-state — render nothing when there's nothing
+  return (
+    <>
+      {!bare && <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>}
+      {isEmpty ? (
+        <div style={{ ...FS.card, padding: "14px 16px", fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={15} color={FIRE.green} /> All caught up — no attendance gaps or overdue assignments.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+          {overdueItems.map((ins) => {
+            const key = `o-${ins.itemId}`;
+            const ctx = `Assignee: ${ins.assigneeName}. Task: ${ins.task}. Overdue by ${ins.daysOverdue} day${ins.daysOverdue === 1 ? "" : "s"}.${ins.sourceLabel ? ` Context: ${ins.sourceLabel}.` : ""}`;
+            return (
+            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.assigneeName}</b>'s “{ins.task}” was due {ins.daysOverdue} day{ins.daysOverdue === 1 ? "" : "s"} ago</div>
+                {ins.sourceLabel && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{ins.sourceLabel}</div>}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View task</button>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, REMINDER_SYS, ctx)}>Draft reminder</button>
+              </div>
+              {draftFor === key && draftBox(key, REMINDER_SYS, ctx)}
+            </div>
+            );
+          })}
+          {attendanceGaps.map((ins) => {
+            const key = `a-${ins.memberId}`;
+            const ctx = `Member: ${ins.memberName}. ${ins.attendedEver ? `Hasn't been to training in ${ins.days} days.` : `Hasn't made it to any training since joining (${ins.days} days).`}`;
+            return (
+            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}>{ins.attendedEver ? <><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</> : <><b>{ins.memberName}</b> hasn't attended any training since joining ({ins.days} days)</>}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, CHECKIN_SYS, ctx)}>Draft check-in</button>
+              </div>
+              {draftFor === key && draftBox(key, CHECKIN_SYS, ctx)}
+            </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
 function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -996,8 +1105,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const [prNext, setPrNext] = useState(null);
   const [fundNext, setFundNext] = useState(null);
   const [raised, setRaised] = useState(0);
-  const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight
-  const [draftFor, setDraftFor] = useState(null); const [draftText, setDraftText] = useState(""); const [draftLoading, setDraftLoading] = useState(false); const [draftErr, setDraftErr] = useState(""); const [copied, setCopied] = useState(false);   // Stage 2: AI draft (approve-before-send), one open at a time
+  const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight (fed to computeInsights)
   const [ringOn, setRingOn] = useState(false);
   useEffect(() => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
@@ -1025,45 +1133,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
-  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
-  const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
-  const eligibleFor = (m, s) => isLeader(m.access) || s.audience !== "leadership";   // same audience rule as deptAttendance / RECENT EVENTS
-  const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
-  const attendanceGaps = pastDone.length === 0 ? [] : members.filter((m) => m.status === "Active").map((m) => {
-    const joinedISO = m.joined ? `${String(m.joined).slice(0, 4)}-01-01` : null;   // members prop only has the join YEAR (member_private.joined_date is DA/PA-scoped, not loaded here)
-    const eligible = pastDone.filter((s) => eligibleFor(m, s) && (!joinedISO || toISODate(sessDate(s)) >= joinedISO));   // eligible sessions on/after they joined
-    if (eligible.length === 0) return null;   // no eligible sessions since joining → don't flag (new member / new dept)
-    const attendedISO = eligible.filter((s) => (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
-    const attendedEver = attendedISO.length > 0;
-    const refISO = attendedEver ? attendedISO[attendedISO.length - 1] : joinedISO;   // gap from last attended, else from join date
-    return { type: "attendance", memberId: m.id, memberName: m.name, days: refISO ? dayDiff(todayISO, refISO) : null, attendedEver };
-  }).filter((x) => x && x.days != null && x.days > 30).sort((a, b) => b.days - a.days);   // real gaps > 30 days, biggest first
-  const overdueItems = (openItems || []).filter((r) => r.due_date && r.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")).map((r) => ({ type: "overdue", itemId: r.id, task: r.text, assigneeName: r.assigned_to ? (nameById.get(r.assigned_to) || "Unassigned") : "Unassigned", daysOverdue: dayDiff(todayISO, r.due_date), sourceLabel: r.source_label || null }));
-  const checkInSys = "You're a volunteer fire department officer writing a brief, WARM, non-punitive check-in text to a member who hasn't been to training in a while. Caring, not scolding — you're glad they're part of the crew and hoping they can make it back. 2-3 sentences, friendly, texting tone. Return ONLY the message.";
-  const reminderSys = "You're a volunteer fire department officer writing a brief, friendly reminder text about a task that's past due. A gentle nudge, not a demand — offer help. 2-3 sentences, texting tone. Return ONLY the message.";
-  async function runDraft(key, sys, ctx) {
-    setDraftFor(key); setDraftText(""); setDraftErr(""); setCopied(false); setDraftLoading(true);
-    try { const t = await callClaude(sys, ctx); setDraftText(t); }
-    catch { setDraftErr("Couldn't draft that just now — try again."); }
-    finally { setDraftLoading(false); }
-  }
-  function closeDraft() { setDraftFor(null); setDraftText(""); setDraftErr(""); setCopied(false); }
-  async function copyDraft() { try { await navigator.clipboard.writeText(draftText); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setDraftErr("Couldn't copy — select the text and copy manually."); } }
-  const draftBox = (key, sys, ctx) => (
-    <div style={{ marginTop: 6, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
-      {draftLoading ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Drafting…</div>
-      ) : draftErr ? (
-        <div style={{ fontSize: 12.5, color: FIRE.redText, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span>{draftErr}</span><button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => runDraft(key, sys, ctx)}>Retry</button></div>
-      ) : (<>
-        <textarea style={{ ...FS.input, minHeight: 74, resize: "vertical", fontSize: 13, width: "100%" }} value={draftText} onChange={(e) => setDraftText(e.target.value)} />
-        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-          <button style={FS.btnPrimary} onClick={copyDraft}>{copied ? <><CheckCircle2 size={15} /> Copied!</> : <><ClipboardCheck size={15} /> Copy</>}</button>
-          <button style={FS.btn} onClick={closeDraft}>Close</button>
-        </div>
-      </>)}
-    </div>
-  );
+  const insights = computeInsights({ sessions, members, openItems, todayISO });
   const cards = [
     { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${nextSession.title}` : null, nav: "training" },
     { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: "#0E6B62", snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
@@ -1122,45 +1192,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}><AlertTriangle size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION</div>
-      {attendanceGaps.length === 0 && overdueItems.length === 0 ? (
-        <div style={{ ...FS.card, padding: "14px 16px", fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={15} color={FIRE.green} /> All caught up — no attendance gaps or overdue assignments.</div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-          {overdueItems.map((ins) => {
-            const key = `o-${ins.itemId}`;
-            const ctx = `Assignee: ${ins.assigneeName}. Task: ${ins.task}. Overdue by ${ins.daysOverdue} day${ins.daysOverdue === 1 ? "" : "s"}.${ins.sourceLabel ? ` Context: ${ins.sourceLabel}.` : ""}`;
-            return (
-            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.assigneeName}</b>'s “{ins.task}” was due {ins.daysOverdue} day{ins.daysOverdue === 1 ? "" : "s"} ago</div>
-                {ins.sourceLabel && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{ins.sourceLabel}</div>}
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View task</button>
-                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, reminderSys, ctx)}>Draft reminder</button>
-              </div>
-              {draftFor === key && draftBox(key, reminderSys, ctx)}
-            </div>
-            );
-          })}
-          {attendanceGaps.map((ins) => {
-            const key = `a-${ins.memberId}`;
-            const ctx = `Member: ${ins.memberName}. ${ins.attendedEver ? `Hasn't been to training in ${ins.days} days.` : `Hasn't made it to any training since joining (${ins.days} days).`}`;
-            return (
-            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}>{ins.attendedEver ? <><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</> : <><b>{ins.memberName}</b> hasn't attended any training since joining ({ins.days} days)</>}</div>
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, checkInSys, ctx)}>Draft check-in</button>
-              </div>
-              {draftFor === key && draftBox(key, checkInSys, ctx)}
-            </div>
-            );
-          })}
-        </div>
-      )}
+      <InsightCards insights={insights} go={go} />
     </div>
   );
 }
