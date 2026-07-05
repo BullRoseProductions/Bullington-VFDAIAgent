@@ -211,7 +211,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "privacy") return doc("Privacy Policy", "Full text to be added before pilot.");
   if (view === "terms") return doc("Terms of Agreement", "Full text to be added before pilot.");
-  if (view === "about") return doc("About", <>Before the Call<br />© 2026 BullRose Productions. All rights reserved.</>);
+  if (view === "about") return doc("About", <>Before the Call<br />© 2026 Ashlea Bullington. All rights reserved.</>);
   const card = (key, Icon, title, desc) => (
     <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
