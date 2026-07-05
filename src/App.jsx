@@ -7,7 +7,7 @@ import {
   ThumbsUp, ThumbsDown, Pencil, MessageSquare, ChevronUp, ChevronDown,
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
-  Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw, Trash2,
+  Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { QRCodeCanvas } from "qrcode.react";
@@ -163,6 +163,7 @@ const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
+  { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
@@ -438,6 +439,7 @@ export default function App() {
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} dept={dept} addFeedback={addFeedback} />}
+          {screen === "study" && <StudySession S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
@@ -1770,6 +1772,86 @@ async function callClaudeChat(system, messages) {
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error || "AI request failed");
   return data.text || "";
+}
+
+/* ---------------- Study Session (member-facing, interactive multi-turn AI tutor) ---------------- */
+const CERT_TRACKS = ["Firefighter I", "Firefighter II", "Fire Instructor", "Fire Engineer", "ECA", "EMT", "Paramedic"];
+function StudySession({ S }) {
+  const [cert, setCert] = useState(CERT_TRACKS[0]);
+  const [mode, setMode] = useState("quiz");        // 'quiz' | 'explain'
+  const [turns, setTurns] = useState([]);           // [{ role: 'user'|'assistant', content, hidden? }]
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const reset = () => { setTurns([]); setInput(""); setErr(""); };
+  const sysFor = (c, m) => {
+    const base = `You are a cert-aware study tutor for a volunteer firefighter preparing for their ${c} certification. Stay within the scope of ${c}.`;
+    const quiz = `QUIZ MODE: Ask exam-style questions ONE AT A TIME. After the member answers, say whether it's correct, partially correct, or incorrect and briefly explain WHY, then ask the next question. Be encouraging and supportive — this is practice, not a real exam.`;
+    const explain = `EXPLAIN MODE: The member asks concept questions. Teach clearly and practically at the right level for ${c}, and answer follow-up questions in context.`;
+    const caveat = `IMPORTANT — this is study help, not the authority. Ground answers in general firefighting/EMS knowledge; do NOT invent a specific protocol, number, or standard you are unsure of — if unsure, say so. Always remind the member to confirm specifics against their department's SOPs and the current TCFP / NREMT standards for ${c}.`;
+    return `${base} ${m === "quiz" ? quiz : explain} Keep replies focused and reasonably short. ${caveat}`;
+  };
+  async function send(text, hidden) {
+    const userTurn = { role: "user", content: text, ...(hidden ? { hidden: true } : {}) };
+    const next = [...turns, userTurn];
+    setTurns(next); setInput(""); setLoading(true); setErr("");
+    try {
+      const reply = await callClaudeChat(sysFor(cert, mode), next.map(({ role: r, content }) => ({ role: r, content })));   // strip `hidden` before sending
+      setTurns((t) => [...t, { role: "assistant", content: reply }]);
+    } catch {
+      setErr("Couldn't reach the tutor just now — try again.");
+      setTurns(turns);                       // roll back the optimistic user turn so the thread stays alternating
+      if (!hidden) setInput(text);           // give them their answer back
+    } finally { setLoading(false); }
+  }
+  const startQuiz = () => send(`Ask me the first exam-style question for the ${cert} certification. One question only — don't reveal the answer yet.`, true);
+  const submit = () => { const t = input.trim(); if (!t || loading) return; send(t, false); };
+  const visible = turns.filter((t) => !t.hidden);
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STUDY SESSION</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Study for your certification</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Pick a track, then quiz yourself or ask a question. An AI study partner — always verify against official standards.</div>
+      </div>
+      <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
+          <select style={{ ...FS.input, maxWidth: 220 }} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
+            {CERT_TRACKS.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select></label>
+        <div style={S.segRow}>
+          {[["quiz", "Quiz me"], ["explain", "Explain"]].map(([k, l]) => (
+            <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <Disclaimer S={S} compact dark />
+      <div style={{ marginTop: 12 }}>
+        {visible.map((t, i) => (
+          <div key={i} style={{ marginBottom: 10 }}>
+            {t.role === "user" ? (
+              <div style={{ ...FS.card, padding: "10px 14px", fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.content}</div>
+            ) : (
+              <div style={{ ...FS.card, padding: "12px 16px" }}><RichOutput S={S} text={t.content} dark /></div>
+            )}
+          </div>
+        ))}
+        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Tutor is thinking…</div>}
+        {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+      </div>
+      <div style={{ marginTop: 12 }}>
+        {mode === "quiz" && visible.length === 0 ? (
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
+        ) : (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder={mode === "quiz" ? "Type your answer…" : `Ask a ${cert} question…`} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
+            <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>{mode === "quiz" ? "Submit answer" : "Ask"}</button>
+          </div>
+        )}
+        {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Start over</button>}
+      </div>
+    </div>
+  );
 }
 
 /* ---------------- Plan feedback loop ---------------- */
