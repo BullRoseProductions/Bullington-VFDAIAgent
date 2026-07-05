@@ -164,6 +164,7 @@ const NAV = [
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
+  { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
@@ -440,6 +441,7 @@ export default function App() {
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "study" && <StudySession S={S} />}
+          {screen === "qanda" && <StationQA S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
@@ -1885,6 +1887,58 @@ function StudySession({ S }) {
         )}
         {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Start over</button>}
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Station Q&A (member-facing, general fire/EMS chat assistant) ---------------- */
+const QANDA_SYS = "You are a knowledgeable, practical, safety-conscious fire/EMS assistant for a VOLUNTEER fire department. Answer operational, procedural, training, and standards questions at the level a volunteer firefighter or EMS responder needs. Keep replies focused and clear, and answer follow-up questions in context.\n\nCRITICAL — you do NOT have access to THIS department's specific SOPs, protocols, medical direction, or local standards; you are giving GENERAL fire-service guidance only, and you should say so when it matters. Do NOT invent specific protocols, numbers, thresholds, or standards — if you are unsure, say so plainly rather than guessing. Always tell the member to follow their DEPARTMENT'S actual SOPs and to confirm specifics against the current official standards that apply to them (NFPA / TCFP / NREMT / their AHJ and medical direction). The harm this prevents is real: a volunteer could act on a made-up procedure on a live call.";
+function StationQA({ S }) {
+  const [turns, setTurns] = useState([]);           // [{ role: 'user'|'assistant', content }]
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const reset = () => { setTurns([]); setInput(""); setErr(""); };
+  async function send(text) {
+    const next = [...turns, { role: "user", content: text }];
+    setTurns(next); setInput(""); setLoading(true); setErr("");
+    try {
+      const reply = await callClaudeChat(QANDA_SYS, next);
+      setTurns((t) => [...t, { role: "assistant", content: reply }]);
+    } catch {
+      setErr("Couldn't reach the assistant just now — try again.");
+      setTurns(turns);                       // roll back the optimistic user turn so the thread stays alternating
+      setInput(text);                        // give their question back
+    } finally { setLoading(false); }
+  }
+  const submit = () => { const t = input.trim(); if (!t || loading) return; send(t); };
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION Q&amp;A</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Ask the station assistant</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>General fire &amp; EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally.</div>
+      </div>
+      <Disclaimer S={S} compact dark />
+      <div style={{ marginTop: 12 }}>
+        {turns.map((t, i) => (
+          <div key={i} style={{ marginBottom: 10 }}>
+            {t.role === "user" ? (
+              <div style={{ ...FS.card, padding: "10px 14px", fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.content}</div>
+            ) : (
+              <div style={{ ...FS.card, padding: "12px 16px" }}><RichOutput S={S} text={t.content} dark /></div>
+            )}
+          </div>
+        ))}
+        {turns.length === 0 && !loading && <div style={{ fontSize: 13, color: FIRE.textMuted, fontStyle: "italic" }}>Ask anything — e.g. &ldquo;What's the difference between an offensive and defensive attack?&rdquo;, &ldquo;How does a RIT work?&rdquo;, &ldquo;What goes into a primary search?&rdquo;</div>}
+        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Thinking…</div>}
+        {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder="Ask a question…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
+        <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>Ask</button>
+      </div>
+      {turns.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Clear</button>}
     </div>
   );
 }
