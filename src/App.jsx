@@ -464,7 +464,7 @@ export default function App() {
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
-          {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} />}
+          {screen === "brand" && <BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} initialMode={navArg} />}
@@ -6519,10 +6519,24 @@ const DEFAULT_BRAND = {
   voice: "Warm, plain-spoken, proud but never boastful — we talk like neighbors, not a corporation.",
   logo: null, guidelines: [],
 };
-function BrandKit({ S, role, brand, setBrand }) {
+function BrandKit({ S, role, brand, setBrand, setDept }) {
   const canManage = hasAny(role, DEPT_ADMIN_ROLES);
   const set = (k, v) => setBrand((b) => ({ ...b, [k]: v }));
   function onLogo(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => set("logo", r.result); r.readAsDataURL(file); }
+  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
+  async function saveBrand() {
+    setSaving(true); setSaveState("");
+    const { data: id } = await supabase.rpc("my_department_id");   // same dept-id source as the load; BrandKit has no dept.id
+    if (!id) { setSaving(false); setSaveState("err"); return; }
+    const { data, error } = await supabase.from("departments").update({
+      name: brand.name, station: brand.station, primary_color: brand.primary, accent_color: brand.accent, font: brand.font, tagline: brand.tagline, voice: brand.voice,
+    }).eq("id", id).select();   // .select() so we can detect a silent 0-row RLS block (logo_url + guidelines excluded in v1)
+    setSaving(false);
+    if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked → surface an error, never a false "Saved"
+    setDept?.((d) => ({ ...(d || {}), name: brand.name }));   // keep the sidebar/header crest name in sync live
+    setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
+  }
   const swatch = (k, label) => (
     <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -6570,6 +6584,14 @@ function BrandKit({ S, role, brand, setBrand }) {
         <label style={{ ...S.field, marginTop: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How the department sounds</span><textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
         <p style={{ ...S.helpP, marginBottom: 0, color: FIRE.textMuted }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
       </div>
+      {canManage && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+          <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveBrand} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
+          {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
+          {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
+          <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Saves name, station, colors, font, tagline &amp; voice. (Logo &amp; guidelines coming soon.)</span>
+        </div>
+      )}
       <div style={{ ...FS.card, padding: 18, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.primary }} /><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.accent }} /></div>
         <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: FIRE.textPrimary }}>{brand.name}</div>
