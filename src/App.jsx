@@ -6841,7 +6841,7 @@ function StationDuties({ S, role, members, meId, notify }) {
                     </>) : (<>
                       <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Who helped?</span>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {members.filter((m) => m.id !== me?.id).map((m) => {
+                        {members.filter((m) => m.id !== me?.id && isAssignable(m)).map((m) => {
                           const sel = selectedHelpers.includes(m.id);
                           return (
                             <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
