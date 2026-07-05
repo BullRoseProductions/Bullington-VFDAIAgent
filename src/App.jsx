@@ -4850,8 +4850,8 @@ function Apparatus({ S, role, members, meId, notify }) {
   useEffect(() => { loadRigs(); }, [members]);   // reload once members resolves so checked_by → name populates
   const ready = rigs.filter((r) => r.status === "Pass").length;
   const flagged = rigs.length - ready;
-  async function logCheck(id) {
-    const { data, error } = await supabase.from("apparatus").update({ status: "Pass", note: "Checked — all good", last_check_at: new Date().toISOString(), checked_by: meId }).eq("id", id).select();
+  async function logCheck(id, status, note) {
+    const { data, error } = await supabase.from("apparatus").update({ status, note, last_check_at: new Date().toISOString(), checked_by: meId }).eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't log the check", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: a silent RLS block fails loudly, not as false success
     loadRigs();   // refetch — UI matches true DB state
   }
@@ -4910,7 +4910,10 @@ function Apparatus({ S, role, members, meId, notify }) {
               {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
               <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: FIRE.textMuted }}>
                 <span>Last check: {r.lastCheck} · {r.by}</span>
-                <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id)}><ClipboardCheck size={14} /> Log a check</button>
+                <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                  <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id, "Pass", "Checked — all good")}><ClipboardCheck size={14} /> Pass</button>
+                  <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => { const n = window.prompt("What needs attention on this rig? (short note)"); if (n === null) return; logCheck(r.id, "Needs attention", n.trim() || "Flagged — needs attention"); }}><AlertTriangle size={14} color={FIRE.redText} /> Needs attention</button>
+                </div>
               </div>
             </div>
           );
