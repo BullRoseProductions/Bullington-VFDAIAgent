@@ -2436,6 +2436,8 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
   const [localDates, setLocalDates] = useState("");   // optional — real local events + dates the leader supplies; drives post scheduling
   const [startDate, setStartDate] = useState(() => nextMondayISO());   // Week 1 begins here; app computes all post dates from this
   const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
+  const [plannerOpen, setPlannerOpen] = useState(true);   // AI Recruitment Planner — expanded by default
+  const [waysOpen, setWaysOpen] = useState(false);         // Ways to Recruit — collapsed by default
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Recruitment)
   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
   const [drafts, setDrafts] = useState([]); const [openDraft, setOpenDraft] = useState(null);
@@ -2496,7 +2498,8 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
 
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER</div>
+          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          {plannerOpen && (<>
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
             <AIField S={S} dark label="Your town" value={town} onChange={setTown} />
@@ -2519,32 +2522,24 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
               <button style={{ ...FS.btn, opacity: (saving || !saveTitle.trim()) ? 0.6 : 1 }} onClick={saveDraft} disabled={saving || !saveTitle.trim()}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save draft</>}</button>
             </div>
           )}
+          </>)}
         </div>
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA</div>
-      <IdeaGrid S={S} dark items={[
+      <button onClick={() => setWaysOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: waysOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA<span style={{ marginLeft: "auto", display: "inline-flex" }}>{waysOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+      {waysOpen && <IdeaGrid S={S} dark items={[
         { h: "Current-member referrals", p: "Your people's networks convert best. Give them a one-line script to forward." },
         { h: "Local employers", p: "Release-time or support partnerships — many owners want the community goodwill." },
         { h: "Schools & trade programs", p: "High schools, EMT classes, and fire-science programs build your pipeline." },
         { h: "Community events", p: "Festivals, markets, ballgames — bring an apparatus and a sign-up sheet." },
         { h: "Former members", p: "A warm 'we'd love to have you back' reopens more doors than you'd think." },
         { h: "Open house", p: "Your highest-converting event — tour, demo, food, and fast follow-up." },
-      ]} />
+      ]} />}
 
       <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECRUITMENT CALENDAR</div>
       <RecruitmentCalendar S={S} role={role} notify={notify} />
 
       <GraphicStudio S={S} brand={brand} />
-
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>RECRUITMENT LIBRARY</div>
-      <ResourceLibrary S={S} dark items={[
-        { name: "Volunteer Recruitment Playbook", type: "PDF · 90-day plan + templates" },
-        { name: "Printable recruitment flyer", type: "PDF · fill-in-the-blank" },
-        { name: "Member-referral scripts", type: "Doc · copy & send" },
-        { name: "Employer & school outreach emails", type: "Doc · templates" },
-        { name: "Open-house checklist & funnel tracker", type: "PDF" },
-      ]} />
 
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</div>
       <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
@@ -2606,6 +2601,7 @@ function Documents({ S, role, notify, uploaderName }) {
   const leader = isLeader(role);
   const canManageDocs = hasAny(role, CANMANAGE_OPS_ROLES);
   const [docs, setDocs] = useState([]);
+  const [draftOpen, setDraftOpen] = useState(true);   // Draft a New Document — expanded by default
   const [docsLoading, setDocsLoading] = useState(true);
   const [uploadType, setUploadType] = useState("SOP / SOG");
   function loadDocs() {
@@ -2734,7 +2730,8 @@ function Documents({ S, role, notify, uploaderName }) {
           <input type="file" multiple style={{ display: "none" }} onChange={onFiles} />
         </label>
 
-        <div style={{ ...FS.kicker, marginTop: 24, marginBottom: 8 }}><FilePlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT</div>
+        <button onClick={() => setDraftOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 24, marginBottom: draftOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><FilePlus size={13} style={{ verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT<span style={{ marginLeft: "auto", display: "inline-flex" }}>{draftOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+        {draftOpen && (<>
         <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
           <div style={{ flex: 1 }}>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Document type</span>
@@ -2750,6 +2747,7 @@ function Documents({ S, role, notify, uploaderName }) {
             {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact dark /><RichOutput S={S} text={out} dark /></div>}
           </div>
         </div>
+        </>)}
       </>)}
 
       <div style={{ ...FS.kicker, marginTop: 24, marginBottom: 8 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
@@ -3294,6 +3292,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
 }
 function Visibility({ S, brand, role, notify }) {
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
+  const [ideasOpen, setIdeasOpen] = useState(false);   // Ideas for Things to Make — collapsed by default
   const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
   async function draft() {
     setLoading(true); setErr(""); setPost("");
@@ -3311,15 +3310,15 @@ function Visibility({ S, brand, role, notify }) {
       <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</div>
       <ContentCalendar S={S} role={role} notify={notify} />
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>IDEAS FOR THINGS TO MAKE</div>
-      <IdeaGrid S={S} dark items={[
+      <button onClick={() => setIdeasOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: ideasOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>IDEAS FOR THINGS TO MAKE<span style={{ marginLeft: "auto", display: "inline-flex" }}>{ideasOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+      {ideasOpen && <IdeaGrid S={S} dark items={[
         { h: "60-second station tour", p: "Walk the bay on a phone camera. People love seeing inside." },
         { h: "Member spotlight", p: "One photo + why they serve. Faces build trust the fastest." },
         { h: "Safety tip card", p: "Smoke alarms, seasonal hazards — useful posts get shared." },
         { h: "Training night clip", p: "A short drill video shows the work most people never see." },
         { h: "Apparatus feature", p: "\u201CMeet Engine 1 — here's what it carries.\u201D" },
         { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
-      ]} />
+      ]} />}
 
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
@@ -3337,12 +3336,6 @@ function Visibility({ S, brand, role, notify }) {
 
       <GraphicStudio S={S} brand={brand} />
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>PUBLIC RELATIONS LIBRARY</div>
-      <ResourceLibrary S={S} dark items={[
-        { name: "Monthly content calendar template", type: "PDF · copy & repeat" },
-        { name: "Caption starters", type: "Doc · fill-in" },
-        { name: "Social Media Playbook", type: "PDF · the full guide" },
-      ]} />
     </div>
   );
 }
@@ -3432,6 +3425,7 @@ const PLAN_SYS = "You help a volunteer fire/EMS department plan a fundraiser. Gi
 function Funding({ S, role, notify, dept, meId, members }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [ideasOpen, setIdeasOpen] = useState(false);   // Event Ideas collapsed by default
+  const [plannerOpen, setPlannerOpen] = useState(true);   // Fundraiser Planner — expanded by default
   const [detail, setDetail] = useState("A pancake breakfast to raise money for new turnout gear.");
   const [goalAmt, setGoalAmt] = useState(""); const [communityType, setCommunityType] = useState("Small town"); const [effortLevel, setEffortLevel] = useState("Medium"); const [targetDate, setTargetDate] = useState("");   // Plan-a-fundraiser inputs
   const [phase, setPhase] = useState("input"); const [ideas, setIdeas] = useState([]); const [chosenIdea, setChosenIdea] = useState(null); const [loadingLabel, setLoadingLabel] = useState("Working…"); const [rawIdeas, setRawIdeas] = useState("");   // two-step brainstorm→plan flow (Plan mode only)
@@ -3618,7 +3612,8 @@ function Funding({ S, role, notify, dept, meId, members }) {
 
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}><PartyPopper size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISER PLANNER</div>
+          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><PartyPopper size={13} style={{ verticalAlign: "-2px" }} />FUNDRAISER PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          {plannerOpen && (<>
           <div style={S.segRow}>
             {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
               <button key={m} onClick={() => { setMode(m); setOut(""); setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setErr(""); }} style={{ ...S.segBtn, background: mode === m ? FIRE.btnBg : "transparent", borderColor: mode === m ? FIRE.red : FIRE.btnBorder, color: mode === m ? FIRE.textPrimary : FIRE.navLabel }}>{m}</button>
@@ -3712,6 +3707,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
               </div>
             </div>
           )}
+        </>)}
         </div>
       </div>
 
