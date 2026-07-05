@@ -470,9 +470,16 @@ const dashboardGreeting = (me) => {
 /* ---------------- Dashboard ---------------- */
 // Shared dept attendance calc — per-member eligible/attended/pct (audience-aware) + department average, for one year.
 // Single source for RosterReports (Chief's Report), AttendanceReport (Yearly report), and the Dept Admin dashboard — no drift.
+/* Accounts excluded from ALL department stats/counts (owner + test) — NOT from identity:
+   they still log in and resolve via members.find(meId), so keep them in the full members array. */
+const STATS_EXCLUDED_IDS = new Set([
+  "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // Ashlea (owner)
+  "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
+]);
+const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id);
 function deptAttendance(members, sessions, year) {
   const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // done + roll-taken
-  const rows = (members || []).map((m) => {
+  const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
     const memberLeader = isLeader(m.access);
     const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");
     const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
@@ -700,8 +707,9 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const me = members.find((m) => m.id === meId) || null;
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);   // dept attendance % + drills
-  const total = members.length;
-  const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
+  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
+  const total = cm.length;
+  const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
   const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
   const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
   const drillsHeld = doneThisYear.length;
@@ -850,8 +858,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same geometry as the member attendance ring
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const total = members.length;
-  const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
+  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
+  const total = cm.length;
+  const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
   const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
   const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
   const drillsHeld = doneThisYear.length;
@@ -873,7 +882,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const openDuties = duties.filter((d) => !d.done);
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
   const flagged = [];
-  members.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
+  cm.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
   flagged.sort((a, b) => a.rank - b.rank);   // expired (0) before expiring (1)
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
   const dutyDone = duties.filter((d) => d.done).length;
@@ -1000,7 +1009,7 @@ function computeInsights({ sessions, members, openItems, todayISO }) {
   const eligibleFor = (m, s) => isLeader(m.access) || s.audience !== "leadership";   // same audience rule as deptAttendance / RECENT EVENTS
   const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
   const isPureBoard = (m) => isBoard(m.access) && !hasAny(m.access, ["Member", "Officer", "Department Admin", "Project Admin"]);   // governance-only → not expected at drills (overdue-items still flags them)
-  const attendanceGaps = pastDone.length === 0 ? [] : (members || []).filter((m) => m.status === "Active" && !isPureBoard(m)).map((m) => {
+  const attendanceGaps = pastDone.length === 0 ? [] : (members || []).filter((m) => countsInStats(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
     const joinedISO = m.joined ? `${String(m.joined).slice(0, 4)}-01-01` : null;   // members prop only has the join YEAR (member_private.joined_date is DA/PA-scoped)
     const eligible = pastDone.filter((s) => eligibleFor(m, s) && (!joinedISO || toISODate(sessDate(s)) >= joinedISO));   // eligible sessions on/after they joined
     if (eligible.length === 0) return null;   // no eligible sessions since joining → don't flag (new member / new dept)
@@ -1106,8 +1115,9 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DA/Board
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const activeCount = members.filter((m) => m.status === "Active").length;
-  const ranks = []; members.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
+  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
+  const activeCount = cm.filter((m) => m.status === "Active").length;
+  const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
   const curC = ranks.filter((r) => r === 2).length, expgC = ranks.filter((r) => r === 1).length, expdC = ranks.filter((r) => r === 0).length;
   const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
   const drillsHeld = doneThisYear.length;
@@ -3546,12 +3556,12 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
       {members.some((m) => m.status === "Inactive") && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-          <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive").length})`}</button>
+          <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
         </div>
       )}
       <div style={S.opGrid}>
-        {/* Ashlea (app owner) is hidden from the roster display only — her row/status/access are untouched */}
-        {members.filter((m) => (showInactive || m.status !== "Inactive") && m.id !== "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4").map((m) => (
+        {/* Owner + test account hidden from the roster display via countsInStats — their rows/status/access are untouched */}
+        {members.filter((m) => (showInactive || m.status !== "Inactive") && countsInStats(m)).map((m) => (
           <div key={m.id} style={{ ...S.opCard, ...FS.card, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <Initials S={S} dark name={m.name} />
@@ -4054,9 +4064,10 @@ function RosterAttendance({ S, members, sessions, plan }) {
 }
 function RosterReports({ S, role, members, sessions, dept, back, meId, notify }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
-  const active = members.filter((m) => m.status === "Active").length;
-  const prob = members.filter((m) => m.status === "Probationary").length;
-  const certs = []; members.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
+  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only; members stays full for names/identity
+  const active = cm.filter((m) => m.status === "Active").length;
+  const prob = cm.filter((m) => m.status === "Probationary").length;
+  const certs = []; cm.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
   // Real attendance — shared deptAttendance calc (same numbers as the Yearly Attendance Report + Dept Admin dashboard).
   const yr = new Date().getFullYear();
@@ -4073,12 +4084,12 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       date: new Date(s.y, s.m, s.d).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       type: s.audience === "leadership" ? "Leadership training" : "Training",
       present: (s.attendance || []).length,
-      total: s.audience === "leadership" ? members.filter((m) => isLeader(m.access)).length : members.length,
+      total: s.audience === "leadership" ? cm.filter((m) => isLeader(m.access)).length : cm.length,
     }));
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
   const flaggedCerts = [];
-  members.forEach((m) => m.certs.forEach((c) => {
+  cm.forEach((m) => m.certs.forEach((c) => {
     const st = certStatus(c.exp);
     if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
   }));
@@ -4100,8 +4111,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     return {
       deptName: dept?.name || "Department",
       station: "",
-      kpis: { active, total: members.length, certPct: Math.round((cur / (cur + expg + expd)) * 100), certWarn: expd > 0, avgPart },
-      counts: { active, prob, total: members.length, cur, expg, expd, avgPart },
+      kpis: { active, total: cm.length, certPct: Math.round((cur / (cur + expg + expd)) * 100), certWarn: expd > 0, avgPart },
+      counts: { active, prob, total: cm.length, cur, expg, expd, avgPart },
       members: members.map((m) => ({ name: m.name, role: m.role, participation: attById.get(m.id), status: m.status })),
       flaggedCerts,
       activity: recentTraining,
@@ -4125,7 +4136,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     const certUrgent = [...flaggedCerts].sort((a, b) => (a.status === "Lapsed" ? 0 : 1) - (b.status === "Lapsed" ? 0 : 1));   // expired/lapsed first
     const lines = [
       `${dept?.name || "Department"} — current status. Use ONLY these facts; add nothing not listed.`,
-      `Members: ${active} active, ${prob} probationary (${members.length} total)`,
+      `Members: ${active} active, ${prob} probationary (${cm.length} total)`,
       `Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired`,
       `Average training attendance this year: ${avgPart}%`,
       `Flagged certifications (most urgent first): ${topN(certUrgent, (f) => `${f.member}'s ${f.cert} (${f.status.toLowerCase()}, ${f.exp})`)}`,
@@ -4175,7 +4186,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Chief's Report</h1>
       <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
       <div style={S.statRow}>
-        <Stat S={S} dark n={`${active}/${members.length}`} label="Active members" />
+        <Stat S={S} dark n={`${active}/${cm.length}`} label="Active members" />
         <Stat S={S} dark n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
         <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
       </div>
@@ -5890,7 +5901,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   // Card 1 — most recent done session's attendance (empty until persistence lands)
   const lastDone = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a))[0];
   const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
-  const totalMembers = members.length;
+  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
+  const totalMembers = cm.length;
   const hasAtt = !!lastDone && lastAtt > 0;
   const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
   // Card 3 — next not-done session from today forward (pure read)
