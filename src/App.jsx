@@ -7338,7 +7338,7 @@ function Fonts() {
       input:focus, select:focus, textarea:focus { outline: 2px solid #1F4E79; outline-offset: 1px; }
       button:focus-visible { outline: 2px solid #1F4E79; outline-offset: 2px; }
       @media (max-width: 900px) {
-        .dr-side { position: fixed; left: -290px; transition: left .22s ease; z-index: 40; height: 100%; }
+        .dr-side { position: fixed; left: -290px; transition: left .22s ease; z-index: 40; height: 100dvh; }
         .dr-side.open { left: 0; }
         .dr-menu { display: inline-flex !important; }
       }
@@ -7352,13 +7352,13 @@ function baseStyles() {
   const INK = "#191C20", SLATE = "#3A4750", ENGINE = "#B11E2A", EMS = "#1F4E79", PAPER = "#E9EBEC", CARD = "#FFFFFF", LINE = "#D9DCDF", MUTED = "#6A7178";
   const chevron = "repeating-linear-gradient(135deg, #B11E2A 0 14px, #191C20 14px 28px)";
   return {
-    app: { display: "flex", minHeight: "100vh", background: FIRE.pageBg, fontFamily: body, color: INK },
+    app: { display: "flex", height: "100dvh", background: FIRE.pageBg, fontFamily: body, color: INK },
     scrim: { position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 35 },
-    sidebar: { width: 262, background: FIRE.sidebar, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, flexShrink: 0 },
+    sidebar: { width: 262, background: FIRE.sidebar, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, paddingBottom: "calc(18px + env(safe-area-inset-bottom))", flexShrink: 0, height: "100dvh", overflow: "hidden" },
     brandRow: { display: "flex", alignItems: "center", gap: 11, paddingBottom: 18, borderBottom: "1px solid #2A2F35" },
     brandName: { fontFamily: display, fontWeight: 700, fontSize: 19, letterSpacing: ".5px", lineHeight: 1 },
     brandSub: { fontSize: 10, color: "#8A929B", letterSpacing: ".9px", marginTop: 3, fontFamily: mono },
-    nav: { display: "flex", flexDirection: "column", gap: 3, marginTop: 18, flex: 1 },
+    nav: { display: "flex", flexDirection: "column", gap: 3, marginTop: 18, flex: 1, minHeight: 0, overflowY: "auto" },
     navItem: { display: "flex", alignItems: "center", gap: 11, padding: "11px 12px", borderRadius: 8, border: "none", background: "transparent", color: "#C3C8CE", fontSize: 14, fontFamily: body, cursor: "pointer", fontWeight: 500 },
     navItemActive: { background: "#262B31", color: "#fff", boxShadow: "inset 3px 0 0 #B11E2A" },
     premiumTag: { fontSize: 9, fontFamily: mono, background: "#54506B", color: "#fff", padding: "2px 6px", borderRadius: 3, letterSpacing: ".5px" },
@@ -7366,7 +7366,7 @@ function baseStyles() {
     deptLabel: { fontSize: 9.5, fontFamily: mono, color: "#8A929B", letterSpacing: ".8px" },
     deptName: { fontFamily: display, fontWeight: 600, fontSize: 16, marginTop: 4 },
     deptMeta: { fontSize: 12, color: "#9AA1A9", marginTop: 2 },
-    main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0 },
+    main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100dvh", overflowY: "auto" },
     topbar: { height: 60, background: FIRE.sidebar, borderBottom: `1px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 14, padding: "0 18px", position: "sticky", top: 0, zIndex: 20 },
     menuBtn: { display: "none", alignItems: "center", justifyContent: "center", width: 38, height: 38, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: INK },
     chevronBand: { flex: 1, height: 8, borderRadius: 2, background: chevron, opacity: .9 },
