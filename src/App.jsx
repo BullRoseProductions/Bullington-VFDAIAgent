@@ -615,6 +615,7 @@ function Announcements({ role, members, meId, notify, style }) {
   const [body, setBody] = useState("");
   const [audience, setAudience] = useState("everyone");
   const [busy, setBusy] = useState(false);
+  const [celebrations, setCelebrations] = useState([]);   // celebrations view: member_id, birthday, joined_date (dept-scoped, all-members-readable)
   const canPost = hasAny(role, ANNOUNCE_ROLES);
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const canDelete = (it) => it.author_id === meId || isDeptAdmin(role);
@@ -627,6 +628,7 @@ function Announcements({ role, members, meId, notify, style }) {
       .then(({ data }) => { setItems(data || []); setLoading(false); });
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => { supabase.from("celebrations").select("*").then(({ data }) => setCelebrations(data || [])); }, []);   // read-tolerant: view missing/empty → []
 
   async function post() {
     const b = body.trim();
@@ -654,6 +656,15 @@ function Announcements({ role, members, meId, notify, style }) {
     if (error) { setItems(prev); notify({ kind: "error", title: "Couldn't delete", text: "Please try again.", details: error.message }); }
   }
 
+  // --- Upcoming celebrations (this month) — from the dept-scoped celebrations view ---
+  const now = new Date();
+  const curMonth = now.getMonth() + 1, curYear = now.getFullYear();
+  const parseMD = (iso) => { if (!iso) return null; const [y, m, d] = String(iso).split("-").map(Number); return (m >= 1 && m <= 12 && d >= 1) ? { y, m, d } : null; };   // parse YYYY-MM-DD without timezone drift; null-safe
+  const monthDay = (m, d) => new Date(2000, m - 1, d).toLocaleDateString("en-US", { month: "long", day: "numeric" });   // local construction → "January 30"
+  const byId = new Map((members || []).map((m) => [m.id, m]));
+  const celebs = (celebrations || []).map((c) => ({ ...c, member: byId.get(c.member_id) })).filter((c) => c.member && countsInStats(c.member));   // known dept member; owner/test excluded
+  const birthdays = celebs.map((c) => ({ id: c.member_id, name: c.member.name, md: parseMD(c.birthday) })).filter((x) => x.md && x.md.m === curMonth).sort((a, b) => a.md.d - b.md.d);   // this month, by day
+  const anniversaries = celebs.map((c) => { const md = parseMD(c.joined_date); return md ? { id: c.member_id, name: c.member.name, md, years: curYear - md.y } : null; }).filter((x) => x && x.md.m === curMonth && x.years >= 1).sort((a, b) => a.md.d - b.md.d);   // this month, real anniversaries (>=1 yr)
   return (
     <div style={{ ...FS.card, padding: 18, ...style }}>
       <div style={FS.kicker}>FEED</div>
@@ -697,8 +708,25 @@ function Announcements({ role, members, meId, notify, style }) {
         <button style={{ ...FS.btn, marginTop: 12 }} onClick={() => setComposing(true)}><Plus size={14} color={FIRE.btnIcon} /> New announcement</button>
       ))}
 
-      {/* Reserved for future birthday / anniversary content (design-locked) */}
-      <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 14, fontStyle: "italic", borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>Birthdays &amp; anniversaries — coming soon</div>
+      {/* Birthdays & anniversaries THIS MONTH — from the dept-scoped celebrations view (all members can see) */}
+      <div style={{ marginTop: 14, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}>🎂 Birthdays &amp; anniversaries</div>
+        {birthdays.length === 0 && anniversaries.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, fontStyle: "italic" }}>No birthdays or anniversaries this month.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {birthdays.map((b) => (
+              <div key={`bd-${b.id}`} style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.4 }}>🎂 <b style={{ color: FIRE.textPrimary }}>{b.name}</b>&rsquo;s birthday is {monthDay(b.md.m, b.md.d)}</div>
+            ))}
+            {anniversaries.map((a) => {
+              const milestone = a.years % 5 === 0;
+              return (
+                <div key={`an-${a.id}`} style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.4 }}>🎖 <b style={{ color: FIRE.textPrimary }}>{a.name}</b> &mdash; {a.years} {a.years === 1 ? "year" : "years"} of service{milestone && <span style={{ color: FIRE.amberText, fontWeight: 700 }}> &middot; {a.years}-year milestone</span>}</div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
