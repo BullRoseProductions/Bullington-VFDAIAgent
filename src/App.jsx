@@ -161,6 +161,43 @@ const SEED = [
 
 /* ---------------- Settings & Support hub (card → sub-screen, mirrors Reports) ---------------- */
 const SUPPORT_EMAIL = "ashlea@bullroseproductions.com";
+// DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
+function DeptSettings({ S, dept, setDept, setBrand }) {
+  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "" });
+  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  async function save() {
+    setSaving(true); setSaveState("");
+    const { data: id } = await supabase.rpc("my_department_id");   // same dept-id source as brand save
+    if (!id) { setSaving(false); setSaveState("err"); return; }
+    const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable
+    setSaving(false);
+    if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked (non-DA) → error, never a false "Saved"
+    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city }));   // sync sidebar crest + this form's source
+    setBrand?.((b) => ({ ...b, name: form.name, station: form.station }));       // keep Brand Kit's name/station consistent
+    setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
+  }
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>DEPARTMENT SETTINGS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Department details</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Your department's name, station number, and city — shown on the crest and in reports.</div>
+      </div>
+      <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 12, maxWidth: 460 }}>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station number</span><input style={FS.input} value={form.station} placeholder="e.g. Station 20" onChange={(e) => set("station", e.target.value)} /></label>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={form.city} onChange={(e) => set("city", e.target.value)} /></label>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
+          <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
+          {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
+          {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
 function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests }) {
   const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
   const isDA = isDeptAdmin(role);
@@ -171,7 +208,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
   if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><div style={{ ...FS.card, padding: 18, marginTop: 12 }}><div style={FS.kicker}>CONTACT SUPPORT</div><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></div></div>;
-  if (view === "dept") return doc("Department Settings", "Edit your department's name, station number, and city — coming in the next update.");
+  if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "privacy") return doc("Privacy Policy", "Full text to be added before pilot.");
   if (view === "terms") return doc("Terms of Agreement", "Full text to be added before pilot.");
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 BullRose Productions. All rights reserved.</>);
@@ -342,7 +379,7 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, station, primary_color, accent_color, font, tagline, voice, logo_url").eq("id", id).single().then(({ data }) => {
+      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url").eq("id", id).single().then(({ data }) => {
         if (!data) return;
         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
@@ -472,7 +509,7 @@ export default function App() {
         <div style={S.deptCard}>
           <div style={S.deptLabel}>DEPARTMENT</div>
           <div style={S.deptName}>{dept?.name || "…"}</div>
-          <div style={S.deptMeta}>Premium · 14 members</div>
+          {dept?.station && <div style={S.deptMeta}>{dept.station}</div>}
         </div>
       </aside>
 
