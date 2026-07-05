@@ -477,6 +477,10 @@ const STATS_EXCLUDED_IDS = new Set([
   "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
 ]);
 const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id);
+// Same two accounts must never be a selectable assignee (mentor/duty/action-item/owner pickers).
+// Distinct predicate from countsInStats (assignable vs. counted) though it shares the id set today.
+const isAssignable = (m) => !STATS_EXCLUDED_IDS.has(m.id);
+const assignableMembers = (ms) => (ms || []).filter(isAssignable);
 function deptAttendance(members, sessions, year) {
   const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // done + roll-taken
   const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
@@ -3114,9 +3118,9 @@ function Funding({ S, role, notify, dept, meId, members }) {
   function matchOwnerId(name) {
     const n = (name || "").trim().toLowerCase();
     if (!n) return "";
-    const exact = members.filter((m) => (m.name || "").toLowerCase() === n);
+    const exact = members.filter((m) => isAssignable(m) && (m.name || "").toLowerCase() === n);
     if (exact.length === 1) return exact[0].id;
-    const tok = members.filter((m) => (m.name || "").toLowerCase().split(/\s+/).includes(n));
+    const tok = members.filter((m) => isAssignable(m) && (m.name || "").toLowerCase().split(/\s+/).includes(n));
     if (tok.length === 1) return tok[0].id;
     return "";
   }
@@ -3296,7 +3300,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
                     <select style={FS.input} value={r.ownerId} onChange={(e) => setPlanReview((p) => ({ ...p, actionItems: p.actionItems.map((x, j) => j === i ? { ...x, ownerId: e.target.value } : x) }))}>
                       <option value="">Unassigned</option>
-                      {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select></label>
                   <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input type="date" style={FS.input} value={r.due} onChange={(e) => setPlanReview((p) => ({ ...p, actionItems: p.actionItems.map((x, j) => j === i ? { ...x, due: e.target.value } : x) }))} /></label>
                 </div>
@@ -3546,7 +3550,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
           <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Mentor</span>
             <select style={FS.input} value={mt} onChange={(e) => setMt(e.target.value)}>
               <option value="">— None —</option>
-              {(members || []).filter((m) => m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {(members || []).filter((m) => isAssignable(m) && m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Start date</span><input type="date" style={FS.input} value={sdate} onChange={(e) => setSdate(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={bday} onChange={(e) => setBday(e.target.value)} /></label>
@@ -3755,7 +3759,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Mentor</span>
                 <select style={FS.input} value={form.mentor_id || ""} onChange={(e) => setForm((f) => ({ ...f, mentor_id: e.target.value }))}>
                   <option value="">— None —</option>
-                  {(members || []).filter((m) => m.id !== member.id && m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  {(members || []).filter((m) => m.id !== member.id && m.status === "Active" && isAssignable(m)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Joined (date)</span><input type="date" style={FS.input} value={form.joined_date || ""} onChange={(e) => setForm((f) => ({ ...f, joined_date: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
@@ -4014,7 +4018,7 @@ function Bar({ S, pct, color, track }) {
 }
 function RosterAttendance({ S, members, sessions, plan }) {
   const people = [...members].sort((a, b) => (b.participation ?? -1) - (a.participation ?? -1));
-  const activeMembers = (members || []).filter((m) => m.status === "Active");
+  const activeMembers = (members || []).filter((m) => countsInStats(m) && m.status === "Active");
   const activeLeaders = activeMembers.filter((m) => isLeader(m.access));
   const recentEvents = (sessions || [])
     .filter((s) => s.done && (s.attendance || []).length > 0)   // real, roll-taken sessions
@@ -4676,9 +4680,9 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   function matchOwnerId(name) {
     const n = (name || "").trim().toLowerCase();
     if (!n) return "";
-    const exact = members.filter((m) => (m.name || "").toLowerCase() === n);
+    const exact = members.filter((m) => isAssignable(m) && (m.name || "").toLowerCase() === n);
     if (exact.length === 1) return exact[0].id;
-    const tok = members.filter((m) => (m.name || "").toLowerCase().split(/\s+/).includes(n));
+    const tok = members.filter((m) => isAssignable(m) && (m.name || "").toLowerCase().split(/\s+/).includes(n));
     if (tok.length === 1) return tok[0].id;
     return "";
   }
@@ -4874,7 +4878,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
                 <select style={FS.input} value={r.ownerId} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, ownerId: e.target.value } : x))}>
                   <option value="">Unassigned</option>
-                  {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  {members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select></label>
               <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input type="date" style={FS.input} value={r.due} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, due: e.target.value } : x))} /></label>
             </div>
@@ -5184,7 +5188,8 @@ const ONBOARD_TEMPLATE = [
 ];
 function Onboarding({ S, members, setMembers, notify, role }) {
   const canManage = hasAny(role, DEPT_ADMIN_ROLES);   // PA/DA — same set as is_dept_admin() (RLS enforces server-side)
-  const candidates = members.length ? members : [{ id: 0, name: "New member", role: "Firefighter" }];
+  const assignable = assignableMembers(members);
+  const candidates = assignable.length ? assignable : [{ id: 0, name: "New member", role: "Firefighter" }];
   const probI = candidates.findIndex((m) => m.status === "Probationary");
   const [selId, setSelId] = useState(candidates[probI >= 0 ? probI : 0].id);
   const [checks, setChecks] = useState({});
@@ -5390,7 +5395,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                     <span style={{ color: done ? FIRE.textMuted2 : FIRE.textPrimary, fontSize: 14 }}>{it.label}</span>
                     <select style={{ ...FS.input, maxWidth: 240, padding: "5px 9px", flex: "0 1 auto" }} value={person?.mentorId || ""} onChange={(e) => assignMentor(e.target.value)}>
                       <option value="">— None —</option>
-                      {(members || []).filter((m) => m.id !== person?.id && m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {(members || []).filter((m) => m.id !== person?.id && m.status === "Active" && isAssignable(m)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                   </div>
                 ) : (
@@ -6776,7 +6781,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
           {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
           <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={due} onChange={(e) => setDue(e.target.value)} /></label>
           <button style={FS.btnPrimary} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
           <button style={FS.btn} onClick={() => setAddingA(false)}>Cancel</button>
@@ -6859,7 +6864,7 @@ function StationDuties({ S, role, members, meId, notify }) {
                     <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={editBuf.category} onChange={(e) => setEditBuf((b) => ({ ...b, category: e.target.value }))}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
                     {editBuf.category === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={editBuf.catNew} onChange={(e) => setEditBuf((b) => ({ ...b, catNew: e.target.value }))} /></label>}
                     <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={editBuf.recurrence} onChange={(e) => setEditBuf((b) => ({ ...b, recurrence: e.target.value }))}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
-                    <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={editBuf.assignee} onChange={(e) => setEditBuf((b) => ({ ...b, assignee: e.target.value }))}><option value="">Station-wide (everyone)</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+                    <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={editBuf.assignee} onChange={(e) => setEditBuf((b) => ({ ...b, assignee: e.target.value }))}><option value="">Station-wide (everyone)</option>{members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
                     <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={editBuf.due} onChange={(e) => setEditBuf((b) => ({ ...b, due: e.target.value }))} /></label>
                     <button style={FS.btnPrimary} onClick={() => saveEditDuty(a.id)}><CheckCircle2 size={15} /> Save</button>
                     <button style={FS.btn} onClick={() => setEditingDutyId(null)}>Cancel</button>
@@ -6876,7 +6881,7 @@ function StationDuties({ S, role, members, meId, notify }) {
       <p style={{ ...S.helpP, color: FIRE.textMuted }}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
       <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What got done</span><input style={FS.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span><input style={FS.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
+        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span><input style={FS.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.filter(isAssignable).map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
         <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
       </div>
       <div>
