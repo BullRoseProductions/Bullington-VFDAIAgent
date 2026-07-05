@@ -1775,9 +1775,26 @@ async function callClaudeChat(system, messages) {
 }
 
 /* ---------------- Study Session (member-facing, interactive multi-turn AI tutor) ---------------- */
-const CERT_TRACKS = ["Firefighter I", "Firefighter II", "Fire Instructor", "Fire Engineer", "ECA", "EMT", "Paramedic"];
+const CERT_TRACKS = {
+  "Basic Fire Certifications": ["Firefighter I", "Firefighter II", "Basic Firefighter", "Exterior Firefighter", "Structural Firefighter", "Wildland Firefighter", "Airport Firefighter (ARFF)", "Industrial Firefighter"],
+  "Rescue": ["Vehicle Extrication", "Rope Rescue", "Confined Space Rescue", "Structural Collapse Rescue", "Trench Rescue", "Water Rescue", "Swiftwater Rescue", "Dive Rescue", "Ice Rescue", "Wilderness Rescue", "Large Animal Rescue", "Technical Rescue Technician"],
+  "EMS": ["Medical First Responder (MFR)", "Emergency Medical Responder (EMR)", "Emergency Medical Technician (EMT)", "Advanced EMT (AEMT)", "Paramedic", "CPR", "Basic Life Support (BLS)", "Advanced Cardiac Life Support (ACLS)", "Pediatric Advanced Life Support (PALS)", "Prehospital Trauma Life Support (PHTLS)", "ITLS", "Stop the Bleed Instructor"],
+  "Hazardous Materials": ["HazMat Awareness", "HazMat Operations", "HazMat Technician", "HazMat Incident Commander", "HazMat Specialist", "Radiological Response", "CBRNE Awareness"],
+  "Incident Command": ["ICS-100", "ICS-200", "ICS-300", "ICS-400", "IS-700", "IS-800", "NIMS Compliance", "Unified Command", "Incident Safety Officer"],
+  "Officer Development": ["Fire Officer I", "Fire Officer II", "Fire Officer III", "Fire Officer IV", "Company Officer", "Chief Officer", "Executive Fire Officer", "Leadership Development"],
+  "Instructor Development": ["Fire Instructor", "Instructor I", "Instructor II", "Instructor III", "Live Fire Instructor", "Evaluator", "Training Coordinator", "Training Officer"],
+  "Fire Inspector": ["Inspector I", "Inspector II", "Plans Examiner", "Fire Marshal", "Code Enforcement", "Fire Investigator", "Juvenile Fire Setter Intervention"],
+  "Apparatus & Driver": ["Emergency Vehicle Operator (EVOC)", "Driver Operator", "Driver Operator Pumper", "Driver Operator Aerial", "Driver Operator Mobile Water Supply", "Tanker Shuttle Operations", "Brush Truck Operations", "Trailer Operations", "UTV Operations"],
+  "Communications": ["Radio Communications", "Dispatch Procedures", "Mayday Operations", "RIT Operations", "Accountability Officer", "Communications Unit Leader"],
+  "Safety": ["Firefighter Survival", "Rapid Intervention Team (RIT)", "Fire Ground Safety", "Safety Officer", "Behavioral Health", "Peer Support", "Cancer Prevention", "Rehabilitation Officer", "Thermal Imaging"],
+  "Specialized": ["Chainsaw Operations", "Ventilation", "High Rise Operations", "Grain Bin Rescue", "Elevator Rescue", "Farm Rescue", "Pipeline Emergency Response", "Railroad Incident Response", "Lithium Battery Fires", "Electric Vehicle Response", "Solar Energy Fires", "Propane Emergencies", "Natural Gas Emergencies", "Marine Firefighting", "Mass Casualty Incident (MCI)", "Active Threat Response", "School Safety Response", "Weather Spotter", "Drone Pilot (FAA Part 107)", "Fire Photography", "PIO Training", "Grant Writing", "Recruitment & Retention", "Public Education", "Fire Prevention Educator", "Community Risk Reduction"],
+  "Administrative": ["Grant Management", "Nonprofit Board Governance", "Records Management", "OSHA Compliance", "Volunteer Coordinator", "Emergency Management", "Public Information Officer (PIO)", "Finance Officer", "Secretary Training", "Treasurer Training"],
+  "Department Qualifications (Non-Certification)": ["Interior Qualified", "Exterior Qualified", "Pump Operator Qualified", "Ladder Qualified", "Driver Cleared", "Brush Truck Qualified", "Rescue Qualified", "Engine Company Qualified", "Tender Qualified", "Tanker Shuttle Qualified", "Rescue Boat Qualified", "Duty Officer Qualified", "Accountability Officer", "Rehab Officer", "RIT Qualified", "Live Fire Instructor Approved", "Fit Tested", "SCBA Qualified", "Chainsaw Qualified", "Station Safety Officer", "New Member Mentor", "Probationary Member Complete"],
+};
+const DEPT_QUAL_GROUP = "Department Qualifications (Non-Certification)";
+const isDeptQual = (c) => (CERT_TRACKS[DEPT_QUAL_GROUP] || []).includes(c);   // skill sign-off / demonstration, not a written-exam cert
 function StudySession({ S }) {
-  const [cert, setCert] = useState(CERT_TRACKS[0]);
+  const [cert, setCert] = useState(Object.values(CERT_TRACKS)[0][0]);   // first cert of the first group
   const [mode, setMode] = useState("quiz");        // 'quiz' | 'explain'
   const [turns, setTurns] = useState([]);           // [{ role: 'user'|'assistant', content, hidden? }]
   const [input, setInput] = useState("");
@@ -1785,10 +1802,19 @@ function StudySession({ S }) {
   const [err, setErr] = useState("");
   const reset = () => { setTurns([]); setInput(""); setErr(""); };
   const sysFor = (c, m) => {
-    const base = `You are a cert-aware study tutor for a volunteer firefighter preparing for their ${c} certification. Stay within the scope of ${c}.`;
-    const quiz = `QUIZ MODE: Ask exam-style questions ONE AT A TIME. After the member answers, say whether it's correct, partially correct, or incorrect and briefly explain WHY, then ask the next question. Be encouraging and supportive — this is practice, not a real exam.`;
-    const explain = `EXPLAIN MODE: The member asks concept questions. Teach clearly and practically at the right level for ${c}, and answer follow-up questions in context.`;
-    const caveat = `IMPORTANT — this is study help, not the authority. Ground answers in general firefighting/EMS knowledge; do NOT invent a specific protocol, number, or standard you are unsure of — if unsure, say so. Always remind the member to confirm specifics against their department's SOPs and the current TCFP / NREMT standards for ${c}.`;
+    const qual = isDeptQual(c);
+    const base = qual
+      ? `You are a training coach for a volunteer firefighter working toward the "${c}" DEPARTMENT QUALIFICATION — a hands-on skill sign-off / demonstration, not a written-exam certification.`
+      : `You are a cert-aware study tutor for a volunteer firefighter preparing for their ${c} certification. Stay within the scope of ${c}.`;
+    const quiz = qual
+      ? `SKILL-CHECK MODE: Walk the member through what this qualification requires them to DEMONSTRATE — the practical steps, equipment, and sign-off criteria — one focus area at a time. Ask them to describe how they'd perform it and give feedback. This is a skill check, not a written test.`
+      : `QUIZ MODE: Ask exam-style questions ONE AT A TIME. After the member answers, say whether it's correct, partially correct, or incorrect and briefly explain WHY, then ask the next question. Be encouraging and supportive — this is practice, not a real exam.`;
+    const explain = qual
+      ? `EXPLAIN MODE: The member asks how to perform or prepare for this qualification's demonstration. Teach the practical skill clearly and answer follow-up questions in context.`
+      : `EXPLAIN MODE: The member asks concept questions. Teach clearly and practically at the right level for ${c}, and answer follow-up questions in context.`;
+    const caveat = qual
+      ? `IMPORTANT — this is coaching, not the authority. Ground guidance in general firefighting practice; do NOT invent a specific department requirement or sign-off criterion — if unsure, say so. Always tell the member to confirm the exact demonstration criteria with their department's SOPs and training officer.`
+      : `IMPORTANT — this is study help, not the authority. Ground answers in general firefighting/EMS knowledge; do NOT invent a specific protocol, number, or standard you are unsure of — if unsure, say so. Always remind the member to confirm specifics against their department's SOPs and the current TCFP / NREMT standards for ${c}.`;
     return `${base} ${m === "quiz" ? quiz : explain} Keep replies focused and reasonably short. ${caveat}`;
   };
   async function send(text, hidden) {
@@ -1804,7 +1830,12 @@ function StudySession({ S }) {
       if (!hidden) setInput(text);           // give them their answer back
     } finally { setLoading(false); }
   }
-  const startQuiz = () => send(`Ask me the first exam-style question for the ${cert} certification. One question only — don't reveal the answer yet.`, true);
+  const startQuiz = () => send(
+    isDeptQual(cert)
+      ? `Walk me through the first skill I need to demonstrate for the "${cert}" qualification. One focus area — don't give it all at once.`
+      : `Ask me the first exam-style question for the ${cert} certification. One question only — don't reveal the answer yet.`,
+    true
+  );
   const submit = () => { const t = input.trim(); if (!t || loading) return; send(t, false); };
   const visible = turns.filter((t) => !t.hidden);
   return (
@@ -1816,11 +1847,15 @@ function StudySession({ S }) {
       </div>
       <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
-          <select style={{ ...FS.input, maxWidth: 220 }} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
-            {CERT_TRACKS.map((c) => <option key={c} value={c}>{c}</option>)}
+          <select style={{ ...FS.input, maxWidth: 320 }} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
+            {Object.entries(CERT_TRACKS).map(([cat, certs]) => (
+              <optgroup key={cat} label={cat}>
+                {certs.map((c) => <option key={c} value={c}>{c}</option>)}
+              </optgroup>
+            ))}
           </select></label>
         <div style={S.segRow}>
-          {[["quiz", "Quiz me"], ["explain", "Explain"]].map(([k, l]) => (
+          {[["quiz", isDeptQual(cert) ? "Skill check" : "Quiz me"], ["explain", "Explain"]].map(([k, l]) => (
             <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
           ))}
         </div>
@@ -1844,7 +1879,7 @@ function StudySession({ S }) {
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
         ) : (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder={mode === "quiz" ? "Type your answer…" : `Ask a ${cert} question…`} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
+            <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder={mode === "quiz" ? (isDeptQual(cert) ? "Describe how you'd do it…" : "Type your answer…") : `Ask a ${cert} question…`} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
             <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>{mode === "quiz" ? "Submit answer" : "Ask"}</button>
           </div>
         )}
