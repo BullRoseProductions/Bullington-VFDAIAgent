@@ -6863,25 +6863,25 @@ function GraphicStudio({ S, brand }) {
   return (
     <div style={{ marginTop: 8 }}>
       <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAKE A GRAPHIC</div>
-      <p style={S.helpP}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {GFX_TEMPLATES.map((t) => (
-          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
+          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
         ))}
       </div>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {GFX_SIZES.map((sz) => (
-            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, ...(sizeKey === sz.key ? S.segBtnOn : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
+            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(sizeKey === sz.key ? S.segBtnOn : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
           ))}
         </div>
       </div>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8696", letterSpacing: 0.4, marginBottom: 6 }}>STYLE</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>STYLE</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {STYLES.map((sy) => (
-            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, ...(styleKey === sy.key ? S.segBtnOn : {}) }}>{sy.name}</button>
+            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(styleKey === sy.key ? S.segBtnOn : {}) }}>{sy.name}</button>
           ))}
         </div>
       </div>
@@ -6890,42 +6890,42 @@ function GraphicStudio({ S, brand }) {
           {[0, 1, 2, 3].map((i) => {
             const key = `l${i + 1}`;
             return (
-              <label key={i} style={{ ...S.field, marginBottom: 8 }}><span style={S.fieldLabel}>{tmpl.labels[i]}</span>
-                <input style={S.input} value={f[key] || ""} onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))} /></label>
+              <label key={i} style={{ ...S.field, marginBottom: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{tmpl.labels[i]}</span>
+                <input style={FS.input} value={f[key] || ""} onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))} /></label>
             );
           })}
           {tk === "spotlight" && (
-            <label style={{ ...S.ghostBtn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
+            <label style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
           )}
-          <div style={{ marginTop: 14, padding: 12, border: "1px dashed #D9D5E2", borderRadius: 10, background: "#FBFAFC" }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#54506B", display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ImageIcon size={14} /> BACKGROUND IMAGE</div>
-            <p style={{ fontSize: 12, color: "#6A7178", marginTop: 0, marginBottom: 8 }}>Add a photo behind your text — your text stays readable over it. Optional.</p>
+          <div style={{ marginTop: 14, padding: 12, border: `1px dashed ${FIRE.btnBorder}`, borderRadius: 10, background: FIRE.btnBg }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ImageIcon size={14} /> BACKGROUND IMAGE</div>
+            <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Add a photo behind your text — your text stays readable over it. Optional.</p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ ...S.ghostBtn, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
-              {bg && <label style={{ fontSize: 12.5, color: "#3A4750", display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use it</label>}
-              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, color: "#B11E2A", borderColor: "#E4C7CB" }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
+              <label style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
+              {bg && <label style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use it</label>}
+              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.btnBg, color: FIRE.redText, borderColor: FIRE.btnBorder }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
             </div>
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #ECEAF1" }}>
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.hairline}` }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#7A7488", display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: "#EDEBF2", color: "#7A7488", padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
-                <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
+                <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted, display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: FIRE.btnBg, color: FIRE.textMuted, padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
+                <button style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
               </div>
               {aiOpen && <div style={{ marginTop: 10 }}>
-                <p style={{ fontSize: 12, color: "#6A7178", marginTop: 0, marginBottom: 8 }}>Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
-                <textarea style={{ ...S.input, minHeight: 54, resize: "vertical", fontFamily: "inherit" }} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
+                <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
+                <textarea style={{ ...FS.input, minHeight: 54, resize: "vertical", fontFamily: "inherit" }} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                  <button style={{ ...S.primaryBtn, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
+                  <button style={{ ...FS.btnPrimary, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
                 </div>
-                {aiErr && <div style={{ ...S.errBox, marginTop: 8 }}>{aiErr}</div>}
+                {aiErr && <div style={{ ...S.errBox, marginTop: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{aiErr}</div>}
               </div>}
             </div>
           </div>
         </div>
         <div style={{ width: 300, maxWidth: "100%" }}>
-          <div style={{ display: "flex", justifyContent: "center", background: "#F4F3F7", borderRadius: 12, border: "1px solid #E7E5EE", padding: 10 }}>
+          <div style={{ display: "flex", justifyContent: "center", background: FIRE.btnBg, borderRadius: 12, border: `1px solid ${FIRE.hairline}`, padding: 10 }}>
             <img src={dataUrl} alt="graphic preview" style={{ maxWidth: "100%", maxHeight: 420, borderRadius: 6, display: "block" }} />
           </div>
-          <button style={{ ...S.primaryBtn, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
+          <button style={{ ...FS.btnPrimary, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
         </div>
       </div>
     </div>
@@ -7379,33 +7379,37 @@ function Admin({ S, library, setLibrary, feedback }) {
   }
   return (
     <div>
-      <PageHead S={S} eyebrow="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately." />
-      <div style={S.formCard}>
-        <label style={S.field}><span style={S.fieldLabel}>Packet title</span><input style={S.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Tanker Shuttle Operations" /></label>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>CONTENT ADMIN</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Publish a packet</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Platform admins add monthly materials. New packets appear in the library immediately.</div>
+      </div>
+      <div style={{ ...S.formCard, ...FS.card }}>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Packet title</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Tanker Shuttle Operations" /></label>
         <div style={S.twoColForm}>
-          <label style={S.field}><span style={S.fieldLabel}>Track</span><select style={S.input} value={track} onChange={(e) => setTrack(e.target.value)}>{Object.keys(TRACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
-          <label style={S.field}><span style={S.fieldLabel}>Estimated time</span><input style={S.input} value={time} onChange={(e) => setTime(e.target.value)} /></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Track</span><select style={FS.input} value={track} onChange={(e) => setTrack(e.target.value)}>{Object.keys(TRACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Estimated time</span><input style={FS.input} value={time} onChange={(e) => setTime(e.target.value)} /></label>
         </div>
-        <label style={S.field}><span style={S.fieldLabel}>Objective</span><textarea style={{ ...S.input, minHeight: 66, resize: "vertical" }} value={objective} onChange={(e) => setObjective(e.target.value)} /></label>
-        <button style={S.primaryBtn} onClick={publish}><Plus size={16} /> Publish to library</button>
-        {done && <div style={S.successBox}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Objective</span><textarea style={{ ...FS.input, minHeight: 66, resize: "vertical" }} value={objective} onChange={(e) => setObjective(e.target.value)} /></label>
+        <button style={FS.btnPrimary} onClick={publish}><Plus size={16} /> Publish to library</button>
+        {done && <div style={{ ...S.successBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
       </div>
 
       <div style={{ marginTop: 26 }}>
         <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FIELD SIGNAL · WHAT WE'RE LEARNING</div>
-        <p style={{ ...S.pageSub, marginTop: 0, marginBottom: 14 }}>Ratings and critiques from departments on AI-generated plans. Review monthly, spot the patterns, and turn them into sharper prompt rules and better packets — that's how the system improves.</p>
+        <p style={{ ...S.pageSub, marginTop: 0, marginBottom: 14, color: FIRE.textMuted }}>Ratings and critiques from departments on AI-generated plans. Review monthly, spot the patterns, and turn them into sharper prompt rules and better packets — that's how the system improves.</p>
         {(!feedback || feedback.length === 0) ? (
-          <div style={S.empty}>No feedback yet. Generate a plan in the AI Training Assistant, rate it, and it'll show up here.</div>
+          <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>No feedback yet. Generate a plan in the AI Training Assistant, rate it, and it'll show up here.</div>
         ) : (
           feedback.map((f, i) => (
-            <div key={i} style={S.fbItem}>
+            <div key={i} style={{ ...S.fbItem, ...FS.card }}>
               <span style={{ ...S.fbDot, background: f.rating === "up" ? "#2E7D52" : (f.rating === "down" ? "#B11E2A" : "#9AA1A9") }} />
               <div style={{ flex: 1 }}>
-                <div style={S.fbItemTop}><strong>{f.topic}</strong>{f.edited && <span style={S.fbEdited}>EDITED</span>}</div>
-                {f.tags && f.tags.length > 0 && <div style={S.fbItemTags}>{f.tags.join(" · ")}</div>}
-                {f.notes && <div style={S.fbItemNotes}>"{f.notes}"</div>}
+                <div style={{ ...S.fbItemTop, color: FIRE.textPrimary }}><strong>{f.topic}</strong>{f.edited && <span style={S.fbEdited}>EDITED</span>}</div>
+                {f.tags && f.tags.length > 0 && <div style={{ ...S.fbItemTags, color: FIRE.textMuted }}>{f.tags.join(" · ")}</div>}
+                {f.notes && <div style={{ ...S.fbItemNotes, color: FIRE.textSecondary }}>"{f.notes}"</div>}
               </div>
-              <span style={S.reqWhen}>{f.when}</span>
+              <span style={{ ...S.reqWhen, color: FIRE.textMuted }}>{f.when}</span>
             </div>
           ))
         )}
