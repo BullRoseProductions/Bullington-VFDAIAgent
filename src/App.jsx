@@ -4907,6 +4907,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; "attendance" | "chief"
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
   if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
+  if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -4931,6 +4932,16 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
             <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Chief's Report</div></div>
           </div>
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
+          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+          </div>
+        </div>
+        <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("actions")}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Action Items</div></div>
+          </div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.</div>
           <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
             <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
           </div>
@@ -5092,6 +5103,114 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
       )}
       {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {rangeText} yet.</div>}
+    </div>
+  );
+}
+
+// Action Items report — the LIST behind the Chief's Report count.
+// Completed/Cancelled are PERIOD FACTS (resolved in range); Still-open is a CURRENT SNAPSHOT
+// (all currently-open items as of today, NOT range-filtered) — mirrors the Chief's period-vs-snapshot split.
+function ActionItemsReport({ S, members, back }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const [presetKey, setPresetKey] = useState("year");
+  const [range, setRange] = useState(() => presetRange("year"));
+  const [items, setItems] = useState(null);   // null = loading
+  useEffect(() => {
+    supabase.from("action_items").select("*").then(({ data }) => setItems(data || []));   // dept-scoped by RLS
+  }, []);
+
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const todayISO = toISODate(new Date());
+  const inRange = (ts) => { if (!ts) return false; const iso = toISODate(new Date(ts)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); };
+  const all = items || [];
+  // Period facts: resolved IN range
+  const completed = all.filter((it) => it.status === "done"      && inRange(it.completed_at)).sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || ""));
+  const cancelled = all.filter((it) => it.status === "cancelled" && inRange(it.cancelled_at)).sort((a, b) => (b.cancelled_at || "").localeCompare(a.cancelled_at || ""));
+  // Current snapshot: ALL currently-open, regardless of range
+  const open      = all.filter((it) => it.status === "open").sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"));
+  const nothing = !completed.length && !cancelled.length && !open.length;
+
+  const fmtD  = (d)  => d  ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+  const fmtTs = (ts) => ts ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+  const rangeText = `${fmtD(range.from)} – ${fmtD(range.to)}`;
+  const assignee = (it) => it.assignee_name || (it.assigned_to ? (nameById.get(it.assigned_to) || "Unknown") : "Unassigned");   // snapshot → live → fallback (matches resolvedRow)
+
+  const row = (it, kind) => {
+    const overdue = kind === "open" && it.due_date && it.due_date < todayISO;
+    const meta = kind === "done"      ? `Completed ${fmtTs(it.completed_at)} · ${assignee(it)}`
+              : kind === "cancelled"  ? `Cancelled ${fmtTs(it.cancelled_at)} · ${assignee(it)} — ${it.cancel_reason || "no reason given"}`
+              :                         `${assignee(it)}${it.due_date ? ` · due ${fmtD(it.due_date)}` : ""}${overdue ? " · OVERDUE" : ""}`;
+    const icon = kind === "done"     ? <CheckCircle2 size={16} color={FIRE.green} style={{ flexShrink: 0 }} />
+              : kind === "cancelled" ? <X size={16} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+              :                        <Clock size={16} color={overdue ? FIRE.redText : FIRE.amberText} style={{ flexShrink: 0 }} />;
+    return (
+      <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+        {icon}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontWeight: 600, color: kind === "open" ? FIRE.textPrimary : FIRE.textMuted2, textDecoration: kind === "open" ? "none" : "line-through" }}>{it.text}</span>
+          <div style={{ fontSize: 12, color: overdue ? FIRE.redText : FIRE.textMuted, marginTop: 1 }}>{meta}</div>
+        </div>
+      </div>
+    );
+  };
+
+  const section = (title, count, note, rows, emptyText) => (
+    <div style={{ ...FS.card, padding: "14px 16px", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>{title}</span>
+        <span style={{ fontSize: 12, color: FIRE.textMuted }}>({count})</span>
+        {note && <span style={{ marginLeft: "auto", fontSize: 11, color: FIRE.textMuted, fontStyle: "italic" }}>{note}</span>}
+      </div>
+      {rows.length ? rows : <div style={{ fontSize: 13, color: FIRE.textMuted }}>{emptyText}</div>}
+    </div>
+  );
+
+  const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  function exportCsv() {
+    const header = ["Status", "Action item", "Assignee", "Due date", "Created", "Resolved", "Reason"];
+    const toRow = (it) => {
+      const st = it.status === "done" ? "Completed" : it.status === "cancelled" ? "Cancelled" : "Open";
+      const resolved = it.status === "done" ? fmtTs(it.completed_at) : it.status === "cancelled" ? fmtTs(it.cancelled_at) : "";
+      const reason = it.status === "cancelled" ? (it.cancel_reason || "") : "";
+      return [st, it.text, assignee(it), it.due_date ? fmtD(it.due_date) : "", fmtTs(it.created_at), resolved, reason];
+    };
+    const allRows = [
+      [`Action items — ${rangeText}`],
+      [`Completed & Cancelled = resolved in this range. Open = ALL currently-open items as of ${fmtD(todayISO)} (current snapshot, not range-filtered).`],
+      [],
+      header,
+      ...completed.map(toRow),
+      ...cancelled.map(toRow),
+      ...open.map(toRow),   // included for the full board picture; Status column marks them Open
+    ];
+    const csv = allRows.map((r) => r.map(csvField).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `action-items-${range.from}_to_${range.to}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
+      <div style={FS.kicker}>REPORTS · ACTION ITEMS</div>
+      <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Action Items</h1>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>What got done, what was dropped, and what's still open. Completed &amp; cancelled are the items resolved during {rangeText}; still-open is a live snapshot as of today.</div>
+
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
+        <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={exportCsv} disabled={nothing}><Download size={15} /> Download CSV</button>
+      </div>
+
+      {items === null ? (
+        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading action items…</div>
+      ) : nothing ? (
+        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>No action items resolved in this period, and none currently open.</div>
+      ) : (<>
+        {section("✓ Completed (in range)", completed.length, null, completed.map((it) => row(it, "done")), "None completed in this period.")}
+        {section("✕ Cancelled (in range)", cancelled.length, null, cancelled.map((it) => row(it, "cancelled")), "None cancelled in this period.")}
+        {section("○ Still open", open.length, `current snapshot — as of ${fmtD(todayISO)}`, open.map((it) => row(it, "open")), "Nothing currently open.")}
+      </>)}
     </div>
   );
 }
