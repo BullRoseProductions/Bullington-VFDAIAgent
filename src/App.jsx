@@ -12,6 +12,10 @@ import {
 import { downloadDepartmentReport } from "./report.js";
 import { QRCodeCanvas } from "qrcode.react";
 import { supabase } from "./supabaseClient";
+// PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
+// only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
+// that parser is lazy-imported in extractPdfText() on first upload.
+import PDF_WORKER_URL from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 /* ------------------------------------------------------------------ */
 /*  Working title: THE DAYROOM  (name not final — easy to swap)        */
@@ -2596,6 +2600,28 @@ function Phase({ S, n, weeks, title, items, accent }) {
 }
 
 /* ---------------- Station Documents (upload + create) ---------------- */
+// SOP text extraction for AI grounding. pdfjs-dist is LAZY-imported — the parser only loads on first upload, never at page load.
+let _pdfjs = null;
+async function loadPdfjs() {
+  if (_pdfjs) return _pdfjs;
+  const lib = await import("pdfjs-dist");
+  lib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;   // worker wired up ONCE — the #1 Vite gotcha
+  _pdfjs = lib;
+  return lib;
+}
+// Extract all page text from a PDF File. Throws if the bytes aren't a readable PDF (caller treats a throw as "no text").
+async function extractPdfText(file) {
+  const buf = await file.arrayBuffer();
+  const pdfjsLib = await loadPdfjs();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    text += tc.items.map((it) => it.str).join(" ") + "\n";   // items[].str = the selectable text spans on the page
+  }
+  return text;
+}
 const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
 function Documents({ S, role, notify, uploaderName, members }) {
   const leader = isLeader(role);
@@ -2654,6 +2680,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
     const failed = [];
     let lastErr = "";
     const added = [];
+    const noText = [];   // saved OK but yielded no extractable text (scan / non-PDF) — advisory, NOT a failure
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       // collision-proof path: {deptId}/{timestamp}-{index}-{filename}
@@ -2661,8 +2688,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
       // 1) upload the file bytes to the private bucket
       const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
       if (upErr) { failed.push(file.name); lastErr = upErr.message; continue; }
-      // 2) write the metadata row
-      const row = { department_id: deptId, name: file.name, type: uploadType, storage_path: path, uploaded_by: uploaderName };
+      // 2) extract text for AI grounding — best-effort; NEVER blocks the upload (row still saves with content_text null).
+      let content_text = null;
+      const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+      if (!isPdf) {
+        noText.push(file.name);                                          // gate 1: not a PDF (DOCX, image, etc.)
+      } else {
+        try {
+          const text = await extractPdfText(file);
+          if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // gate 3: has a real text layer
+          else noText.push(file.name);                                  // empty/near-empty → likely a scanned image PDF
+        } catch {
+          noText.push(file.name);                                       // gate 2: getDocument threw — unreadable / not a real PDF
+        }
+      }
+      // 3) write the metadata row (content_text = extracted text, or null on any extraction failure)
+      const row = { department_id: deptId, name: file.name, type: uploadType, storage_path: path, uploaded_by: uploaderName, content_text };
       const { data: docData, error: docErr } = await supabase.from("documents").insert(row).select().single();
       if (docErr || !docData) { failed.push(file.name); lastErr = docErr?.message ?? "unknown error"; continue; }
       // confirmed-committed row — map to loadDocs's exact shape for an optimistic prepend
@@ -2673,10 +2714,12 @@ function Documents({ S, role, notify, uploaderName, members }) {
     // 3) show the just-inserted rows instantly (already committed), then reconcile with DB truth
     if (added.length) setDocs((d) => [...added, ...d]);
     await loadDocs();   // non-destructive: a flaky read leaves the optimistic rows in place
+    // advisory (not an error): files that saved but couldn't be read for AI grounding — appended to the summary
+    const aiNote = noText.length ? ` Couldn't read text from ${noText.join(", ")} — they may be scans or unsupported formats; they won't be included in the AI assistant until re-uploaded as text PDFs.` : "";
     if (failed.length === 0) {
-      notify({ kind: "success", title: "Documents uploaded", text: `${okCount} document${okCount === 1 ? "" : "s"} uploaded.` });
+      notify({ kind: "success", title: "Documents uploaded", text: `${okCount} document${okCount === 1 ? "" : "s"} uploaded.${aiNote}` });
     } else if (okCount > 0) {
-      notify({ kind: "error", title: "Some uploads failed", text: `${okCount} uploaded, ${failed.length} couldn't be added: ${failed.join(", ")}.` });
+      notify({ kind: "error", title: "Some uploads failed", text: `${okCount} uploaded, ${failed.length} couldn't be added: ${failed.join(", ")}.${aiNote}` });
     } else {
       notify({ kind: "error", title: "Couldn't upload", text: "None of your documents could be uploaded.", details: lastErr });
     }
