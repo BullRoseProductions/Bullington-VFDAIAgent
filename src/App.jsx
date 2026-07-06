@@ -582,8 +582,12 @@ const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id);
 // Distinct predicate from countsInStats (assignable vs. counted) though it shares the id set today.
 const isAssignable = (m) => !STATS_EXCLUDED_IDS.has(m.id);
 const assignableMembers = (ms) => (ms || []).filter(isAssignable);
-function deptAttendance(members, sessions, year) {
-  const doneThisYear = (sessions || []).filter((s) => s.done && s.y === year && (s.attendance || []).length > 0);   // done + roll-taken
+function deptAttendance(members, sessions, year, range) {
+  // scope by date range {from,to} (ISO) when given (empty bound = unbounded); else the original year filter — backward-compatible for dashboards
+  const inScope = range
+    ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
+    : (s) => s.y === year;
+  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0);   // done + roll-taken, in scope
   const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
     const memberLeader = isLeader(m.access);
     const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");
@@ -4889,11 +4893,40 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
 // Yearly attendance — per-member aggregation from sessions + session_attendance.
 // Source pool excludes done drills with NO recorded attendance (roll never taken → missing data, not absence).
 // eligible denominator is PER MEMBER (audience-aware): leadership-only events count only for leaders.
+// ---- Shared date-range picker: presets + custom from/to → { from, to } (ISO) ----
+function presetRange(key) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const p2 = (n) => String(n).padStart(2, "0");
+  const iso = (yy, mm, dd) => `${yy}-${p2(mm)}-${p2(dd)}`;              // mm is 1-indexed
+  const lastDay = (yy, mm) => new Date(yy, mm, 0).getDate();           // last day of month mm (1-indexed)
+  if (key === "month")   { const m = now.getMonth() + 1; return { from: iso(y, m, 1), to: iso(y, m, lastDay(y, m)) }; }
+  if (key === "quarter") { const q = Math.floor(now.getMonth() / 3), m1 = q * 3 + 1, m3 = q * 3 + 3; return { from: iso(y, m1, 1), to: iso(y, m3, lastDay(y, m3)) }; }
+  if (key === "lastyear") return { from: iso(y - 1, 1, 1), to: iso(y - 1, 12, 31) };
+  return { from: iso(y, 1, 1), to: iso(y, 12, 31) };                    // "year" (default)
+}
+const RANGE_PRESETS = [["month", "This Month"], ["quarter", "This Quarter"], ["year", "This Year"], ["lastyear", "Last Year"]];
+function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
+  const pick = (k) => { setPresetKey(k); setRange(presetRange(k)); };
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {RANGE_PRESETS.map(([k, label]) => {
+          const on = presetKey === k;
+          return <button key={k} onClick={() => pick(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>;
+        })}
+      </div>
+      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From</span><input type="date" style={FS.input} value={range.from} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, from: e.target.value })); }} /></label>
+      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>To</span><input type="date" style={FS.input} value={range.to} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, to: e.target.value })); }} /></label>
+    </div>
+  );
+}
 function AttendanceReport({ S, members, sessions, dept, back }) {
-  const cur = new Date().getFullYear();
-  const [year, setYear] = useState(cur);
-  const years = [...new Set([cur, ...(sessions || []).filter((s) => s.done && (s.attendance || []).length > 0).map((s) => s.y)])].sort((a, b) => b - a);   // current year + any year with reportable drills, newest first
-  const { rows: attRows, avg: avgPct, doneThisYear } = deptAttendance(members, sessions, year);   // shared calc (also RosterReports + Dept Admin dashboard)
+  const [presetKey, setPresetKey] = useState("year");                  // default This Year (matches prior on-load behavior)
+  const [range, setRange] = useState(() => presetRange("year"));
+  const { rows: attRows, avg: avgPct, doneThisYear } = deptAttendance(members, sessions, null, range);   // range-filtered (dashboards still call the year form)
+  const fmtD = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+  const rangeText = `${fmtD(range.from)} – ${fmtD(range.to)}`;
   const rows = [...attRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
   const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
@@ -4918,7 +4951,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     const allRows = [
       sumHeader, ...sumBody,
       [],                                                        // blank line between the two sections
-      [`Session-by-session — full year ${year}`],
+      [`Session-by-session — ${rangeText}`],
       gridHeader, ...gridBody,
       [],
       ["Legend: P = present, A = absent, blank = not expected (leadership session, non-leader), (L) = leadership session"],
@@ -4928,7 +4961,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `attendance-${year}.csv`;
+    a.download = `attendance-${range.from}_to_${range.to}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -4936,14 +4969,11 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
       <div style={FS.kicker}>REPORTS · ATTENDANCE</div>
-      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Yearly Attendance Report</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>Full-year training attendance per member for {year}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.</div>
+      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Attendance Report</h1>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>Training attendance per member for {rangeText}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.</div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-        <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Report year</span>
-        <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ ...FS.input, width: "auto", minWidth: 110 }}>
-          {years.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+        <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
         <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={exportCsv} disabled={doneThisYear.length === 0}><Download size={15} /> Download CSV</button>
       </div>
 
@@ -4956,7 +4986,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         </div>
         {detail && chron.length > 10 && (
           <button style={{ ...FS.btn, marginLeft: "auto", fontSize: 12 }} onClick={() => setFullYear((v) => !v)}>
-            {fullYear ? `All ${chron.length} sessions · show recent 10` : `Recent 10 · expand to full year (${chron.length})`}
+            {fullYear ? `All ${chron.length} sessions · show recent 10` : `Recent 10 · expand to full range (${chron.length})`}
           </button>
         )}
       </div>
