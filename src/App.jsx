@@ -5304,12 +5304,14 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const normalizeDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim())) ? s.trim() : "";   // only a clean YYYY-MM-DD pre-fills the picker
   const [items, setItems] = useState([]);
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
-  const openItems = items.filter((i) => i.status !== "done");
-  const doneItems = items.filter((i) => i.status === "done");
+  const openItems = items.filter((i) => i.status === "open");                                   // only open — done AND cancelled are excluded from the active list
+  const doneItems = items.filter((i) => i.status === "done");                                   // completed only — for the CSV export
+  const resolvedItems = items.filter((i) => i.status === "done" || i.status === "cancelled");   // completed OR cancelled → the history split
   const GRACE_MS = 14 * 24 * 60 * 60 * 1000;   // 14-day reopen grace — mirrors the reopen_action_item DB lock
-  const isArchived = (i) => i.completed_at && (Date.now() - new Date(i.completed_at).getTime()) >= GRACE_MS;
-  const recentDone = doneItems.filter((i) => !isArchived(i));   // within grace — reopenable
-  const archivedDone = doneItems.filter(isArchived);            // past grace — read-only, permanent
+  const resolvedAt = (i) => i.completed_at || i.cancelled_at;                                    // whichever outcome stamp is set (an item is one or the other)
+  const isArchived = (i) => resolvedAt(i) && (Date.now() - new Date(resolvedAt(i)).getTime()) >= GRACE_MS;
+  const recentResolved = resolvedItems.filter((i) => !isArchived(i));   // within grace — reopenable
+  const archivedResolved = resolvedItems.filter(isArchived);            // past grace — read-only, permanent
   const open = openItems.length;
   async function draft() {
     if (!notes.trim()) { setErr("Add a few rough notes first and I'll shape them into minutes."); return; }
@@ -5426,11 +5428,41 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     const { error } = await supabase.rpc("reopen_action_item", { p_id: it.id });   // RPC rejects if completed 14+ days ago (archived)
     if (error) {
       const locked = /14 days|archived/i.test(error.message || "");
-      notify({ kind: "error", title: locked ? "Item is archived" : "Couldn't reopen that", text: locked ? "This item was completed over 14 days ago and is now archived — it can't be reopened." : "Something went wrong. Please try again.", details: locked ? undefined : error.message });
+      notify({ kind: "error", title: locked ? "Item is archived" : "Couldn't reopen that", text: locked ? "This item was completed or cancelled over 14 days ago and is now archived — it can't be reopened." : "Something went wrong. Please try again.", details: locked ? undefined : error.message });
       return;
     }
     loadActionItems();
   }
+  async function cancelItem(it) {
+    if (!canManage) return;
+    const reason = window.prompt(`Why is "${it.text}" no longer needed? (a reason is required)`);
+    if (reason === null) return;                                   // dismissed the prompt
+    if (!reason.trim()) { notify({ kind: "error", title: "Reason required", text: "Please give a reason for cancelling this item." }); return; }
+    const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });   // server-stamps cancelled_at/by + snapshots assignee_name
+    if (error) { notify({ kind: "error", title: "Couldn't cancel that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Marked no longer needed", text: `"${it.text}" was cancelled.` });
+    loadActionItems();
+  }
+  // one history row for a RESOLVED item (completed OR cancelled); reopenable → shows the Reopen button (within the 14-day grace)
+  const resolvedRow = (it, reopenable) => {
+    const done = it.status === "done";
+    const ts = done ? it.completed_at : it.cancelled_at;
+    const when = ts ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+    const actor = done ? it.completed_by : it.cancelled_by;
+    const who = (actor && nameById.get(actor)) || it.assignee_name || (it.assigned_to ? "Unknown" : "Unassigned");   // live actor → snapshot name → fallback
+    return (
+      <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+        {done
+          ? <CheckCircle2 size={16} color={reopenable ? FIRE.green : FIRE.textMuted} style={{ flexShrink: 0 }} />
+          : <X size={16} color={reopenable ? FIRE.redText : FIRE.textMuted} style={{ flexShrink: 0 }} />}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
+          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{done ? `Completed ${when} · ${who}` : `Cancelled ${when} · ${who} — ${it.cancel_reason || "no reason given"}`}</div>
+        </div>
+        {reopenable && <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopenItem(it)}>Reopen</button>}
+      </div>
+    );
+  };
   const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   function exportCompletedCsv() {
     const header = ["Action item", "Completed by", "Completed"];
@@ -5533,14 +5565,15 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
                   <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{it.text}</span>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{who} · due {due}</div>
                 </div>
+                {canManage && <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => cancelItem(it)} title="No longer needed">Cancel</button>}
               </div>
             );
           })}
       </div>
-      {canManage && doneItems.length > 0 && (
+      {canManage && resolvedItems.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <button onClick={() => setShowDone((v) => !v)} style={{ ...FS.btn, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span>Completed ({doneItems.length})</span>
+            <span>Completed &amp; cancelled ({resolvedItems.length})</span>
             {showDone ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
           {showDone && (
@@ -5548,38 +5581,13 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCompletedCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>
               </div>
-              {recentDone.length > 0 && (<>
-                <div style={{ ...FS.kicker, fontSize: 10.5, marginTop: 2, marginBottom: 4 }}>RECENTLY COMPLETED · REOPENABLE FOR 14 DAYS</div>
-                {[...recentDone].sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")).map((it) => {
-                  const who = it.completed_by ? (nameById.get(it.completed_by) || "Unknown") : "—";
-                  const when = it.completed_at ? new Date(it.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
-                  return (
-                    <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-                      <CheckCircle2 size={16} color={FIRE.green} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
-                        <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{who} · {when}</div>
-                      </div>
-                      <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopenItem(it)}>Reopen</button>
-                    </div>
-                  );
-                })}
+              {recentResolved.length > 0 && (<>
+                <div style={{ ...FS.kicker, fontSize: 10.5, marginTop: 2, marginBottom: 4 }}>RECENTLY RESOLVED · REOPENABLE FOR 14 DAYS</div>
+                {[...recentResolved].sort((a, b) => (resolvedAt(b) || "").localeCompare(resolvedAt(a) || "")).map((it) => resolvedRow(it, true))}
               </>)}
-              {archivedDone.length > 0 && (<>
-                <div style={{ ...FS.kicker, fontSize: 10.5, marginTop: recentDone.length ? 12 : 2, marginBottom: 4 }}>ARCHIVE · READ-ONLY</div>
-                {[...archivedDone].sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")).map((it) => {
-                  const who = it.assignee_name || (it.assigned_to ? (nameById.get(it.assigned_to) || "Unknown") : "Unassigned");   // snapshot first; live lookup / Unassigned fallback
-                  const when = it.completed_at ? new Date(it.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
-                  return (
-                    <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-                      <CheckCircle2 size={16} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
-                        <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>Completed {when} · {who}</div>
-                      </div>
-                    </div>
-                  );
-                })}
+              {archivedResolved.length > 0 && (<>
+                <div style={{ ...FS.kicker, fontSize: 10.5, marginTop: recentResolved.length ? 12 : 2, marginBottom: 4 }}>ARCHIVE · READ-ONLY</div>
+                {[...archivedResolved].sort((a, b) => (resolvedAt(b) || "").localeCompare(resolvedAt(a) || "")).map((it) => resolvedRow(it, false))}
               </>)}
             </div>
           )}
