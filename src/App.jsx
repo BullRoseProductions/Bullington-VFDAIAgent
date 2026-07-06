@@ -2607,18 +2607,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
   const [showTrash, setShowTrash] = useState(false);
   const [trashed, setTrashed] = useState([]);
   const [trashLoading, setTrashLoading] = useState(false);
+  const [historyFor, setHistoryFor] = useState(null);   // doc id whose version history is expanded
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [draftOpen, setDraftOpen] = useState(true);   // Draft a New Document — expanded by default
   const [docsLoading, setDocsLoading] = useState(true);
   const [uploadType, setUploadType] = useState("SOP / SOG");
   function loadDocs() {
     return supabase
       .from("documents")
-      .select("id, name, type, storage_path")
+      .select("id, name, type, storage_path, supersedes")
       .is("deleted_at", null)                            // hide trashed SOPs from the live list
+      .is("archived_at", null)                           // hide superseded (older) versions — only current versions show
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (error || !data) { setDocsLoading(false); return; }   // leave existing docs in place on a flaky read
-        setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path })));
+        setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path, supersedes: r.supersedes })));
         setDocsLoading(false);
       });
   }
@@ -2729,6 +2733,45 @@ function Documents({ S, role, notify, uploaderName, members }) {
     notify({ kind: "success", title: "Permanently deleted", text: `"${item.name}" was erased.` });
     loadTrashed();
   }
+  // Replace with a new version: upload new file → insert new row (SAME name/type) → replace_document RPC (links new→old + archives old).
+  async function doReplace(oldRow, file) {
+    if (!oldRow?.id || !file) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const path = `${deptId}/${Date.now()}-${file.name}`;                                   // new unique storage path (same pattern as uploadFiles)
+    const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
+    if (upErr) { notify({ kind: "error", title: "Couldn't upload the new version", text: "Please try again.", details: upErr.message }); return; }
+    const row = { department_id: deptId, name: oldRow.name, type: oldRow.type, storage_path: path, uploaded_by: uploaderName };   // inherit name/type from the original
+    const { data: newRow, error: insErr } = await supabase.from("documents").insert(row).select().single();
+    if (insErr || !newRow) { notify({ kind: "error", title: "Couldn't save the new version", text: "Please try again.", details: insErr?.message }); return; }
+    const { error: repErr } = await supabase.rpc("replace_document", { p_old_id: oldRow.id, p_new_id: newRow.id });   // link new→old + archive old
+    if (repErr) { notify({ kind: "error", title: "Uploaded, but couldn't archive the old version", text: "The new version saved but the previous one wasn't archived — please try again.", details: repErr.message }); loadDocs(); return; }
+    notify({ kind: "success", title: "New version saved", text: `"${oldRow.name}" was updated — the previous version is kept in history.` });
+    setHistoryFor(null);   // the chain changed; collapse any open history
+    loadDocs();
+  }
+  // Version history: walk the supersedes chain backward — current.supersedes → prior → prior.supersedes → … → null.
+  // Each fetched row is one older version; because we start at the most-recent prior and follow the pointer, chain is newest-first.
+  async function loadHistory(doc) {
+    setHistoryFor(doc.id); setHistory([]); setHistoryLoading(true);
+    const chain = [];
+    let cursor = doc.supersedes;   // id of the immediately-previous version (null if this is the original)
+    let guard = 0;                 // runaway / cycle guard
+    while (cursor && guard < 50) {
+      const { data, error } = await supabase.from("documents")
+        .select("id, name, type, storage_path, created_at, uploaded_by, supersedes")
+        .eq("id", cursor).maybeSingle();
+      if (error || !data) break;
+      chain.push(data);
+      cursor = data.supersedes;
+      guard++;
+    }
+    setHistory(chain); setHistoryLoading(false);
+  }
+  function toggleHistory(doc) {
+    if (historyFor === doc.id) { setHistoryFor(null); setHistory([]); }
+    else loadHistory(doc);
+  }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
     const sys = "You help a volunteer fire/EMS department draft an internal document (SOP/SOG, guideline, policy, or checklist). Write a clear, well-structured DRAFT in plain text with a title, a short note that it must be reviewed and adapted to the department's AHJ, local protocols, medical direction, and applicable law, then numbered sections. Practical and realistic for a small volunteer department. Under 450 words.";
@@ -2786,7 +2829,34 @@ function Documents({ S, role, notify, uploaderName, members }) {
             : "No documents have been added yet."}
         </div>
       ) : (
-        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={isDA ? deleteDoc : undefined} />
+        <div>
+          {docs.map((d) => (
+            <div key={d.id}>
+              <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span></div>
+                <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDoc(d)}><Download size={14} /> Open</button>
+                <button style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => toggleHistory(d)}><Clock size={14} /> History <span style={{ display: "inline-flex" }}>{historyFor === d.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span></button>
+                {isDA && <label style={{ ...FS.btn, padding: "6px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }} title="Replace with a new version"><Upload size={14} /> Replace<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) doReplace(d, f); }} /></label>}
+                {isDA && <button title="Move to trash" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => deleteDoc(d)}><X size={14} color={FIRE.deleteRed} /></button>}
+              </div>
+              {historyFor === d.id && (
+                <div style={{ ...FS.card, padding: 12, marginTop: 6, marginBottom: 8 }}>
+                  <div style={{ ...FS.kicker, marginBottom: 6 }}>VERSION HISTORY</div>
+                  {historyLoading ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>
+                   : history.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>No previous versions — this is the original.</div>
+                   : history.map((v) => (
+                     <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                       <FileText size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+                       <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: FIRE.textSecondary }}>Uploaded {v.created_at ? new Date(v.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}{v.uploaded_by ? ` · ${v.uploaded_by}` : ""}</div>
+                       <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }} onClick={() => openDoc(v)}><Download size={13} /> View</button>
+                     </div>
+                   ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
       {isDA && (
