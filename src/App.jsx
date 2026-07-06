@@ -4090,8 +4090,9 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   async function add() {
     const email = em.trim().toLowerCase();
     if (!nm.trim() || !email || !/^\S+@\S+\.\S+$/.test(email)) { notify({ kind: "error", title: "Email required", text: "A valid email is needed so this member can sign in." }); return; }
-    const { data: dept } = await supabase.from("departments").select("id").limit(1).single();
-    const newRow = { department_id: dept ? dept.id : null, name: nm.trim(), role: rl.trim() || null, access: ax.length ? ax : ["Member"], status: st, phone: ph.trim() || "—", email, mentor_id: mt || null, joined: sdate ? sdate.slice(0, 4) : null, participation: 0 };   // joined (year) derived from the start date
+    const { data: myDept } = await supabase.rpc("my_department_id");   // authoritative dept id — NOT `departments limit 1` (that grabs an arbitrary dept once >1 exists)
+    if (!myDept) { notify({ kind: "error", title: "Couldn't resolve your department", text: "We couldn't determine your department to add this member. Please try again." }); return; }
+    const newRow = { department_id: myDept, name: nm.trim(), role: rl.trim() || null, access: ax.length ? ax : ["Member"], status: st, phone: ph.trim() || "—", email, mentor_id: mt || null, joined: sdate ? sdate.slice(0, 4) : null, participation: 0 };   // joined (year) derived from the start date
     const { data, error } = await supabase.from("members").insert(newRow).select().single();
     if (error || !data) { notify({ kind: "error", title: "Couldn't add the member", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");   // authoritative dept id (matches the member_private with_check); convention across all dept-scoped writes
