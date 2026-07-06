@@ -2,13 +2,13 @@
 -- Project Admin (PA) Dashboard — issue/health radar
 -- ------------------------------------------------------------
 -- Two functions powering a PA-only, cross-department monitoring
--- screen. Verified against the live DB (North Hood) — all tables
--- and columns below confirmed to exist live (certs.department_id,
--- duty_log, duties.due_date/done, action_items.completed_by, etc.).
+-- screen (Program Overview). Verified against the live DB.
 --
 -- NOTE: schema.sql in this repo is stale; this file is the source
--- of truth for these two functions. Idempotent (CREATE OR REPLACE)
--- — safe to re-run.
+-- of truth for these functions. is_project_admin() is idempotent
+-- (CREATE OR REPLACE). pa_department_radar() adds columns over its
+-- earlier version, so it MUST be dropped before recreate (Postgres
+-- can't change a function's RETURNS TABLE via CREATE OR REPLACE).
 -- ============================================================
 
 -- ============================================================
@@ -38,13 +38,20 @@ GRANT EXECUTE ON FUNCTION public.is_project_admin() TO authenticated;
 --    Self-gates on the FIRST line. SECURITY DEFINER so it can read across
 --    departments (bypasses the per-dept RLS), but only a Project Admin
 --    can get past the gate.
+--
+--    Return signature changed (added admin_name/admin_email) → DROP first.
 -- ============================================================
+DROP FUNCTION IF EXISTS public.pa_department_radar();
+
 CREATE OR REPLACE FUNCTION public.pa_department_radar()
  RETURNS TABLE (
    department_id            uuid,
    department_name          text,
    station                  text,
    city                     text,
+   -- primary Department Admin (for the "resend login link" support action)
+   admin_name               text,        -- earliest-created DA with a valid email; null if none
+   admin_email              text,        -- lowercased; null → hide resend, fix-no-email drives instead
    -- health pulse
    health                   text,        -- GREEN / YELLOW / RED
    last_activity            timestamptz,
@@ -81,6 +88,20 @@ begin
       d.name as department_name,
       d.station,
       d.city,
+
+      -- ---- PRIMARY ADMIN (earliest-created Department Admin who has a usable email)
+      (select m.name from members m
+         where m.department_id = d.id
+           and m.access && array['Department Admin']::text[]
+           and m.email is not null and btrim(m.email) <> ''
+         order by m.created_at asc nulls last
+         limit 1) as admin_name,
+      (select lower(m.email) from members m
+         where m.department_id = d.id
+           and m.access && array['Department Admin']::text[]
+           and m.email is not null and btrim(m.email) <> ''
+         order by m.created_at asc nulls last
+         limit 1) as admin_email,
 
       -- ---- HEALTH PULSE: last activity = max across every live dated per-dept signal
       greatest(
@@ -164,6 +185,8 @@ begin
     b.department_name,
     b.station,
     b.city,
+    b.admin_name,
+    b.admin_email,
     case
       when b.last_activity is null                    then 'RED'
       when current_date - b.last_activity::date <  14 then 'GREEN'
