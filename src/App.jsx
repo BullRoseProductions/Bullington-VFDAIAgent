@@ -265,6 +265,10 @@ const NAV = [
   { key: "adddept", label: "Add Department", Icon: Landmark, roles: ["Project Admin"] },
 ];
 
+// A Project-Admin-ONLY user gets a trimmed oversight+support nav (no department-operation screens,
+// which are RLS-scoped to their own department anyway). Keys must exist in NAV above.
+const PA_NAV = ["dashboard", "settings", "admin", "adddept"];
+
 /* ================================================================== */
 function Notification({ S, kind, title, text, details, onClose }) {
   const [showDetails, setShowDetails] = useState(false);
@@ -485,7 +489,13 @@ export default function App() {
 
   function go(k, arg) { setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null); }
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
-  const visibleNav = NAV.filter((n) => hasAny(role, n.roles));
+  // Trim to the oversight+support surface ONLY when the ACTIVE role is exactly Project Admin
+  // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —
+  // falls through to the unchanged hasAny filter.
+  const isProjectAdminOnly = Array.isArray(role) && hasAny(role, ["Project Admin"]) && role.every((r) => r === "Project Admin");
+  const visibleNav = isProjectAdminOnly
+    ? NAV.filter((n) => PA_NAV.includes(n.key))
+    : NAV.filter((n) => hasAny(role, n.roles));
   const packet = library.find((p) => p.id === packetId);
 
   return (
@@ -1359,7 +1369,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   );
 }
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
-  if (hasAny(role, ["Project Admin"])) return <ProgramOverview S={S} role={role} />;   // PA home = Program Overview (must be FIRST — PA also passes isDeptAdmin)
+  if (hasAny(role, ["Project Admin"])) return <ProgramOverview S={S} role={role} notify={notify} />;   // PA home = Program Overview (must be FIRST — PA also passes isDeptAdmin)
   if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isBoard(role) && !hasAny(role, ['Officer'])) return <BoardDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
@@ -7831,18 +7841,18 @@ function AddDepartment({ S, role, notify }) {
 }
 
 /* ---------------- Program Overview (Project-Admin-only, cross-department health/issue radar) ---------------- */
-function ProgramOverview({ S, role }) {
+function ProgramOverview({ S, role, notify }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const [rows, setRows] = useState(null);   // null = loading, [] = loaded/empty
   const [err, setErr] = useState(null);
   const isPA = hasAny(role, ["Project Admin"]);   // PA-only; belt-and-suspenders with the DB self-gate
-  useEffect(() => {
-    if (!isPA) return;
+  const load = () => {
     supabase.rpc("pa_department_radar").then(({ data, error }) => {
       if (error) { setErr(error.message); setRows([]); return; }
-      setRows(data || []);
+      setErr(null); setRows(data || []);
     });
-  }, []);
+  };
+  useEffect(() => { if (isPA) load(); }, []);   // refetched by cards via refresh() after a fix
 
   // Screen-level PA gate (nav already filters, but guard the render too — mirrors the DB self-gate)
   if (!isPA) return <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>This dashboard is available to Project Admins only.</div>;
@@ -7860,20 +7870,21 @@ function ProgramOverview({ S, role }) {
       {rows !== null && rows.length === 0 && !err && <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>No departments found.</div>}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {(rows || []).map((d) => <ProgramDeptCard key={d.department_id} S={S} d={d} />)}
+        {(rows || []).map((d) => <ProgramDeptCard key={d.department_id} S={S} d={d} notify={notify} refresh={load} />)}
       </div>
     </div>
   );
 }
 
-function ProgramDeptCard({ S, d }) {
+function ProgramDeptCard({ S, d, notify, refresh }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const [showNoEmail, setShowNoEmail] = useState(false);
   const healthColor = d.health === "GREEN" ? FIRE.green : d.health === "YELLOW" ? FIRE.amberText : FIRE.redText;
   const healthLabel = d.health === "GREEN" ? "Healthy" : d.health === "YELLOW" ? "Slowing" : "Needs attention";
 
   // Issue flags — only pushed when count > 0, so a clean dept shows an "all clear" state.
   const flags = [];
-  if (d.members_no_email_count  > 0) flags.push({ n: d.members_no_email_count,  tone: "red",   label: "members can't log in (no email)" });
+  if (d.members_no_email_count  > 0) flags.push({ n: d.members_no_email_count,  tone: "red",   label: "members can't log in (no email)", action: "noemail" });
   if (d.documents_no_text_count > 0) flags.push({ n: d.documents_no_text_count, tone: "amber", label: "SOPs with no readable text (AI grounding off)" });
   if (d.expired_certs_count     > 0) flags.push({ n: d.expired_certs_count,     tone: "red",   label: "expired certifications" });
   if (d.expiring_certs_count    > 0) flags.push({ n: d.expiring_certs_count,    tone: "amber", label: "certs expiring within 3 months" });
@@ -7895,6 +7906,15 @@ function ProgramDeptCard({ S, d }) {
         <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: healthColor }}>{healthLabel}</span>
       </div>
 
+      {/* Support: primary admin + resend login link — ONLY when a DA with an email exists.
+          When admin_email is null, this hides and the no-email fix below is what applies. */}
+      {d.admin_email && (
+        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: FIRE.textMuted }}>Admin: {d.admin_name || d.admin_email}</span>
+          <ResendLink email={d.admin_email} notify={notify} />
+        </div>
+      )}
+
       {/* NEEDS ATTENTION — the star */}
       <div style={{ marginTop: 16 }}>
         <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
@@ -7905,14 +7925,27 @@ function ProgramDeptCard({ S, d }) {
             <CheckCircle2 size={16} /> All clear — nothing needs attention.
           </div>
         ) : (
+          <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10 }}>
-            {flags.map((f, i) => (
+            {flags.map((f, i) => f.action === "noemail" ? (
+              // the ONLY actionable flag → toggles the inline fix panel
+              <button key={i} onClick={() => setShowNoEmail((v) => !v)} style={{ ...FS.card, borderLeft: `3px solid ${toneBar(f.tone)}`, padding: "12px 15px", display: "flex", alignItems: "baseline", gap: 10, cursor: "pointer", textAlign: "left", width: "100%", fontFamily: "inherit" }}>
+                <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 26, lineHeight: 1, color: toneNum(f.tone), ...FS.num }}>{f.n}</span>
+                <span style={{ flex: 1, fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: FIRE.btnText, whiteSpace: "nowrap" }}>{showNoEmail ? "Close" : "Fix →"}</span>
+              </button>
+            ) : (
+              // every other flag stays informational (non-clickable), exactly as today
               <div key={i} style={{ ...FS.card, borderLeft: `3px solid ${toneBar(f.tone)}`, padding: "12px 15px", display: "flex", alignItems: "baseline", gap: 10 }}>
                 <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 26, lineHeight: 1, color: toneNum(f.tone), ...FS.num }}>{f.n}</span>
                 <span style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
               </div>
             ))}
           </div>
+          {showNoEmail && d.members_no_email_count > 0 && (
+            <NoEmailFixPanel S={S} deptId={d.department_id} notify={notify} onFixed={refresh} />
+          )}
+          </>
         )}
       </div>
 
@@ -7950,6 +7983,72 @@ function ProgramDeptCard({ S, d }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Resend a login link to a department's admin — signInWithOtp, doesn't disturb the PA's own session.
+function ResendLink({ email, notify }) {
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  async function send() {
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+    setBusy(false);
+    if (error) { notify?.({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
+    setSent(true);
+  }
+  if (sent) return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.greenText }}><CheckCircle2 size={14} /> Login link sent to {email}</span>;
+  return (
+    <button onClick={send} disabled={busy} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.7 : 1 }}>
+      {busy ? <Loader2 size={13} className="spin" /> : <Send size={13} />} Resend login link
+    </button>
+  );
+}
+
+// Inline "fix no-email members" panel — the one actionable radar flag. Lists a dept's no-email
+// members (pa_members_missing_email) and sets each email (pa_set_member_email), then refreshes the radar.
+function NoEmailFixPanel({ S, deptId, notify, onFixed }) {
+  const [list, setList] = useState(null);        // null = loading
+  const [drafts, setDrafts] = useState({});      // member_id -> typed email
+  const [savingId, setSavingId] = useState(null);
+  useEffect(() => {
+    supabase.rpc("pa_members_missing_email", { p_department_id: deptId }).then(({ data, error }) => {
+      if (error) { notify?.({ kind: "error", title: "Couldn't load members", text: error.message }); setList([]); return; }
+      setList(data || []);
+    });
+  }, [deptId]);
+  async function save(m) {
+    const email = (drafts[m.member_id] || "").trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) { notify?.({ kind: "error", title: "Invalid email", text: "Enter a valid email address." }); return; }
+    setSavingId(m.member_id);
+    const { error } = await supabase.rpc("pa_set_member_email", { p_member_id: m.member_id, p_email: email });
+    setSavingId(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't save the email", text: error.message }); return; }   // surfaces "already exists" / "valid email required" from the RPC
+    notify?.({ kind: "success", title: "Email saved", text: `${m.name} can now sign in with ${email.toLowerCase()}.` });
+    setList((l) => (l || []).filter((x) => x.member_id !== m.member_id));   // drop locally
+    onFixed?.();   // refresh the radar so the count drops
+  }
+  return (
+    <div style={{ ...FS.card, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, padding: "14px 16px", marginTop: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, marginBottom: 10 }}>Add an email so these members can sign in</div>
+      {list === null ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.textMuted, fontSize: 13 }}><Loader2 size={14} className="spin" /> Loading…</div>
+      ) : list.length === 0 ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.greenText, fontSize: 13 }}><CheckCircle2 size={15} /> All members now have an email.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {list.map((m) => (
+            <div key={m.member_id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13.5, color: FIRE.textPrimary, minWidth: 120 }}>{m.name}</span>
+              <input type="email" value={drafts[m.member_id] || ""} onChange={(e) => setDrafts((p) => ({ ...p, [m.member_id]: e.target.value }))} placeholder="name@email.com" style={{ ...FS.input, flex: 1, minWidth: 160, padding: "7px 10px", fontSize: 13.5 }} />
+              <button onClick={() => save(m)} disabled={savingId === m.member_id} style={{ ...FS.btn, padding: "6px 12px", fontSize: 12, opacity: savingId === m.member_id ? 0.7 : 1 }}>
+                {savingId === m.member_id ? <Loader2 size={13} className="spin" /> : "Save"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
