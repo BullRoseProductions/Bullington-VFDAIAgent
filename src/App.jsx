@@ -538,7 +538,7 @@ export default function App() {
           {screen === "qanda" && <StationQA S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
-          {screen === "documents" && <Documents S={S} role={role} notify={notify} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
+          {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -2597,10 +2597,16 @@ function Phase({ S, n, weeks, title, items, accent }) {
 
 /* ---------------- Station Documents (upload + create) ---------------- */
 const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
-function Documents({ S, role, notify, uploaderName }) {
+function Documents({ S, role, notify, uploaderName, members }) {
   const leader = isLeader(role);
   const canManageDocs = hasAny(role, CANMANAGE_OPS_ROLES);
+  const isDA = isDeptAdmin(role);                       // DA/PA — matches the soft_delete_document / restore_document DB gate
+  const isPA = hasAny(role, ["Project Admin"]);         // PA-only — permanent hard delete
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));   // deleted_by (uuid) → member name
   const [docs, setDocs] = useState([]);
+  const [showTrash, setShowTrash] = useState(false);
+  const [trashed, setTrashed] = useState([]);
+  const [trashLoading, setTrashLoading] = useState(false);
   const [draftOpen, setDraftOpen] = useState(true);   // Draft a New Document — expanded by default
   const [docsLoading, setDocsLoading] = useState(true);
   const [uploadType, setUploadType] = useState("SOP / SOG");
@@ -2608,6 +2614,7 @@ function Documents({ S, role, notify, uploaderName }) {
     return supabase
       .from("documents")
       .select("id, name, type, storage_path")
+      .is("deleted_at", null)                            // hide trashed SOPs from the live list
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (error || !data) { setDocsLoading(false); return; }   // leave existing docs in place on a flaky read
@@ -2616,6 +2623,16 @@ function Documents({ S, role, notify, uploaderName }) {
       });
   }
   useEffect(() => { loadDocs(); }, []);
+  function loadTrashed() {
+    setTrashLoading(true);
+    return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error || !data) { setTrashLoading(false); return; }
+        setTrashed(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path, deletedBy: r.deleted_by,
+          deletedWhen: r.deleted_at ? new Date(r.deleted_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—" })));
+        setTrashLoading(false);
+      });
+  }
   const [kind, setKind] = useState("SOP / SOG");
   const [desc, setDesc] = useState("A standard operating guideline for responding to a structure fire with a single engine plus mutual aid.");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
@@ -2682,24 +2699,35 @@ function Documents({ S, role, notify, uploaderName }) {
     a.click();
     a.remove();
   }
+  // Soft-delete: move to trash (DA/PA, server-stamped). File STAYS in Storage so it can be restored.
   async function deleteDoc(item) {
-    if (!item?.storage_path || !item?.id) return;
-    if (!window.confirm(`Delete "${item.name}"? This can't be undone.`)) return;
-    // 1) remove the file from storage first (safer failure mode)
-    const { error: rmErr } = await supabase.storage.from("station-documents").remove([item.storage_path]);
-    if (rmErr) {
-      notify({ kind: "error", title: "Couldn't delete file", text: "The document couldn't be removed — please try again.", details: rmErr.message });
-      return;
+    if (!item?.id) return;
+    if (!window.confirm(`Move "${item.name}" to the trash? An admin can restore it.`)) return;
+    const { error } = await supabase.rpc("soft_delete_document", { p_id: item.id });
+    if (error) { notify({ kind: "error", title: "Couldn't move to trash", text: "Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Moved to trash", text: `"${item.name}" was moved to the trash.` });
+    loadDocs(); if (showTrash) loadTrashed();
+  }
+  // Restore from trash (DA/PA, server-stamped).
+  async function restoreDoc(item) {
+    if (!item?.id) return;
+    const { error } = await supabase.rpc("restore_document", { p_id: item.id });
+    if (error) { notify({ kind: "error", title: "Couldn't restore", text: "Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Restored", text: `"${item.name}" is back in the library.` });
+    loadTrashed(); loadDocs();
+  }
+  // Permanent hard delete (PA ONLY): erase the file + row. Cannot be undone.
+  async function hardDeleteDoc(item) {
+    if (!item?.id) return;
+    if (!window.confirm(`Permanently delete "${item.name}"? This CANNOT be undone — the file and its record are erased.`)) return;
+    if (item.storage_path) {
+      const { error: rmErr } = await supabase.storage.from("station-documents").remove([item.storage_path]);
+      if (rmErr) { notify({ kind: "error", title: "Couldn't delete file", text: "Please try again.", details: rmErr.message }); return; }
     }
-    // 2) then delete the metadata row
     const { error: rowErr } = await supabase.from("documents").delete().eq("id", item.id);
-    if (rowErr) {
-      notify({ kind: "error", title: "File removed, record not", text: "The file was deleted but its record couldn't be removed.", details: rowErr.message });
-      loadDocs();
-      return;
-    }
-    notify({ kind: "success", title: "Document deleted", text: `"${item.name}" was removed.` });
-    loadDocs();
+    if (rowErr) { notify({ kind: "error", title: "File removed, record not", text: "The file was erased but its record couldn't be removed.", details: rowErr.message }); loadTrashed(); return; }
+    notify({ kind: "success", title: "Permanently deleted", text: `"${item.name}" was erased.` });
+    loadTrashed();
   }
   async function draft() {
     setLoading(true); setErr(""); setOut("");
@@ -2758,7 +2786,28 @@ function Documents({ S, role, notify, uploaderName }) {
             : "No documents have been added yet."}
         </div>
       ) : (
-        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={hasAny(role, CANMANAGE_OPS_ROLES) ? deleteDoc : undefined} />
+        <ResourceLibrary S={S} dark verb="Open" items={docs} onOpen={openDoc} onDelete={isDA ? deleteDoc : undefined} />
+      )}
+
+      {isDA && (
+        <div style={{ marginTop: 24 }}>
+          <button onClick={() => { const n = !showTrash; setShowTrash(n); if (n) loadTrashed(); }} style={{ ...FS.kicker, marginBottom: showTrash ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Trash2 size={13} style={{ verticalAlign: "-2px" }} />TRASH<span style={{ marginLeft: "auto", display: "inline-flex" }}>{showTrash ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          {showTrash && (
+            trashLoading ? <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>Loading…</div>
+            : trashed.length === 0 ? <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>Trash is empty.</div>
+            : trashed.map((d) => (
+              <div key={d.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <Trash2 size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>Trashed {d.deletedWhen}{d.deletedBy ? ` · ${nameById.get(d.deletedBy) || "An admin"}` : ""}</div>
+                </div>
+                <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => restoreDoc(d)}><RefreshCw size={14} /> Restore</button>
+                {isPA && <button title="Permanently delete" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => hardDeleteDoc(d)}><Trash2 size={14} color={FIRE.deleteRed} /></button>}
+              </div>
+            ))
+          )}
+        </div>
       )}
     </div>
   );
