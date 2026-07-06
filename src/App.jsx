@@ -4992,7 +4992,6 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
 
       <div style={S.statRow}>
-        <Stat S={S} dark n={String(year)} label="Report year" />
         <Stat S={S} dark n={String(doneThisYear.length)} label="Drills held" />
         <Stat S={S} dark n={`${avgPct}%`} label="Avg attendance" />
         <Stat S={S} dark n={String(rows.length)} label="Members" />
@@ -5043,7 +5042,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         ))}
       </div>
       )}
-      {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {year} yet.</div>}
+      {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {rangeText} yet.</div>}
     </div>
   );
 }
