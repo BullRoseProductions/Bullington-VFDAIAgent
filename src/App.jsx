@@ -2075,17 +2075,46 @@ function StudySession({ S }) {
 
 /* ---------------- Station Q&A (member-facing, general fire/EMS chat assistant) ---------------- */
 const QANDA_SYS = "You are a knowledgeable, practical, safety-conscious fire/EMS assistant for a VOLUNTEER fire department. Answer operational, procedural, training, and standards questions at the level a volunteer firefighter or EMS responder needs. Keep replies focused and clear, and answer follow-up questions in context.\n\nCRITICAL — you do NOT have access to THIS department's specific SOPs, protocols, medical direction, or local standards; you are giving GENERAL fire-service guidance only, and you should say so when it matters. Do NOT invent specific protocols, numbers, thresholds, or standards — if you are unsure, say so plainly rather than guessing. Always tell the member to follow their DEPARTMENT'S actual SOPs and to confirm specifics against the current official standards that apply to them (NFPA / TCFP / NREMT / their AHJ and medical direction). The harm this prevents is real: a volunteer could act on a made-up procedure on a live call.";
+// Grounded system prompt: injects the dept's SOP text. Keeps the SAME safety framing + truth guardrail as QANDA_SYS,
+// and ADDS: cite the document, fall back + say so when SOPs are silent, never invent protocols not in the SOPs.
+const groundedQandaSys = (context) => "You are a knowledgeable, practical, safety-conscious fire/EMS assistant for a VOLUNTEER fire department. Answer operational, procedural, training, and standards questions at the level a volunteer firefighter or EMS responder needs. Keep replies focused and clear, and answer follow-up questions in context.\n\nHere are THIS department's actual SOPs/documents:\n\n" + context + "\n\nAnswer from these when they're relevant, and CITE the document (\"According to your {document name}…\"). When the SOPs are SILENT on a question, fall back to general fire-service guidance and SAY SO clearly. NEVER invent a department-specific protocol, number, or threshold that is not in the SOPs above — the harm is real: a volunteer could act on a made-up procedure on a live call. Always remind them to follow their DEPARTMENT'S actual SOPs and to verify specifics against the current official standards that apply to them (NFPA / TCFP / NREMT / their AHJ and medical direction).";
 function StationQA({ S }) {
   const [turns, setTurns] = useState([]);           // [{ role: 'user'|'assistant', content }]
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [ground, setGround] = useState({ text: "", has: false, note: "" });   // grounding context, hasGrounding, size-limit note
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const { data: deptId } = await supabase.rpc("my_department_id");
+      if (!deptId || !alive) return;
+      const { data, error } = await supabase.from("documents")
+        .select("name, content_text")
+        .eq("department_id", deptId)
+        .is("deleted_at", null)                 // current versions only —
+        .is("archived_at", null)                // composes with the Failsafe
+        .not("content_text", "is", null);
+      if (!alive || error || !data || data.length === 0) return;
+      const CAP = 80000;                          // ~80k-char context budget (safety valve; real RAG would retrieve instead)
+      let text = ""; let included = 0;
+      for (const d of data) {
+        const block = `=== ${d.name} ===\n${d.content_text}`;
+        if (text.length + block.length + 2 > CAP) break;   // stop once the next doc would exceed the budget
+        text += (text ? "\n\n" : "") + block;
+        included++;
+      }
+      setGround({ text, has: included > 0, note: included < data.length ? `${included} of ${data.length} documents included (size limit)` : "" });
+    })();
+    return () => { alive = false; };
+  }, []);
   const reset = () => { setTurns([]); setInput(""); setErr(""); };
   async function send(text) {
     const next = [...turns, { role: "user", content: text }];
     setTurns(next); setInput(""); setLoading(true); setErr("");
     try {
-      const reply = await callClaudeChat(QANDA_SYS, next);
+      const sys = ground.has ? groundedQandaSys(ground.text) : QANDA_SYS;   // grounded if SOPs loaded; else clean ungrounded fallback
+      const reply = await callClaudeChat(sys, next);
       setTurns((t) => [...t, { role: "assistant", content: reply }]);
     } catch {
       setErr("Couldn't reach the assistant just now — try again.");
@@ -2099,7 +2128,8 @@ function StationQA({ S }) {
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>STATION Q&amp;A</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Ask the station assistant</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>General fire &amp; EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally.</div>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{ground.has ? "Grounded in your uploaded SOPs — always verify locally." : "General fire & EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally."}</div>
+        {ground.has && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>This assistant reads your department's uploaded SOP text to answer.{ground.note ? ` (${ground.note})` : ""}</div>}
       </div>
       <Disclaimer S={S} compact dark />
       <div style={{ marginTop: 12 }}>
