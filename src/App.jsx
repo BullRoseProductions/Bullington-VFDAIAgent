@@ -5306,6 +5306,10 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const openItems = items.filter((i) => i.status !== "done");
   const doneItems = items.filter((i) => i.status === "done");
+  const GRACE_MS = 14 * 24 * 60 * 60 * 1000;   // 14-day reopen grace — mirrors the reopen_action_item DB lock
+  const isArchived = (i) => i.completed_at && (Date.now() - new Date(i.completed_at).getTime()) >= GRACE_MS;
+  const recentDone = doneItems.filter((i) => !isArchived(i));   // within grace — reopenable
+  const archivedDone = doneItems.filter(isArchived);            // past grace — read-only, permanent
   const open = openItems.length;
   async function draft() {
     if (!notes.trim()) { setErr("Add a few rough notes first and I'll shape them into minutes."); return; }
@@ -5413,16 +5417,18 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   useEffect(() => { loadActionItems(); }, []);
   async function completeItem(it) {
     if (!canManage) return;
-    const { error } = await supabase.from("action_items")
-      .update({ status: "done", completed_by: meId, completed_at: new Date().toISOString() }).eq("id", it.id);   // client-set stamp (matches ai_outputs)
+    const { error } = await supabase.rpc("complete_action_item", { p_id: it.id });   // server-stamps completed_at/completed_by + snapshots assignee_name
     if (error) { notify({ kind: "error", title: "Couldn't update that", text: "Something went wrong. Please try again.", details: error.message }); return; }
     loadActionItems();
   }
   async function reopenItem(it) {
     if (!canManage) return;
-    const { error } = await supabase.from("action_items")
-      .update({ status: "open", completed_by: null, completed_at: null }).eq("id", it.id);   // clears the stamp on reopen
-    if (error) { notify({ kind: "error", title: "Couldn't reopen that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    const { error } = await supabase.rpc("reopen_action_item", { p_id: it.id });   // RPC rejects if completed 14+ days ago (archived)
+    if (error) {
+      const locked = /14 days|archived/i.test(error.message || "");
+      notify({ kind: "error", title: locked ? "Item is archived" : "Couldn't reopen that", text: locked ? "This item was completed over 14 days ago and is now archived — it can't be reopened." : "Something went wrong. Please try again.", details: locked ? undefined : error.message });
+      return;
+    }
     loadActionItems();
   }
   const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -5542,20 +5548,39 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCompletedCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>
               </div>
-              {[...doneItems].sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")).map((it) => {
-                const who = it.completed_by ? (nameById.get(it.completed_by) || "Unknown") : "—";
-                const when = it.completed_at ? new Date(it.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
-                return (
-                  <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-                    <CheckCircle2 size={16} color={FIRE.green} style={{ flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
-                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{who} · {when}</div>
+              {recentDone.length > 0 && (<>
+                <div style={{ ...FS.kicker, fontSize: 10.5, marginTop: 2, marginBottom: 4 }}>RECENTLY COMPLETED · REOPENABLE FOR 14 DAYS</div>
+                {[...recentDone].sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")).map((it) => {
+                  const who = it.completed_by ? (nameById.get(it.completed_by) || "Unknown") : "—";
+                  const when = it.completed_at ? new Date(it.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+                  return (
+                    <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                      <CheckCircle2 size={16} color={FIRE.green} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
+                        <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{who} · {when}</div>
+                      </div>
+                      <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopenItem(it)}>Reopen</button>
                     </div>
-                    <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopenItem(it)}>Reopen</button>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </>)}
+              {archivedDone.length > 0 && (<>
+                <div style={{ ...FS.kicker, fontSize: 10.5, marginTop: recentDone.length ? 12 : 2, marginBottom: 4 }}>ARCHIVE · READ-ONLY</div>
+                {[...archivedDone].sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")).map((it) => {
+                  const who = it.assignee_name || (it.assigned_to ? (nameById.get(it.assigned_to) || "Unknown") : "Unassigned");   // snapshot first; live lookup / Unassigned fallback
+                  const when = it.completed_at ? new Date(it.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+                  return (
+                    <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                      <CheckCircle2 size={16} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{it.text}</span>
+                        <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>Completed {when} · {who}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>)}
             </div>
           )}
         </div>
