@@ -262,6 +262,7 @@ const NAV = [
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
+  { key: "adddept", label: "Add Department", Icon: Landmark, roles: ["Project Admin"] },
 ];
 
 /* ================================================================== */
@@ -554,6 +555,7 @@ export default function App() {
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />}
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
+          {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} />}
         </main>
       </div>
     </div>
@@ -7744,6 +7746,86 @@ function Admin({ S, library, setLibrary, feedback }) {
           ))
         )}
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Add Department (Project-Admin-only: create a department + its first admin) ---------------- */
+function AddDepartment({ S, role, notify }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const isPA = hasAny(role, ["Project Admin"]);
+  const [f, setF] = useState({ name: "", station: "", city: "", adminName: "", adminEmail: "" });
+  const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState(null);   // { id, name, adminEmail } after success — persists so the link button survives the form reset
+  const [linkSent, setLinkSent] = useState(false);
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+
+  // Screen-level PA gate (nav already filters, but guard the render too — mirrors the DB self-gate)
+  if (!isPA) return <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>This screen is available to Project Admins only.</div>;
+
+  async function create() {
+    const name = f.name.trim(), adminName = f.adminName.trim(), adminEmail = f.adminEmail.trim().toLowerCase();
+    if (!name || !adminName || !/^\S+@\S+\.\S+$/.test(adminEmail)) {
+      notify({ kind: "error", title: "Missing details", text: "Department name, admin name, and a valid admin email are required." });
+      return;
+    }
+    setBusy(true);
+    const { data, error } = await supabase.rpc("pa_create_department", {
+      p_name: name, p_station: f.station.trim() || null, p_city: f.city.trim() || null,
+      p_admin_name: adminName, p_admin_email: adminEmail,
+    });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't create the department", text: error.message, details: error.message }); return; }
+    setCreated({ id: data, name, adminEmail });
+    setLinkSent(false);
+    setF({ name: "", station: "", city: "", adminName: "", adminEmail: "" });
+    notify({ kind: "success", title: "Department created", text: `${name} is ready — send ${adminEmail} their login link to finish.` });
+  }
+
+  async function sendLink() {
+    if (!created) return;
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithOtp({ email: created.adminEmail, options: { emailRedirectTo: window.location.origin } });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
+    setLinkSent(true);
+  }
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>PROJECT ADMIN</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "6px 0 4px", letterSpacing: "-0.01em" }}>Add a department</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Create a new department and its first admin in one step. They sign in with a login link — no password to set up.</div>
+      </div>
+
+      <div style={{ ...S.formCard, ...FS.card, maxWidth: 620 }}>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name *</span><input style={FS.input} value={f.name} onChange={set("name")} placeholder="e.g. North Hood Volunteer Fire" /></label>
+        <div style={S.twoColForm}>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={f.station} onChange={set("station")} placeholder="e.g. Station 1" /></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={f.city} onChange={set("city")} placeholder="e.g. North Hood, TX" /></label>
+        </div>
+        <div style={{ height: 1, background: FIRE.hairline, margin: "2px 0" }} />
+        <div style={FS.kicker}>FIRST ADMIN</div>
+        <div style={S.twoColForm}>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin name *</span><input style={FS.input} value={f.adminName} onChange={set("adminName")} placeholder="e.g. Scott Miller" /></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin email *</span><input style={FS.input} type="email" value={f.adminEmail} onChange={set("adminEmail")} placeholder="scott@northhood.org" /></label>
+        </div>
+        <div style={{ fontSize: 12, color: FIRE.textMuted, lineHeight: 1.5 }}>Created as a <strong style={{ color: FIRE.textSecondary }}>Department Admin</strong>. Their email must be unique and is how they sign in — double-check it.</div>
+        <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={create}>{busy ? <Loader2 size={16} className="spin" /> : <Plus size={16} />} Create department</button>
+      </div>
+
+      {created && (
+        <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.green}`, padding: "16px 18px", marginTop: 14, maxWidth: 620 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, color: FIRE.greenText, fontWeight: 700, fontSize: 15 }}><CheckCircle2 size={18} /> {created.name} created</div>
+          <div style={{ fontSize: 13.5, color: FIRE.textSecondary, marginTop: 8, lineHeight: 1.5 }}>Send <strong style={{ color: FIRE.textPrimary }}>{created.adminEmail}</strong> a login link so they can sign in and finish setup.</div>
+          {linkSent ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.greenText, fontSize: 13.5, marginTop: 12 }}><CheckCircle2 size={16} /> Login link sent to {created.adminEmail}.</div>
+          ) : (
+            <button style={{ ...FS.btn, marginTop: 12, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={sendLink}><Send size={15} /> Send login link</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
