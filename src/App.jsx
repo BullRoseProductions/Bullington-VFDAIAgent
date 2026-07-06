@@ -262,7 +262,6 @@ const NAV = [
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
   { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
-  { key: "program", label: "Program Overview", Icon: Building2, roles: ["Project Admin"] },
 ];
 
 /* ================================================================== */
@@ -555,7 +554,6 @@ export default function App() {
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />}
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
-          {screen === "program" && <ProgramOverview S={S} role={role} />}
         </main>
       </div>
     </div>
@@ -1359,6 +1357,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   );
 }
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
+  if (hasAny(role, ["Project Admin"])) return <ProgramOverview S={S} role={role} />;   // PA home = Program Overview (must be FIRST — PA also passes isDeptAdmin)
   if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isBoard(role) && !hasAny(role, ['Officer'])) return <BoardDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
