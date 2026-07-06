@@ -4648,14 +4648,16 @@ function RosterAttendance({ S, members, sessions, plan }) {
 }
 function RosterReports({ S, role, members, sessions, dept, back, meId, notify }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [presetKey, setPresetKey] = useState("year"); const [range, setRange] = useState(() => presetRange("year"));   // report period; default This Year (prior behavior)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only; members stays full for names/identity
   const active = cm.filter((m) => m.status === "Active").length;
   const prob = cm.filter((m) => m.status === "Probationary").length;
   const certs = []; cm.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
-  // Real attendance — shared deptAttendance calc (same numbers as the Yearly Attendance Report + Dept Admin dashboard).
-  const yr = new Date().getFullYear();
-  const { rows: attRows, avg: avgPart } = deptAttendance(members, sessions, yr);
+  const certPct = (cur + expg + expd) ? Math.round((cur / (cur + expg + expd)) * 100) : 0;   // cert currency — a SNAPSHOT (as of today), never range-scoped
+  // Real attendance — shared deptAttendance calc, now RANGE-scoped (a period fact). Dashboards still call the year form.
+  const { rows: attRows, avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, range);
+  const drillsHeld = drills.length;   // training sessions held (with attendance) during the period
   const attById = new Map(attRows.map((r) => [r.id, r.pct]));
   // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
   const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
@@ -4684,6 +4686,19 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));
   }, []);
+  // Period facts from the append-only / server-stamped LOCKED records (duty_log, action_items) — fetched once, counted by range.
+  const [dutyLog, setDutyLog] = useState([]);
+  const [resolvedActions, setResolvedActions] = useState([]);
+  useEffect(() => {
+    supabase.from("duty_log").select("done_at").then(({ data }) => setDutyLog(data || []));
+    supabase.from("action_items").select("completed_at, cancelled_at, status").in("status", ["done", "cancelled"]).then(({ data }) => setResolvedActions(data || []));
+  }, []);
+  const inRange = (ts) => { if (!ts) return false; const iso = toISODate(new Date(ts)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); };
+  const dutiesDone = dutyLog.filter((d) => inRange(d.done_at)).length;                                                     // period
+  const actionsResolved = resolvedActions.filter((a) => inRange(a.completed_at) || inRange(a.cancelled_at)).length;        // period
+  const fmtRD = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+  const periodLabel = `${fmtRD(range.from)} – ${fmtRD(range.to)}`;
+  const todayLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const todayISO = toISODate(new Date());
   const openDuties = duties.filter((d) => !d.done);
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
@@ -4695,8 +4710,9 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     return {
       deptName: dept?.name || "Department",
       station: "",
-      kpis: { active, total: cm.length, certPct: Math.round((cur / (cur + expg + expd)) * 100), certWarn: expd > 0, avgPart },
+      kpis: { active, total: cm.length, certPct, certWarn: expd > 0, avgPart },
       counts: { active, prob, total: cm.length, cur, expg, expd, avgPart },
+      period: { label: periodLabel, generated: todayLabel, drillsHeld, avgPart, dutiesDone, actionsResolved },   // PERIOD facts (during the range); counts above are the AS-OF-TODAY snapshot
       members: members.map((m) => ({ name: m.name, role: m.role, participation: attById.get(m.id), status: m.status })),
       flaggedCerts,
       activity: recentTraining,
@@ -4719,18 +4735,25 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     };
     const certUrgent = [...flaggedCerts].sort((a, b) => (a.status === "Lapsed" ? 0 : 1) - (b.status === "Lapsed" ? 0 : 1));   // expired/lapsed first
     const lines = [
-      `${dept?.name || "Department"} — current status. Use ONLY these facts; add nothing not listed.`,
+      `${dept?.name || "Department"} — readiness & activity report. Use ONLY these facts; add nothing not listed.`,
+      `Report period: ${periodLabel}. Today's date: ${todayLabel}.`,
+      ``,
+      `=== DURING THE REPORT PERIOD (${periodLabel}) — what happened in this window ===`,
+      `Training sessions held (attendance recorded): ${drillsHeld}`,
+      `Average training attendance during the period: ${avgPart}%`,
+      `Duties completed: ${dutiesDone}`,
+      `Action items resolved (completed or cancelled): ${actionsResolved}`,
+      ``,
+      `=== AS OF TODAY (${todayLabel}) — current status, NOT specific to the period above ===`,
       `Members: ${active} active, ${prob} probationary (${cm.length} total)`,
-      `Certifications: ${cur} current, ${expg} expiring within 90 days, ${expd} expired`,
-      `Average training attendance this year: ${avgPart}%`,
+      `Certification currency: ${cur} current, ${expg} expiring within 90 days, ${expd} expired (${certPct}% current)`,
       `Flagged certifications (most urgent first): ${topN(certUrgent, (f) => `${f.member}'s ${f.cert} (${f.status.toLowerCase()}, ${f.exp})`)}`,
       `Overdue duties (most overdue first): ${topN(overdueDuties, (d) => `${d.duty} — ${nameById.get(d.assigned_to) || (d.assigned_to ? "unassigned" : "station-wide")}${d.due_date ? `, due ${d.due_date}` : ""}`)}`,
       `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
-      `Recent training: ${recentTraining.length} recent drill${recentTraining.length === 1 ? "" : "s"} with recorded attendance`,
     ];
     const summary = lines.join("\n");
-    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's live data. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's real records for a specific REPORT PERIOD. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nPERIOD vs. CURRENT — the data below is split into two labeled blocks. 'DURING THE REPORT PERIOD' facts describe what happened in the report window: narrate them as the period's activity and STATE THE REPORT PERIOD near the top. 'AS OF TODAY' facts are the department's CURRENT status (certification currency, roster) and are NOT specific to the period: narrate them as today's standing, and NEVER imply the current numbers describe the period — do not say attendance, certification, or roster levels were a certain value 'during the period' unless it is a DURING-THE-PERIOD fact. Keep the two clearly distinct so a reader always knows whether a number covers the period or today.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
   const [saving, setSaving] = useState(false);
@@ -4768,14 +4791,26 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
       <div style={FS.kicker}>REPORTS · CHIEF'S REPORT</div>
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Chief's Report</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
-      <div style={S.statRow}>
-        <Stat S={S} dark n={`${active}/${cm.length}`} label="Active members" />
-        <Stat S={S} dark n={`${Math.round((cur / (cur + expg + expd)) * 100)}%`} label="Cert compliance" warn={expd > 0} />
-        <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 14 }}>The board &amp; city readiness report — the chief's narrative over your locked, period-filtered facts.</div>
+      <div style={{ marginBottom: 14 }}>
+        <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 8 }}>Report period: <strong style={{ color: FIRE.textSecondary }}>{periodLabel}</strong> · Generated {todayLabel}</div>
       </div>
       <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
-        <div style={{ ...FS.kicker, marginBottom: 2 }}>DEPARTMENT SNAPSHOT · LIVE</div>
+        <div style={{ ...FS.kicker, marginBottom: 8 }}>DURING THIS PERIOD · {periodLabel}</div>
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+          <Stat S={S} dark n={String(drillsHeld)} label="Training sessions" />
+          <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
+          <Stat S={S} dark n={String(dutiesDone)} label="Duties completed" />
+          <Stat S={S} dark n={String(actionsResolved)} label="Action items resolved" />
+        </div>
+      </div>
+      <div style={S.statRow}>
+        <Stat S={S} dark n={`${active}/${cm.length}`} label="Active members" />
+        <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expd > 0} />
+      </div>
+      <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
+        <div style={{ ...FS.kicker, marginBottom: 2 }}>AS OF TODAY · CURRENT STATUS</div>
         <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
         {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
         <SubHead>Flagged certifications — {expd} expired · {expg} expiring</SubHead>

@@ -60,7 +60,7 @@ export function buildReportDoc(data) {
   while (doc.getTextWidth(fullName) > avail && fs > 10) { fs -= 0.5; doc.setFontSize(fs); }
   doc.text(fullName, M + 56, y + 36);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...PINK);
-  doc.text(`${station ? station + " \u00b7 " : ""}Monthly Department Report`, M + 56, y + 54);
+  doc.text(`${station ? station + " \u00b7 " : ""}Department Report`, M + 56, y + 54);
   doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
   doc.text(period, M + CW - 14, y + 34, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...PINK);
@@ -72,7 +72,7 @@ export function buildReportDoc(data) {
   const tiles = [
     { num: `${k.active}/${k.total}`, label: "ACTIVE MEMBERS", sub: `${data.counts.prob} probationary`, sc: GRAY },
     { num: `${k.certPct}%`, label: "CERT COMPLIANCE", sub: `${data.counts.expg} expiring \u00b7 ${data.counts.expd} expired`, sc: k.certWarn ? REDX : AMBER },
-    { num: `${k.avgPart}%`, label: "AVG PARTICIPATION", sub: "this year", sc: GRAY },
+    { num: `${k.avgPart}%`, label: "AVG PARTICIPATION", sub: "over the period", sc: GRAY },
   ];
   const KH = 64;
   doc.setFillColor(...PANEL); doc.rect(M, y, CW, KH, "F");
@@ -140,9 +140,11 @@ export function buildReportDoc(data) {
 
   // ---------- Chief's Summary ----------
   const c = data.counts;
+  const pd = data.period || {};
   header("Chief\u2019s Summary");
-  para(`As of ${MONTHS[now.getMonth()]} ${now.getFullYear()}, the department has ${c.active} active members of `
-    + `${c.total} on the roster (${c.prob} probationary) and ${c.avgPart}% average participation this year. `
+  if (pd.label) para(`Report period: ${pd.label}${pd.generated ? `   \u00b7   Generated ${pd.generated}` : ""}`, SLATE, 9.3);
+  if (pd.label) para(`During this period, the department held ${pd.drillsHeld} training session${pd.drillsHeld === 1 ? "" : "s"} with recorded attendance (${pd.avgPart}% average attendance), completed ${pd.dutiesDone} dut${pd.dutiesDone === 1 ? "y" : "ies"}, and resolved ${pd.actionsResolved} action item${pd.actionsResolved === 1 ? "" : "s"}.`);
+  para(`As of today, the department has ${c.active} active members of ${c.total} on the roster (${c.prob} probationary). `
     + (c.expd > 0
       ? `${c.expd} certification${c.expd > 1 ? "s are" : " is"} expired and ${c.expg} expiring within 90 days \u2014 flagged below as action items.`
       : `Certifications are in good standing, with ${c.expg} expiring within 90 days to watch.`));
