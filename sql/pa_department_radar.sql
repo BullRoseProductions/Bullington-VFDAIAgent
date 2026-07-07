@@ -130,7 +130,8 @@ begin
        ) act where mid is not null) as active_members_30d,
 
       -- ---- SETUP COMPLETENESS
-      (select count(*) from members mm   where mm.department_id = d.id) as member_count,
+      (select count(*) from members mm   where mm.department_id = d.id
+                                          and not (mm.access && array['Project Admin']::text[])) as member_count,
       (select count(*) from documents dc where dc.department_id = d.id
                                           and dc.deleted_at is null
                                           and dc.archived_at is null)   as documents_count,
@@ -147,6 +148,7 @@ begin
 
       -- ---- ISSUE FLAGS
       (select count(*) from members mm where mm.department_id = d.id
+                                        and not (mm.access && array['Project Admin']::text[])
                                         and (mm.email is null or btrim(mm.email) = '')) as members_no_email_count,
 
       (select count(*) from documents dc where dc.department_id = d.id
