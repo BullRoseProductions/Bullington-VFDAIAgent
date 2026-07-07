@@ -1,52 +1,15 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>B4C — Before the Call</title>
-
-    <!-- Favicons (assets live in public/, served from web root) -->
-    <link rel="icon" href="/favicon.ico" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32.png" />
-    <link rel="apple-touch-icon" href="/favicon_180.png" />
-
-    <!-- Open Graph / Twitter social share preview -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="B4C — Before the Call" />
-    <meta property="og:description" content="Keeping responders prepared" />
-    <meta property="og:image" content="/b4c-og-share.png" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="B4C — Before the Call" />
-    <meta name="twitter:description" content="Keeping responders prepared" />
-    <meta name="twitter:image" content="/b4c-og-share.png" />
-    <style>
-      /* Zero the browser's default body margin (8px) so the app's dark
-         background reaches all four viewport edges. Without this, the gap
-         shows the default white canvas as a frame — invisible under the old
-         light login, glaring under the navy one. Dark base bg is a
-         belt-and-suspenders so no light ever peeks at the edges (login + app). */
-      html, body { margin: 0; }
-      body { background: #080A10; }
-
-      /* Native form controls: force a dark scheme so browsers never pick a
-         white system popup (fixes white-on-white <option> lists / date
-         pickers on machines whose OS default is light — the app is dark-themed).
-         color-scheme is the root cure; the explicit control/option colors are
-         belt-and-suspenders for Chrome/Firefox on Windows/Linux. */
-      :root { color-scheme: dark; }
-      select,
-      option,
-      input[type="date"],
-      input[type="month"],
-      input[type="time"] {
-        background-color: #13161B;   /* FIRE.card */
-        color: #F7F8FA;              /* FIRE.textPrimary */
-      }
-      option { background-color: #13161B; color: #F7F8FA; }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>B4C — POA Member Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>
