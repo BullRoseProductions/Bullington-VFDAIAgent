@@ -589,10 +589,10 @@ const STATS_EXCLUDED_IDS = new Set([
   "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // Ashlea (owner)
   "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
 ]);
-const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id);
+const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, ['Project Admin']);   // owner/test by id + any Project Admin by role (robust across depts/ids)
 // Same two accounts must never be a selectable assignee (mentor/duty/action-item/owner pickers).
 // Distinct predicate from countsInStats (assignable vs. counted) though it shares the id set today.
-const isAssignable = (m) => !STATS_EXCLUDED_IDS.has(m.id);
+const isAssignable = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, ['Project Admin']);   // never a selectable assignee (owner/test by id + any Project Admin by role)
 const assignableMembers = (ms) => (ms || []).filter(isAssignable);
 function deptAttendance(members, sessions, year, range) {
   // scope by date range {from,to} (ISO) when given (empty bound = unbounded); else the original year filter — backward-compatible for dashboards
