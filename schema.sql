@@ -2,8 +2,53 @@
 -- The Dayroom — Database Schema Reference
 -- Project: BullRoseProductions/Bullington-VFDAIAgent
 -- Supabase project: ifeptqnlucmvhlvadcpj
--- Refreshed: 2026-06-27 (adds DB-backed calendars: content_calendar posts +
+-- Refreshed: 2026-07-06 (SESSION UPDATE — see "2026-07-06 SESSION" note below)
+-- Prior refresh: 2026-06-27 (DB-backed calendars: content_calendar posts +
 --   color, training_sessions writes, and the new recruitment_events table)
+-- =============================================================================
+--
+-- ⚠️ ACCURACY NOTE (2026-07-06): This refresh applies THIS SESSION'S changes
+--   VERBATIM (documents Failsafe + action_items lifecycle + doc-grounding col +
+--   departments.city — all run together this session, so they are trustworthy).
+--   Everything ELSE is carried forward from the 2026-06-27 snapshot and was NOT
+--   re-verified against the live DB in this refresh. A full live re-introspection
+--   (columns/functions/policies/triggers/constraints/views) is still worth doing
+--   with the Supabase CLI for a guaranteed-complete dump. Known carried-forward
+--   staleness is flagged inline (e.g. is_leader()/is_department_admin() show the
+--   scalar `access in (...)` form; live uses text[] overlap `access && array[...]`).
+--
+-- =============================================================================
+-- 2026-07-06 SESSION — WHAT CHANGED (all verified this session)
+-- -----------------------------------------------------------------------------
+-- DOCUMENTS — Failsafe Phase 3 (SOP integrity):
+--   Slice A (soft-delete): + deleted_at, deleted_by cols; soft_delete_document(),
+--     restore_document() RPCs (DA/PA-gated, server-stamped); guard trigger
+--     trg_guard_documents_deleted_at; DELETE policy tightened DA/Officer -> PA-only
+--     (documents_delete_leadership dropped -> documents_delete_pa_only).
+--   Slice B (version-on-replace): + supersedes, archived_at cols;
+--     replace_document(p_old,p_new) RPC (links new->old, archives old);
+--     guard trigger trg_guard_documents_archived_at.
+--   Doc-grounding: + content_text col (client-side pdfjs text extraction on upload;
+--     Station Q&A stuffs current-version SOP text into the prompt).
+--   NOTE: documents.storage_path is the LIVE column in use (this snapshot's
+--     Section 1 historically showed file_url — storage_path added below).
+-- ACTION_ITEMS — full lifecycle (open -> completed/cancelled -> 14d grace -> archive):
+--   + assignee_name (snapshot), completed_at, completed_by, cancelled_at,
+--     cancelled_by, cancel_reason cols. (Also assigned_to, due_date, source_label
+--     exist live from the prototype — added to Section 1 below.)
+--   RPCs: complete_action_item(), reopen_action_item() (14-day lock via
+--     coalesce(completed_at,cancelled_at)), cancel_action_item(p_id,p_reason)
+--     (reason REQUIRED). All SECURITY DEFINER, is_canmanage()-gated, server-stamped.
+--   POLICY: the "canmanage update action_items" UPDATE policy was DROPPED — both
+--     writers now go through the RPCs (RPC-only), making the 14-day lock
+--     unbypassable. So action_items has NO direct UPDATE policy (only SELECT+INSERT).
+--   NOTE: action_items.status is free-text (NO check constraint) — 'cancelled'
+--     inserts fine.
+-- DEPARTMENTS — + city col (department profile). (Live also has a "DA can update
+--   own department" UPDATE policy.)
+-- HELPERS confirmed live this session (real bodies, text[] overlap form):
+--   is_dept_admin() = PA|DA ; is_canmanage() = Board|DA|Officer ;
+--   is_canmanage_ops() = DA|Officer. These weren't all in prior snapshots.
 -- =============================================================================
 --
 -- WHAT THIS IS
@@ -99,14 +144,28 @@
 -- (columns / types / nullability / defaults — for reference; _uuid = uuid[])
 -- =============================================================================
 
+-- Action items — full lifecycle (2026-07-06): open -> completed OR cancelled ->
+--   14-day reopenable grace -> permanent read-only archive. Writes go ONLY through
+--   complete_action_item / reopen_action_item / cancel_action_item (SECURITY DEFINER,
+--   server-stamped); the direct UPDATE policy was DROPPED (RPC-only). status is
+--   free-text (no CHECK) — values: 'open' | 'done' | 'cancelled'.
 CREATE TABLE public.action_items (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   department_id uuid NOT NULL,
   meeting_id uuid,
   text text NOT NULL,
   owner text,
-  status text DEFAULT 'open'::text,
-  created_at timestamp with time zone NOT NULL DEFAULT now()
+  status text DEFAULT 'open'::text,              -- 'open' | 'done' | 'cancelled' (free-text, no CHECK)
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  assigned_to uuid,                              -- member the item is assigned to (prototype)
+  due_date date,                                 -- optional due date (prototype)
+  source_label text,                             -- snapshot of where it came from (prototype)
+  completed_at timestamp with time zone,         -- server-stamped on completion
+  completed_by uuid,                             -- who completed it
+  assignee_name text,                            -- SNAPSHOT of assignee name (survives member removal) (2026-07-06)
+  cancelled_at timestamp with time zone,         -- server-stamped on cancellation (2026-07-06)
+  cancelled_by uuid,                             -- who cancelled it (2026-07-06)
+  cancel_reason text                             -- REQUIRED reason on cancel (2026-07-06)
 );
 
 CREATE TABLE public.ai_feedback (
@@ -202,6 +261,7 @@ CREATE TABLE public.departments (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   name text NOT NULL,
   station text,
+  city text,                                     -- department city (2026-07-06)
   primary_color text DEFAULT '#B11E2A'::text,
   accent_color text DEFAULT '#1F4E79'::text,
   font text DEFAULT 'Modern sans'::text,
@@ -211,14 +271,26 @@ CREATE TABLE public.departments (
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
+-- Station Documents (SOPs/SOGs/policies). Failsafe Phase 3 (2026-07-06):
+--   soft-delete (deleted_at/deleted_by) + version-on-replace (supersedes/archived_at)
+--   + doc-grounding text (content_text). See the 2026-07-06 SESSION note up top.
+--   storage_path is the LIVE file pointer (station-documents bucket); file_url is
+--   a legacy/unused column retained from an earlier build.
 CREATE TABLE public.documents (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   department_id uuid NOT NULL,
   name text NOT NULL,
   type text,
-  file_url text,
+  file_url text,                                 -- legacy/unused; storage_path is live
+  storage_path text,                             -- LIVE file pointer (station-documents bucket)
   uploaded_by text,
-  created_at timestamp with time zone NOT NULL DEFAULT now()
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  deleted_at timestamp with time zone,           -- soft-delete stamp; NULL = live (Slice A)
+  deleted_by uuid,                               -- who trashed it (Slice A)
+  supersedes uuid,                               -- -> the older version this replaced (Slice B)
+  archived_at timestamp with time zone,          -- set when superseded by a newer version (Slice B)
+  content_text text,                             -- extracted SOP text for AI grounding (NULL = scan/unreadable)
+  plan_id uuid                                   -- (present live; training-plan linkage)
 );
 
 -- The live duty checklist. helper_ids carries the CURRENT completion's helpers
@@ -725,6 +797,211 @@ begin
 end;
 $function$;
 
+-- --- DOCUMENTS Failsafe Phase 3 (2026-07-06) --------------------------------
+-- Slice A: soft-delete/restore (DA/PA-gated, server-stamped). The live library
+-- filters deleted_at IS NULL; the guard trigger (Section 3) locks the deleted
+-- state to DA/PA. Hard DELETE is PA-only (documents_delete_pa_only policy).
+
+CREATE OR REPLACE FUNCTION public.soft_delete_document(p_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+declare v_row public.documents;
+begin
+  if not public.is_dept_admin() then
+    raise exception 'Only a Department Admin or Project Admin can delete this document';
+  end if;
+  select * into v_row from public.documents where id = p_id;
+  if not found then raise exception 'Document not found'; end if;
+  if v_row.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: document belongs to another department';
+  end if;
+  if v_row.deleted_at is not null then return; end if;  -- already trashed, no-op
+  update public.documents
+    set deleted_at = now(), deleted_by = public.my_member_id()
+    where id = p_id;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.restore_document(p_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+declare v_row public.documents;
+begin
+  if not public.is_dept_admin() then
+    raise exception 'Only a Department Admin or Project Admin can restore this document';
+  end if;
+  select * into v_row from public.documents where id = p_id;
+  if not found then raise exception 'Document not found'; end if;
+  if v_row.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: document belongs to another department';
+  end if;
+  update public.documents
+    set deleted_at = null, deleted_by = null
+    where id = p_id;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.guard_documents_deleted_at()
+ RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+begin
+  if (new.deleted_at is distinct from old.deleted_at) then
+    if not public.is_dept_admin() then
+      raise exception 'Only a Department Admin or Project Admin can change the deleted state of this document';
+    end if;
+  end if;
+  return new;
+end;
+$function$;
+
+-- Slice B: version-on-replace. Called after the client uploads the new file +
+-- inserts the new row; links new->old via supersedes and archives the old.
+CREATE OR REPLACE FUNCTION public.replace_document(p_old_id uuid, p_new_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+declare v_old public.documents; v_new public.documents;
+begin
+  if not public.is_dept_admin() then
+    raise exception 'Only a Department Admin or Project Admin can replace a document';
+  end if;
+  select * into v_old from public.documents where id = p_old_id;
+  if not found then raise exception 'Original document not found'; end if;
+  select * into v_new from public.documents where id = p_new_id;
+  if not found then raise exception 'New document not found'; end if;
+  if v_old.department_id <> public.my_department_id()
+     or v_new.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: document belongs to another department';
+  end if;
+  update public.documents set supersedes = p_old_id where id = p_new_id;
+  update public.documents set archived_at = now() where id = p_old_id;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.guard_documents_archived_at()
+ RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+begin
+  if (new.archived_at is distinct from old.archived_at) then
+    if not public.is_dept_admin() then
+      raise exception 'Only a Department Admin or Project Admin can change the version state of this document';
+    end if;
+  end if;
+  return new;
+end;
+$function$;
+
+-- --- ACTION_ITEMS lifecycle (2026-07-06) ------------------------------------
+-- Writes go ONLY through these RPCs (the direct UPDATE policy was dropped).
+-- All is_canmanage()-gated (Board/DA/Officer), dept-checked, server-stamped,
+-- and snapshot the assignee name so archived history survives member removal.
+
+CREATE OR REPLACE FUNCTION public.complete_action_item(p_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+declare v_row public.action_items;
+begin
+  if not public.is_canmanage() then raise exception 'Not authorized to complete action items'; end if;
+  select * into v_row from public.action_items where id = p_id;
+  if not found then raise exception 'Action item not found'; end if;
+  if v_row.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: belongs to another department';
+  end if;
+  update public.action_items set
+    status = 'done', completed_at = now(), completed_by = public.my_member_id(),
+    assignee_name = coalesce(
+      (select m.name from public.members m where m.id = v_row.assigned_to),
+      assignee_name)
+  where id = p_id;
+end;
+$function$;
+
+-- Reopen handles BOTH completed and cancelled; 14-day lock via coalesce.
+CREATE OR REPLACE FUNCTION public.reopen_action_item(p_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+declare v_row public.action_items; v_resolved timestamp with time zone;
+begin
+  if not public.is_canmanage() then raise exception 'Not authorized to reopen action items'; end if;
+  select * into v_row from public.action_items where id = p_id;
+  if not found then raise exception 'Action item not found'; end if;
+  if v_row.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: belongs to another department';
+  end if;
+  v_resolved := coalesce(v_row.completed_at, v_row.cancelled_at);
+  if v_resolved is not null and (now() - v_resolved) >= interval '14 days' then
+    raise exception 'This item was resolved over 14 days ago and is now archived — it can no longer be reopened';
+  end if;
+  update public.action_items set
+    status = 'open',
+    completed_at = null, completed_by = null,
+    cancelled_at = null, cancelled_by = null, cancel_reason = null
+  where id = p_id;
+end;
+$function$;
+
+-- Cancel = distinct "no longer needed" outcome; reason REQUIRED.
+CREATE OR REPLACE FUNCTION public.cancel_action_item(p_id uuid, p_reason text)
+ RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+declare v_row public.action_items;
+begin
+  if not public.is_canmanage() then raise exception 'Not authorized to cancel action items'; end if;
+  if p_reason is null or btrim(p_reason) = '' then
+    raise exception 'A reason is required to cancel an action item';
+  end if;
+  select * into v_row from public.action_items where id = p_id;
+  if not found then raise exception 'Action item not found'; end if;
+  if v_row.department_id <> public.my_department_id() then
+    raise exception 'Not authorized: belongs to another department';
+  end if;
+  update public.action_items set
+    status = 'cancelled', cancelled_at = now(), cancelled_by = public.my_member_id(),
+    cancel_reason = btrim(p_reason),
+    assignee_name = coalesce(
+      (select m.name from public.members m where m.id = v_row.assigned_to),
+      assignee_name)
+  where id = p_id;
+end;
+$function$;
+
+-- --- Helper functions confirmed live this session (2026-07-06) ---------------
+-- These weren't all in prior snapshots. Real bodies use text[] overlap.
+-- is_dept_admin() = Project Admin | Department Admin.
+CREATE OR REPLACE FUNCTION public.is_dept_admin()
+ RETURNS boolean
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  select exists (
+    select 1 from public.members
+    where lower(members.email) = lower(auth.email())
+      and members.access && array['Project Admin','Department Admin']::text[]
+  );
+$function$;
+
+-- is_canmanage() = Board Member | Department Admin | Officer.
+CREATE OR REPLACE FUNCTION public.is_canmanage()
+ RETURNS boolean
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  select exists (
+    select 1 from members
+    where lower(members.email) = lower(auth.email())
+      and members.access && array['Board Member','Department Admin','Officer']::text[]
+  );
+$function$;
+
+-- is_canmanage_ops() = Department Admin | Officer (ops-management, no Board).
+-- [Body carried forward — captured live this session; verify with
+--  SELECT pg_get_functiondef('public.is_canmanage_ops()'::regprocedure); ]
+
 
 -- =============================================================================
 -- SECTION 3 — ROW-LEVEL SECURITY POLICIES
@@ -763,6 +1040,14 @@ ALTER TABLE public.session_plans       ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "leaders can read action_items" ON public.action_items FOR SELECT TO public
   USING ((is_leader() AND (department_id = my_department_id())));
 
+-- action_items write model (2026-07-06): INSERT via is_canmanage(); there is
+-- deliberately NO direct UPDATE policy — completion/reopen/cancel go ONLY through
+-- complete_action_item / reopen_action_item / cancel_action_item (SECURITY DEFINER),
+-- which makes the 14-day reopen lock unbypassable. (The old "canmanage update
+-- action_items" UPDATE policy was DROPPED this session.)
+CREATE POLICY "canmanage insert action_items" ON public.action_items FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND is_canmanage()));
+
 CREATE POLICY "leaders can read ai_feedback" ON public.ai_feedback FOR SELECT TO public
   USING ((is_leader() AND (department_id = my_department_id())));
 
@@ -794,6 +1079,32 @@ CREATE POLICY "authenticated can read content_calendar" ON public.content_calend
 
 CREATE POLICY "authenticated can read documents" ON public.documents FOR SELECT TO public
   USING ((department_id = my_department_id()));
+
+-- --- DOCUMENTS write policies + Failsafe triggers (2026-07-06) ---------------
+-- INSERT/UPDATE: is_canmanage_ops() (DA/Officer). Hard DELETE: PA ONLY.
+-- Soft-delete/restore runs through soft_delete_document/restore_document and is
+-- locked to DA/PA by trg_guard_documents_deleted_at; version-on-replace archives
+-- via replace_document, locked by trg_guard_documents_archived_at.
+CREATE POLICY documents_insert_leadership ON public.documents FOR INSERT TO authenticated
+  WITH CHECK (((department_id = my_department_id()) AND is_canmanage_ops()));
+
+CREATE POLICY documents_update_leadership ON public.documents FOR UPDATE TO authenticated
+  USING (((department_id = my_department_id()) AND is_canmanage_ops()))
+  WITH CHECK (((department_id = my_department_id()) AND is_canmanage_ops()));
+
+-- Hard delete tightened to PA-only this session (was documents_delete_leadership DA/Officer).
+CREATE POLICY documents_delete_pa_only ON public.documents FOR DELETE TO authenticated
+  USING (((department_id = my_department_id()) AND (EXISTS ( SELECT 1
+     FROM members
+    WHERE ((lower(members.email) = lower(auth.email())) AND (members.access && ARRAY['Project Admin'::text]))))));
+
+-- Guard: any change to deleted_at (soft-delete OR restore) requires DA/PA.
+CREATE TRIGGER trg_guard_documents_deleted_at BEFORE UPDATE ON public.documents
+  FOR EACH ROW EXECUTE FUNCTION guard_documents_deleted_at();
+
+-- Guard: any change to archived_at (version-on-replace state) requires DA/PA.
+CREATE TRIGGER trg_guard_documents_archived_at BEFORE UPDATE ON public.documents
+  FOR EACH ROW EXECUTE FUNCTION guard_documents_archived_at();
 
 CREATE POLICY "authenticated can read duties" ON public.duties FOR SELECT TO public
   USING ((department_id = my_department_id()));
@@ -1018,6 +1329,11 @@ CREATE POLICY "authenticated can read training_plans" ON public.training_plans F
 
 CREATE POLICY "signed in can read departments" ON public.departments FOR SELECT TO authenticated
   USING (true);  -- department info readable to function
+
+-- A Department Admin can update their own department (profile/brand). Confirmed live.
+CREATE POLICY "DA can update own department" ON public.departments FOR UPDATE TO authenticated
+  USING ((id = my_department_id()) AND is_dept_admin())
+  WITH CHECK ((id = my_department_id()) AND is_dept_admin());
 
 -- =============================================================================
 -- END OF SCHEMA SNAPSHOT
