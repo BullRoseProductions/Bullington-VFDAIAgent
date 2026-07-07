@@ -4096,8 +4096,13 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
 }
 function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
-  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false);
+  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState("");
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
+  // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
+  const q = query.trim().toLowerCase();
+  const matches = (m) => !q || [m.name, m.email, m.role, (Array.isArray(m.access) ? m.access.join(" ") : "")].some((f) => (f || "").toLowerCase().includes(q));
+  const rosterTotal = members.filter(countsInStats).length;   // full roster (owner/test/PA excluded) — the "of Y"
+  const filtered = members.filter((m) => countsInStats(m) && (showInactive || !q || m.status !== "Inactive") && matches(m));
   async function add() {
     const email = em.trim().toLowerCase();
     if (!nm.trim() || !email || !/^\S+@\S+\.\S+$/.test(email)) { notify({ kind: "error", title: "Email required", text: "A valid email is needed so this member can sign in." }); return; }
@@ -4152,14 +4157,21 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      <div style={{ ...S.searchBox, ...FS.card, marginBottom: 10 }}>
+        <Search size={16} color={FIRE.textMuted} />
+        <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search members by name, email, or role…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {query && <button style={S.clearBtn} onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
+      </div>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10 }}>Showing {filtered.length} of {rosterTotal}</div>
       {members.some((m) => m.status === "Inactive") && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
           <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
         </div>
       )}
+      {filtered.length === 0 && <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted }}>{query ? `No members match "${query}".` : "No members to show."}</div>}
       <div style={S.opGrid}>
-        {/* Owner + test account hidden from the roster display via countsInStats — their rows/status/access are untouched */}
-        {members.filter((m) => (showInactive || m.status !== "Inactive") && countsInStats(m)).map((m) => (
+        {/* Owner + test + Project Admin hidden via countsInStats; search + inactive toggle compose (AND) */}
+        {filtered.map((m) => (
           <div key={m.id} style={{ ...S.opCard, ...FS.card, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <Initials S={S} dark name={m.name} />
