@@ -1,0 +1,23 @@
+{
+  "name": "B4C — Before the Call",
+  "short_name": "B4C",
+  "description": "Keeping responders prepared",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F1B33",
+  "theme_color": "#0F1B33",
+  "icons": [
+    {
+      "src": "/favicon_192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

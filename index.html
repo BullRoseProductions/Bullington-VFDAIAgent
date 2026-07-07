@@ -10,6 +10,15 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32.png" />
     <link rel="apple-touch-icon" href="/favicon_180.png" />
 
+    <!-- PWA: installable home-screen app (standalone/full-screen). Frontend-only,
+         no service worker yet — offline support can be a later add. -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0F1B33" />
+    <!-- iOS home-screen (Safari ignores the manifest's display/theme; needs its own tags) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="B4C" />
+
     <!-- Open Graph / Twitter social share preview -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="B4C — Before the Call" />
