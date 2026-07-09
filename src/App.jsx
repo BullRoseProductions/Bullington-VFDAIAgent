@@ -549,7 +549,7 @@ export default function App() {
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} checkIn={doCheckIn} notify={notify} dept={dept} addFeedback={addFeedback} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
@@ -6419,7 +6419,7 @@ function LeadershipTag({ audience }) {   // amber "Leadership" pill for leadersh
   if (audience !== "leadership") return null;
   return <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>Leadership</span>;
 }
-function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, checkIn, notify, dept, addFeedback }) {
+function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, notify, dept, addFeedback }) {
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
   const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
   const canPlanAI = hasAny(role, SIGNIN_ROLES);   // AI drill planner — same PA/DA/TO set as the retired standalone AI page (NOT canManage: excludes Board, includes PA)
@@ -7065,7 +7065,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                               <button style={Lbtn} onClick={() => rotateSI(s)}><RefreshCw size={14} color={LbtnIcon} /> Rotate code</button>
                               <button style={{ ...Lbtn, padding: "7px 11px" }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>
                             </div>
-                            <button style={{ ...Lbtn, marginTop: 8 }} onClick={async () => { const r = await checkIn(s.id, liveToken, meId); notify(r.ok ? { title: r.already ? "Already checked in" : "Checked in", text: `${me?.name || "You"} ${r.already ? "were already on the list" : "added"}.` } : { kind: "error", title: "Couldn't check in", text: r.reason }); }}>Simulate a scan (check me in)</button>
                           </div>
                           <div style={{ flex: 1, minWidth: 190 }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color: "#9AA1AC", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
