@@ -8,6 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
+  Maximize2,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { QRCodeCanvas } from "qrcode.react";
@@ -6450,6 +6451,40 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     loadSessions();
   }
   const checkinURL = (s, token) => `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?checkin=${s.id}&t=${token || ""}`;
+  // Full-screen QR overlay + hi-res PNG export for the sign-in code
+  const [expandQR, setExpandQR] = useState(null);   // { s, token } | null
+  const dlQRRef = useRef(null);                      // wraps the hidden 720px export QR (only one panel open at a time)
+  function downloadSigninPNG(s, token) {
+    const src = dlQRRef.current?.querySelector("canvas");
+    if (!src) { notify({ kind: "error", title: "QR not ready", text: "Give the code a moment to render, then try again." }); return; }
+    const qr = src.width;                            // 720 — offscreen hi-res, not the 172px on-screen canvas
+    const pad = 56, W = qr + pad * 2;
+    const c = document.createElement("canvas");
+    const ctx = c.getContext("2d");
+    // wrap the session title to at most 2 lines so long names don't overflow
+    const wrap = (text, font, maxW) => {
+      ctx.font = font; const words = String(text || "").split(/\s+/); const lines = []; let line = "";
+      for (const w of words) { const t = line ? line + " " + w : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; }
+      if (line) lines.push(line); return lines.slice(0, 2);
+    };
+    const titleFont = "700 44px system-ui, -apple-system, sans-serif";
+    const titleLines = wrap(s.title || "Training sign-in", titleFont, qr);
+    const topPad = 44, titleLH = 54, gap = 28, footTop = 56, footLH = 40;
+    const titleBlock = titleLines.length * titleLH;
+    c.width = W;
+    c.height = topPad + titleBlock + gap + qr + footTop + footLH + 40;
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#111827"; ctx.font = titleFont;
+    titleLines.forEach((ln, i) => ctx.fillText(ln, W / 2, topPad + titleLH * (i + 1) - 12));
+    ctx.drawImage(src, pad, topPad + titleBlock + gap);
+    let y = topPad + titleBlock + gap + qr + footTop;
+    ctx.fillStyle = "#111827"; ctx.font = "600 38px system-ui, -apple-system, sans-serif";
+    ctx.fillText("Scan to check in", W / 2, y); y += footLH;
+    ctx.fillStyle = "#6B7280"; ctx.font = "400 28px system-ui, -apple-system, sans-serif";
+    ctx.fillText(`${fmtSess(s)} · Code ${token}`, W / 2, y);
+    c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `signin-${s.id}-${token}.png`; a.click(); URL.revokeObjectURL(a.href); }, "image/png");
+  }
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
@@ -7019,8 +7054,14 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                             <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
                               <QRCodeCanvas value={checkinURL(s, liveToken)} size={172} />
                             </div>
+                            {/* offscreen hi-res QR — read by downloadSigninPNG, never shown */}
+                            <div ref={dlQRRef} aria-hidden style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }}>
+                              <QRCodeCanvas value={checkinURL(s, liveToken)} size={720} marginSize={2} />
+                            </div>
                             <div style={{ marginTop: 8, fontSize: 12, color: "#9AA1AC" }}>This session's code: <b style={{ letterSpacing: 2, color: "#F0F2F5" }}>{liveToken}</b></div>
                             <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
+                              <button style={Lbtn} onClick={() => setExpandQR({ s, token: liveToken })}><Maximize2 size={14} color={LbtnIcon} /> Expand</button>
+                              <button style={Lbtn} onClick={() => downloadSigninPNG(s, liveToken)}><Download size={14} color={LbtnIcon} /> Download PNG</button>
                               <button style={Lbtn} onClick={() => rotateSI(s)}><RefreshCw size={14} color={LbtnIcon} /> Rotate code</button>
                               <button style={{ ...Lbtn, padding: "7px 11px" }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>
                             </div>
@@ -7050,6 +7091,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             })}
         </div>
       </div>
+      {expandQR && (
+        <div onClick={() => setExpandQR(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", zIndex: 80, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, cursor: "pointer" }}>
+          <div style={{ color: "#fff", fontSize: 26, fontWeight: 700, textAlign: "center", marginBottom: 22, maxWidth: 640 }}>{expandQR.s.title}</div>
+          <div style={{ background: "#fff", padding: 20, borderRadius: 16 }}>
+            <QRCodeCanvas value={checkinURL(expandQR.s, expandQR.token)} size={Math.min((typeof window !== "undefined" ? Math.min(window.innerWidth, window.innerHeight) : 560) - 200, 560)} marginSize={1} />
+          </div>
+          <div style={{ color: "#fff", fontSize: 22, fontWeight: 600, marginTop: 22 }}>Scan to check in</div>
+          <div style={{ color: "rgba(255,255,255,.6)", fontSize: 14, marginTop: 8 }}>{fmtSess(expandQR.s)} · Code {expandQR.token} · tap anywhere to close</div>
+        </div>
+      )}
     </div>
   );
 }
