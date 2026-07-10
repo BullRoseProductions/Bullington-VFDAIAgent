@@ -617,7 +617,7 @@ function deptAttendance(members, sessions, year, range) {
 const rolling90 = () => { const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 90); return { from: toISODate(from), to: toISODate(to) }; };
 // Shared personal cards (My Certifications / Assigned Duties / Upcoming Training) — self-contained (owns its personal-duties load + plan viewer).
 // Rendered in the Dept Admin dashboard; MemberDashboard keeps its own inline copy for now (switch is a later dedicated change).
-function PersonalView({ S, me, meId, sessions, notify }) {
+function PersonalView({ S, me, meId, sessions, notify, go }) {
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
   const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length, certsTotal = certsAll.length;
@@ -716,6 +716,7 @@ function PersonalView({ S, me, meId, sessions, notify }) {
               </div>
             ))}
           </div>
+          {go && <button onClick={() => go("training")} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, marginTop: 10 }}>View Training</button>}
         </div>
       </div>
       {mounts}
@@ -1055,10 +1056,11 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <div style={FS.kicker}>{dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"}</div>
           <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
         </div>
-        <div style={{ textAlign: "right", minWidth: 130 }}>
+        <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
           {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
-        </div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
+        </button>
       </div>
       <div style={{ ...FS.card, padding: "18px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
         <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
@@ -1077,12 +1079,12 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <Stat S={S} dark n={String(total)} label="Members" />
-        <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} />
-        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
-        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" /></div>
-        <Stat S={S} dark n={String(drillsHeld)} label="Drills held" />
-        <Stat S={S} dark n={String(openActions)} label="Open action items" />
+        <Stat S={S} dark n={String(total)} label="Members" onClick={() => go("roster", "members")} />
+        <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} onClick={() => go("roster", "certs")} />
+        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" onClick={() => go("roster", "attendance")} />
+        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" onClick={() => go("duties")} /></div>
+        <Stat S={S} dark n={String(drillsHeld)} label="Drills held" onClick={() => go("training")} />
+        <Stat S={S} dark n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />
       </div>
       <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
@@ -1131,7 +1133,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} />
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
@@ -8297,8 +8299,17 @@ function NoEmailFixPanel({ S, deptId, notify, onFixed }) {
 function PageHead({ S, eyebrow, title, sub }) {
   return <div style={S.pageHead}><div style={S.cardEyebrow}>{eyebrow}</div><h1 style={S.pageTitle}>{title}</h1>{sub && <p style={S.pageSub}>{sub}</p>}</div>;
 }
-function Stat({ S, n, label, warn, dark }) {
-  return <div style={dark ? { ...S.stat, ...FS.card } : S.stat}><div style={{ ...S.statN, color: warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20") }}>{n}</div><div style={dark ? { ...S.statLabel, color: FIRE.textMuted } : S.statLabel}>{label}</div></div>;
+function Stat({ S, n, label, warn, dark, onClick }) {
+  const box = dark ? { ...S.stat, ...FS.card } : S.stat;
+  const num = <div style={{ ...S.statN, color: warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20") }}>{n}</div>;
+  const lbl = <div style={dark ? { ...S.statLabel, color: FIRE.textMuted } : S.statLabel}>{label}</div>;
+  if (!onClick) return <div style={box}>{num}{lbl}</div>;   // unchanged for every other Stat usage
+  return (
+    <button onClick={onClick} className="stat-cta" style={{ ...box, position: "relative", width: "100%", display: "block", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+      {num}{lbl}
+      <ChevronRight size={16} color={FIRE.btnIcon} style={{ position: "absolute", top: 14, right: 14 }} />
+    </button>
+  );
 }
 function Meta({ Icon, text, dark }) {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: dark ? FIRE.textMuted : "#6A7178" }}><Icon size={14} /> {text}</span>;
@@ -8327,6 +8338,9 @@ function Fonts() {
       .spin { animation: spin .9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
       input:focus, select:focus, textarea:focus { outline: 2px solid #1F4E79; outline-offset: 1px; }
       button:focus-visible { outline: 2px solid #1F4E79; outline-offset: 2px; }
+      .stat-cta { transition: filter .15s ease, transform .08s ease; }
+      .stat-cta:hover { filter: brightness(1.08); }
+      .stat-cta:active { transform: translateY(1px); }
       @media (max-width: 900px) {
         .dr-side { position: fixed; left: -290px; transition: left .22s ease; z-index: 40; height: 100dvh; }
         .dr-side.open { left: 0; }
