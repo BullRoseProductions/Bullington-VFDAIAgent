@@ -5263,6 +5263,9 @@ const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "
 function Apparatus({ S, role, members, meId, notify }) {
   const [rigs, setRigs] = useState([]);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
+  const me = members.find((m) => m.id === meId) || null;
+  const canCheck = !!me && me.status !== "Inactive";     // any active member (Probationary included) can perform a check
+  const [checkingRig, setCheckingRig] = useState(null);  // rig whose check modal is open
   const [adding, setAdding] = useState(false);
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
   const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
@@ -5284,11 +5287,6 @@ function Apparatus({ S, role, members, meId, notify }) {
   useEffect(() => { loadRigs(); }, [members]);   // reload once members resolves so checked_by → name populates
   const ready = rigs.filter((r) => r.status === "Pass").length;
   const flagged = rigs.length - ready;
-  async function logCheck(id, status, note) {
-    const { data, error } = await supabase.from("apparatus").update({ status, note, last_check_at: new Date().toISOString(), checked_by: meId }).eq("id", id).select();
-    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't log the check", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: a silent RLS block fails loudly, not as false success
-    loadRigs();   // refetch — UI matches true DB state
-  }
   function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper" }); }
   async function saveEditRig(id) {
     if (!rigBuf.name.trim()) return;
@@ -5353,8 +5351,7 @@ function Apparatus({ S, role, members, meId, notify }) {
               <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: FIRE.textMuted }}>
                 <span>Last check: {r.lastCheck} · {r.by}</span>
                 <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-                  <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => logCheck(r.id, "Pass", "Checked — all good")}><ClipboardCheck size={14} /> Pass</button>
-                  <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => { const n = window.prompt("What needs attention on this rig? (short note)"); if (n === null) return; logCheck(r.id, "Needs attention", n.trim() || "Flagged — needs attention"); }}><AlertTriangle size={14} color={FIRE.redText} /> Needs attention</button>
+                  {canCheck && <button style={{ ...FS.btnPrimary, padding: "7px 12px", fontSize: 12.5 }} onClick={() => setCheckingRig(r)}><ClipboardCheck size={14} /> Start Check</button>}
                 </div>
               </div>
               {editingRigId === r.id && (
@@ -5373,6 +5370,7 @@ function Apparatus({ S, role, members, meId, notify }) {
       </div>
       )}
       <MaintenancePanel S={S} role={role} rigs={rigs} notify={notify} />
+      {checkingRig && <CheckRunModal S={S} rig={checkingRig} meId={meId} notify={notify} canManage={canManage} onClose={() => setCheckingRig(null)} />}
     </div>
   );
 }
@@ -5382,6 +5380,99 @@ function Apparatus({ S, role, members, meId, notify }) {
 // (required), Location/Area (required, hybrid picker), Description (optional, on tap).
 // Add/edit/retire/restore; direct table writes governed by the "ops manage check items" RLS
 // (is_canmanage_ops); .select() + 0-row guard makes a silent RLS block fail loudly.
+// Slice 4a — perform-check modal shell. On open, start_or_resume_check gets/creates the
+// truck's ONE in_progress draft, then loads active checklist items (grouped by location,
+// walkaround order, descriptions on tap) + any existing marks on the draft. Pass/Fail
+// toggles are shown but NOT wired here — marking + auto-save is Slice 4b.
+function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
+  const [checkId, setCheckId] = useState(null);
+  const [items, setItems] = useState(null);        // active checklist items
+  const [marks, setMarks] = useState({});          // item_id -> { result, note, marked_by_name, marked_at }
+  const [expandedItemId, setExpandedItemId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");              // "" | "empty" | <message>
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true); setErr("");
+      const { data: cid, error: rpcErr } = await supabase.rpc("start_or_resume_check", { p_apparatus_id: rig.id });
+      if (!alive) return;
+      if (rpcErr || !cid) {
+        const msg = rpcErr?.message || "";
+        if (/no checklist items/i.test(msg)) { setErr("empty"); setLoading(false); return; }
+        setErr(msg || "Couldn't start the check — please try again."); setLoading(false); return;
+      }
+      setCheckId(cid);
+      const [{ data: its }, { data: res }] = await Promise.all([
+        supabase.from("apparatus_check_items")
+          .select("id, label, location, description, sort_order")
+          .eq("apparatus_id", rig.id).eq("active", true)
+          .order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
+        supabase.from("apparatus_check_results")
+          .select("item_id, result, note, marked_by_name, marked_at").eq("check_id", cid),
+      ]);
+      if (!alive) return;
+      const mmap = {}; (res || []).forEach((r) => { if (r.item_id) mmap[r.item_id] = r; });
+      setItems(its || []); setMarks(mmap); setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [rig.id]);
+  const groups = []; const gmap = new Map();
+  (items || []).forEach((it) => { const loc = (it.location || "").trim() || "Unspecified"; if (!gmap.has(loc)) { gmap.set(loc, []); groups.push(loc); } gmap.get(loc).push(it); });
+  const markedCount = (items || []).filter((it) => marks[it.id]).length;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
+      <div style={{ ...FS.card, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <Truck size={18} color={FIRE.btnIcon} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Truck check</div>
+            <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontWeight: 700, fontSize: 18, color: FIRE.textPrimary }}>{rig.name}</div>
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={onClose}><X size={16} color={FIRE.textSecondary} /></button>
+        </div>
+        <div style={{ padding: 16 }}>
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: FIRE.textMuted }}><Loader2 size={15} className="spin" /> Loading…</div>
+          ) : err === "empty" ? (
+            <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>This truck has no checklist items yet. {canManage ? "Add them in the Checklist panel on the apparatus card." : "Ask an officer to set up this truck's checklist."}</div>
+          ) : err ? (
+            <div style={{ fontSize: 13.5, color: FIRE.redText, lineHeight: 1.5 }}>{err}</div>
+          ) : (<>
+            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10 }}>{markedCount} of {(items || []).length} items marked · walk the truck and mark each one.</div>
+            {groups.map((loc) => (
+              <div key={loc} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "6px 0 3px" }}>{loc}</div>
+                {gmap.get(loc).map((it) => {
+                  const mk = marks[it.id];
+                  return (
+                    <div key={it.id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button onClick={() => it.description && setExpandedItemId(expandedItemId === it.id ? null : it.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: it.description ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+                          <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
+                          {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
+                        </button>
+                        <div style={{ display: "inline-flex", gap: 6 }}>
+                          <button disabled title="Marking arrives in the next update" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: mk?.result === "pass" ? 1 : 0.45 }}><CheckCircle2 size={14} color={FIRE.green} /> Pass</button>
+                          <button disabled title="Marking arrives in the next update" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: mk?.result === "fail" ? 1 : 0.45 }}><X size={14} color={FIRE.redBright} /> Fail</button>
+                        </div>
+                      </div>
+                      {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 4px", lineHeight: 1.45 }}>{it.description}</div>}
+                      {mk && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{mk.result === "fail" ? "✗" : "✓"} {mk.marked_by_name || "—"}{mk.marked_at ? ` · ${new Date(mk.marked_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}{mk.result === "fail" && mk.note ? ` · ${mk.note}` : ""}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </>)}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+          <button style={FS.btn} onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 // Case-insensitive de-dup for a location: if the typed value matches an existing
 // location (case-insensitively), reuse the existing casing; else store trimmed-as-typed.
 function normalizeLocation(loc, existing) {
