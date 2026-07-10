@@ -5377,21 +5377,67 @@ function Apparatus({ S, role, members, meId, notify }) {
   );
 }
 
-// Slice 3a — ops-only checklist template management (per rig). Lazy-loads ACTIVE
-// apparatus_check_items ordered by sort_order, empty state, and ADD (label + optional
-// category). Direct table writes governed by the "ops manage check items" RLS
+// Ops-only checklist template management (per rig). Lazy-loads ACTIVE
+// apparatus_check_items ordered by sort_order; grouped by location/area. Fields: Title
+// (required), Location/Area (required, hybrid picker), Description (optional, on tap).
+// Add/edit/retire/restore; direct table writes governed by the "ops manage check items" RLS
 // (is_canmanage_ops); .select() + 0-row guard makes a silent RLS block fail loudly.
+// Case-insensitive de-dup for a location: if the typed value matches an existing
+// location (case-insensitively), reuse the existing casing; else store trimmed-as-typed.
+function normalizeLocation(loc, existing) {
+  const t = (loc || "").trim();
+  if (!t) return "";
+  const match = (existing || []).find((o) => (o || "").trim().toLowerCase() === t.toLowerCase());
+  return match ? match.trim() : t;
+}
+// Hybrid location picker: dropdown of the truck's existing locations + "add new".
+// Reports the picked/typed string via onChange; the parent de-dups on save.
+function LocationPicker({ existing, value, onChange }) {
+  const NEW = "__add_new__";
+  const opts = []; const seen = new Set();
+  (existing || []).concat(value ? [value] : []).forEach((loc) => {
+    const t = (loc || "").trim(); if (!t) return;
+    const k = t.toLowerCase(); if (seen.has(k)) return; seen.add(k); opts.push(t);
+  });
+  opts.sort((a, b) => a.localeCompare(b));
+  const selected = value && opts.find((o) => o.toLowerCase() === value.trim().toLowerCase());
+  const [mode, setMode] = useState(opts.length === 0 ? "new" : "pick");
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      {mode === "pick" ? (
+        <select style={{ ...FS.input, minWidth: 160 }} value={selected || ""}
+          onChange={(e) => { if (e.target.value === NEW) { setMode("new"); onChange(""); } else onChange(e.target.value); }}>
+          <option value="" disabled>Select location…</option>
+          {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+          <option value={NEW}>➕ Add new location…</option>
+        </select>
+      ) : (
+        <>
+          <input style={{ ...FS.input, minWidth: 160 }} value={value} placeholder="e.g. Pump panel" onChange={(e) => onChange(e.target.value)} />
+          {opts.length > 0 && <button type="button" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => { setMode("pick"); onChange(""); }}>Pick existing</button>}
+        </>
+      )}
+    </div>
+  );
+}
 function ApparatusChecklist({ S, rig, notify }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState(null);        // null = not loaded yet
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState("");
-  const [category, setCategory] = useState("");
+  const [location, setLocation] = useState("");
+  const [description, setDescription] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editBuf, setEditBuf] = useState({ label: "", location: "", description: "" });
+  const [expandedItemId, setExpandedItemId] = useState(null);
+  const [showRetired, setShowRetired] = useState(false);
+  const [retired, setRetired] = useState(null);      // null = not loaded
+  const [retiredLoading, setRetiredLoading] = useState(false);
   const load = async () => {
     setLoading(true);
     const { data } = await supabase.from("apparatus_check_items")
-      .select("id, label, category, sort_order")
+      .select("id, label, location, description, sort_order")
       .eq("apparatus_id", rig.id).eq("active", true)
       .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
     setItems(data || []); setLoading(false);
@@ -5402,16 +5448,56 @@ function ApparatusChecklist({ S, rig, notify }) {
   }
   async function addItem() {
     const lbl = label.trim();
-    if (!lbl) return;
+    const loc = normalizeLocation(location, distinctLocations);
+    if (!lbl || !loc) { notify({ kind: "error", title: "Title and Location are required", text: "Give the item a title and a location/area." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
     const nextOrder = (items || []).reduce((mx, it) => Math.max(mx, it.sort_order ?? 0), -1) + 1;
     const { data, error } = await supabase.from("apparatus_check_items")
-      .insert({ department_id: deptId, apparatus_id: rig.id, label: lbl, category: category.trim() || null, sort_order: nextOrder, active: true })
+      .insert({ department_id: deptId, apparatus_id: rig.id, label: lbl, location: loc, description: description.trim() || null, sort_order: nextOrder, active: true })
       .select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the item", text: "Something went wrong saving that — please try again.", details: error?.message }); return; }
-    setLabel(""); setCategory(""); setAdding(false); load();
+    setLabel(""); setLocation(""); setDescription(""); setAdding(false); load();
   }
+  function startEdit(it) { setEditingId(it.id); setEditBuf({ label: it.label || "", location: it.location || "", description: it.description || "" }); }
+  async function saveEdit(id) {
+    const lbl = editBuf.label.trim();
+    const loc = normalizeLocation(editBuf.location, distinctLocations);
+    if (!lbl || !loc) { notify({ kind: "error", title: "Title and Location are required", text: "Give the item a title and a location/area." }); return; }
+    const { data, error } = await supabase.from("apparatus_check_items")
+      .update({ label: lbl, location: loc, description: editBuf.description.trim() || null }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the item", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }
+    setEditingId(null); load();
+  }
+  async function loadRetired() {
+    setRetiredLoading(true);
+    const { data } = await supabase.from("apparatus_check_items")
+      .select("id, label, location")
+      .eq("apparatus_id", rig.id).eq("active", false)
+      .order("created_at", { ascending: true });
+    setRetired(data || []); setRetiredLoading(false);
+  }
+  async function toggleRetired() {
+    const next = !showRetired; setShowRetired(next);
+    if (next && retired === null) await loadRetired();
+  }
+  async function retire(id) {
+    const { data, error } = await supabase.from("apparatus_check_items")
+      .update({ active: false }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't retire the item", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }
+    load(); if (showRetired) loadRetired(); else setRetired(null);
+  }
+  async function restore(id) {
+    const { data, error } = await supabase.from("apparatus_check_items")
+      .update({ active: true }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't restore the item", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }
+    load(); loadRetired();
+  }
+  const distinctLocations = (() => {
+    const seen = new Set(); const out = [];
+    (items || []).forEach((it) => { const t = (it.location || "").trim(); const k = t.toLowerCase(); if (t && !seen.has(k)) { seen.add(k); out.push(t); } });
+    return out.sort((a, b) => a.localeCompare(b));
+  })();
   return (
     <div style={{ marginTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
       <button onClick={toggleOpen} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -5421,25 +5507,75 @@ function ApparatusChecklist({ S, rig, notify }) {
       {open && (
         <div style={{ marginTop: 8 }}>
           {adding ? (
-            <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Item</span><input style={FS.input} value={label} placeholder="e.g. SCBA pressure" onChange={(e) => setLabel(e.target.value)} /></label>
-              <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category (optional)</span><input style={FS.input} value={category} placeholder="e.g. Safety" onChange={(e) => setCategory(e.target.value)} /></label>
-              <button style={FS.btnPrimary} onClick={addItem}><Plus size={15} /> Add</button>
-              <button style={FS.btn} onClick={() => { setAdding(false); setLabel(""); setCategory(""); }}>Cancel</button>
+            <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={label} placeholder="e.g. SCBA pressure" onChange={(e) => setLabel(e.target.value)} /></label>
+              <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={location} onChange={setLocation} /></div>
+              <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={description} placeholder="Optional detail, shown on tap" onChange={(e) => setDescription(e.target.value)} /></label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={FS.btnPrimary} onClick={addItem}><Plus size={15} /> Add</button>
+                <button style={FS.btn} onClick={() => { setAdding(false); setLabel(""); setLocation(""); setDescription(""); }}>Cancel</button>
+              </div>
             </div>
           ) : <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, marginBottom: 8 }} onClick={() => setAdding(true)}><Plus size={14} /> Add item</button>}
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
           ) : (items && items.length === 0) ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>No checklist items yet — add the first item to build this truck's check.</div>
-          ) : (items || []).map((it) => (
-            <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
-                {it.category && <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.category}</span>}
+          ) : (() => {
+            const groups = []; const gmap = new Map();
+            (items || []).forEach((it) => { const loc = (it.location || "").trim() || "Unspecified"; if (!gmap.has(loc)) { gmap.set(loc, []); groups.push(loc); } gmap.get(loc).push(it); });
+            return groups.map((loc) => (
+              <div key={loc} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "8px 0 2px" }}>{loc}</div>
+                {gmap.get(loc).map((it) => (
+                  <div key={it.id}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                      <button onClick={() => it.description && setExpandedItemId(expandedItemId === it.id ? null : it.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: it.description ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+                        <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
+                        {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
+                      </button>
+                      <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(it)}><Pencil size={13} color={FIRE.textSecondary} /></button>
+                      <button title="Retire (hides it; past checks keep it)" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => retire(it.id)}>Retire</button>
+                    </div>
+                    {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 8px", lineHeight: 1.45 }}>{it.description}</div>}
+                    {editingId === it.id && (
+                      <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, margin: "6px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+                        <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={editBuf.label} onChange={(e) => setEditBuf((b) => ({ ...b, label: e.target.value }))} /></label>
+                        <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={editBuf.location} onChange={(v) => setEditBuf((b) => ({ ...b, location: v }))} /></div>
+                        <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={editBuf.description} onChange={(e) => setEditBuf((b) => ({ ...b, description: e.target.value }))} /></label>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button style={FS.btnPrimary} onClick={() => saveEdit(it.id)}><CheckCircle2 size={15} /> Save</button>
+                          <button style={FS.btn} onClick={() => setEditingId(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
+            ));
+          })()}
+          {!loading && (
+            <div style={{ marginTop: 10 }}>
+              <button onClick={toggleRetired} style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                {showRetired ? "Hide retired" : "Show retired"}{retired ? ` (${retired.length})` : ""}
+              </button>
+              {showRetired && (
+                retiredLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: FIRE.textMuted, marginTop: 6 }}><Loader2 size={13} className="spin" /> Loading…</div>
+                ) : (retired && retired.length === 0) ? (
+                  <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 6 }}>No retired items.</div>
+                ) : (retired || []).map((it) => (
+                  <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 13, color: FIRE.textMuted, textDecoration: "line-through" }}>{it.label}</span>
+                      {it.location && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.location}</span>}
+                    </div>
+                    <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => restore(it.id)}><RotateCcw size={13} color={FIRE.btnIcon} /> Restore</button>
+                  </div>
+                ))
+              )}
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>
