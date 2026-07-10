@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2,
+  Maximize2, RotateCcw,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { QRCodeCanvas } from "qrcode.react";
@@ -6623,19 +6623,42 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} ${cad.toLowerCase()} session${fresh.length === 1 ? "" : "s"}${skipped ? ` (${skipped} already existed)` : ""}.` });
     setShowSess(false); setRepeat(false); setStitle(""); loadSessions();
   }
-  async function completeSession(s) {
+  // "Done for the night" — does NOT lock. Opens the roll writable so the officer can
+  // confirm/complete attendance BEFORE finalizing. The lock/clock-reset moves to finalizeSession.
+  function beginCloseout(s) {
+    setOpenAtt(s.id);   // expand the attendance roster in writable state
+  }
+  // Finalize & lock — the explicit second step, run AFTER the roll is confirmed.
+  async function finalizeSession(s) {
+    if (!window.confirm(`Lock attendance for "${s.title}"? You can reopen it later if needed.`)) return;
+    // auto-close any open QR sign-in so no stale code lingers / no post-lock scans
+    if (s.signinOpen) {
+      const { error: cErr } = await supabase.rpc("close_signin", { p_session_id: s.id });
+      if (cErr) { notify({ kind: "error", title: "Couldn't close the sign-in", text: "Attendance was not locked — please try again.", details: cErr.message }); return; }
+      setSigninTokens((t) => { const n = { ...t }; delete n[s.id]; return n; });
+    }
     const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
-    if (error) { notify({ kind: "error", title: "Couldn't update the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't finalize the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     // plan-linked -> reset the overdue clock to today, persisted. One-offs reset nothing.
     if (s.planId) {
       const iso = toISO(new Date());
       const { error: pErr } = await supabase.from("training_plans").update({ last_iso: iso }).eq("id", s.planId);
-      if (pErr) notify({ kind: "error", title: "Session complete — clock not reset", text: "The session was saved, but the training clock couldn't be reset.", details: pErr.message });
+      if (pErr) notify({ kind: "error", title: "Locked — clock not reset", text: "Attendance is locked, but the training clock couldn't be reset.", details: pErr.message });
       else setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p));
     }
-    setOpenAtt(s.id);   // (a) open the attendance roster in the same step
     loadSessions();
     loadPlans();
+  }
+  // Recover from a premature finalize — flips done back to false and reopens the writable roll.
+  // Direct UPDATE, permitted by the existing "leaders update training_sessions" RLS (same policy that
+  // wrote done:true); re-enables manual taps + self check-in. HARDEN LATER: a grace-window reopen RPC
+  // (mirroring reopen_action_item) could cap how long a finalized session stays reopenable — deferred
+  // for the pilot so leaders keep full flexibility to fix attendance.
+  async function reopenSession(s) {
+    const { error } = await supabase.from("training_sessions").update({ done: false }).eq("id", s.id);
+    if (error) { notify({ kind: "error", title: "Couldn't reopen the session", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    setOpenAtt(s.id);   // pop the roll back open, writable, for the correction
+    loadSessions();
   }
   async function removeSession(id) {
     const sess = sessions.find((x) => x.id === id);
@@ -7020,7 +7043,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     {canManage && (
                       <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> {s.plans.length ? "Attach more" : "Attach plan"}<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                     )}
-                    {s.done ? <Pill S={S} color="#76C98D">DONE</Pill> : canManage && <button style={Lbtn} onClick={() => completeSession(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Mark complete</button>}
+                    {s.done
+                      ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
+                      : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Done for the night</button>}
                     {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
                   {s.plans.length > 0 && (
@@ -7040,7 +7065,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   )}
                   {open && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
-                      <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked." : "Tap a name to mark who attended.") : "Who attended this session."}</div>
+                      <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
                       {roll.map((m) => {
                         const present = att.includes(m.id);
                         return (
@@ -7053,6 +7078,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           </div>
                         );
                       })}
+                      {canManage && !s.done && (
+                        <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                          <button style={LprimaryBtn} onClick={() => finalizeSession(s)}><ClipboardCheck size={15} /> Finalize &amp; lock attendance</button>
+                        </div>
+                      )}
                     </div>
                   )}
                   {canRunSignin && !s.done && openSignin === s.id && (() => {
