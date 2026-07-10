@@ -612,6 +612,9 @@ function deptAttendance(members, sessions, year, range) {
   const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
   return { rows, avg, doneThisYear };
 }
+// Rolling 90-day window for live participation (roster + member file) — feeds the SAME
+// deptAttendance calc as Reports, so a finalized drill moves these numbers immediately.
+const rolling90 = () => { const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 90); return { from: toISODate(from), to: toISODate(to) }; };
 // Shared personal cards (My Certifications / Assigned Duties / Upcoming Training) — self-contained (owns its personal-duties load + plan viewer).
 // Rendered in the Dept Admin dashboard; MemberDashboard keeps its own inline copy for now (switch is a later dedicated change).
 function PersonalView({ S, me, meId, sessions, notify }) {
@@ -4234,6 +4237,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
+  // Live 90-day participation — same deptAttendance calc as the roster + Reports; NOT the stale stored field.
+  const part90 = deptAttendance(members, sessions, null, rolling90()).rows.find((r) => r.id === member.id)?.pct ?? null;
   useEffect(() => {                              // load DA/PA-only data; Board/TO skip (RLS would return nothing anyway)
     if (!assign) return;
     let alive = true;
@@ -4331,8 +4336,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
           <Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>
         </div>
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{member.participation == null ? "—" : `${member.participation}%`}</span></div>
-          {member.participation != null && <Bar S={S} pct={member.participation} track={FIRE.track} color={member.participation >= 75 ? FIRE.green : member.participation >= 50 ? FIRE.amberText : FIRE.redText} />}
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{part90 == null ? "—" : `${part90}%`}</span></div>
+          {part90 != null && <Bar S={S} pct={part90} track={FIRE.track} color={part90 >= 75 ? FIRE.green : part90 >= 50 ? FIRE.amberText : FIRE.redText} />}
         </div>
         {assign && !editing && (
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
@@ -4641,7 +4646,10 @@ function Bar({ S, pct, color, track }) {
   return <div style={track ? { ...S.bar, background: track } : S.bar}><div style={{ ...S.barFill, width: `${pct}%`, background: color || "#1F4E79" }} /></div>;
 }
 function RosterAttendance({ S, members, sessions, plan }) {
-  const people = [...members].sort((a, b) => (b.participation ?? -1) - (a.participation ?? -1));
+  // Live 90-day participation — same deptAttendance calc as Reports (consistent numbers), rolling window.
+  // Replaces the stale stored m.participation field for DISPLAY only (column + writes retired-in-place, drop later).
+  const pctById = new Map(deptAttendance(members, sessions, null, rolling90()).rows.map((r) => [r.id, r.pct]));
+  const people = [...members].sort((a, b) => (pctById.get(b.id) ?? -1) - (pctById.get(a.id) ?? -1));
   const activeMembers = (members || []).filter((m) => countsInStats(m) && m.status === "Active");
   const activeLeaders = activeMembers.filter((m) => isLeader(m.access));
   const recentEvents = (sessions || [])
@@ -4679,13 +4687,16 @@ function RosterAttendance({ S, members, sessions, plan }) {
       </div>
       <div style={{ ...FS.kicker, marginBottom: 8 }}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
       <div style={{ ...FS.card, padding: "4px 16px" }}>
-        {people.map((m) => (
+        {people.map((m) => {
+          const p = pctById.get(m.id) ?? null;   // live 90-day pct (null = no eligible drills in window → "—")
+          return (
           <div key={m.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
             <Initials S={S} dark name={m.name} />
             <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}</div></div>
-            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{m.participation == null ? "—" : `${m.participation}%`}</div>{m.participation != null && <Bar S={S} pct={m.participation} track={FIRE.track} color={m.participation >= 75 ? FIRE.green : (m.participation >= 50 ? FIRE.amberText : FIRE.redText)} />}</div>
+            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{p == null ? "—" : `${p}%`}</div>{p != null && <Bar S={S} pct={p} track={FIRE.track} color={p >= 75 ? FIRE.green : (p >= 50 ? FIRE.amberText : FIRE.redText)} />}</div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
