@@ -1080,9 +1080,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat S={S} dark n={String(total)} label="Members" onClick={() => go("roster", "members")} />
-        <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expdC > 0} onClick={() => go("roster", "certs")} />
-        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" onClick={() => go("roster", "attendance")} />
-        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" onClick={() => go("duties")} /></div>
+        <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" pct={expdC > 0 ? 0 : certPct} onClick={() => go("roster", "certs")} />
+        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" pct={avgPart} onClick={() => go("roster", "attendance")} />
+        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={`${dutyCompletion}%`} label="Duty completion" pct={dutyCompletion} onClick={() => go("duties")} /></div>
         <Stat S={S} dark n={String(drillsHeld)} label="Drills held" onClick={() => go("training")} />
         <Stat S={S} dark n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />
       </div>
@@ -8299,9 +8299,14 @@ function NoEmailFixPanel({ S, deptId, notify, onFixed }) {
 function PageHead({ S, eyebrow, title, sub }) {
   return <div style={S.pageHead}><div style={S.cardEyebrow}>{eyebrow}</div><h1 style={S.pageTitle}>{title}</h1>{sub && <p style={S.pageSub}>{sub}</p>}</div>;
 }
-function Stat({ S, n, label, warn, dark, onClick }) {
+function Stat({ S, n, label, warn, dark, onClick, pct }) {
   const box = dark ? { ...S.stat, ...FS.card } : S.stat;
-  const num = <div style={{ ...S.statN, color: warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20") }}>{n}</div>;
+  // pct (a percentage 0-100) → threshold color: <30 red · 30-75 amber · >75 green (same palette as the readiness ring).
+  // Falls back to the existing warn/neutral coloring when pct isn't provided (count stats + every other Stat usage).
+  const numColor = pct != null
+    ? (pct > 75 ? FIRE.green : pct >= 30 ? FIRE.amberText : FIRE.redText)
+    : (warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20"));
+  const num = <div style={{ ...S.statN, color: numColor }}>{n}</div>;
   const lbl = <div style={dark ? { ...S.statLabel, color: FIRE.textMuted } : S.statLabel}>{label}</div>;
   if (!onClick) return <div style={box}>{num}{lbl}</div>;   // unchanged for every other Stat usage
   return (
