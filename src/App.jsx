@@ -5365,12 +5365,96 @@ function Apparatus({ S, role, members, meId, notify }) {
                   <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
                 </div>
               )}
+              <ApparatusHistory S={S} rig={r} />
             </div>
           );
         })}
       </div>
       )}
       <MaintenancePanel S={S} role={role} rigs={rigs} notify={notify} />
+    </div>
+  );
+}
+
+// Slice 2 — read-only check history per rig. Lazy-loads apparatus_checks on open,
+// then apparatus_check_results per run on expand. Read-only (SELECT only); RLS lets
+// all dept members read. Rows appear once Slice 4's perform-check flow (RPC) writes them.
+function ApparatusHistory({ S, rig }) {
+  const [open, setOpen] = useState(false);
+  const [checks, setChecks] = useState(null);          // null = not loaded yet
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(null);      // check id whose items are shown
+  const [resultsById, setResultsById] = useState({});  // check_id -> results[]
+  const [resLoading, setResLoading] = useState(null);
+  async function toggleOpen() {
+    const next = !open; setOpen(next);
+    if (next && checks === null) {
+      setLoading(true);
+      const { data } = await supabase.from("apparatus_checks")
+        .select("id, performed_by_name, performed_at, status, pass_count, fail_count, general_note")
+        .eq("apparatus_id", rig.id).order("performed_at", { ascending: false });
+      setChecks(data || []); setLoading(false);
+    }
+  }
+  async function toggleCheck(id) {
+    if (expanded === id) { setExpanded(null); return; }
+    setExpanded(id);
+    if (!resultsById[id]) {
+      setResLoading(id);
+      const { data } = await supabase.from("apparatus_check_results")
+        .select("id, item_label, result, note").eq("check_id", id).order("created_at", { ascending: true });
+      setResultsById((m) => ({ ...m, [id]: data || [] })); setResLoading(null);
+    }
+  }
+  const fmtWhen = (iso) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  return (
+    <div style={{ marginTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
+      <button onClick={toggleOpen} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <ClipboardCheck size={14} color={FIRE.btnIcon} /> Check history{checks ? ` (${checks.length})` : ""}
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (checks && checks.length === 0) ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted }}>No checks recorded yet.</div>
+          ) : (checks || []).map((c) => {
+            const failed = c.status === "fail"; const isOpen = expanded === c.id;
+            return (
+              <div key={c.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "9px 12px", marginBottom: 6 }}>
+                <button onClick={() => toggleCheck(c.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                  <Pill S={S} color={failed ? FIRE.redBright : FIRE.green}>{failed ? "FAIL" : "PASS"}</Pill>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
+                  </div>
+                  {isOpen ? <ChevronUp size={14} color={FIRE.textMuted} /> : <ChevronDown size={14} color={FIRE.textMuted} />}
+                </button>
+                {isOpen && (
+                  <div style={{ marginTop: 8, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+                    {c.general_note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8, fontStyle: "italic" }}>“{c.general_note}”</div>}
+                    {resLoading === c.id ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={13} className="spin" /> Loading items…</div>
+                    ) : (resultsById[c.id] || []).map((it) => {
+                      const itFail = it.result === "fail";
+                      return (
+                        <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "4px 0" }}>
+                          {itFail ? <X size={15} color={FIRE.redBright} style={{ flexShrink: 0, marginTop: 1 }} /> : <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{it.item_label}</div>
+                            {itFail && it.note && <div style={{ fontSize: 12, color: FIRE.redText, marginTop: 1 }}>{it.note}</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
