@@ -5365,6 +5365,7 @@ function Apparatus({ S, role, members, meId, notify }) {
                   <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
                 </div>
               )}
+              {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
               <ApparatusHistory S={S} rig={r} />
             </div>
           );
@@ -5376,6 +5377,74 @@ function Apparatus({ S, role, members, meId, notify }) {
   );
 }
 
+// Slice 3a — ops-only checklist template management (per rig). Lazy-loads ACTIVE
+// apparatus_check_items ordered by sort_order, empty state, and ADD (label + optional
+// category). Direct table writes governed by the "ops manage check items" RLS
+// (is_canmanage_ops); .select() + 0-row guard makes a silent RLS block fail loudly.
+function ApparatusChecklist({ S, rig, notify }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState(null);        // null = not loaded yet
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState("");
+  const [category, setCategory] = useState("");
+  const load = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("apparatus_check_items")
+      .select("id, label, category, sort_order")
+      .eq("apparatus_id", rig.id).eq("active", true)
+      .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+    setItems(data || []); setLoading(false);
+  };
+  async function toggleOpen() {
+    const next = !open; setOpen(next);
+    if (next && items === null) await load();
+  }
+  async function addItem() {
+    const lbl = label.trim();
+    if (!lbl) return;
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const nextOrder = (items || []).reduce((mx, it) => Math.max(mx, it.sort_order ?? 0), -1) + 1;
+    const { data, error } = await supabase.from("apparatus_check_items")
+      .insert({ department_id: deptId, apparatus_id: rig.id, label: lbl, category: category.trim() || null, sort_order: nextOrder, active: true })
+      .select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the item", text: "Something went wrong saving that — please try again.", details: error?.message }); return; }
+    setLabel(""); setCategory(""); setAdding(false); load();
+  }
+  return (
+    <div style={{ marginTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
+      <button onClick={toggleOpen} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <ClipboardList size={14} color={FIRE.btnIcon} /> Checklist{items ? ` (${items.length})` : ""}
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {adding ? (
+            <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Item</span><input style={FS.input} value={label} placeholder="e.g. SCBA pressure" onChange={(e) => setLabel(e.target.value)} /></label>
+              <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category (optional)</span><input style={FS.input} value={category} placeholder="e.g. Safety" onChange={(e) => setCategory(e.target.value)} /></label>
+              <button style={FS.btnPrimary} onClick={addItem}><Plus size={15} /> Add</button>
+              <button style={FS.btn} onClick={() => { setAdding(false); setLabel(""); setCategory(""); }}>Cancel</button>
+            </div>
+          ) : <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, marginBottom: 8 }} onClick={() => setAdding(true)}><Plus size={14} /> Add item</button>}
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (items && items.length === 0) ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted }}>No checklist items yet — add the first item to build this truck's check.</div>
+          ) : (items || []).map((it) => (
+            <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
+                {it.category && <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.category}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 // Slice 2 — read-only check history per rig. Lazy-loads apparatus_checks on open,
 // then apparatus_check_results per run on expand. Read-only (SELECT only); RLS lets
 // all dept members read. Rows appear once Slice 4's perform-check flow (RPC) writes them.
