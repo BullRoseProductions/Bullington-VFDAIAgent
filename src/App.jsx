@@ -1160,14 +1160,13 @@ function computeInsights({ sessions, members, openItems, todayISO }) {
   const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
   const isPureBoard = (m) => isBoard(m.access) && !hasAny(m.access, ["Member", "Officer", "Department Admin", "Project Admin"]);   // governance-only → not expected at drills (overdue-items still flags them)
   const attendanceGaps = pastDone.length === 0 ? [] : (members || []).filter((m) => countsInStats(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
-    const joinedISO = m.joined ? `${String(m.joined).slice(0, 4)}-01-01` : null;   // members prop only has the join YEAR (member_private.joined_date is DA/PA-scoped)
-    const eligible = pastDone.filter((s) => eligibleFor(m, s) && (!joinedISO || toISODate(sessDate(s)) >= joinedISO));   // eligible sessions on/after they joined
-    if (eligible.length === 0) return null;   // no eligible sessions since joining → don't flag (new member / new dept)
-    const attendedISO = eligible.filter((s) => (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
-    const attendedEver = attendedISO.length > 0;
-    const refISO = attendedEver ? attendedISO[attendedISO.length - 1] : joinedISO;   // gap from last attended, else from join date
-    return { type: "attendance", memberId: m.id, memberName: m.name, days: refISO ? dayDiff(todayISO, refISO) : null, attendedEver };
-  }).filter((x) => x && x.days != null && x.days > 30).sort((a, b) => b.days - a.days);   // real gaps > 30 days, biggest first
+    // Only flag members who have attended at least one B4C session; measure the gap from their LAST actual attendance.
+    // Never-attended members are skipped entirely — no station-tenure/first-drill fallback (B4C has no history for them yet).
+    const attendedISO = pastDone.filter((s) => eligibleFor(m, s) && (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
+    if (attendedISO.length === 0) return null;   // never attended a B4C session → not flagged
+    const refISO = attendedISO[attendedISO.length - 1];   // days since their last B4C attendance
+    return { type: "attendance", memberId: m.id, memberName: m.name, days: dayDiff(todayISO, refISO) };
+  }).filter((x) => x && x.days > 30).sort((a, b) => b.days - a.days);   // lapsed active members > 30 days, biggest first
   const overdueItems = (openItems || []).filter((r) => r.due_date && r.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")).map((r) => ({ type: "overdue", itemId: r.id, task: r.text, assigneeName: r.assigned_to ? (nameById.get(r.assigned_to) || "Unassigned") : "Unassigned", daysOverdue: dayDiff(todayISO, r.due_date), sourceLabel: r.source_label || null }));
   return { attendanceGaps, overdueItems };
 }
@@ -1241,11 +1240,11 @@ function InsightCards({ insights, go, bare }) {
           })}
           {attendanceGaps.map((ins) => {
             const key = `a-${ins.memberId}`;
-            const ctx = `Member: ${ins.memberName}. ${ins.attendedEver ? `Hasn't been to training in ${ins.days} days.` : `Hasn't made it to any training since joining (${ins.days} days).`}`;
+            const ctx = `Member: ${ins.memberName}. Hasn't been to training in ${ins.days} days.`;
             return (
             <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}>{ins.attendedEver ? <><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</> : <><b>{ins.memberName}</b> hasn't attended any training since joining ({ins.days} days)</>}</div>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, CHECKIN_SYS, ctx)}>Draft check-in</button>
