@@ -7036,8 +7036,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               const att = s.attendance || [];
               const open = openAtt === s.id;
               const ldrEvent = s.audience === "leadership";
-              const expected = ldrEvent ? members.filter((m) => isLeader(m.access)) : members;                         // counted population (leaders for leadership events)
-              const roll = ldrEvent ? members.filter((m) => isLeader(m.access) || att.includes(m.id)) : members;      // shown = expected ∪ actual attendees (never hide a real check-in)
+              const counted = members.filter(countsInStats);                                                          // exclude Project Admins (Ashlea + Demo, by role) + owner/test — same rule as deptAttendance/RECENT EVENTS
+              const expected = ldrEvent ? counted.filter((m) => isLeader(m.access)) : counted;                        // counted population (leaders for leadership events)
+              const roll = ldrEvent ? counted.filter((m) => isLeader(m.access) || att.includes(m.id)) : counted;      // shown = expected ∪ actual attendees (never hide a real check-in)
               const expCount = expected.length;                                                                        // denominator M
               const attCount = expected.filter((m) => att.includes(m.id)).length;                                      // numerator N — expected who attended
               return (
