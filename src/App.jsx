@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { QRCodeCanvas } from "qrcode.react";
-import { supabase } from "./supabaseClient";
+import { supabase, APP_URL } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 // that parser is lazy-imported in extractPdfText() on first upload.
@@ -4097,7 +4097,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
 }
 function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
-  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
   const q = query.trim().toLowerCase();
@@ -4120,7 +4120,21 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
       if (e2) { notify({ kind: "error", title: "Member saved, personal details didn't", text: "The main record saved; birthday/address/start date didn't — add them via the member's file.", details: e2.message }); }
     }
     setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, mentorId: data.mentor_id ?? null, certs: [], notes: [] }]);
-    setNm(""); setPh(""); setEm(""); setSt("Active"); setAx(["Member"]); setMt(""); setBday(""); setSdate(""); setAddr(""); setAdding(false);
+    if (sendLink) {
+      const { error: otpErr } = await supabase.auth.signInWithOtp({
+        email,                                                  // the new member's email, already trimmed+lowercased
+        options: { emailRedirectTo: APP_URL },
+      });
+      if (otpErr) {
+        notify({ kind: "error", title: "Member added — login link didn't send",
+          text: `${data.name} is on the roster, but we couldn't email their login link. They can request one at sign-in, or you can try again from their file.`,
+          details: otpErr.message });
+      } else {
+        notify({ kind: "success", title: "Member added & invited",
+          text: `We emailed a login link to ${email}.` });
+      }
+    }
+    setNm(""); setPh(""); setEm(""); setSt("Active"); setAx(["Member"]); setMt(""); setBday(""); setSdate(""); setAddr(""); setSendLink(true); setAdding(false);
   }
   async function remove(id, name) {
     if (!window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) return;
@@ -4155,6 +4169,10 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Start date</span><input type="date" style={FS.input} value={sdate} onChange={(e) => setSdate(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={bday} onChange={(e) => setBday(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={addr} onChange={(e) => setAddr(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 180, display: "inline-flex", flexDirection: "row", alignItems: "center", gap: 7, cursor: "pointer" }}>
+            <input type="checkbox" checked={sendLink} onChange={(e) => setSendLink(e.target.checked)} />
+            <span style={{ fontSize: 13, color: FIRE.textPrimary }}>Email them a login link now</span>
+          </label>
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
@@ -7976,7 +7994,7 @@ function AddDepartment({ S, role, notify }) {
   async function sendLink() {
     if (!created) return;
     setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({ email: created.adminEmail, options: { emailRedirectTo: window.location.origin } });
+    const { error } = await supabase.auth.signInWithOtp({ email: created.adminEmail, options: { emailRedirectTo: APP_URL } });
     setBusy(false);
     if (error) { notify({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
     setLinkSent(true);
@@ -8174,7 +8192,7 @@ function ResendLink({ email, notify }) {
   const [sent, setSent] = useState(false);
   async function send() {
     setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: APP_URL } });
     setBusy(false);
     if (error) { notify?.({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
     setSent(true);
