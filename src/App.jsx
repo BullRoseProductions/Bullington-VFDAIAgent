@@ -600,10 +600,10 @@ function deptAttendance(members, sessions, year, range) {
   const inScope = range
     ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
     : (s) => s.y === year;
-  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0);   // done + roll-taken, in scope
+  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && s.audience !== "leadership");   // TRAINING only — leadership EVENTS excluded (separate track); people/roles untouched
   const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
     const memberLeader = isLeader(m.access);
-    const eligible = doneThisYear.filter((s) => memberLeader || s.audience !== "leadership");
+    const eligible = doneThisYear;   // all remaining are audience='everyone' → eligible for everyone (the memberLeader/audience filter is now redundant)
     const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
     const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
     return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
@@ -1161,7 +1161,7 @@ const REMINDER_SYS = "You're a volunteer fire department officer writing a brief
 function computeInsights({ sessions, members, openItems, todayISO }) {
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
-  const eligibleFor = (m, s) => isLeader(m.access) || s.audience !== "leadership";   // same audience rule as deptAttendance / RECENT EVENTS
+  const eligibleFor = (m, s) => s.audience !== "leadership";   // TRAINING-gap only — leadership EVENTS excluded (event filter, not person); leaders' regular-training gaps still count
   const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
   const isPureBoard = (m) => isBoard(m.access) && !hasAny(m.access, ["Member", "Officer", "Department Admin", "Project Admin"]);   // governance-only → not expected at drills (overdue-items still flags them)
   const attendanceGaps = pastDone.length === 0 ? [] : (members || []).filter((m) => countsInStats(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
@@ -4434,7 +4434,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
 
       {(() => {
         const memberLeader = isLeader(member.access);   // score + list off the VIEWED member's actual roles
-        const done = (sessions || []).filter((s) => s.done && (memberLeader || s.audience !== "leadership")).sort((a, b) => sessDate(b) - sessDate(a));
+        const done = (sessions || []).filter((s) => s.done && s.audience !== "leadership").sort((a, b) => sessDate(b) - sessDate(a));   // TRAINING only — leadership EVENTS excluded (event filter; the member is still fully counted for regular training)
         const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
@@ -4657,7 +4657,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
   const activeMembers = (members || []).filter((m) => countsInStats(m) && m.status === "Active");
   const activeLeaders = activeMembers.filter((m) => isLeader(m.access));
   const recentEvents = (sessions || [])
-    .filter((s) => s.done && (s.attendance || []).length > 0)   // real, roll-taken sessions
+    .filter((s) => s.done && (s.attendance || []).length > 0 && s.audience !== "leadership")   // TRAINING only — leadership EVENTS excluded
     .sort((a, b) => new Date(b.y, b.m, b.d) - new Date(a.y, a.m, a.d))   // newest first
     .slice(0, 6)
     .map((s) => ({
@@ -4721,7 +4721,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
   const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
   const recentTraining = (sessions || [])
-    .filter((s) => s.done && (s.attendance || []).length > 0)
+    .filter((s) => s.done && (s.attendance || []).length > 0 && s.audience !== "leadership")   // TRAINING only — leadership EVENTS excluded
     .sort((a, b) => sessMs(b) - sessMs(a))
     .slice(0, 6)
     .map((s) => ({
@@ -7120,7 +7120,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const catOf = (s) => plan.find((p) => String(p.id) === String(s.planId));
     // DATA HONESTY: a session only "has a record" once attendance was actually taken (non-empty).
     // Attendance doesn't persist yet, so today every array is empty → these fall to clean empty states.
-    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s));
+    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s) && s.audience !== "leadership");   // TRAINING only — leadership EVENTS excluded from a member's training %
     const totalRecorded = recorded.length;
     const attendedCount = recorded.filter((s) => (s.attendance || []).includes(me?.id)).length;
     const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
@@ -7252,7 +7252,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
   const statusColor = (label) => (label === "On track" || label === "Done") ? "#76C98D" : label === "Due soon" ? "#D6A95E" : "#E58A90";
   // Card 1 — most recent done session's attendance (empty until persistence lands)
-  const lastDone = sessions.filter((s) => s.done).sort((a, b) => sessDate(b) - sessDate(a))[0];
+  const lastDone = sessions.filter((s) => s.done && s.audience !== "leadership").sort((a, b) => sessDate(b) - sessDate(a))[0];   // most recent TRAINING — leadership EVENTS excluded
   const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const totalMembers = cm.length;
