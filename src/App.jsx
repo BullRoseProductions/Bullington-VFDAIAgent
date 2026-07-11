@@ -384,6 +384,35 @@ export default function App() {
       });
     return () => { cancelled = true; };
   }, [authEmail]);
+  // Ensure the signed-in user's OWN row is in `members`, even when members_view
+  // (security_invoker) omits it under the caller's RLS. Then every
+  // members.find(m => m.id === meId) resolves — canCheck, dashboardGreeting(me).name,
+  // PersonalView me.certs, and any future me lookup. Base "members read own row" RLS
+  // permits this self-read; we enrich certs the SAME way the main load does (same
+  // { id, name, exp } shape) so PersonalView shows real certs, not []. Keyed on
+  // [myMemberId, members]: if a later members reload drops self it re-merges (no race),
+  // and the some()-guard makes it a no-op once self is present (no loop, no refetch).
+  useEffect(() => {
+    if (!myMemberId) return;
+    if (members.some((m) => m.id === myMemberId)) return;   // view already had it, or we merged it
+    let cancelled = false;
+    Promise.all([
+      supabase.from("members").select("*").eq("id", myMemberId).single(),
+      supabase.from("certs").select("id, member_id, name, exp").eq("member_id", myMemberId),
+    ]).then(([selfRes, certsRes]) => {
+      if (cancelled) return;
+      const s = selfRes.data;
+      if (selfRes.error || !s) return;
+      const certs = (certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp }));
+      const selfRow = {
+        id: s.id, department_id: s.department_id, name: s.name, role: s.role, access: s.access,
+        status: s.status, phone: s.phone, email: s.email, joined: s.joined,
+        participation: s.participation, mentorId: s.mentor_id, certs, notes: [],
+      };
+      setMembers((cur) => cur.some((m) => m.id === s.id) ? cur : [...cur, selfRow]);
+    });
+    return () => { cancelled = true; };
+  }, [myMemberId, members]);
   const [dept, setDept] = useState(null);   // real department identity (name + logo_url) — header crest + sidebar
   useEffect(() => {
     if (!authEmail) { setDept(null); return; }
@@ -4120,6 +4149,10 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   const [sel, setSel] = useState(null);
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
+  // Roster DISPLAY excludes PA/owner (countsInStats: not a Project Admin, not an excluded id)
+  // so the self-row now merged into `members` (to fix me-lookups) never surfaces the PA/owner
+  // in their own roster. Identity/detail paths (selected, update, MemberDetail) keep full array.
+  const rosterList = members.filter(countsInStats);
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -4131,10 +4164,10 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
       <div style={S.segRow}>
         {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
-      {tab === "members" && <RosterMembers S={S} role={role} members={members} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
-      {tab === "certs" && leader && <RosterCerts S={S} members={members} />}
-      {tab === "attendance" && leader && <RosterAttendance S={S} members={members} sessions={sessions} plan={plan} />}
-      {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={members} notify={notify} />}
+      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
+      {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
+      {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
+      {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
     </div>
   );
 }
@@ -5430,6 +5463,9 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");              // "" | "empty" | <message>
+  const [savingItemId, setSavingItemId] = useState(null); // item currently auto-saving
+  const [noteItemId, setNoteItemId] = useState(null);     // item whose Fail-note editor is open
+  const [noteDraft, setNoteDraft] = useState("");
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -5456,6 +5492,34 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
     })();
     return () => { alive = false; };
   }, [rig.id]);
+  // Reload just the marks for the current draft (items don't change mid-check) so
+  // every marker sees the latest stamp after a save.
+  const refreshMarks = async (cid = checkId) => {
+    const { data: res } = await supabase.from("apparatus_check_results")
+      .select("item_id, result, note, marked_by_name, marked_at").eq("check_id", cid);
+    const mmap = {}; (res || []).forEach((r) => { if (r.item_id) mmap[r.item_id] = r; });
+    setMarks(mmap);
+  };
+  // The toggle IS the save — no separate button. Pass saves immediately; Fail saves
+  // with a required note. The RPC enforces every rule; a same-outcome re-mark (or any
+  // other rejection) comes back as an error we surface as a toast.
+  const mark = async (itemId, result, note) => {
+    setSavingItemId(itemId);
+    const { error } = await supabase.rpc("mark_check_item",
+      { p_check_id: checkId, p_item_id: itemId, p_result: result, p_note: note ?? null });
+    setSavingItemId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't save that mark", text: error.message || "Please try again." }); return false; }
+    await refreshMarks();
+    return true;
+  };
+  const onPass = (it) => { setNoteItemId(null); setNoteDraft(""); mark(it.id, "pass", null); };
+  const openFail = (it) => { const mk = marks[it.id]; setNoteItemId(it.id); setNoteDraft(mk?.result === "fail" ? (mk.note || "") : ""); };
+  const saveFail = async (it) => {
+    const n = noteDraft.trim();
+    if (!n) { notify({ kind: "error", title: "A note is required to fail an item", text: "Describe what's wrong so it can be fixed." }); return; }
+    const ok = await mark(it.id, "fail", n);
+    if (ok) { setNoteItemId(null); setNoteDraft(""); }
+  };
   const groups = []; const gmap = new Map();
   (items || []).forEach((it) => { const loc = (it.location || "").trim() || "Unspecified"; if (!gmap.has(loc)) { gmap.set(loc, []); groups.push(loc); } gmap.get(loc).push(it); });
   const markedCount = (items || []).filter((it) => marks[it.id]).length;
@@ -5492,11 +5556,20 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
                           {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
                         </button>
                         <div style={{ display: "inline-flex", gap: 6 }}>
-                          <button disabled title="Marking arrives in the next update" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: mk?.result === "pass" ? 1 : 0.45 }}><CheckCircle2 size={14} color={FIRE.green} /> Pass</button>
-                          <button disabled title="Marking arrives in the next update" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: mk?.result === "fail" ? 1 : 0.45 }}><X size={14} color={FIRE.redBright} /> Fail</button>
+                          <button disabled={savingItemId === it.id} title="Pass" onClick={() => onPass(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : mk?.result === "pass" ? 1 : 0.45 }}><CheckCircle2 size={14} color={FIRE.green} /> Pass</button>
+                          <button disabled={savingItemId === it.id} title="Fail (needs a note)" onClick={() => openFail(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : (mk?.result === "fail" || noteItemId === it.id) ? 1 : 0.45 }}><X size={14} color={FIRE.redBright} /> Fail</button>
                         </div>
                       </div>
                       {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 4px", lineHeight: 1.45 }}>{it.description}</div>}
+                      {noteItemId === it.id && (
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                          <input autoFocus value={noteDraft} placeholder="What's wrong? (required)" onChange={(e) => setNoteDraft(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") saveFail(it); if (e.key === "Escape") { setNoteItemId(null); setNoteDraft(""); } }}
+                            style={{ ...FS.input, flex: 1, minWidth: 0, fontSize: 12.5, padding: "5px 8px" }} />
+                          <button disabled={savingItemId === it.id || !noteDraft.trim()} onClick={() => saveFail(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: (savingItemId === it.id || !noteDraft.trim()) ? 0.5 : 1 }}>{savingItemId === it.id ? <Loader2 size={13} className="spin" /> : "Save fail"}</button>
+                          <button onClick={() => { setNoteItemId(null); setNoteDraft(""); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Cancel</button>
+                        </div>
+                      )}
                       {mk && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{mk.result === "fail" ? "✗" : "✓"} {mk.marked_by_name || "—"}{mk.marked_at ? ` · ${new Date(mk.marked_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}{mk.result === "fail" && mk.note ? ` · ${mk.note}` : ""}</div>}
                     </div>
                   );
