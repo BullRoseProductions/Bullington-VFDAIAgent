@@ -5338,6 +5338,7 @@ function Apparatus({ S, role, members, meId, notify }) {
   const me = members.find((m) => m.id === meId) || null;
   const canCheck = !!me && me.status !== "Inactive";     // any active member (Probationary included) can perform a check
   const [checkingRig, setCheckingRig] = useState(null);  // rig whose check modal is open
+  const [historyKey, setHistoryKey] = useState(0);       // bump to remount ApparatusHistory after a finalize (refetch)
   const [adding, setAdding] = useState(false);
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
   const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
@@ -5435,14 +5436,14 @@ function Apparatus({ S, role, members, meId, notify }) {
                 </div>
               )}
               {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
-              <ApparatusHistory S={S} rig={r} />
+              <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} />
             </div>
           );
         })}
       </div>
       )}
       <MaintenancePanel S={S} role={role} rigs={rigs} notify={notify} />
-      {checkingRig && <CheckRunModal S={S} rig={checkingRig} meId={meId} notify={notify} canManage={canManage} onClose={() => setCheckingRig(null)} />}
+      {checkingRig && <CheckRunModal S={S} rig={checkingRig} meId={meId} notify={notify} canManage={canManage} onClose={() => setCheckingRig(null)} onFinalized={() => { loadRigs(); setHistoryKey((k) => k + 1); }} />}
     </div>
   );
 }
@@ -5456,7 +5457,7 @@ function Apparatus({ S, role, members, meId, notify }) {
 // truck's ONE in_progress draft, then loads active checklist items (grouped by location,
 // walkaround order, descriptions on tap) + any existing marks on the draft. Pass/Fail
 // toggles are shown but NOT wired here — marking + auto-save is Slice 4b.
-function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
+function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }) {
   const [checkId, setCheckId] = useState(null);
   const [items, setItems] = useState(null);        // active checklist items
   const [marks, setMarks] = useState({});          // item_id -> { result, note, marked_by_name, marked_at }
@@ -5466,6 +5467,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
   const [savingItemId, setSavingItemId] = useState(null); // item currently auto-saving
   const [noteItemId, setNoteItemId] = useState(null);     // item whose Fail-note editor is open
   const [noteDraft, setNoteDraft] = useState("");
+  const [finalizing, setFinalizing] = useState(false);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -5523,6 +5525,21 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
   const groups = []; const gmap = new Map();
   (items || []).forEach((it) => { const loc = (it.location || "").trim() || "Unspecified"; if (!gmap.has(loc)) { gmap.set(loc, []); groups.push(loc); } gmap.get(loc).push(it); });
   const markedCount = (items || []).filter((it) => marks[it.id]).length;
+  // items are loaded active=true, so "all active items marked" = every loaded item marked.
+  const allMarked = !!items && items.length > 0 && markedCount === items.length;
+  const unmarked = (items?.length || 0) - markedCount;
+  // Finalize: flip the draft to an immutable record. The RPC re-checks the mid-draft rule
+  // (rejects "N item(s) still unmarked"), stamps the finalizer, computes outcome, and moves
+  // the apparatus pointer. On success: close, reload the rig card + check history.
+  const finalize = async () => {
+    setFinalizing(true);
+    const { error } = await supabase.rpc("finalize_check", { p_check_id: checkId });
+    setFinalizing(false);
+    if (error) { notify({ kind: "error", title: "Couldn't finalize the check", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: "Check finalized." });
+    onFinalized?.();
+    onClose();
+  };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
       <div style={{ ...FS.card, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
@@ -5578,8 +5595,14 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose }) {
             ))}
           </>)}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+          {!loading && !err && items && items.length > 0 && !allMarked && (
+            <div style={{ marginRight: "auto", fontSize: 12, color: FIRE.textMuted }}>{unmarked} item{unmarked === 1 ? "" : "s"} still unmarked</div>
+          )}
           <button style={FS.btn} onClick={onClose}>Close</button>
+          {!loading && !err && items && items.length > 0 && (
+            <button disabled={!allMarked || finalizing} title={allMarked ? "Finalize this check" : "Mark every item first"} onClick={finalize} style={{ ...FS.btnPrimary, opacity: (!allMarked || finalizing) ? 0.5 : 1 }}>{finalizing ? <><Loader2 size={15} className="spin" /> Finalizing…</> : <><CheckCircle2 size={15} /> Finalize check</>}</button>
+          )}
         </div>
       </div>
     </div>
@@ -5799,8 +5822,8 @@ function ApparatusHistory({ S, rig }) {
     if (next && checks === null) {
       setLoading(true);
       const { data } = await supabase.from("apparatus_checks")
-        .select("id, performed_by_name, performed_at, status, pass_count, fail_count, general_note")
-        .eq("apparatus_id", rig.id).order("performed_at", { ascending: false });
+        .select("id, performed_by_name, performed_at, outcome, pass_count, fail_count, general_note")
+        .eq("apparatus_id", rig.id).eq("state", "finalized").order("performed_at", { ascending: false });
       setChecks(data || []); setLoading(false);
     }
   }
@@ -5828,7 +5851,7 @@ function ApparatusHistory({ S, rig }) {
           ) : (checks && checks.length === 0) ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>No checks recorded yet.</div>
           ) : (checks || []).map((c) => {
-            const failed = c.status === "fail"; const isOpen = expanded === c.id;
+            const failed = c.outcome === "fail"; const isOpen = expanded === c.id;
             return (
               <div key={c.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "9px 12px", marginBottom: 6 }}>
                 <button onClick={() => toggleCheck(c.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
