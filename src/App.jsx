@@ -1083,6 +1083,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [pendingCerts, setPendingCerts] = useState([]);
   const [openActions, setOpenActions] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // full open action_items rows → computeInsights
+  const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
   const [attnOpen, setAttnOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible; default expanded
   const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   useEffect(() => {
@@ -1101,9 +1102,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;   // done/total; no duties = nothing outstanding = 100
   const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);        // 40% certs · 40% attendance · 20% duty completion
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
-  const insights = computeInsights({ sessions, members, openItems, todayISO });
-  const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0;
-  const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length;   // 3 count-card categories (non-zero) + per-person insight cards
+  const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
+  const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0 || insights.apparatusFailures.length > 0;
+  const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
@@ -1188,7 +1189,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       {hasInsights && <div style={{ ...FS.kicker, marginTop: 14, marginBottom: 8, opacity: 0.7 }}>PEOPLE TO REACH OUT TO</div>}
-      <InsightCards insights={insights} go={go} bare />
+      <InsightCards insights={insights} go={go} bare role={role} notify={notify} onResolved={reloadFailures} />
       </>)}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
@@ -1221,7 +1222,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
 const CHECKIN_SYS = "You're a volunteer fire department officer writing a brief, WARM, non-punitive check-in text to a member who hasn't been to training in a while. Caring, not scolding — you're glad they're part of the crew and hoping they can make it back. 2-3 sentences, friendly, texting tone. Return ONLY the message.";
 const REMINDER_SYS = "You're a volunteer fire department officer writing a brief, friendly reminder text about a task that's past due. A gentle nudge, not a demand — offer help. 2-3 sentences, texting tone. Return ONLY the message.";
 // Pure compute — attendanceGaps (guardrailed) + overdueItems. Needs sessions, members, openItems (open action_items rows), todayISO.
-function computeInsights({ sessions, members, openItems, todayISO }) {
+function computeInsights({ sessions, members, openItems, openFailures, todayISO }) {
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
   const eligibleFor = (m, s) => s.audience !== "leadership";   // TRAINING-gap only — leadership EVENTS excluded (event filter, not person); leaders' regular-training gaps still count
@@ -1236,7 +1237,31 @@ function computeInsights({ sessions, members, openItems, todayISO }) {
     return { type: "attendance", memberId: m.id, memberName: m.name, days: dayDiff(todayISO, refISO) };
   }).filter((x) => x && x.days > 30).sort((a, b) => b.days - a.days);   // lapsed active members > 30 days, biggest first
   const overdueItems = (openItems || []).filter((r) => r.due_date && r.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")).map((r) => ({ type: "overdue", itemId: r.id, task: r.text, assigneeName: r.assigned_to ? (nameById.get(r.assigned_to) || "Unassigned") : "Unassigned", daysOverdue: dayDiff(todayISO, r.due_date), sourceLabel: r.source_label || null }));
-  return { attendanceGaps, overdueItems };
+  // Apparatus failures escalation: every FAIL in a FINALIZED check not yet resolved.
+  // The fetch (useApparatusFailures) already scopes to fail + finalized + unresolved; here
+  // we just shape it into insight cards. Newest fail first.
+  const apparatusFailures = (openFailures || []).map((r) => ({
+    type: "apparatus", resultId: r.id, rig: r.apparatus_name || "Apparatus", item: r.item_label,
+    note: r.note || "", markedByName: r.marked_by_name || "—", markedAt: r.marked_at,
+  }));
+  return { attendanceGaps, overdueItems, apparatusFailures };
+}
+// Open apparatus failures (fail + finalized check + not resolved), dept-scoped by RLS.
+// Feeds computeInsights and refetches after a resolve so the card drops off.
+function useApparatusFailures() {
+  const [failures, setFailures] = useState([]);
+  const reloadFailures = () => {
+    supabase.from("apparatus_check_results")
+      .select("id, item_label, note, marked_by_name, marked_at, apparatus_checks!inner(apparatus_name, apparatus_id, state)")
+      .eq("result", "fail").is("resolved_at", null).eq("apparatus_checks.state", "finalized")
+      .order("marked_at", { ascending: false })
+      .then(({ data }) => setFailures((data || []).map((r) => ({
+        id: r.id, item_label: r.item_label, note: r.note, marked_by_name: r.marked_by_name, marked_at: r.marked_at,
+        apparatus_name: r.apparatus_checks?.apparatus_name || null, apparatus_id: r.apparatus_checks?.apparatus_id || null,
+      }))));
+  };
+  useEffect(() => { reloadFailures(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  return { failures, reloadFailures };
 }
 // Draft state + AI actions (approve-before-send); one draft open at a time. Owned by InsightCards.
 function useInsightDrafts() {
@@ -1271,17 +1296,31 @@ function useInsightDrafts() {
   return { draftFor, runDraft, draftBox };
 }
 // Shared 'NEEDS YOUR ATTENTION' card grid (overdue + attendance) with AI-draft actions.
-function InsightCards({ insights, go, bare }) {
-  const { attendanceGaps, overdueItems } = insights;
+function InsightCards({ insights, go, bare, role, notify, onResolved }) {
+  const { attendanceGaps, overdueItems, apparatusFailures = [] } = insights;
   const { draftFor, runDraft, draftBox } = useInsightDrafts();
   const [open, setOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible (non-bare mode); default expanded
-  const isEmpty = attendanceGaps.length === 0 && overdueItems.length === 0;
+  const canResolve = canManage(role);   // is_canmanage() = Board/DA/Officer — mirrors the RPC's leadership gate
+  const [resolveFor, setResolveFor] = useState(null);   // resultId whose resolve editor is open
+  const [resolveNote, setResolveNote] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const doResolve = async (resultId) => {
+    const n = resolveNote.trim();
+    if (!n) { notify?.({ kind: "error", title: "A resolution note is required", text: "Describe how it was fixed or accounted for." }); return; }
+    setResolving(true);
+    const { error } = await supabase.rpc("resolve_apparatus_failure", { p_result_id: resultId, p_resolution_note: n });
+    setResolving(false);
+    if (error) { notify?.({ kind: "error", title: "Couldn't resolve that", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: "Failure resolved." });
+    setResolveFor(null); setResolveNote(""); onResolved?.();   // refetch; RPC clears the rig flag if it was the last open failure
+  };
+  const isEmpty = attendanceGaps.length === 0 && overdueItems.length === 0 && apparatusFailures.length === 0;
   if (bare && isEmpty) return null;   // bare (DA): no kicker, no empty-state — render nothing when there's nothing
   return (
     <>
       {!bare && (
         <button onClick={() => setOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: open ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
-          <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attendanceGaps.length + overdueItems.length})
+          <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attendanceGaps.length + overdueItems.length + apparatusFailures.length})
           <span style={{ marginLeft: "auto", display: "inline-flex" }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
         </button>
       )}
@@ -1289,6 +1328,32 @@ function InsightCards({ insights, go, bare }) {
         <div style={{ ...FS.card, padding: "14px 16px", fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={15} color={FIRE.green} /> All caught up — no attendance gaps or overdue assignments.</div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+          {apparatusFailures.map((ins) => {
+            const editing = resolveFor === ins.resultId;
+            const when = ins.markedAt ? new Date(ins.markedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+            return (
+            <div key={`af-${ins.resultId}`} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redBright}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.rig}</b> — “{ins.item}” failed its check</div>
+                {ins.note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, fontStyle: "italic" }}>“{ins.note}”</div>}
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Marked by {ins.markedByName}{when ? ` · ${when}` : ""}</div>
+              </div>
+              {canResolve && (editing ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <input autoFocus value={resolveNote} placeholder="How was it fixed? (required)" onChange={(e) => setResolveNote(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") doResolve(ins.resultId); if (e.key === "Escape") { setResolveFor(null); setResolveNote(""); } }}
+                    style={{ ...FS.input, fontSize: 12.5, padding: "6px 8px" }} />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button disabled={resolving || !resolveNote.trim()} onClick={() => doResolve(ins.resultId)} style={{ ...FS.btnPrimary, padding: "5px 10px", fontSize: 12, opacity: (resolving || !resolveNote.trim()) ? 0.5 : 1 }}>{resolving ? <><Loader2 size={13} className="spin" /> Resolving…</> : "Save resolution"}</button>
+                    <button onClick={() => { setResolveFor(null); setResolveNote(""); }} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setResolveFor(ins.resultId); setResolveNote(""); }} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }}><CheckCircle2 size={14} color={FIRE.green} /> Resolve</button>
+              ))}
+            </div>
+            );
+          })}
           {overdueItems.map((ins) => {
             const key = `o-${ins.itemId}`;
             const ctx = `Assignee: ${ins.assigneeName}. Task: ${ins.task}. Overdue by ${ins.daysOverdue} day${ins.daysOverdue === 1 ? "" : "s"}.${ins.sourceLabel ? ` Context: ${ins.sourceLabel}.` : ""}`;
@@ -1347,6 +1412,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const [fundNext, setFundNext] = useState(null);
   const [raised, setRaised] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight (fed to computeInsights)
+  const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
   const [ringOn, setRingOn] = useState(false);
   useEffect(() => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
@@ -1374,7 +1440,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
-  const insights = computeInsights({ sessions, members, openItems, todayISO });
+  const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const cards = [
     { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}` : null, nav: "training" },
     { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: "#0E6B62", snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
@@ -1435,7 +1501,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <InsightCards insights={insights} go={go} />
+      <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
     </div>
   );
 }
@@ -5436,7 +5502,7 @@ function Apparatus({ S, role, members, meId, notify }) {
                 </div>
               )}
               {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
-              <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} />
+              <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} />
             </div>
           );
         })}
@@ -5810,13 +5876,35 @@ function ApparatusChecklist({ S, rig, notify }) {
 // Slice 2 — read-only check history per rig. Lazy-loads apparatus_checks on open,
 // then apparatus_check_results per run on expand. Read-only (SELECT only); RLS lets
 // all dept members read. Rows appear once Slice 4's perform-check flow (RPC) writes them.
-function ApparatusHistory({ S, rig }) {
+function ApparatusHistory({ S, rig, role, notify, onResolved }) {
   const [open, setOpen] = useState(false);
   const [checks, setChecks] = useState(null);          // null = not loaded yet
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(null);      // check id whose items are shown
   const [resultsById, setResultsById] = useState({});  // check_id -> results[]
   const [resLoading, setResLoading] = useState(null);
+  const canResolve = canManage(role);                  // is_canmanage() = Board/DA/Officer — mirrors the RPC gate
+  const [resolveFor, setResolveFor] = useState(null);  // result id whose resolve editor is open
+  const [resolveNote, setResolveNote] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const RESULT_COLS = "id, item_label, result, note, resolved_at, resolved_by_name, resolution_note";
+  async function reloadResults(checkId) {
+    const { data } = await supabase.from("apparatus_check_results")
+      .select(RESULT_COLS).eq("check_id", checkId).order("created_at", { ascending: true });
+    setResultsById((m) => ({ ...m, [checkId]: data || [] }));
+  }
+  async function doResolve(resultId, checkId) {
+    const n = resolveNote.trim();
+    if (!n) { notify?.({ kind: "error", title: "A resolution note is required", text: "Describe how it was fixed or accounted for." }); return; }
+    setResolving(true);
+    const { error } = await supabase.rpc("resolve_apparatus_failure", { p_result_id: resultId, p_resolution_note: n });
+    setResolving(false);
+    if (error) { notify?.({ kind: "error", title: "Couldn't resolve that", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: "Failure resolved." });
+    setResolveFor(null); setResolveNote("");
+    await reloadResults(checkId);   // refresh this item's trail in place
+    onResolved?.();                 // reload the rig card (flag flips to READY if this was the last open failure)
+  }
   async function toggleOpen() {
     const next = !open; setOpen(next);
     if (next && checks === null) {
@@ -5833,7 +5921,7 @@ function ApparatusHistory({ S, rig }) {
     if (!resultsById[id]) {
       setResLoading(id);
       const { data } = await supabase.from("apparatus_check_results")
-        .select("id, item_label, result, note").eq("check_id", id).order("created_at", { ascending: true });
+        .select(RESULT_COLS).eq("check_id", id).order("created_at", { ascending: true });
       setResultsById((m) => ({ ...m, [id]: data || [] })); setResLoading(null);
     }
   }
@@ -5869,12 +5957,30 @@ function ApparatusHistory({ S, rig }) {
                       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={13} className="spin" /> Loading items…</div>
                     ) : (resultsById[c.id] || []).map((it) => {
                       const itFail = it.result === "fail";
+                      const isResolved = !!it.resolved_at;
+                      const editing = resolveFor === it.id;
                       return (
                         <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "4px 0" }}>
                           {itFail ? <X size={15} color={FIRE.redBright} style={{ flexShrink: 0, marginTop: 1 }} /> : <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />}
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{it.item_label}</div>
                             {itFail && it.note && <div style={{ fontSize: 12, color: FIRE.redText, marginTop: 1 }}>{it.note}</div>}
+                            {itFail && isResolved && (
+                              <div style={{ fontSize: 11.5, color: FIRE.green, marginTop: 2 }}>Resolved by {it.resolved_by_name || "—"}{it.resolved_at ? ` · ${fmtWhen(it.resolved_at)}` : ""}{it.resolution_note ? `: ${it.resolution_note}` : ""}</div>
+                            )}
+                            {itFail && !isResolved && canResolve && (editing ? (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                                <input autoFocus value={resolveNote} placeholder="How was it fixed? (required)" onChange={(e) => setResolveNote(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter") doResolve(it.id, c.id); if (e.key === "Escape") { setResolveFor(null); setResolveNote(""); } }}
+                                  style={{ ...FS.input, fontSize: 12, padding: "5px 8px" }} />
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button disabled={resolving || !resolveNote.trim()} onClick={() => doResolve(it.id, c.id)} style={{ ...FS.btnPrimary, padding: "4px 9px", fontSize: 11.5, opacity: (resolving || !resolveNote.trim()) ? 0.5 : 1 }}>{resolving ? <><Loader2 size={12} className="spin" /> Resolving…</> : "Save resolution"}</button>
+                                  <button onClick={() => { setResolveFor(null); setResolveNote(""); }} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button onClick={() => { setResolveFor(it.id); setResolveNote(""); }} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5, marginTop: 3 }}><CheckCircle2 size={13} color={FIRE.green} /> Resolve</button>
+                            ))}
                           </div>
                         </div>
                       );
