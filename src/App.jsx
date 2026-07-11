@@ -1058,7 +1058,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
         <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
-          {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
+          {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
           <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
         </button>
       </div>
@@ -1312,7 +1312,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
   const insights = computeInsights({ sessions, members, openItems, todayISO });
   const cards = [
-    { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${nextSession.title}` : null, nav: "training" },
+    { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}` : null, nav: "training" },
     { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: "#0E6B62", snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
     { key: "pr",        title: "Public Relations", Icon: Calendar,      accent: "#54506B", snap: prNext ? `${fmtISO(prNext.date)} · ${prNext.caption}` : null, nav: "visibility" },
     { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: "#9A6B12", snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
@@ -1633,7 +1633,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
               <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT EVENT</div>
               {nextEvent ? (
                 <>
-                  <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                  <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div>
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nextEvent.title || "—"}</div>
                   <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}<LeadershipTag audience={nextEvent.audience} /></div>
                 </>
@@ -2248,7 +2248,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)
-  const [newDate, setNewDate] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
+  const [newDate, setNewDate] = useState(""); const [newTime, setNewTime] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
@@ -2282,14 +2282,14 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const title = newTitle.trim() || `${form.topic} — AI drill plan`;
     // a) create the session on the picked date (reuses addSession's insert shape; the type=date value is already YYYY-MM-DD)
-    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, done: false, audience: newAudience }).select().single();
+    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, start_time: newTime || null, done: false, audience: newAudience }).select().single();
     if (e1 || !sess) { setSaving(false); notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong creating that session. Please try again.", details: e1?.message }); return; }
     // b) attach the plan to the new session (reuses saveToSession's attach). Non-atomic — recoverable if this fails.
     const { error: e2 } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: sess.id, title, source: "ai", ai_text: serializeDrillPlan(plan, form.topic), created_by: me?.name || "Unknown" });
     setSaving(false);
     if (e2) { notify({ kind: "error", title: "Session created — plan didn't attach", text: "The session was scheduled, but attaching the plan failed. You can attach it from the planner's session picker.", details: e2.message }); loadSessions && loadSessions(); return; }
     notify({ kind: "success", title: "Scheduled", text: `Training scheduled on ${newDate} with its plan.` });
-    setNewDate(""); setNewTitle(""); setNewCat(""); setNewAudience("everyone");
+    setNewDate(""); setNewTime(""); setNewTitle(""); setNewCat(""); setNewAudience("everyone");
     loadSessions && loadSessions();
   }
   return (
@@ -2345,6 +2345,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
                   <div style={{ width: "100%", fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>— or schedule on a new date —</div>
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input type="date" style={FS.input} value={newDate} onChange={(e) => setNewDate(e.target.value)} /></label>
+                  <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Start time (optional)</span><input type="time" style={FS.input} value={newTime} onChange={(e) => setNewTime(e.target.value)} /></label>
                   <label style={{ ...S.field, minWidth: 150, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={form.topic} /></label>
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={newCat} onChange={(e) => setNewCat(e.target.value)}><option value="">One-off (no category)</option>{(categories || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
                   <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Audience</span>
@@ -3495,7 +3496,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         <MonthCalendar
           cur={cur} setCur={setCur} dark
           items={monthItems}
-          renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
+          renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
           todayColor={FIRE.red}
           monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
           overflowIndicator
@@ -6903,7 +6904,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
-  const [stitle, setStitle] = useState("");
+  const [stitle, setStitle] = useState(""); const [sTime, setSTime] = useState("");
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
   const [rCad, setRCad] = useState("Bi-weekly");        // recurring cadence (defaults from the picked category)
@@ -6934,7 +6935,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const reconcile = (p) => {   // a pre-scheduled future session overrides the derived last+cadence guess (no "overdue" while sessions sit on the calendar)
     const base = dueInfo(p), up = upcomingFor(p.id);
     if (!up) return base;
-    const nd = sessDate(up), nl = nd.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const nd = sessDate(up), nl = nd.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + (up.startTime ? ` · ${fmtTime(up.startTime)}` : "");
     return { ...base, label: "On track", color: "#2E7D52", rel: `next session ${nl}`, nextLabel: nl, next: nd, urgent: false };
   };
   const planView = plan.map((p) => ({ p, info: reconcile(p) })).sort((a, b) => rank(a.info.label) - rank(b.info.label));
@@ -6981,11 +6982,12 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       plan_id: pItem ? pItem.id : null,                       // link the session to its training category (null = one-off)
       title,
       date: toISO(new Date(cur.y, cur.m, Number(sd))),
+      start_time: sTime || null,
       done: false,
       audience: sAudience,
     });
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setShowSess(false); setStitle(""); loadSessions();
+    setShowSess(false); setStitle(""); setSTime(""); loadSessions();
   }
   function toggleRepeat() {
     if (!repeat) {   // opening: seed cadence from the selected category, N from cadence
@@ -7013,13 +7015,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
-    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, done: false, series_id: sid, audience: sAudience }));
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem) await supabase.from("training_plans").update({ starts_on: toISO(new Date(startY, startM, startD)) }).eq("id", pItem.id);
     const skipped = dates.length - fresh.length;
     notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} ${cad.toLowerCase()} session${fresh.length === 1 ? "" : "s"}${skipped ? ` (${skipped} already existed)` : ""}.` });
-    setShowSess(false); setRepeat(false); setStitle(""); loadSessions();
+    setShowSess(false); setRepeat(false); setStitle(""); setSTime(""); loadSessions();
   }
   // "Done for the night" — does NOT lock. Opens the roll writable so the officer can
   // confirm/complete attendance BEFORE finalizing. The lock/clock-reset moves to finalizeSession.
@@ -7198,7 +7200,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   <CalendarCheck size={15} color={cat?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<LeadershipTag audience={s.audience} /></div>
-                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d} · {s.planId ? "counts toward the plan" : "one-off"}</div>
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""} · {s.planId ? "counts toward the plan" : "one-off"}</div>
                   </div>
                   {!s.done ? (
                     <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em" }}>Scheduled</span>
@@ -7370,6 +7372,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       {canManage && (showSess ? (
         <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>{repeat ? "Start day" : "Day"}</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sTime} onChange={(e) => setSTime(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
@@ -7434,7 +7437,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<LeadershipTag audience={s.audience} /></span>
-                      <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
+                      <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
                     <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
