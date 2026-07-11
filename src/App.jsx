@@ -873,6 +873,25 @@ function Announcements({ role, members, meId, notify, style }) {
 // Board oversight dashboard — governance/health view (Board is oversight, not ops).
 // Derivations MIRROR DeptAdminDashboard exactly (deptAttendance, cert compliance, readiness 40/40/20).
 // SCAFFOLD: header + raw derived numbers for verification; cards/styling + governance queries land next.
+// Piece 4 — soonest FUTURE leadership event (audience='leadership'), for the leader dashboards.
+function NextLeadershipEventTile({ S, sessions, notify }) {
+  const { openSessionPlans, mounts } = usePlanViewer(S, notify);
+  const todayISO = toISODate(new Date());
+  const next = (sessions || []).filter((s) => !s.done && s.audience === "leadership" && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  return (
+    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> NEXT LEADERSHIP EVENT</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {next ? (<>
+          <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3 }}>{next.title}</div>
+          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{fmtSess(next)}</div>
+        </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No upcoming leadership events.</div>}
+      </div>
+      {next?.plan && <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => openSessionPlans(next)}>View plan <ChevronRight size={13} color={FIRE.btnIcon} /></button>}
+      {mounts}
+    </div>
+  );
+}
 function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DeptAdminDashboard
@@ -893,13 +912,11 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
     const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
   }, []);
   // Governance data (read-only; ai_outputs + action_items are leader-readable, Board included) — reuses the Minutes/Agenda/DeptAdmin patterns.
-  const [agendaRow, setAgendaRow] = useState(null);
   const [minutesRow, setMinutesRow] = useState(null);
   const [openItems, setOpenItems] = useState([]);
   useEffect(() => {
     const cols = "id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by";
     const newest = (rows) => (rows || []).slice().sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))[0] || null;   // coalesce(edited_at, created_at) desc
-    supabase.from("ai_outputs").select(cols).eq("feature", "agenda").is("deleted_at", null).then(({ data }) => setAgendaRow(newest(data)));
     supabase.from("ai_outputs").select(cols).eq("feature", "minutes").is("deleted_at", null).then(({ data }) => setMinutesRow(newest(data)));
     supabase.from("action_items").select("*").eq("status", "open")   // full rows (text + due_date) — dept-scoped by RLS
       .then(({ data }) => setOpenItems((data || []).slice().sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"))));   // soonest due first
@@ -924,17 +941,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       {/* MEETINGS & GOVERNANCE — governance leads for Board (read-only; ai_outputs/action_items are leader-readable) */}
       <div style={{ ...FS.kicker, marginBottom: 8 }}>MEETINGS &amp; GOVERNANCE</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
-        {/* Next meeting — newest agenda draft */}
-        <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> NEXT MEETING</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {agendaRow ? (<>
-              <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3 }}>{agendaRow.title || "Untitled agenda"}</div>
-              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{govDate(agendaRow)}</div>
-            </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No agenda yet.</div>}
-          </div>
-          <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "agenda")}>View agenda <ChevronRight size={13} color={FIRE.btnIcon} /></button>
-        </div>
+        {/* Next leadership event — soonest future audience='leadership' session (Piece 4; repointed from the old agenda-draft NEXT MEETING) */}
+        <NextLeadershipEventTile S={S} sessions={sessions} notify={notify} />
         {/* Recent minutes — newest minutes draft */}
         <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><FileText size={13} color={FIRE.red} /> RECENT MINUTES</div>
@@ -1103,6 +1111,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, ...FS.num, marginTop: 4, color: ldrPct > 75 ? FIRE.green : ldrPct >= 30 ? FIRE.amberText : FIRE.redText }}>{ldrPct}%</div>
         </button>
       </div>
+      <div style={{ marginBottom: 12, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} notify={notify} /></div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat S={S} dark n={String(total)} label="Members" onClick={() => go("roster", "members")} />
         <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" pct={expdC > 0 ? 0 : certPct} onClick={() => go("roster", "certs")} />
@@ -1377,6 +1386,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         <Stat S={S} dark n={String(drillsHeld)} label="Drills run" />
         <Stat S={S} dark n={`${ldrPct}%`} label="Leadership attendance" />
       </div>
+      <div style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} notify={notify} /></div>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
         {cards.map((c) => (
