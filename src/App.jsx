@@ -6872,6 +6872,57 @@ function LeadershipTag({ audience }) {   // amber "Leadership" pill for leadersh
   if (audience !== "leadership") return null;
   return <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>Leadership</span>;
 }
+// Attach a saved agenda (ai_outputs feature='agenda') to a leadership event as a SNAPSHOT
+// session_plans ai-row → surfaces via the existing "View plan" / openSessionPlans path (zero new view code).
+function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) {
+  const [agendas, setAgendas] = useState(null);   // null = loading
+  const [busyId, setBusyId] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    supabase.from("ai_outputs").select("id, title, ai_text, current_text").eq("feature", "agenda").is("deleted_at", null).order("created_at", { ascending: false })
+      .then(({ data }) => { if (alive) setAgendas(data || []); });
+    return () => { alive = false; };
+  }, []);
+  async function pick(a) {
+    setBusyId(a.id);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setBusyId(null); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { data, error } = await supabase.from("session_plans")
+      .insert({ department_id: deptId, session_id: session.id, source: "ai", title: a.title || "Agenda", ai_text: a.current_text ?? a.ai_text ?? "", created_by: byName || "Unknown" })
+      .select();   // snapshot copy of the agenda's live text
+    setBusyId(null);
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't attach the agenda", text: "Something went wrong — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: a silent RLS block fails loudly
+    notify({ kind: "success", title: "Agenda attached", text: `"${a.title || "Agenda"}" was attached to ${session.title}.` });
+    onAttached(); onClose();
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
+      <div style={{ ...FS.card, width: "min(480px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <ClipboardList size={16} color={FIRE.btnIcon} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Attach agenda</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.title}</div>
+          </div>
+          <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={onClose}><X size={16} color={FIRE.textSecondary} /></button>
+        </div>
+        <div style={{ padding: 12 }}>
+          {agendas === null ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted, padding: 8 }}><Loader2 size={14} className="spin" /> Loading agendas…</div>
+          ) : agendas.length === 0 ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted, padding: 8, lineHeight: 1.5 }}>No saved agendas yet. Draft one in Minutes → Agenda, then attach it here.</div>
+          ) : agendas.map((a) => (
+            <button key={a.id} disabled={!!busyId} onClick={() => pick(a)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `0.5px solid ${FIRE.hairline}`, padding: "10px 6px", cursor: "pointer", fontFamily: "inherit", opacity: busyId && busyId !== a.id ? 0.5 : 1 }}>
+              <ClipboardList size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title || "Untitled agenda"}</span>
+              {busyId === a.id ? <Loader2 size={13} className="spin" color={FIRE.textMuted} /> : <ChevronRight size={14} color={FIRE.textMuted} />}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, notify, dept, addFeedback }) {
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
   const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
@@ -6943,6 +6994,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState(""); const [sTime, setSTime] = useState("");
   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
+  const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
   const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", planId: "", audience: "everyone" });
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
@@ -7358,6 +7410,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       </div>
 
       {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} />}
+      {agendaSession && <AttachAgendaModal S={S} session={agendaSession} byName={me?.name} notify={notify} onAttached={loadSessions} onClose={() => setAgendaSession(null)} />}
       {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
@@ -7499,6 +7552,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     {canManage && (
                       <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                     )}
+                    {s.audience === "leadership" && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
                     {s.done
                       ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
                       : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
