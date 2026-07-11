@@ -6905,6 +6905,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState(""); const [sTime, setSTime] = useState("");
+  const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
+  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", planId: "", audience: "everyone" });
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
   const [rCad, setRCad] = useState("Bi-weekly");        // recurring cadence (defaults from the picked category)
@@ -7066,6 +7068,20 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { error } = await supabase.from("training_sessions").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the session", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadSessions();
+  }
+  function startEditSession(s) {
+    setEditingSessionId(s.id);
+    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), planId: s.planId || "", audience: s.audience || "everyone" });
+  }
+  async function saveEditSession(id) {
+    if (!sessEdit.date) { notify({ kind: "error", title: "Pick a date", text: "Choose a date for this training." }); return; }
+    const pItem = plan.find((p) => String(p.id) === String(sessEdit.planId));
+    const title = sessEdit.title.trim() || pItem?.name || "Training session";
+    const { data, error } = await supabase.from("training_sessions")
+      .update({ title, date: sessEdit.date, start_time: sessEdit.startTime || null, plan_id: sessEdit.planId || null, audience: sessEdit.audience })
+      .eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the training", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS/lock block fails loudly
+    setEditingSessionId(null); loadSessions();
   }
 
   async function attachPlan(s, file) {
@@ -7431,6 +7447,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               const roll = ldrEvent ? counted.filter((m) => isLeader(m.access) || att.includes(m.id)) : counted;      // shown = expected ∪ actual attendees (never hide a real check-in)
               const expCount = expected.length;                                                                        // denominator M
               const attCount = expected.filter((m) => att.includes(m.id)).length;                                      // numerator N — expected who attended
+              const locked = s.done || s.signinOpen || (s.attendance?.length > 0);   // editable only BEFORE QR sign-in starts / any check-in / done
               return (
                 <div key={s.id}>
                   <div style={Lrow}>
@@ -7443,13 +7460,31 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
                     {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                     {canManage && (
-                      <label style={{ ...Lbtn, cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /> {s.plans.length ? "Attach more" : "Attach plan"}<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
+                      <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                     )}
                     {s.done
                       ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
-                      : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Done for the night</button>}
+                      : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
+                    {canManage && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
                     {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                   </div>
+                  {editingSessionId === s.id && (
+                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title</span><input style={Linput} value={sessEdit.title} onChange={(e) => setSessEdit((b) => ({ ...b, title: e.target.value }))} /></label>
+                      <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Date</span><input type="date" style={Linput} value={sessEdit.date} onChange={(e) => setSessEdit((b) => ({ ...b, date: e.target.value }))} /></label>
+                      <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sessEdit.startTime} onChange={(e) => setSessEdit((b) => ({ ...b, startTime: e.target.value }))} /></label>
+                      <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category</span><select style={Linput} value={sessEdit.planId} onChange={(e) => setSessEdit((b) => ({ ...b, planId: e.target.value }))}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="">One-off (no category)</option></select></label>
+                      <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
+                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+                          {[["everyone", "Everyone"], ["leadership", "Leadership only"]].map(([val, lbl], i) => {
+                            const on = sessEdit.audience === val;
+                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                          })}
+                        </div></label>
+                      <button style={LprimaryBtn} onClick={() => saveEditSession(s.id)}><CheckCircle2 size={15} /> Save</button>
+                      <button style={Lbtn} onClick={() => setEditingSessionId(null)}>Cancel</button>
+                    </div>
+                  )}
                   {s.plans.length > 0 && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
                       <div style={{ fontSize: 11, color: "#7E8794", marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
