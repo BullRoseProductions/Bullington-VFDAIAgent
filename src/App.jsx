@@ -5405,27 +5405,53 @@ function Apparatus({ S, role, members, meId, notify }) {
   const canCheck = !!me && me.status !== "Inactive";     // any active member (Probationary included) can perform a check
   const [checkingRig, setCheckingRig] = useState(null);  // rig whose check modal is open
   const [historyKey, setHistoryKey] = useState(0);       // bump to remount ApparatusHistory after a finalize (refetch)
+  const [serviceKey, setServiceKey] = useState(0);       // bump to remount ApparatusServiceHistory after a take-out/return
+  const [serviceFor, setServiceFor] = useState(null);    // rig id whose Take-out reason editor is open
+  const [serviceReason, setServiceReason] = useState("");
+  const [serviceBusy, setServiceBusy] = useState(null);  // rig id currently transitioning
+  async function takeOutOfService(rigId) {
+    const reason = serviceReason.trim();
+    if (!reason) { notify({ kind: "error", title: "A reason is required", text: "Say why it's going out of service (e.g. at the shop for brakes)." }); return; }
+    setServiceBusy(rigId);
+    const { error } = await supabase.rpc("take_apparatus_out_of_service", { p_apparatus_id: rigId, p_reason: reason });
+    setServiceBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't take it out of service", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: "Taken out of service." });
+    setServiceFor(null); setServiceReason(""); setServiceKey((k) => k + 1); loadRigs();
+  }
+  async function returnToService(rigId, rigName) {
+    if (!window.confirm(`Return "${rigName}" to service? It'll be marked Needs attention until its next check.`)) return;
+    setServiceBusy(rigId);
+    const { error } = await supabase.rpc("return_apparatus_to_service", { p_apparatus_id: rigId });
+    setServiceBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't return it to service", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: "Returned to service — marked Needs attention for a re-check." });
+    setServiceKey((k) => k + 1); loadRigs();
+  }
   const [adding, setAdding] = useState(false);
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
+  const [svc, setSvc] = useState("In service"); const [svcReason, setSvcReason] = useState("");   // initial availability on create
   const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
   const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper" });
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const loadRigs = () => {
     supabase.from("apparatus")
-      .select("id, name, type, status, note, last_check_at, checked_by")
+      .select("id, name, type, status, note, last_check_at, checked_by, in_service")
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
         if (error || !data) return;
         setRigs(data.map((r) => ({
-          id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "",
+          id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false,
           lastCheck: r.last_check_at ? new Date(r.last_check_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
           by: r.checked_by ? (nameById.get(r.checked_by) || "A member") : "—",
         })));
       });
   };
   useEffect(() => { loadRigs(); }, [members]);   // reload once members resolves so checked_by → name populates
-  const ready = rigs.filter((r) => r.status === "Pass").length;
-  const flagged = rigs.length - ready;
+  const inServiceRigs = rigs.filter((r) => r.inService);   // out-of-service rigs excluded from readiness stats
+  const ready = inServiceRigs.filter((r) => r.status === "Pass").length;
+  const flagged = inServiceRigs.filter((r) => r.status !== "Pass").length;   // computed directly on in-service rigs, NOT total − ready
+  const outOfServiceCount = rigs.length - inServiceRigs.length;
   function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper" }); }
   async function saveEditRig(id) {
     if (!rigBuf.name.trim()) return;
@@ -5435,11 +5461,17 @@ function Apparatus({ S, role, members, meId, notify }) {
   }
   async function addRig() {
     if (!nm.trim()) return;
+    const outOfService = svc === "Out of service";
+    if (outOfService && !svcReason.trim()) { notify({ kind: "error", title: "A reason is required", text: "Say why it's being added out of service (e.g. at the shop)." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    const { error } = await supabase.from("apparatus").insert({ department_id: deptId, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null });
-    if (error) { notify({ kind: "error", title: "Couldn't add the apparatus", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setNm(""); setTp("Pumper"); setRd("Ready"); setAdding(false); loadRigs();
+    const { data: created, error } = await supabase.from("apparatus").insert({ department_id: deptId, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null }).select("id").single();
+    if (error || !created) { notify({ kind: "error", title: "Couldn't add the apparatus", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
+    if (outOfService) {   // reuse the RPC so an open service period is recorded (no separate insert path)
+      const { error: svcErr } = await supabase.rpc("take_apparatus_out_of_service", { p_apparatus_id: created.id, p_reason: svcReason.trim() });
+      if (svcErr) { notify({ kind: "error", title: "Added, but couldn't mark out of service", text: "The rig was added in service — take it out of service from its card.", details: svcErr.message }); }
+    }
+    setNm(""); setTp("Pumper"); setRd("Ready"); setSvc("In service"); setSvcReason(""); setAdding(false); loadRigs();
   }
   async function removeRig(id, name) {
     if (!window.confirm(`Take "${name}" out of the station? This removes it from the apparatus list.`)) return;
@@ -5459,11 +5491,14 @@ function Apparatus({ S, role, members, meId, notify }) {
         <Stat S={S} dark n={String(flagged)} label="Needs attention" warn={flagged > 0} />
         <Stat S={S} dark n={String(rigs.length)} label="Apparatus in station" />
       </div>
+      {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
       {canManage && (adding ? (
         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name / unit</span><input style={FS.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
           <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={rd} onChange={(e) => setRd(e.target.value)}><option>Ready</option><option>Needs attention</option></select></label>
+          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Service</span><select style={FS.input} value={svc} onChange={(e) => setSvc(e.target.value)}><option>In service</option><option>Out of service</option></select></label>
+          {svc === "Out of service" && <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Reason (required)</span><input style={FS.input} value={svcReason} placeholder="e.g. at the shop" onChange={(e) => setSvcReason(e.target.value)} /></label>}
           <button style={FS.btnPrimary} onClick={addRig}><Plus size={15} /> Add to station</button>
           <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); }}>Cancel</button>
         </div>
@@ -5477,22 +5512,38 @@ function Apparatus({ S, role, members, meId, notify }) {
       <div style={S.opGrid}>
         {rigs.map((r) => {
           const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
+          const outOfService = !r.inService;   // availability dimension (separate from Pass/Needs-attention readiness)
           return (
-            <div key={r.id} style={{ ...S.opCard, ...FS.card }}>
+            <div key={r.id} style={{ ...S.opCard, ...FS.card, opacity: outOfService ? 0.68 : 1 }}>
               <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-                <Truck size={20} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <Truck size={20} color={outOfService ? FIRE.textMuted2 : FIRE.btnIcon} style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
-                <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>
+                {outOfService
+                  ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
+                  : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
                 {canManage && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-                {canManage && <button title="Take out of station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
+                {canManage && <button title="Remove from station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
+              {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
               {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
-              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: FIRE.textMuted }}>
+              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: FIRE.textMuted, flexWrap: "wrap", gap: 8 }}>
                 <span>Last check: {r.lastCheck} · {r.by}</span>
-                <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-                  {canCheck && <button style={{ ...FS.btnPrimary, padding: "7px 12px", fontSize: 12.5 }} onClick={() => setCheckingRig(r)}><ClipboardCheck size={14} /> Start Check</button>}
+                <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
+                  {canManage && (outOfService
+                    ? <button disabled={serviceBusy === r.id} title="Return to service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5 }} onClick={() => returnToService(r.id, r.name)}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} color={FIRE.green} />} Return to service</button>
+                    : <button title="Take out of service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5 }} onClick={() => { setServiceFor(r.id); setServiceReason(""); }}><Wrench size={13} color={FIRE.textSecondary} /> Take out of service</button>)}
+                  {canCheck && <button disabled={outOfService} title={outOfService ? "Return to service to run a check" : "Start a check"} style={{ ...FS.btnPrimary, padding: "7px 12px", fontSize: 12.5, opacity: outOfService ? 0.5 : 1 }} onClick={() => { if (!outOfService) setCheckingRig(r); }}><ClipboardCheck size={14} /> Start Check</button>}
                 </div>
               </div>
+              {canManage && serviceFor === r.id && !outOfService && (
+                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
+                  <input autoFocus value={serviceReason} placeholder="Why out of service? (required)" onChange={(e) => setServiceReason(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") takeOutOfService(r.id); if (e.key === "Escape") { setServiceFor(null); setServiceReason(""); } }}
+                    style={{ ...FS.input, flex: 1, minWidth: 0, fontSize: 12.5, padding: "6px 8px" }} />
+                  <button disabled={serviceBusy === r.id || !serviceReason.trim()} onClick={() => takeOutOfService(r.id)} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: (serviceBusy === r.id || !serviceReason.trim()) ? 0.5 : 1 }}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : "Confirm"}</button>
+                  <button onClick={() => { setServiceFor(null); setServiceReason(""); }} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+                </div>
+              )}
               {editingRigId === r.id && (
                 <div style={{ ...FS.card, padding: 14, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={rigBuf.name} onChange={(e) => setRigBuf((b) => ({ ...b, name: e.target.value }))} /></label>
@@ -5503,6 +5554,7 @@ function Apparatus({ S, role, members, meId, notify }) {
               )}
               {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
               <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} />
+              <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
             </div>
           );
         })}
@@ -5987,6 +6039,50 @@ function ApparatusHistory({ S, rig, role, notify, onResolved }) {
                     })}
                   </div>
                 )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+// Out-of-service history for a rig (Slice 5c). Reads apparatus_service_periods
+// (RLS: dept read-only), newest first. Open period (back_at null) = currently out.
+function ApparatusServiceHistory({ S, rig }) {
+  const [open, setOpen] = useState(false);
+  const [periods, setPeriods] = useState(null);   // null = not loaded yet
+  const [loading, setLoading] = useState(false);
+  async function toggle() {
+    const next = !open; setOpen(next);
+    if (next && periods === null) {
+      setLoading(true);
+      const { data } = await supabase.from("apparatus_service_periods")
+        .select("id, out_at, out_by_name, out_reason, back_at, back_by_name")
+        .eq("apparatus_id", rig.id).order("out_at", { ascending: false });
+      setPeriods(data || []); setLoading(false);
+    }
+  }
+  const fmtD = (iso) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={toggle} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <Wrench size={13} color={FIRE.btnIcon} /> Service history{periods ? ` (${periods.length})` : ""}
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (periods && periods.length === 0) ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted }}>Never taken out of service.</div>
+          ) : (periods || []).map((p) => {
+            const stillOut = !p.back_at;
+            return (
+              <div key={p.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "8px 12px", marginBottom: 6, fontSize: 12.5 }}>
+                <div style={{ color: FIRE.textPrimary }}>{stillOut ? `Out of service since ${fmtD(p.out_at)}` : `Out of service ${fmtD(p.out_at)} – ${fmtD(p.back_at)}`}</div>
+                <div style={{ color: FIRE.textSecondary, marginTop: 2 }}>{p.out_reason}</div>
+                <div style={{ color: FIRE.textMuted, marginTop: 2 }}>Out by {p.out_by_name || "—"}{p.back_at ? ` · back by ${p.back_by_name || "—"}` : ""}</div>
               </div>
             );
           })}
