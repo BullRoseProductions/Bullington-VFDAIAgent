@@ -420,7 +420,7 @@ export default function App() {
   const [trainingSessions, setTrainingSessions] = useState([]);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, done, signin_open, series_id, audience"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -444,7 +444,7 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // audience: 'everyone' | 'leadership' (default everyone); plans[] = all; plan = newest (backward-compat alias)
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // audience: 'everyone' | 'leadership' (default everyone); plans[] = all; plan = newest (backward-compat alias)
       })
     );
   };
@@ -633,7 +633,7 @@ function PersonalView({ S, me, meId, sessions, notify, go }) {
     loadMine();
   }
   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-  const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 4);   // next 4 only (display cap)
+  const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
   return (
     <>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>
@@ -1019,7 +1019,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
   const drillsHeld = doneThisYear.length;
   const todayISO = toISODate(new Date());
-  const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b))[0] || null;
+  const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
@@ -1276,7 +1276,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const certPct = (curC + expgC + expdC) ? Math.round((curC / (curC + expgC + expdC)) * 100) : 0;
   const drillsHeld = doneThisYear.length;
   const todayISO = toISODate(new Date());
-  const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b))[0] || null;
+  const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const [duties, setDuties] = useState([]);
   const [recruitNext, setRecruitNext] = useState(null);
   const [prNext, setPrNext] = useState(null);
@@ -1519,7 +1519,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const trend = (thisMonth && lastMonth) ? thisMonth.pct - lastMonth.pct : null;    // only when BOTH months have data
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;                                 // ring geometry (circumference for stroke-dash)
   const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
-  const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 4);   // next 4 only (display cap)
+  const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
   const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length;
   const certsTotal = certsAll.length;
@@ -1549,18 +1549,18 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   useEffect(() => {
     const todayIso = toISO(today);
     Promise.all([
-      supabase.from("training_sessions").select("id, title, date, audience"),
+      supabase.from("training_sessions").select("id, title, date, start_time, audience"),
       supabase.from("funding_events").select("title, date"),
       supabase.from("recruitment_events").select("title, date"),
       supabase.from("content_calendar").select("caption, date"),
     ]).then(([tr, fu, rc, so]) => {
       const rows = [
-        ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, type: "Training", audience: r.audience || "everyone" })),
+        ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, startTime: r.start_time || null, type: "Training", audience: r.audience || "everyone" })),
         ...(fu.data || []).map((r) => ({ title: r.title, date: r.date, type: "Fundraiser" })),
         ...(rc.data || []).map((r) => ({ title: r.title, date: r.date, type: "Recruitment" })),
         ...(so.data || []).map((r) => ({ title: r.caption, date: r.date, type: "Social" })),
       ].filter((r) => r.date && r.date >= todayIso);                    // upcoming = date >= today (ISO string compare)
-      rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));   // YYYY-MM-DD sorts chronologically
+      rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || String(a.startTime || "").localeCompare(String(b.startTime || "")));   // date, then start time (unset first)
       setUpcomingAll(rows);                                             // store all upcoming; select at render (leadership-aware)
     });
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -2337,7 +2337,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                 <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save to session</span>
                   <select style={FS.input} value={saveSession} onChange={(e) => setSaveSession(e.target.value)}>
                     <option value="">Choose a session…</option>
-                    {(sessions || []).filter((s) => !s.done).sort((a, b) => sessDate(a) - sessDate(b)).map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)}</option>)}
+                    {(sessions || []).filter((s) => !s.done).sort(sessSort).map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)}</option>)}
                   </select></label>
                 <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveToSession} disabled={!saveSession || saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save plan to session</>}</button>
               </div>
@@ -3404,7 +3404,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
   const loadAll = () => {
     Promise.all([
       supabase.from("content_calendar").select("id, date, caption"),
-      supabase.from("training_sessions").select("id, date, title, audience, session_plans(id, title, storage_path, ai_text, source, created_at)"),
+      supabase.from("training_sessions").select("id, date, start_time, title, audience, session_plans(id, title, storage_path, ai_text, source, created_at)"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("funding_events").select("id, date, title"),
       supabase.from("action_items").select("id, text, due_date, status"),                      // 5th source (RLS: leaders only → members get [])
@@ -3421,6 +3421,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         ...mapRows(social, "social", (r) => r.caption || ""),
         ...mapRows(training, "training", (r) => r.title, (r) => ({
           title: r.title,   // SessionPlanChooser header reads session.title (chip items only have `label`)
+          startTime: r.start_time || null,
           audience: r.audience || "everyone",
           plans: (r.session_plans || [])
             .slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))   // newest-first, matching Training's loadSessions
@@ -4759,7 +4760,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   const todayISO = toISODate(new Date());
   const openDuties = duties.filter((d) => !d.done);
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
-  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 5);
+  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
   const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
   const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
   const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
@@ -5034,7 +5035,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
   const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
   const [fullYear, setFullYear] = useState(false);  // grid scope: false = recent 10, true = all sessions in year
-  const chron = [...doneThisYear].sort((a, b) => sessDate(a) - sessDate(b));   // chronological columns
+  const chron = [...doneThisYear].sort(sessSort);   // chronological columns
   const gridCols = fullYear ? chron : chron.slice(-10);                        // screen default = recent 10 (CSV always exports full)
   // Audience-aware cell state — SAME predicate as the summary's eligible denominator, applied per session:
   const cellState = (r, s) => (r.leader || s.audience !== "leadership")
@@ -6277,7 +6278,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const todayISO = toISODate(new Date());
   const openDuties = duties.filter((d) => !d.done);
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date is YYYY-MM-DD → string compare
-  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort((a, b) => sessDate(a) - sessDate(b)).slice(0, 5);
+  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
   const expired = certContext?.expired || [];
   const expiring = certContext?.expiring || [];
   const [title, setTitle] = useState("Monthly Business Meeting");
@@ -6738,8 +6739,12 @@ function trainSessionsSeed() {
     { id: 106, planId: null, title: "Ladder throws drill", y, m, d: fwd(9), done: false, attendance: [] },
   ];
 }
-const sessDate = (s) => new Date(s.y, s.m, s.d);
-const fmtSess = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const sessDate = (s) => new Date(s.y, s.m, s.d);   // date-only — drives sorting-scope/dedup/filters (unchanged)
+// Optional wall-clock start time. Accepts "HH:MM" or "HH:MM:SS"; "" when unset.
+const fmtTime = (t) => { if (!t) return ""; const d = new Date(`1970-01-01T${t}`); return isNaN(d) ? "" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
+const fmtSess = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + (s.startTime ? ` · ${fmtTime(s.startTime)}` : "");
+// Display ordering: by date, then start time (unset time sorts first among same-day).
+const sessSort = (a, b) => (sessDate(a) - sessDate(b)) || String(a.startTime || "").localeCompare(String(b.startTime || ""));
 function CheckinConfirm({ S, result, members, meId, go }) {
   const me = members.find((m) => m.id === meId);
   const ok = result?.ok;
@@ -6925,7 +6930,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
   const rank = (l) => (l === "Overdue" || l === "Not logged") ? 0 : l === "Due soon" ? 1 : 2;
   const _t0 = new Date(today); _t0.setHours(0, 0, 0, 0);
-  const upcomingFor = (catId) => sessions.filter((s) => String(s.planId) === String(catId) && !s.done && sessDate(s) >= _t0).sort((a, b) => sessDate(a) - sessDate(b))[0];
+  const upcomingFor = (catId) => sessions.filter((s) => String(s.planId) === String(catId) && !s.done && sessDate(s) >= _t0).sort(sessSort)[0];
   const reconcile = (p) => {   // a pre-scheduled future session overrides the derived last+cadence guess (no "overdue" while sessions sit on the calendar)
     const base = dueInfo(p), up = upcomingFor(p.id);
     if (!up) return base;
@@ -7237,7 +7242,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
   // Card 3 — next not-done session from today forward (pure read)
   const t0n = new Date(today); t0n.setHours(0, 0, 0, 0);
-  const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort((a, b) => sessDate(a) - sessDate(b))[0];
+  const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort(sessSort)[0];
   const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
 
   return (
