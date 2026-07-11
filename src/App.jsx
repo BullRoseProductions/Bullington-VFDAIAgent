@@ -612,6 +612,24 @@ function deptAttendance(members, sessions, year, range) {
   const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
   return { rows, avg, doneThisYear };
 }
+// Separate LEADERSHIP-EVENT accountability track (Piece 2): leaders' attendance at
+// audience='leadership' sessions (board/officer meetings, leadership-only trainings).
+// Mirrors deptAttendance but scoped to leadership EVENTS + the leadership team as the roll.
+function leadershipAttendance(members, sessions, year, range) {
+  const inScope = range
+    ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
+    : (s) => s.y === year;
+  const doneLeadership = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && s.audience === "leadership");   // leadership EVENTS with a roll taken
+  const leaders = (members || []).filter((m) => countsInStats(m) && isLeader(m.access) && m.status === "Active");   // accountable group: Board/Officer/DA (PA/owner/test excluded)
+  const rows = leaders.map((m) => {
+    const attended = doneLeadership.filter((s) => (s.attendance || []).includes(m.id)).length;
+    const pct = doneLeadership.length ? Math.round((attended / doneLeadership.length) * 100) : null;
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: doneLeadership.length, pct };
+  });
+  const rated = rows.filter((r) => r.pct != null);
+  const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
+  return { rows, avg, doneLeadership };   // avg = leadership attendance %, doneLeadership.length = leadership events held
+}
 // Rolling 90-day window for live participation (roster + member file) — feeds the SAME
 // deptAttendance calc as Reports, so a finalized drill moves these numbers immediately.
 const rolling90 = () => { const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 90); return { from: toISODate(from), to: toISODate(to) }; };
@@ -861,6 +879,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const me = members.find((m) => m.id === meId) || null;
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);   // dept attendance % + drills
+  const { avg: ldrPct } = leadershipAttendance(members, sessions, yr);   // separate leadership-event track (% only)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const total = cm.length;
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
@@ -977,6 +996,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
             ["Attendance", `${avgPart}%`],
             ["Active roster", String(total)],
             ["Drills held", String(drillsHeld)],
+            ["Leadership attendance", `${ldrPct}%`],
           ].map(([label, val]) => (
             <div key={label}>
               <div style={{ fontFamily: DISPLAY, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1, ...FS.num }}>{val}</div>
@@ -1012,6 +1032,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same geometry as the member attendance ring
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
+  const { avg: ldrPct } = leadershipAttendance(members, sessions, yr);   // separate leadership-event track (% only)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const total = cm.length;
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
@@ -1077,6 +1098,10 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <div style={FS.kicker}>DEPARTMENT READINESS</div>
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>40% certifications · 40% attendance · 20% duty completion</div>
         </div>
+        <button onClick={() => go("training")} className="stat-cta" title="Leadership attendance — view training" style={{ background: "none", border: "none", padding: "0 2px", cursor: "pointer", textAlign: "right", fontFamily: "inherit", flexShrink: 0, alignSelf: "center" }}>
+          <div style={FS.kicker}>LEADERSHIP ATTENDANCE</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, ...FS.num, marginTop: 4, color: ldrPct > 75 ? FIRE.green : ldrPct >= 30 ? FIRE.amberText : FIRE.redText }}>{ldrPct}%</div>
+        </button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat S={S} dark n={String(total)} label="Members" onClick={() => go("roster", "members")} />
@@ -1269,6 +1294,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DA/Board
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
+  const { avg: ldrPct } = leadershipAttendance(members, sessions, yr);   // separate leadership-event track (% only)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const activeCount = cm.filter((m) => m.status === "Active").length;
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
@@ -1349,6 +1375,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
         <Stat S={S} dark n={String(activeCount)} label="Active members" />
         <Stat S={S} dark n={String(drillsHeld)} label="Drills run" />
+        <Stat S={S} dark n={`${ldrPct}%`} label="Leadership attendance" />
       </div>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
