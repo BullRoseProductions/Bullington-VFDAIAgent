@@ -258,6 +258,11 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
       {card("terms", FileText, "Terms of Agreement", "The terms of using Before the Call.")}
       {card("about", Award, "About", "App info and copyright.")}
     </div>
+    {/* Build id — matches the deployed commit's short hash + /version.json. Lets anyone confirm a
+        phone actually picked up a new deploy (vs. running a stale cached bundle). Tap to force a fresh reload. */}
+    <div onClick={() => location.reload()} title="Tap to reload the latest version" style={{ marginTop: 18, textAlign: "center", fontSize: 11, color: FIRE.textMuted2, letterSpacing: ".03em", cursor: "pointer", ...FS.num }}>
+      Build {typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev"}
+    </div>
   </>);
 }
 const NAV = [
