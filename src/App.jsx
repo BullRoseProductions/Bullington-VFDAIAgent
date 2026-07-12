@@ -6264,7 +6264,7 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
       </div>
       {tabs && <div style={{ flexShrink: 0, padding: "0 12px 10px", display: "flex", gap: 6, overflowX: "auto" }}>{tabs}</div>}
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        <TransformWrapper minScale={1} maxScale={6} doubleClick={{ mode: "toggle", step: 1.6 }} panning={{ excluded: ["apparatus-dot"] }} pinch={{ step: 5 }} wheel={{ step: 0.15 }}>
+        <TransformWrapper minScale={1} maxScale={6} centerOnInit doubleClick={{ mode: "toggle", step: 1.6 }} panning={{ excluded: ["apparatus-dot"] }} pinch={{ step: 5 }} wheel={{ step: 0.15 }}>
           {({ zoomIn, zoomOut, resetTransform }) => (<>
             <div style={{ position: "absolute", right: 14, bottom: "calc(16px + env(safe-area-inset-bottom))", zIndex: 20, display: "flex", flexDirection: "column", gap: 6, background: "rgba(15,17,20,.82)", border: "1px solid rgba(255,255,255,.22)", borderRadius: 14, padding: 6 }}>
               <button onClick={() => zoomIn()} title="Zoom in" style={ctlBtn}>+</button>
@@ -6272,8 +6272,11 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
               <button onClick={() => resetTransform()} title="Fit to screen" style={{ ...ctlBtn, fontSize: 11, fontWeight: 800 }}>FIT</button>
             </div>
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%", touchAction: "none" }} contentStyle={{ width: "100%" }}>
-              <div style={{ position: "relative", width: "100%" }}
-                onClick={(e) => { if (drag) return; if (!editable) { setSelectedId(null); return; } const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
+              {/* Opens fit (whole truck visible), not oversized: cap the image column + center it
+                  (centerOnInit centers vertically). width:100% keeps the dot layer === the image box,
+                  so dots stay aligned; placement reads from the img rect so it's exact at any size. */}
+              <div style={{ position: "relative", width: "100%", maxWidth: 820, margin: "0 auto" }}
+                onClick={(e) => { if (drag) return; if (!editable) return; /* check mode: empty-photo click is a NO-OP — panning across a truck makes near-clicks constantly; never disturb the selected item / Pass-Fail panel. Selection changes only by tapping a dot. */ const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
                 {url
                   ? <img ref={imgRef} src={url} alt={photo.angle_label || "Apparatus photo"} draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} />
                   : <div style={{ height: 260, background: FIRE.btnBg, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
