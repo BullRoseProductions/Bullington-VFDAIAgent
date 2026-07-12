@@ -3534,6 +3534,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
   const [filter, setFilter] = useState("all");
   const [view, setView] = useState("grid");   // "grid" | "importance" (only surfaced when withImportanceMode)
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
+  const [detailEvent, setDetailEvent] = useState(null);   // event clicked on the calendar → detail modal
   const loadAll = () => {
     Promise.all([
       supabase.from("content_calendar").select("id, date, caption"),
@@ -3628,12 +3629,41 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         <MonthCalendar
           cur={cur} setCur={setCur} dark
           items={monthItems}
-          renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; return { color: ldr ? FIRE.amberText : it.color, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${ldr ? "Leadership only · " : ""}${(it.source === "training" && (it.plans || []).length) ? `${it.label} · click to view plan` : it.label}`, ...(filter === "all" ? { tier: it.tier } : {}), ...(it.source === "training" && (it.plans || []).length ? { onClick: () => openSessionPlans(it) } : {}) }; }}
+          renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: ldr ? FIRE.amberText : it.color, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${ldr ? "Leadership only · " : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
           todayColor={FIRE.red}
           monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
           overflowIndicator
         />
       )}
+      {detailEvent && (() => {
+        const it = detailEvent;
+        const isTraining = it.source === "training";
+        const hasPlans = isTraining && (it.plans || []).length > 0;
+        const ldr = isTraining && it.audience === "leadership";
+        const SRC_LABEL = { training: "Training", actionitem: "Action item", recruit: "Recruitment", funding: "Funding", social: "Social" };
+        const dateStr = new Date(it.y, it.m, it.d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={() => setDetailEvent(null)}>
+            <div style={{ ...FS.card, width: "min(460px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <span style={{ width: 10, height: 10, borderRadius: 999, background: it.color, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>{SRC_LABEL[it.source] || it.source}</div>
+                  <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontWeight: 700, fontSize: 18, color: FIRE.textPrimary }}>{it.title || it.label}</div>
+                </div>
+                <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => setDetailEvent(null)}><X size={16} color={FIRE.textSecondary} /></button>
+              </div>
+              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 13.5, color: FIRE.textPrimary }}><Calendar size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} color={FIRE.textMuted} />{dateStr}{it.startTime ? ` · ${fmtTime(it.startTime)}` : ""}</div>
+                {ldr && <div style={{ fontSize: 12.5, color: FIRE.amberText, fontWeight: 600 }}>Leadership only</div>}
+                {isTraining && (hasPlans
+                  ? <button style={{ ...FS.btnPrimary, alignSelf: "flex-start", marginTop: 4 }} onClick={() => { openSessionPlans(it); setDetailEvent(null); }}><FileText size={15} /> View plan</button>
+                  : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 2 }}>No plan attached yet.</div>)}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {mounts}
     </div>
   );
