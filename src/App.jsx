@@ -7853,6 +7853,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const me = members.find((m) => m.id === meId);
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [addingPlan, setAddingPlan] = useState(false);
+  const [editPlanMode, setEditPlanMode] = useState(false);   // false = clean text; true = reveal Add + per-plan Edit/Remove. Schedule stays at rest (ops).
+  function togglePlanEdit() { setEditPlanMode((v) => { if (v) { setEditingPlanId(null); setAddingPlan(false); } return !v; }); }
   const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly"); const [pcolor, setPcolor] = useState(CATEGORY_COLORS[0]);
   const [editingPlanId, setEditingPlanId] = useState(null);
   const [ed, setEd] = useState({ name: "", cadence: "Monthly", color: CATEGORY_COLORS[0] });
@@ -8342,8 +8344,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       )}
 
       {/* TRAINING CATEGORIES */}
-      <div style={{ ...Lkick, marginBottom: 10 }}><GraduationCap size={13} /> TRAINING CATEGORIES</div>
-      {canManage && (addingPlan ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <div style={{ ...Lkick, marginBottom: 0 }}><GraduationCap size={13} /> TRAINING CATEGORIES</div>
+        {canManage && planView.length > 0 && (
+          <button onClick={togglePlanEdit} style={{ ...Lbtn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            {editPlanMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit trainings</>}
+          </button>
+        )}
+      </div>
+      {canManage && (editPlanMode || planView.length === 0) && (addingPlan ? (
         <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
@@ -8388,8 +8397,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               <div style={FS.rowActions}>
                 <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
                 {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
-                {canManage && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
-                {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
+                {canManage && editPlanMode && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
+                {canManage && editPlanMode && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
               </div>
             </div>
           )
