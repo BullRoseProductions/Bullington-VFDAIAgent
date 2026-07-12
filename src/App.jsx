@@ -6633,6 +6633,8 @@ function MaintenancePanel({ S, role, rigs, notify }) {
   const [u, setU] = useState(rigs[0]?.name || "All units"); const [t, setT] = useState(""); const [cad, setCad] = useState("Monthly");
   const [editingMaintId, setEditingMaintId] = useState(null);   // which maintenance item is in inline edit (separate from rigs)
   const [maintBuf, setMaintBuf] = useState({ task: "", cadence: "Monthly" });
+  const [editMode, setEditMode] = useState(false);   // false = clean text; true = reveal Add + per-item Edit/Remove. Mark done stays at rest (daily ops).
+  function toggleEditMode() { setEditMode((v) => { if (v) { setEditingMaintId(null); setAdding(false); } return !v; }); }
   const rigNameById = new Map((rigs || []).map((r) => [r.id, r.name]));
   const loadMaint = () => {
     supabase.from("apparatus_maintenance")
@@ -6693,7 +6695,14 @@ function MaintenancePanel({ S, role, rigs, notify }) {
       <div style={{ fontSize: 13, color: due > 0 ? FIRE.red : FIRE.greenText, margin: "2px 0 12px", fontWeight: 600 }}>
         {due > 0 ? `${due} maintenance item${due === 1 ? "" : "s"} need attention` : "All maintenance up to date"}
       </div>
-      {canManage && (adding ? (
+      {canManage && items.length > 0 && (
+        <div style={{ display: "flex", marginBottom: 12 }}>
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+            {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit items</>}
+          </button>
+        </div>
+      )}
+      {canManage && (editMode || items.length === 0) && (adding ? (
         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Unit</span><select style={FS.input} value={u} onChange={(e) => setU(e.target.value)}>{[...rigs.map((r) => r.name), "All units"].map((nm) => <option key={nm}>{nm}</option>)}</select></label>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={t} placeholder="e.g. Hose pressure test" onChange={(e) => setT(e.target.value)} /></label>
@@ -6712,8 +6721,8 @@ function MaintenancePanel({ S, role, rigs, notify }) {
             </div>
             <Pill S={S} color={MAINT_FIRE[i.status]}>{i.status.toUpperCase()}</Pill>
             <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
-            {canManage && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+            {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
+            {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i.id)}><X size={14} color={FIRE.deleteRed} /></button>}
             {editingMaintId === i.id && (
               <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={maintBuf.task} onChange={(e) => setMaintBuf((b) => ({ ...b, task: e.target.value }))} /></label>
