@@ -7,7 +7,7 @@ import {
   ThumbsUp, ThumbsDown, Pencil, MessageSquare, ChevronUp, ChevronDown,
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
-  Palette, Image as ImageIcon, Camera, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
+  Palette, Image as ImageIcon, Camera, MapPin, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
@@ -6149,6 +6149,72 @@ async function downscaleImage(file, maxPx = 1600, quality = 0.85) {
     return new File([blob], (file.name || "photo").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
   } catch { return file; }
 }
+// Slice 6c-1 — EDIT-mode dot canvas: place / drag / link / remove checklist dots on a photo.
+// x_pct/y_pct are 0-100 percentages of the image, rendered in an aspect-ratio container so a
+// dot lands on the identical spot on phone / tablet / desktop. Visual dot ~16px inside a 44px
+// touch target (gloved hands). Drag saves ONE update on release; tap-vs-drag by a 5px threshold.
+function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMove, onUnlink, busy }) {
+  const containerRef = useRef(null);
+  const [pending, setPending] = useState(null);   // { xp, yp } tapped empty spot awaiting new/link
+  const [newLabel, setNewLabel] = useState("");
+  const [selectedId, setSelectedId] = useState(null);
+  const [drag, setDrag] = useState(null);          // { id, xp, yp, sx, sy, moved }
+  const clamp = (n) => Math.max(0, Math.min(100, n));
+  const pctFromEvent = (e) => { const r = containerRef.current.getBoundingClientRect(); return { xp: Math.round(clamp((e.clientX - r.left) / r.width * 100)), yp: Math.round(clamp((e.clientY - r.top) / r.height * 100)) }; };
+  const selected = selectedId ? dots.find((d) => d.id === selectedId) : null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div ref={containerRef}
+        onClick={(e) => { if (drag) return; const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}
+        style={{ position: "relative", width: "100%", maxWidth: 520, borderRadius: 10, overflow: "hidden", userSelect: "none", touchAction: "manipulation", border: `0.5px solid ${FIRE.hairline}` }}>
+        {url
+          ? <img src={url} alt={photo.angle_label || "Apparatus photo"} draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} />
+          : <div style={{ height: 220, background: FIRE.btnBg, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
+        {dots.map((it) => {
+          const dragging = drag && drag.id === it.id;
+          const x = dragging ? drag.xp : it.x_pct;
+          const y = dragging ? drag.yp : it.y_pct;
+          const sel = selectedId === it.id;
+          return (
+            <div key={it.id}
+              onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); setDrag({ id: it.id, xp: it.x_pct, yp: it.y_pct, sx: e.clientX, sy: e.clientY, moved: false }); }}
+              onPointerMove={(e) => setDrag((d) => { if (!d || d.id !== it.id) return d; const { xp, yp } = pctFromEvent(e); return { ...d, xp, yp, moved: d.moved || Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5 }; })}
+              onPointerUp={(e) => { e.stopPropagation(); setDrag((d) => { if (d && d.id === it.id) { if (d.moved) onMove(it, d.xp, d.yp); else { setSelectedId(it.id); setPending(null); } } return null; }); }}
+              onClick={(e) => e.stopPropagation()}
+              style={{ position: "absolute", left: `${x}%`, top: `${y}%`, width: 44, height: 44, transform: "translate(-50%,-50%)", display: "grid", placeItems: "center", cursor: "grab", touchAction: "none", zIndex: 2 }}>
+              <span style={{ width: 16, height: 16, borderRadius: 999, background: sel ? FIRE.red : "#fff", border: `2px solid ${sel ? "#fff" : FIRE.red}`, boxShadow: "0 0 0 2px rgba(0,0,0,.45)" }} />
+            </div>
+          );
+        })}
+      </div>
+      {pending && (
+        <div style={{ ...FS.card, background: FIRE.btnBg, padding: 10, marginTop: 8 }}>
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8 }}>Place a dot here ({pending.xp}%, {pending.yp}%):</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: unplaced.length ? 10 : 0 }}>
+            <input autoFocus value={newLabel} placeholder="New item name (e.g. Pump primer)" onChange={(e) => setNewLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && newLabel.trim()) { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); } }}
+              style={{ ...FS.input, flex: "1 1 170px", minWidth: 140, fontSize: 12.5, padding: "6px 8px" }} />
+            <button disabled={busy || !newLabel.trim()} onClick={() => { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); }} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: (busy || !newLabel.trim()) ? 0.5 : 1 }}><Plus size={13} /> New item</button>
+          </div>
+          {unplaced.length > 0 && (<>
+            <div style={{ fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700, marginBottom: 4 }}>or link an existing item</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {unplaced.map((it) => <button key={it.id} disabled={busy} onClick={() => { onLink(it, pending.xp, pending.yp); setPending(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}>{it.label}</button>)}
+            </div>
+          </>)}
+          <div style={{ marginTop: 8 }}><button onClick={() => setPending(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Cancel</button></div>
+        </div>
+      )}
+      {selected && !pending && (
+        <div style={{ ...FS.card, background: FIRE.btnBg, padding: 10, marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: FIRE.textPrimary, flex: "1 1 120px", minWidth: 100 }}><b>{selected.label}</b></span>
+          <button disabled={busy} onClick={() => { onUnlink(selected); setSelectedId(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}><X size={13} color={FIRE.deleteRed} /> Remove dot</button>
+          <button onClick={() => setSelectedId(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Done</button>
+        </div>
+      )}
+    </div>
+  );
+}
 // Slice 6b — per-rig photo management (leadership only; ops manage photos RLS).
 // Reuses the station-documents bucket + signed-URL display, exactly like Documents.
 // No dot placement here (that's 6c) — just upload / label / reorder / soft-delete.
@@ -6160,6 +6226,15 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
   const [busy, setBusy] = useState(false);       // upload/reorder/delete in flight — disables buttons (guards the reorder mash-race)
   const [editLabelId, setEditLabelId] = useState(null);   // photo whose label is being edited (else display mode)
   const [labelDraft, setLabelDraft] = useState("");
+  const [items, setItems] = useState(null);        // active checklist items (for dot placement: photo_id/x_pct/y_pct)
+  const [editDotsId, setEditDotsId] = useState(null);   // photo whose dot-placement canvas is open
+  async function loadItems() {
+    const { data } = await supabase.from("apparatus_check_items")
+      .select("id, label, active, photo_id, x_pct, y_pct, sort_order")
+      .eq("apparatus_id", rig.id).eq("active", true)
+      .order("sort_order", { ascending: true });
+    setItems(data || []);
+  }
   async function load() {
     setLoading(true);
     const { data } = await supabase.from("apparatus_photos")
@@ -6173,9 +6248,45 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
       const { data: signed } = await supabase.storage.from("station-documents").createSignedUrls(paths, 3600);
       (signed || []).forEach((s) => { const ph = s?.signedUrl && list.find((p) => p.storage_path === s.path); if (ph) map[ph.id] = s.signedUrl; });
     }
-    setPhotos(list); setUrls(map); setLoading(false);
+    setPhotos(list); setUrls(map);
+    await loadItems();
+    setLoading(false);
   }
   async function toggle() { const next = !open; setOpen(next); if (next && photos === null) await load(); }
+  // Dot placement writes (apparatus_check_items UPDATE/INSERT — gated by ops-manage-check-items RLS).
+  async function createDot(photo, xp, yp, label) {
+    const name = (label || "").trim(); if (!name) return;
+    setBusy(true);
+    try {
+      const { data: deptId } = await supabase.rpc("my_department_id");
+      if (!deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+      const nextOrder = (items || []).reduce((m, it) => Math.max(m, it.sort_order ?? 0), -1) + 1;
+      const { error } = await supabase.from("apparatus_check_items").insert({ department_id: deptId, apparatus_id: rig.id, label: name, active: true, sort_order: nextOrder, photo_id: photo.id, x_pct: xp, y_pct: yp });
+      if (error) { notify({ kind: "error", title: "Couldn't add the item", text: error.message }); return; }
+      await loadItems();
+    } finally { setBusy(false); }
+  }
+  async function linkDot(item, photo, xp, yp) {
+    setBusy(true);
+    try {
+      const { error } = await supabase.from("apparatus_check_items").update({ photo_id: photo.id, x_pct: xp, y_pct: yp }).eq("id", item.id);
+      if (error) { notify({ kind: "error", title: "Couldn't link the item", text: error.message }); return; }
+      await loadItems();
+    } finally { setBusy(false); }
+  }
+  async function moveDot(item, xp, yp) {   // one UPDATE per nudge, on pointer release
+    setItems((is) => (is || []).map((x) => x.id === item.id ? { ...x, x_pct: xp, y_pct: yp } : x));   // optimistic
+    const { error } = await supabase.from("apparatus_check_items").update({ x_pct: xp, y_pct: yp }).eq("id", item.id);
+    if (error) { notify({ kind: "error", title: "Couldn't move the dot", text: error.message }); await loadItems(); }
+  }
+  async function unlinkDot(item) {
+    setBusy(true);
+    try {
+      const { error } = await supabase.from("apparatus_check_items").update({ photo_id: null, x_pct: null, y_pct: null }).eq("id", item.id);
+      if (error) { notify({ kind: "error", title: "Couldn't remove the dot", text: error.message }); return; }
+      await loadItems();
+    } finally { setBusy(false); }
+  }
   async function addPhoto(file) {
     if (!file) return;
     setBusy(true);
@@ -6223,6 +6334,9 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
     try {
       const { error } = await supabase.from("apparatus_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", p.id);
       if (error) { notify({ kind: "error", title: "Couldn't remove the photo", text: error.message }); return; }
+      // soft-delete keeps photo_id (FK SET NULL only fires on hard delete), so clear the
+      // dots explicitly → those items return to the list-only pool and survive.
+      await supabase.from("apparatus_check_items").update({ photo_id: null, x_pct: null, y_pct: null }).eq("photo_id", p.id);
       await load();
     } finally { setBusy(false); }
   }
@@ -6239,32 +6353,45 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
           ) : (
             <>
               {(photos || []).length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 8 }}>No photos yet — add one so you can build a visual check later.</div>}
-              {(photos || []).map((p, i) => (
-                <div key={p.id} style={{ ...FS.card, background: FIRE.btnBg, padding: 8, marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  {urls[p.id]
-                    ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
-                    : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
-                  {editLabelId === p.id ? (
-                    <input autoFocus value={labelDraft} placeholder="Label (e.g. Front, Driver side)" onChange={(e) => setLabelDraft(e.target.value)}
-                      onBlur={() => saveLabel(p, labelDraft)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                      style={{ ...FS.input, flex: "1 1 150px", minWidth: 120, fontSize: 12.5, padding: "6px 8px" }} />
-                  ) : (
-                    <button title="Edit label" onClick={() => { setEditLabelId(p.id); setLabelDraft(p.angle_label || ""); }}
-                      style={{ flex: "1 1 150px", minWidth: 120, textAlign: "left", background: "none", border: "none", padding: "6px 2px", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      {p.angle_label
-                        ? <span style={{ fontSize: 13, color: FIRE.textPrimary }}>{p.angle_label}</span>
-                        : <span style={{ fontSize: 12.5, color: FIRE.textMuted2, fontStyle: "italic" }}>Add label</span>}
-                      <Pencil size={12} color={FIRE.textMuted} />
-                    </button>
-                  )}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-                    <button title="Move up" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === 0) ? 0.4 : 1 }}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
-                    <button title="Move down" disabled={busy || i === (photos.length - 1)} onClick={() => move(i, 1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === (photos.length - 1)) ? 0.4 : 1 }}><ChevronDown size={14} color={FIRE.btnIcon} /></button>
-                    <button title="Remove photo" disabled={busy} onClick={() => del(p)} style={{ ...FS.btn, padding: "6px 8px", opacity: busy ? 0.4 : 1 }}><X size={14} color={FIRE.deleteRed} /></button>
+              {(photos || []).map((p, i) => {
+                const dotCount = (items || []).filter((it) => it.photo_id === p.id && it.x_pct != null).length;
+                const editingDots = editDotsId === p.id;
+                return (
+                <div key={p.id} style={{ marginBottom: 6 }}>
+                  <div style={{ ...FS.card, background: FIRE.btnBg, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    {urls[p.id]
+                      ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
+                      : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
+                    {editLabelId === p.id ? (
+                      <input autoFocus value={labelDraft} placeholder="Label (e.g. Front, Driver side)" onChange={(e) => setLabelDraft(e.target.value)}
+                        onBlur={() => saveLabel(p, labelDraft)}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                        style={{ ...FS.input, flex: "1 1 150px", minWidth: 120, fontSize: 12.5, padding: "6px 8px" }} />
+                    ) : (
+                      <button title="Edit label" onClick={() => { setEditLabelId(p.id); setLabelDraft(p.angle_label || ""); }}
+                        style={{ flex: "1 1 150px", minWidth: 120, textAlign: "left", background: "none", border: "none", padding: "6px 2px", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        {p.angle_label
+                          ? <span style={{ fontSize: 13, color: FIRE.textPrimary }}>{p.angle_label}</span>
+                          : <span style={{ fontSize: 12.5, color: FIRE.textMuted2, fontStyle: "italic" }}>Add label</span>}
+                        <Pencil size={12} color={FIRE.textMuted} />
+                      </button>
+                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                      <button title={editingDots ? "Done placing dots" : "Place checklist dots on this photo"} onClick={() => setEditDotsId(editingDots ? null : p.id)} style={{ ...FS.btn, padding: "6px 9px", fontSize: 11.5, ...(editingDots ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}><MapPin size={13} color={editingDots ? FIRE.red : FIRE.btnIcon} /> Dots {dotCount}</button>
+                      <button title="Move up" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === 0) ? 0.4 : 1 }}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
+                      <button title="Move down" disabled={busy || i === (photos.length - 1)} onClick={() => move(i, 1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === (photos.length - 1)) ? 0.4 : 1 }}><ChevronDown size={14} color={FIRE.btnIcon} /></button>
+                      <button title="Remove photo" disabled={busy} onClick={() => del(p)} style={{ ...FS.btn, padding: "6px 8px", opacity: busy ? 0.4 : 1 }}><X size={14} color={FIRE.deleteRed} /></button>
+                    </div>
                   </div>
+                  {editingDots && <PhotoDotEditor S={S} url={urls[p.id]} photo={p}
+                    dots={(items || []).filter((it) => it.photo_id === p.id && it.x_pct != null)}
+                    unplaced={(items || []).filter((it) => it.photo_id == null)}
+                    onCreate={(xp, yp, label) => createDot(p, xp, yp, label)}
+                    onLink={(it, xp, yp) => linkDot(it, p, xp, yp)}
+                    onMove={moveDot} onUnlink={unlinkDot} busy={busy} />}
                 </div>
-              ))}
+                );
+              })}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {/* Take photo: capture="environment" opens the REAR camera on a phone. */}
                 <label title="Take a photo with the camera" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
