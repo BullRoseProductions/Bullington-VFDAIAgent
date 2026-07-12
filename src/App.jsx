@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { QRCodeCanvas } from "qrcode.react";
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { supabase, APP_URL } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -6149,67 +6150,91 @@ async function downscaleImage(file, maxPx = 1600, quality = 0.85) {
     return new File([blob], (file.name || "photo").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
   } catch { return file; }
 }
-// Slice 6c-1 — EDIT-mode dot canvas: place / drag / link / remove checklist dots on a photo.
-// x_pct/y_pct are 0-100 percentages of the image, rendered in an aspect-ratio container so a
-// dot lands on the identical spot on phone / tablet / desktop. Visual dot ~16px inside a 44px
-// touch target (gloved hands). Drag saves ONE update on release; tap-vs-drag by a 5px threshold.
-function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMove, onUnlink, busy }) {
-  const containerRef = useRef(null);
-  const [pending, setPending] = useState(null);   // { xp, yp } tapped empty spot awaiting new/link
+// Slice 6c — FULL-SCREEN dot viewer/editor. Pinch-zoom + pan via react-zoom-pan-pinch;
+// dots + image live INSIDE the transformed content (positioned in image-% space) so they pan/
+// zoom as one unit. Coordinates are read from the <img>'s getBoundingClientRect — which already
+// encodes scale AND pan — so x_pct/y_pct are always relative to the FULL image (correct by
+// construction at any zoom/pan). Gesture rules: two-finger pinch = zoom; one-finger on empty =
+// pan (library); one-finger on a DOT = move it (edit only, dot is panning.excluded); tap =
+// place/select. Dot-drag aborts the instant a 2nd pointer lands (let the pinch win).
+// editable=false → read-only viewer for CHECK mode (6c-2): no drag, no placement; tap selects.
+function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMove, onUnlink, onClose, busy, editable = true, marks, onSelectDot }) {
+  const imgRef = useRef(null);
+  const pointers = useRef(0);                      // active pointer count (pinch-abort)
+  const [pending, setPending] = useState(null);    // { xp, yp } tapped empty spot awaiting new/link
   const [newLabel, setNewLabel] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [drag, setDrag] = useState(null);          // { id, xp, yp, sx, sy, moved }
   const clamp = (n) => Math.max(0, Math.min(100, n));
-  const pctFromEvent = (e) => { const r = containerRef.current.getBoundingClientRect(); return { xp: Math.round(clamp((e.clientX - r.left) / r.width * 100)), yp: Math.round(clamp((e.clientY - r.top) / r.height * 100)) }; };
+  const pctFromEvent = (e) => { const r = imgRef.current.getBoundingClientRect(); return { xp: Math.round(clamp((e.clientX - r.left) / r.width * 100)), yp: Math.round(clamp((e.clientY - r.top) / r.height * 100)) }; };
   const selected = selectedId ? dots.find((d) => d.id === selectedId) : null;
+  const dotColor = (it, sel) => { const mk = marks && marks[it.id]; if (mk) return mk.result === "fail" ? FIRE.redBright : FIRE.green; return sel ? FIRE.red : "#fff"; };
   return (
-    <div style={{ marginTop: 8 }}>
-      <div ref={containerRef}
-        onClick={(e) => { if (drag) return; const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}
-        style={{ position: "relative", width: "100%", maxWidth: 520, borderRadius: 10, overflow: "hidden", userSelect: "none", touchAction: "manipulation", border: `0.5px solid ${FIRE.hairline}` }}>
-        {url
-          ? <img src={url} alt={photo.angle_label || "Apparatus photo"} draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} />
-          : <div style={{ height: 220, background: FIRE.btnBg, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
-        {dots.map((it) => {
-          const dragging = drag && drag.id === it.id;
-          const x = dragging ? drag.xp : it.x_pct;
-          const y = dragging ? drag.yp : it.y_pct;
-          const sel = selectedId === it.id;
-          return (
-            <div key={it.id}
-              onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); setDrag({ id: it.id, xp: it.x_pct, yp: it.y_pct, sx: e.clientX, sy: e.clientY, moved: false }); }}
-              onPointerMove={(e) => setDrag((d) => { if (!d || d.id !== it.id) return d; const { xp, yp } = pctFromEvent(e); return { ...d, xp, yp, moved: d.moved || Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5 }; })}
-              onPointerUp={(e) => { e.stopPropagation(); setDrag((d) => { if (d && d.id === it.id) { if (d.moved) onMove(it, d.xp, d.yp); else { setSelectedId(it.id); setPending(null); } } return null; }); }}
-              onClick={(e) => e.stopPropagation()}
-              style={{ position: "absolute", left: `${x}%`, top: `${y}%`, width: 44, height: 44, transform: "translate(-50%,-50%)", display: "grid", placeItems: "center", cursor: "grab", touchAction: "none", zIndex: 2 }}>
-              <span style={{ width: 16, height: 16, borderRadius: 999, background: sel ? FIRE.red : "#fff", border: `2px solid ${sel ? "#fff" : FIRE.red}`, boxShadow: "0 0 0 2px rgba(0,0,0,.45)" }} />
-            </div>
-          );
-        })}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.93)", zIndex: 80, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", flexShrink: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, color: "#F0F2F5", fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.angle_label || "Apparatus photo"}</div>
+        <button onClick={onClose} style={{ ...FS.btn, padding: "6px 12px" }}><X size={15} color={FIRE.btnIcon} /> Done</button>
       </div>
-      {pending && (
-        <div style={{ ...FS.card, background: FIRE.btnBg, padding: 10, marginTop: 8 }}>
-          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8 }}>Place a dot here ({pending.xp}%, {pending.yp}%):</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: unplaced.length ? 10 : 0 }}>
-            <input autoFocus value={newLabel} placeholder="New item name (e.g. Pump primer)" onChange={(e) => setNewLabel(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && newLabel.trim()) { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); } }}
-              style={{ ...FS.input, flex: "1 1 170px", minWidth: 140, fontSize: 12.5, padding: "6px 8px" }} />
-            <button disabled={busy || !newLabel.trim()} onClick={() => { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); }} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: (busy || !newLabel.trim()) ? 0.5 : 1 }}><Plus size={13} /> New item</button>
-          </div>
-          {unplaced.length > 0 && (<>
-            <div style={{ fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700, marginBottom: 4 }}>or link an existing item</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {unplaced.map((it) => <button key={it.id} disabled={busy} onClick={() => { onLink(it, pending.xp, pending.yp); setPending(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}>{it.label}</button>)}
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        <TransformWrapper minScale={1} maxScale={6} doubleClick={{ mode: "toggle", step: 1.6 }} panning={{ excluded: ["apparatus-dot"] }} pinch={{ step: 5 }} wheel={{ step: 0.15 }}>
+          {({ zoomIn, zoomOut, resetTransform }) => (<>
+            <div style={{ position: "absolute", right: 12, bottom: "calc(12px + env(safe-area-inset-bottom))", zIndex: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={() => zoomIn()} style={{ ...FS.btn, width: 42, height: 42, justifyContent: "center", padding: 0, fontSize: 18 }}>+</button>
+              <button onClick={() => zoomOut()} style={{ ...FS.btn, width: 42, height: 42, justifyContent: "center", padding: 0, fontSize: 18 }}>−</button>
+              <button onClick={() => resetTransform()} title="Fit" style={{ ...FS.btn, width: 42, height: 42, justifyContent: "center", padding: 0, fontSize: 10.5, fontWeight: 700 }}>FIT</button>
             </div>
+            <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }} contentStyle={{ width: "100%" }}>
+              <div style={{ position: "relative", width: "100%" }}
+                onClick={(e) => { if (!editable || drag) return; const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
+                {url
+                  ? <img ref={imgRef} src={url} alt={photo.angle_label || "Apparatus photo"} draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} />
+                  : <div style={{ height: 260, background: FIRE.btnBg, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
+                {dots.map((it) => {
+                  const dragging = drag && drag.id === it.id;
+                  const x = dragging ? drag.xp : it.x_pct;
+                  const y = dragging ? drag.yp : it.y_pct;
+                  const sel = selectedId === it.id;
+                  return (
+                    <div key={it.id} className="apparatus-dot"
+                      onPointerDown={(e) => { pointers.current += 1; if (!editable) return; if (pointers.current > 1) { setDrag(null); return; } e.stopPropagation(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch {} setDrag({ id: it.id, xp: it.x_pct, yp: it.y_pct, sx: e.clientX, sy: e.clientY, moved: false }); }}
+                      onPointerMove={(e) => { if (!editable) return; if (pointers.current > 1) { setDrag(null); return; } setDrag((d) => { if (!d || d.id !== it.id) return d; const { xp, yp } = pctFromEvent(e); return { ...d, xp, yp, moved: d.moved || Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5 }; }); }}
+                      onPointerUp={(e) => { pointers.current = Math.max(0, pointers.current - 1); if (!editable) { onSelectDot && onSelectDot(it); return; } e.stopPropagation(); setDrag((d) => { if (d && d.id === it.id) { if (d.moved) onMove(it, d.xp, d.yp); else { setSelectedId(it.id); setPending(null); } } return null; }); }}
+                      onPointerCancel={() => { pointers.current = Math.max(0, pointers.current - 1); setDrag(null); }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ position: "absolute", left: `${x}%`, top: `${y}%`, width: 44, height: 44, transform: "translate(-50%,-50%)", display: "grid", placeItems: "center", cursor: editable ? "grab" : "pointer", touchAction: "none", zIndex: 2 }}>
+                      <span style={{ width: 18, height: 18, borderRadius: 999, background: dotColor(it, sel), border: `2.5px solid ${sel ? "#fff" : "rgba(255,255,255,.9)"}`, boxShadow: "0 0 0 2px rgba(0,0,0,.5)" }} />
+                    </div>
+                  );
+                })}
+              </div>
+            </TransformComponent>
           </>)}
-          <div style={{ marginTop: 8 }}><button onClick={() => setPending(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Cancel</button></div>
-        </div>
-      )}
-      {selected && !pending && (
-        <div style={{ ...FS.card, background: FIRE.btnBg, padding: 10, marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: FIRE.textPrimary, flex: "1 1 120px", minWidth: 100 }}><b>{selected.label}</b></span>
-          <button disabled={busy} onClick={() => { onUnlink(selected); setSelectedId(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}><X size={13} color={FIRE.deleteRed} /> Remove dot</button>
-          <button onClick={() => setSelectedId(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Done</button>
+        </TransformWrapper>
+      </div>
+      {editable && (pending || selected) && (
+        <div style={{ flexShrink: 0, background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: `12px 16px calc(12px + env(safe-area-inset-bottom))` }}>
+          {pending ? (<>
+            <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8 }}>Place a dot here:</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: unplaced.length ? 10 : 0 }}>
+              <input autoFocus value={newLabel} placeholder="New item name (e.g. Pump primer)" onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && newLabel.trim()) { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); } }}
+                style={{ ...FS.input, flex: "1 1 170px", minWidth: 140, fontSize: 12.5, padding: "6px 8px" }} />
+              <button disabled={busy || !newLabel.trim()} onClick={() => { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); }} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: (busy || !newLabel.trim()) ? 0.5 : 1 }}><Plus size={13} /> New item</button>
+            </div>
+            {unplaced.length > 0 && (<>
+              <div style={{ fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700, marginBottom: 4 }}>or link an existing item</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {unplaced.map((it) => <button key={it.id} disabled={busy} onClick={() => { onLink(it, pending.xp, pending.yp); setPending(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}>{it.label}</button>)}
+              </div>
+            </>)}
+            <div style={{ marginTop: 8 }}><button onClick={() => setPending(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Cancel</button></div>
+          </>) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, color: FIRE.textPrimary, flex: "1 1 120px", minWidth: 100 }}><b>{selected.label}</b></span>
+              <button disabled={busy} onClick={() => { onUnlink(selected); setSelectedId(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}><X size={13} color={FIRE.deleteRed} /> Remove dot</button>
+              <button onClick={() => setSelectedId(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Done</button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -6383,15 +6408,19 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                       <button title="Remove photo" disabled={busy} onClick={() => del(p)} style={{ ...FS.btn, padding: "6px 8px", opacity: busy ? 0.4 : 1 }}><X size={14} color={FIRE.deleteRed} /></button>
                     </div>
                   </div>
-                  {editingDots && <PhotoDotEditor S={S} url={urls[p.id]} photo={p}
-                    dots={(items || []).filter((it) => it.photo_id === p.id && it.x_pct != null)}
-                    unplaced={(items || []).filter((it) => it.photo_id == null)}
-                    onCreate={(xp, yp, label) => createDot(p, xp, yp, label)}
-                    onLink={(it, xp, yp) => linkDot(it, p, xp, yp)}
-                    onMove={moveDot} onUnlink={unlinkDot} busy={busy} />}
                 </div>
                 );
               })}
+              {editDotsId && (() => {
+                const p = (photos || []).find((x) => x.id === editDotsId);
+                if (!p) return null;
+                return <PhotoDotEditor S={S} url={urls[p.id]} photo={p}
+                  dots={(items || []).filter((it) => it.photo_id === p.id && it.x_pct != null)}
+                  unplaced={(items || []).filter((it) => it.photo_id == null)}
+                  onCreate={(xp, yp, label) => createDot(p, xp, yp, label)}
+                  onLink={(it, xp, yp) => linkDot(it, p, xp, yp)}
+                  onMove={moveDot} onUnlink={unlinkDot} onClose={() => setEditDotsId(null)} busy={busy} editable />;
+              })()}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {/* Take photo: capture="environment" opens the REAR camera on a phone. */}
                 <label title="Take a photo with the camera" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
