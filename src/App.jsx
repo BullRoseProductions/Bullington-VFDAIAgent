@@ -940,7 +940,7 @@ function NextLeadershipEventTile({ S, sessions, role, notify }) {
   const todayISO = toISODate(new Date());
   const viewer = { access: role };
   const next = (sessions || []).filter((s) => !s.done && isRestrictedEvent(s) && rollFor(s, viewer) && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
-  const kicker = next?.audience === "board" ? "NEXT BOARD EVENT" : "NEXT LEADERSHIP EVENT";
+  const kicker = next?.audience === "board" ? "NEXT BOARD MEETING" : "NEXT LEADERSHIP EVENT";
   return (
     <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> {kicker}</div>
