@@ -6182,7 +6182,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
       if (!deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
       const small = await downscaleImage(file);   // ~1600px JPEG — a few hundred KB
       const safe = (small.name || "photo.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `apparatus/${deptId}/${Date.now()}-${safe}`;
+      const path = `${deptId}/apparatus/${Date.now()}-${safe}`;   // deptId FIRST — the station-documents storage policy gates on first-folder = dept (like Documents / cert proofs)
       const { error: upErr } = await supabase.storage.from("station-documents").upload(path, small);
       if (upErr) { notify({ kind: "error", title: "Upload failed", text: upErr.message || "Please try again." }); return; }
       const nextOrder = (photos || []).reduce((m, p) => Math.max(m, p.sort_order ?? 0), -1) + 1;
