@@ -6169,19 +6169,21 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
   const pctFromEvent = (e) => { const r = imgRef.current.getBoundingClientRect(); return { xp: Math.round(clamp((e.clientX - r.left) / r.width * 100)), yp: Math.round(clamp((e.clientY - r.top) / r.height * 100)) }; };
   const selected = selectedId ? dots.find((d) => d.id === selectedId) : null;
   const dotColor = (it, sel) => { const mk = marks && marks[it.id]; if (mk) return mk.result === "fail" ? FIRE.redBright : FIRE.green; return sel ? FIRE.red : "#fff"; };
+  const ctlBtn = { width: 46, height: 46, borderRadius: 10, border: "none", background: "rgba(255,255,255,.13)", color: "#fff", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 };
+  useEffect(() => { const onKey = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.93)", zIndex: 80, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", flexShrink: 0 }}>
+    <div style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0, color: "#F0F2F5", fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.angle_label || "Apparatus photo"}</div>
-        <button onClick={onClose} style={{ ...FS.btn, padding: "6px 12px" }}><X size={15} color={FIRE.btnIcon} /> Done</button>
+        <button onClick={onClose} title="Close (Esc)" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", color: "#111", border: "none", borderRadius: 999, padding: "11px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}><X size={18} /> Close</button>
       </div>
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
         <TransformWrapper minScale={1} maxScale={6} doubleClick={{ mode: "toggle", step: 1.6 }} panning={{ excluded: ["apparatus-dot"] }} pinch={{ step: 5 }} wheel={{ step: 0.15 }}>
           {({ zoomIn, zoomOut, resetTransform }) => (<>
-            <div style={{ position: "absolute", right: 12, bottom: "calc(12px + env(safe-area-inset-bottom))", zIndex: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-              <button onClick={() => zoomIn()} style={{ ...FS.btn, width: 42, height: 42, justifyContent: "center", padding: 0, fontSize: 18 }}>+</button>
-              <button onClick={() => zoomOut()} style={{ ...FS.btn, width: 42, height: 42, justifyContent: "center", padding: 0, fontSize: 18 }}>−</button>
-              <button onClick={() => resetTransform()} title="Fit" style={{ ...FS.btn, width: 42, height: 42, justifyContent: "center", padding: 0, fontSize: 10.5, fontWeight: 700 }}>FIT</button>
+            <div style={{ position: "absolute", right: 14, bottom: "calc(16px + env(safe-area-inset-bottom))", zIndex: 20, display: "flex", flexDirection: "column", gap: 6, background: "rgba(15,17,20,.82)", border: "1px solid rgba(255,255,255,.22)", borderRadius: 14, padding: 6 }}>
+              <button onClick={() => zoomIn()} title="Zoom in" style={ctlBtn}>+</button>
+              <button onClick={() => zoomOut()} title="Zoom out" style={ctlBtn}>−</button>
+              <button onClick={() => resetTransform()} title="Fit to screen" style={{ ...ctlBtn, fontSize: 11, fontWeight: 800 }}>FIT</button>
             </div>
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }} contentStyle={{ width: "100%" }}>
               <div style={{ position: "relative", width: "100%" }}
