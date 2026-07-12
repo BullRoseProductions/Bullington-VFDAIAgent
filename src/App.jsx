@@ -5670,7 +5670,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
       if (ppaths.length) { const { data: signed } = await supabase.storage.from("station-documents").createSignedUrls(ppaths, 3600); (signed || []).forEach((s) => { const ph = s?.signedUrl && plist.find((p) => p.storage_path === s.path); if (ph) umap[ph.id] = s.signedUrl; }); }
       if (!alive) return;
       setPhotos(plist); setPhotoUrls(umap);
-      if (plist.length) { setCheckPhotoId(plist[0].id); setPhotoOpen(true); }   // default to Photo view when the rig has photos
+      if (plist.length) setCheckPhotoId(plist[0].id);   // pre-select the first photo, but DON'T auto-open — the check opens on the LIST (the finalize backbone; only place list-only items show). Photo view is a one-tap choice.
       setLoading(false);
     })();
     return () => { alive = false; };
