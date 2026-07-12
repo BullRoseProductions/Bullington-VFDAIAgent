@@ -9064,6 +9064,8 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [ad, setAd] = useState(""); const [acat, setAcat] = useState("Cleanup"); const [acatNew, setAcatNew] = useState(""); const [arec, setArec] = useState("Weekly");
   const [assignee, setAssignee] = useState(""); const [due, setDue] = useState("");   // "" = station-wide / no due date
   const [editingDutyId, setEditingDutyId] = useState(null);   // which duty is being edited inline
+  const [editMode, setEditMode] = useState(false);   // false = clean checklist text; true = reveal Add + per-duty Edit/Remove. The done-check + Reset stay at rest (daily ops).
+  function toggleEditMode() { setEditMode((v) => { if (v) { setEditingDutyId(null); setAddingA(false); } return !v; }); }
   const [editBuf, setEditBuf] = useState({ title: "", category: "Cleanup", catNew: "", recurrence: "Weekly", assignee: "", due: "" });
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
   const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
@@ -9209,7 +9211,8 @@ function StationDuties({ S, role, members, meId, notify }) {
             <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color={FIRE.green} track={FIRE.track} />
           </div>
           {canManage && <button style={FS.btn} onClick={resetWeek}><RefreshCw size={14} color={FIRE.btnIcon} /> Reset now</button>}
-          {canCreate && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
+          {(canManage || canCreate) && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
+          {canCreate && (editMode || duties.length === 0) && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
           <RefreshCw size={13} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -9273,8 +9276,8 @@ function StationDuties({ S, role, members, meId, notify }) {
                     return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
                   })()}
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
-                  {canManage && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-                  {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
+                  {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
+                  {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
                 {pickerForDutyId === a.id && (
                   <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
