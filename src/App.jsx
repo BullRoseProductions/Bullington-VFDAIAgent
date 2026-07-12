@@ -5910,6 +5910,10 @@ function ApparatusChecklist({ S, rig, notify }) {
   const [showRetired, setShowRetired] = useState(false);
   const [retired, setRetired] = useState(null);      // null = not loaded
   const [retiredLoading, setRetiredLoading] = useState(false);
+  const [editMode, setEditMode] = useState(false);   // false = clean read-only text; true = reveal add/edit/retire on every row
+  function toggleEditMode() {
+    setEditMode((v) => { if (v) { setEditingId(null); setAdding(false); } return !v; });   // leaving edit mode drops any in-progress edit/add
+  }
   const load = async () => {
     setLoading(true);
     const { data } = await supabase.from("apparatus_check_items")
@@ -5982,7 +5986,17 @@ function ApparatusChecklist({ S, rig, notify }) {
       </button>
       {open && (
         <div style={{ marginTop: 8 }}>
-          {adding ? (
+          {/* Clean by default: read-only text. "Edit checklist" reveals add/edit/retire on all rows
+              (reading vs restructuring). An empty list shows Add directly to bootstrap the first item. */}
+          {!loading && items && items.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{items.length} item{items.length === 1 ? "" : "s"}</span>
+              <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+                {editMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={FIRE.btnIcon} /> Edit checklist</>}
+              </button>
+            </div>
+          )}
+          {(editMode || (items && items.length === 0)) && (adding ? (
             <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={label} placeholder="e.g. SCBA pressure" onChange={(e) => setLabel(e.target.value)} /></label>
               <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={location} onChange={setLocation} /></div>
@@ -5992,7 +6006,7 @@ function ApparatusChecklist({ S, rig, notify }) {
                 <button style={FS.btn} onClick={() => { setAdding(false); setLabel(""); setLocation(""); setDescription(""); }}>Cancel</button>
               </div>
             </div>
-          ) : <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, marginBottom: 8 }} onClick={() => setAdding(true)}><Plus size={14} /> Add item</button>}
+          ) : <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, marginBottom: 8 }} onClick={() => setAdding(true)}><Plus size={14} /> Add item</button>)}
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
           ) : (items && items.length === 0) ? (
@@ -6010,8 +6024,8 @@ function ApparatusChecklist({ S, rig, notify }) {
                         <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
                         {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
                       </button>
-                      <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(it)}><Pencil size={13} color={FIRE.textSecondary} /></button>
-                      <button title="Retire (hides it; past checks keep it)" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => retire(it.id)}>Retire</button>
+                      {editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(it)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
+                      {editMode && <button title="Retire (hides it; past checks keep it)" style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => retire(it.id)}>Retire</button>}
                     </div>
                     {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 8px", lineHeight: 1.45 }}>{it.description}</div>}
                     {editingId === it.id && (
@@ -6030,7 +6044,7 @@ function ApparatusChecklist({ S, rig, notify }) {
               </div>
             ));
           })()}
-          {!loading && (
+          {!loading && editMode && (
             <div style={{ marginTop: 10 }}>
               <button onClick={toggleRetired} style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5 }}>
                 {showRetired ? "Hide retired" : "Show retired"}{retired ? ` (${retired.length})` : ""}
