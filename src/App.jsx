@@ -6264,29 +6264,30 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
         </TransformWrapper>
       </div>
       {editable && (pending || selected) && (
-        <div style={{ flexShrink: 0, background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: `12px 16px calc(12px + env(safe-area-inset-bottom))` }}>
+        <div style={{ flexShrink: 0, background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", maxHeight: "48vh", overflowY: "auto" }}>
           {pending ? (<>
             <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8 }}>Place a dot here:</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: unplaced.length ? 10 : 0 }}>
-              <input autoFocus value={newLabel} placeholder="New item name (e.g. Pump primer)" onChange={(e) => setNewLabel(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && newLabel.trim()) { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); } }}
-                style={{ ...FS.input, flex: "1 1 170px", minWidth: 140, fontSize: 12.5, padding: "6px 8px" }} />
-              <button disabled={busy || !newLabel.trim()} onClick={() => { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); }} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: (busy || !newLabel.trim()) ? 0.5 : 1 }}><Plus size={13} /> New item</button>
+            {/* portrait: field on its own full-width line, actions wrap below (never a fixed row) */}
+            <input autoFocus value={newLabel} placeholder="New item name (e.g. Pump primer)" onChange={(e) => setNewLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && newLabel.trim()) { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); } }}
+              style={{ ...FS.input, width: "100%", fontSize: 13, padding: "9px 10px", marginBottom: 8 }} />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button disabled={busy || !newLabel.trim()} onClick={() => { onCreate(pending.xp, pending.yp, newLabel); setPending(null); setNewLabel(""); }} style={{ ...FS.btnPrimary, flex: "1 1 140px", justifyContent: "center", padding: "10px 12px", fontSize: 13, opacity: (busy || !newLabel.trim()) ? 0.5 : 1 }}><Plus size={14} /> New item</button>
+              <button onClick={() => setPending(null)} style={{ ...FS.btn, flex: "0 1 auto", padding: "10px 14px", fontSize: 13 }}>Cancel</button>
             </div>
             {unplaced.length > 0 && (<>
-              <div style={{ fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700, marginBottom: 4 }}>or link an existing item</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700, margin: "12px 0 6px" }}>or link an existing item</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {unplaced.map((it) => <button key={it.id} disabled={busy} onClick={() => { onLink(it, pending.xp, pending.yp); setPending(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}>{it.label}</button>)}
+                {unplaced.map((it) => <button key={it.id} disabled={busy} onClick={() => { onLink(it, pending.xp, pending.yp); setPending(null); }} style={{ ...FS.btn, padding: "7px 10px", fontSize: 12, maxWidth: "100%", whiteSpace: "normal", textAlign: "left", opacity: busy ? 0.5 : 1 }}>{it.label}</button>)}
               </div>
             </>)}
-            <div style={{ marginTop: 8 }}><button onClick={() => setPending(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Cancel</button></div>
-          </>) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, color: FIRE.textPrimary, flex: "1 1 120px", minWidth: 100 }}><b>{selected.label}</b></span>
-              <button disabled={busy} onClick={() => { onUnlink(selected); setSelectedId(null); }} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, opacity: busy ? 0.5 : 1 }}><X size={13} color={FIRE.deleteRed} /> Remove dot</button>
-              <button onClick={() => setSelectedId(null)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }}>Done</button>
+          </>) : (<>
+            <div style={{ fontSize: 14, color: FIRE.textPrimary, marginBottom: 8, wordBreak: "break-word" }}><b>{selected.label}</b></div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button disabled={busy} onClick={() => { onUnlink(selected); setSelectedId(null); }} style={{ ...FS.btn, flex: "1 1 auto", justifyContent: "center", padding: "10px 12px", fontSize: 13, opacity: busy ? 0.5 : 1 }}><X size={14} color={FIRE.deleteRed} /> Remove dot</button>
+              <button onClick={() => setSelectedId(null)} style={{ ...FS.btn, flex: "0 1 auto", padding: "10px 14px", fontSize: 13 }}>Done</button>
             </div>
-          )}
+          </>)}
         </div>
       )}
       {!editable && selected && checkPanel && <div style={{ flexShrink: 0 }}>{checkPanel(selected)}</div>}
