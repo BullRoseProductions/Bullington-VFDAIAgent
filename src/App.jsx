@@ -5444,7 +5444,11 @@ function Apparatus({ S, role, members, meId, notify }) {
   const [rigs, setRigs] = useState([]);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
   const me = members.find((m) => m.id === meId) || null;
-  const canCheck = !!me && me.status !== "Inactive";     // any active member (Probationary included) can perform a check
+  // canCheck is an IDENTITY question, so gate on meId (authoritative — always set for the
+  // signed-in user), NOT on finding `me` in the RLS-filtered members array (which omits the
+  // owner/PA, so the array lookup silently fails for them — same reason canManage never broke).
+  // If `me` happens to resolve we still honor an explicit Inactive; the RPC enforces active-member server-side.
+  const canCheck = !!meId && (me ? me.status !== "Inactive" : true);
   const [checkingRig, setCheckingRig] = useState(null);  // rig whose check modal is open
   const [historyKey, setHistoryKey] = useState(0);       // bump to remount ApparatusHistory after a finalize (refetch)
   const [serviceKey, setServiceKey] = useState(0);       // bump to remount ApparatusServiceHistory after a take-out/return
