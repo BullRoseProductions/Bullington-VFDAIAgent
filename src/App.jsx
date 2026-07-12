@@ -6728,6 +6728,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items + save minutes → CANMANAGE (is_canmanage(): Board/DA/Officer)
   const canManageOps = hasAny(role, CANMANAGE_OPS_ROLES);   // file UPLOAD to station-documents is ops-only (DA/Officer) per station_docs_insert_leadership RLS; Board can still paste
   // Import minutes written OUTSIDE B4C (Firefly/Word/typed elsewhere). Stored source='imported' — never as AI-drafted.
+  const [impOpen, setImpOpen] = useState(false);   // Import card collapsed by default — occasional action, calm by default
   const [impMode, setImpMode] = useState("paste");   // 'paste' | 'upload'
   const [impTitle, setImpTitle] = useState(""); const [impText, setImpText] = useState("");
   const [impFile, setImpFile] = useState(null); const [importing, setImporting] = useState(false); const [impErr, setImpErr] = useState("");
@@ -7011,8 +7012,12 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       </div>
 
       {canManage && (
-        <div style={{ ...FS.card, padding: "16px 18px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
-          <div style={{ ...FS.kicker, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><Upload size={13} /> IMPORT MINUTES — WRITTEN OUTSIDE B4C</div>
+        <div style={{ ...FS.card, padding: impOpen ? "16px 18px" : "4px 18px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
+          <button onClick={() => setImpOpen((v) => !v)} aria-expanded={impOpen} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: "10px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+            <span style={{ ...FS.kicker, marginBottom: 0, display: "inline-flex", alignItems: "center", gap: 6, flex: 1 }}><Upload size={13} /> IMPORT MINUTES — WRITTEN OUTSIDE B4C</span>
+            {impOpen ? <ChevronUp size={16} color={FIRE.btnIcon} /> : <ChevronDown size={16} color={FIRE.btnIcon} />}
+          </button>
+          {impOpen && (<>
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 10, lineHeight: 1.45 }}>Bring in minutes from Firefly, Word, or typed elsewhere. These are saved as <b style={{ color: FIRE.amberText }}>Imported — not AI-generated</b>. You can extract action items from them just like AI minutes.</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
             {[["paste", "Paste text"], ["upload", "Upload file"]].map(([k, l]) => {
@@ -7034,6 +7039,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
           )}
           {impErr && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 10 }}>{impErr}</div>}
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: importing ? 0.7 : 1 }} onClick={saveImported} disabled={importing}>{importing ? <><Loader2 size={16} className="spin" /> Importing…</> : <><Upload size={16} /> Save imported minutes</>}</button>
+          </>)}
         </div>
       )}
 
