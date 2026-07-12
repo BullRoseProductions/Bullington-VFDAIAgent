@@ -7855,6 +7855,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [addingPlan, setAddingPlan] = useState(false);
   const [editPlanMode, setEditPlanMode] = useState(false);   // false = clean text; true = reveal Add + per-plan Edit/Remove. Schedule stays at rest (ops).
   function togglePlanEdit() { setEditPlanMode((v) => { if (v) { setEditingPlanId(null); setAddingPlan(false); } return !v; }); }
+  const [editSessionMode, setEditSessionMode] = useState(false);   // false = clean session rows; true = reveal per-session Edit/Remove + detach-plan. Attendance/QR/Complete/Attach stay at rest (ops).
+  function toggleSessionEdit() { setEditSessionMode((v) => { if (v) setEditingSessionId(null); return !v; }); }
   const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly"); const [pcolor, setPcolor] = useState(CATEGORY_COLORS[0]);
   const [editingPlanId, setEditingPlanId] = useState(null);
   const [ed, setEd] = useState({ name: "", cadence: "Monthly", color: CATEGORY_COLORS[0] });
@@ -8459,6 +8461,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         </div>
 
         <div>
+          {canManage && monthSessions.length > 0 && (
+            <div style={{ display: "flex", marginBottom: 8 }}>
+              <button onClick={toggleSessionEdit} style={{ ...Lbtn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                {editSessionMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit sessions</>}
+              </button>
+            </div>
+          )}
           {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#7E8794", marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
             monthSessions.map((s) => {
               const att = s.attendance || [];
@@ -8489,8 +8498,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       {s.done
                         ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
                         : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
-                      {canManage && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
-                      {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
+                      {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
+                      {canManage && editSessionMode && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                     </div>
                   </div>
                   {editingSessionId === s.id && (
@@ -8520,7 +8529,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           {p.kind === "file"
                             ? <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => openPlan(p)}><FileText size={13} color={LbtnIcon} /> Open</button>
                             : <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => setViewPlan(p)}><FileText size={13} color={LbtnIcon} /> View</button>}
-                          {canManage && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color="#C8606A" /></button>}
+                          {canManage && editSessionMode && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color="#C8606A" /></button>}
                         </div>
                       ))}
                     </div>
