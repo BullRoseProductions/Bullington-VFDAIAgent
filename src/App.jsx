@@ -6224,7 +6224,11 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
   // Portal to <body>: escapes the rig card's opacity (out-of-service = 0.68) and its stacking
   // context, so the modal is truly opaque AND above the app header (both were caused by that ancestor).
   return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+    // stopPropagation: this viewer is createPortal'd to <body>, but React events bubble through the
+    // COMPONENT tree, not the DOM tree — so without this, clicks inside bubble up to the enclosing
+    // CheckRunModal's <div onClick={onClose}> backdrop and destroy the whole check. Catch-all so
+    // empty-photo / content / tab clicks are contained (dots already stopPropagation individually).
+    <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0, color: "#F0F2F5", fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.angle_label || "Apparatus photo"}</div>
         {editable
