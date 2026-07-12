@@ -6409,6 +6409,8 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
   const [labelDraft, setLabelDraft] = useState("");
   const [items, setItems] = useState(null);        // active checklist items (for dot placement: photo_id/x_pct/y_pct)
   const [editDotsId, setEditDotsId] = useState(null);   // photo whose dot-placement canvas is open
+  const [editMode, setEditMode] = useState(false);   // false = view (thumbnail + label + dot-count); true = reveal label-edit/dots/reorder/remove + add
+  function toggleEditMode() { setEditMode((v) => { if (v) { setEditLabelId(null); setEditDotsId(null); } return !v; }); }
   async function loadItems() {
     const { data } = await supabase.from("apparatus_check_items")
       .select("id, label, active, photo_id, x_pct, y_pct, sort_order")
@@ -6533,6 +6535,14 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
           ) : (
             <>
+              {(photos || []).length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{photos.length} photo{photos.length === 1 ? "" : "s"}</span>
+                  <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+                    {editMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={FIRE.btnIcon} /> Edit photos</>}
+                  </button>
+                </div>
+              )}
               {(photos || []).length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 8 }}>No photos yet — add one so you can build a visual check later.</div>}
               {(photos || []).map((p, i) => {
                 const dotCount = (items || []).filter((it) => it.photo_id === p.id && it.x_pct != null).length;
@@ -6543,12 +6553,12 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                     {urls[p.id]
                       ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
                       : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
-                    {editLabelId === p.id ? (
+                    {editMode && editLabelId === p.id ? (
                       <input autoFocus value={labelDraft} placeholder="Label (e.g. Front, Driver side)" onChange={(e) => setLabelDraft(e.target.value)}
                         onBlur={() => saveLabel(p, labelDraft)}
                         onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
                         style={{ ...FS.input, flex: "1 1 150px", minWidth: 120, fontSize: 12.5, padding: "6px 8px" }} />
-                    ) : (
+                    ) : editMode ? (
                       <button title="Edit label" onClick={() => { setEditLabelId(p.id); setLabelDraft(p.angle_label || ""); }}
                         style={{ flex: "1 1 150px", minWidth: 120, textAlign: "left", background: "none", border: "none", padding: "6px 2px", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
                         {p.angle_label
@@ -6556,12 +6566,18 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                           : <span style={{ fontSize: 12.5, color: FIRE.textMuted2, fontStyle: "italic" }}>Add label</span>}
                         <Pencil size={12} color={FIRE.textMuted} />
                       </button>
+                    ) : (
+                      <span style={{ flex: "1 1 150px", minWidth: 120, padding: "6px 2px", fontSize: 13, color: p.angle_label ? FIRE.textPrimary : FIRE.textMuted2, fontStyle: p.angle_label ? "normal" : "italic" }}>{p.angle_label || "Unlabeled"}</span>
                     )}
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-                      <button title={editingDots ? "Done placing dots" : "Place checklist dots on this photo"} onClick={() => setEditDotsId(editingDots ? null : p.id)} style={{ ...FS.btn, padding: "6px 9px", fontSize: 11.5, ...(editingDots ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}><MapPin size={13} color={editingDots ? FIRE.red : FIRE.btnIcon} /> Dots {dotCount}</button>
-                      <button title="Move up" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === 0) ? 0.4 : 1 }}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
-                      <button title="Move down" disabled={busy || i === (photos.length - 1)} onClick={() => move(i, 1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === (photos.length - 1)) ? 0.4 : 1 }}><ChevronDown size={14} color={FIRE.btnIcon} /></button>
-                      <button title="Remove photo" disabled={busy} onClick={() => del(p)} style={{ ...FS.btn, padding: "6px 8px", opacity: busy ? 0.4 : 1 }}><X size={14} color={FIRE.deleteRed} /></button>
+                      {editMode ? (<>
+                        <button title={editingDots ? "Done placing dots" : "Place checklist dots on this photo"} onClick={() => setEditDotsId(editingDots ? null : p.id)} style={{ ...FS.btn, padding: "6px 9px", fontSize: 11.5, ...(editingDots ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}><MapPin size={13} color={editingDots ? FIRE.red : FIRE.btnIcon} /> Dots {dotCount}</button>
+                        <button title="Move up" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === 0) ? 0.4 : 1 }}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
+                        <button title="Move down" disabled={busy || i === (photos.length - 1)} onClick={() => move(i, 1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === (photos.length - 1)) ? 0.4 : 1 }}><ChevronDown size={14} color={FIRE.btnIcon} /></button>
+                        <button title="Remove photo" disabled={busy} onClick={() => del(p)} style={{ ...FS.btn, padding: "6px 8px", opacity: busy ? 0.4 : 1 }}><X size={14} color={FIRE.deleteRed} /></button>
+                      </>) : (
+                        dotCount > 0 && <span title={`${dotCount} checklist dot${dotCount === 1 ? "" : "s"} placed`} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: FIRE.textMuted }}><MapPin size={12} color={FIRE.textMuted2} /> {dotCount}</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -6577,7 +6593,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                   onLink={(it, xp, yp) => linkDot(it, p, xp, yp)}
                   onMove={moveDot} onUnlink={unlinkDot} onClose={() => setEditDotsId(null)} busy={busy} editable />;
               })()}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {(editMode || (photos || []).length === 0) && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {/* Take photo: capture="environment" opens the REAR camera on a phone. */}
                 <label title="Take a photo with the camera" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
                   {busy ? <><Loader2 size={13} className="spin" /> Working…</> : <><Camera size={14} color={FIRE.btnIcon} /> Take photo</>}
@@ -6588,7 +6604,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                   <ImageIcon size={14} color={FIRE.btnIcon} /> Upload photo
                   <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addPhoto(f); }} />
                 </label>
-              </div>
+              </div>}
             </>
           )}
         </div>
