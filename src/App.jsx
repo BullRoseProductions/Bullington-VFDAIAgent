@@ -5744,8 +5744,12 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
     onFinalized?.();
     onClose();
   };
+  // Backdrop has NO onClick={onClose}: a stray click must never destroy an in-progress check
+  // (setCheckingRig(null)). It was also the sink the portaled photo viewer's clicks reached on
+  // desktop (react-zoom-pan-pinch drives mouse pan via native document listeners, so those clicks
+  // slipped past the portal-root guard). Close only via the header ✕ / footer Close buttons.
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
       {photoOpen && checkPhoto && <PhotoDotEditor S={S} url={photoUrls[checkPhoto.id]} photo={checkPhoto}
         dots={dotsFor(checkPhoto.id)} unplaced={[]} marks={marks} editable={false}
         tabs={photoTabs} checkPanel={checkPanel} onClose={() => setPhotoOpen(false)} busy={false} />}
@@ -6221,6 +6225,25 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
   const dotColor = (it, sel) => { const mk = marks && marks[it.id]; if (mk) return mk.result === "fail" ? FIRE.redBright : FIRE.green; return sel ? FIRE.red : "#fff"; };
   const ctlBtn = { width: 46, height: 46, borderRadius: 10, border: "none", background: "rgba(255,255,255,.13)", color: "#fff", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 };
   useEffect(() => { const onKey = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
+  // Pinch must zoom the IMAGE, never the page. touch-action:none on the surface (below) handles
+  // Android/Chrome; iOS Safari ignores user-scalable=no since iOS 10, so we preventDefault the
+  // WebKit gesture events + multi-touch touchmove WHILE this viewer is mounted. preventDefault
+  // suppresses only the browser's page-zoom default — the events still reach the library, so the
+  // photo zooms. Scoped to the open viewer, so the rest of the app keeps normal page zoom.
+  useEffect(() => {
+    const stopGesture = (e) => e.preventDefault();
+    const stopMultiTouch = (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); };
+    document.addEventListener("gesturestart", stopGesture, { passive: false });
+    document.addEventListener("gesturechange", stopGesture, { passive: false });
+    document.addEventListener("gestureend", stopGesture, { passive: false });
+    document.addEventListener("touchmove", stopMultiTouch, { passive: false });
+    return () => {
+      document.removeEventListener("gesturestart", stopGesture);
+      document.removeEventListener("gesturechange", stopGesture);
+      document.removeEventListener("gestureend", stopGesture);
+      document.removeEventListener("touchmove", stopMultiTouch);
+    };
+  }, []);
   // Portal to <body>: escapes the rig card's opacity (out-of-service = 0.68) and its stacking
   // context, so the modal is truly opaque AND above the app header (both were caused by that ancestor).
   return createPortal(
@@ -6248,7 +6271,7 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
               <button onClick={() => zoomOut()} title="Zoom out" style={ctlBtn}>−</button>
               <button onClick={() => resetTransform()} title="Fit to screen" style={{ ...ctlBtn, fontSize: 11, fontWeight: 800 }}>FIT</button>
             </div>
-            <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }} contentStyle={{ width: "100%" }}>
+            <TransformComponent wrapperStyle={{ width: "100%", height: "100%", touchAction: "none" }} contentStyle={{ width: "100%" }}>
               <div style={{ position: "relative", width: "100%" }}
                 onClick={(e) => { if (drag) return; if (!editable) { setSelectedId(null); return; } const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
                 {url
