@@ -7,7 +7,7 @@ import {
   ThumbsUp, ThumbsDown, Pencil, MessageSquare, ChevronUp, ChevronDown,
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
-  Palette, Image as ImageIcon, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
+  Palette, Image as ImageIcon, Camera, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
@@ -6187,7 +6187,10 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
       if (upErr) { notify({ kind: "error", title: "Upload failed", text: upErr.message || "Please try again." }); return; }
       const nextOrder = (photos || []).reduce((m, p) => Math.max(m, p.sort_order ?? 0), -1) + 1;
       const { error: insErr } = await supabase.from("apparatus_photos").insert({ department_id: deptId, apparatus_id: rig.id, storage_path: path, angle_label: "", sort_order: nextOrder, uploaded_by: meId });
-      if (insErr) { notify({ kind: "error", title: "Couldn't save the photo", text: insErr.message || "Please try again." }); return; }
+      if (insErr) {
+        await supabase.storage.from("station-documents").remove([path]).catch(() => {});   // no orphaned file when the metadata row is rejected (e.g. RLS)
+        notify({ kind: "error", title: "Couldn't save the photo", text: insErr.message || "Please try again." }); return;
+      }
       notify({ kind: "success", text: "Photo added." });
       await load();
     } finally { setBusy(false); }
@@ -6248,10 +6251,18 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                   </div>
                 </div>
               ))}
-              <label title="Take or choose a photo" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                {busy ? <><Loader2 size={13} className="spin" /> Working…</> : <><Plus size={14} color={FIRE.btnIcon} /> Add photo</>}
-                <input type="file" accept="image/*" capture="environment" disabled={busy} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addPhoto(f); }} />
-              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {/* Take photo: capture="environment" opens the REAR camera on a phone. */}
+                <label title="Take a photo with the camera" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  {busy ? <><Loader2 size={13} className="spin" /> Working…</> : <><Camera size={14} color={FIRE.btnIcon} /> Take photo</>}
+                  <input type="file" accept="image/*" capture="environment" disabled={busy} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addPhoto(f); }} />
+                </label>
+                {/* Upload photo: no capture -> photo library on a phone, file picker on desktop. */}
+                <label title="Choose a photo from your library" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <ImageIcon size={14} color={FIRE.btnIcon} /> Upload photo
+                  <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addPhoto(f); }} />
+                </label>
+              </div>
             </>
           )}
         </div>
