@@ -6158,6 +6158,8 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
   const [urls, setUrls] = useState({});          // photo id -> signed thumbnail url
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);       // upload/reorder/delete in flight — disables buttons (guards the reorder mash-race)
+  const [editLabelId, setEditLabelId] = useState(null);   // photo whose label is being edited (else display mode)
+  const [labelDraft, setLabelDraft] = useState("");
   async function load() {
     setLoading(true);
     const { data } = await supabase.from("apparatus_photos")
@@ -6197,10 +6199,11 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
   }
   async function saveLabel(p, value) {
     const label = (value || "").trim();
-    if (label === (p.angle_label || "")) return;   // unchanged
+    setEditLabelId(null);   // back to display mode either way (blur/Enter)
+    if (label === (p.angle_label || "")) return;   // unchanged — nothing to write
     const { error } = await supabase.from("apparatus_photos").update({ angle_label: label }).eq("id", p.id);
     if (error) { notify({ kind: "error", title: "Couldn't save the label", text: error.message }); await load(); return; }
-    setPhotos((ps) => (ps || []).map((x) => x.id === p.id ? { ...x, angle_label: label } : x));
+    setPhotos((ps) => (ps || []).map((x) => x.id === p.id ? { ...x, angle_label: label } : x));   // display now shows the new text
   }
   async function move(i, dir) {
     const list = photos || []; const j = i + dir;
@@ -6241,9 +6244,20 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                   {urls[p.id]
                     ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
                     : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
-                  <input defaultValue={p.angle_label || ""} placeholder="Label (e.g. Front, Driver side)" onBlur={(e) => saveLabel(p, e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                    style={{ ...FS.input, flex: "1 1 150px", minWidth: 120, fontSize: 12.5, padding: "6px 8px" }} />
+                  {editLabelId === p.id ? (
+                    <input autoFocus value={labelDraft} placeholder="Label (e.g. Front, Driver side)" onChange={(e) => setLabelDraft(e.target.value)}
+                      onBlur={() => saveLabel(p, labelDraft)}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                      style={{ ...FS.input, flex: "1 1 150px", minWidth: 120, fontSize: 12.5, padding: "6px 8px" }} />
+                  ) : (
+                    <button title="Edit label" onClick={() => { setEditLabelId(p.id); setLabelDraft(p.angle_label || ""); }}
+                      style={{ flex: "1 1 150px", minWidth: 120, textAlign: "left", background: "none", border: "none", padding: "6px 2px", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {p.angle_label
+                        ? <span style={{ fontSize: 13, color: FIRE.textPrimary }}>{p.angle_label}</span>
+                        : <span style={{ fontSize: 12.5, color: FIRE.textMuted2, fontStyle: "italic" }}>Add label</span>}
+                      <Pencil size={12} color={FIRE.textMuted} />
+                    </button>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
                     <button title="Move up" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === 0) ? 0.4 : 1 }}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
                     <button title="Move down" disabled={busy || i === (photos.length - 1)} onClick={() => move(i, 1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === (photos.length - 1)) ? 0.4 : 1 }}><ChevronDown size={14} color={FIRE.btnIcon} /></button>
