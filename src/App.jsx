@@ -11,6 +11,7 @@ import {
   Maximize2, RotateCcw,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
+import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { supabase, APP_URL } from "./supabaseClient";
@@ -6171,7 +6172,9 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
   const dotColor = (it, sel) => { const mk = marks && marks[it.id]; if (mk) return mk.result === "fail" ? FIRE.redBright : FIRE.green; return sel ? FIRE.red : "#fff"; };
   const ctlBtn = { width: 46, height: 46, borderRadius: 10, border: "none", background: "rgba(255,255,255,.13)", color: "#fff", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 };
   useEffect(() => { const onKey = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
-  return (
+  // Portal to <body>: escapes the rig card's opacity (out-of-service = 0.68) and its stacking
+  // context, so the modal is truly opaque AND above the app header (both were caused by that ancestor).
+  return createPortal(
     <div style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0, color: "#F0F2F5", fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.angle_label || "Apparatus photo"}</div>
@@ -6239,7 +6242,11 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
           )}
         </div>
       )}
-    </div>
+      <div style={{ flexShrink: 0, background: "#0b0d10", borderTop: "1px solid rgba(255,255,255,.12)", padding: "10px 16px calc(12px + env(safe-area-inset-bottom))" }}>
+        <button onClick={onClose} style={{ width: "100%", display: "inline-flex", justifyContent: "center", alignItems: "center", gap: 8, background: "#fff", color: "#111", border: "none", borderRadius: 12, padding: "13px 16px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><X size={18} /> Done</button>
+      </div>
+    </div>,
+    document.body
   );
 }
 // Slice 6b — per-rig photo management (leadership only; ops manage photos RLS).
