@@ -5629,6 +5629,10 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
   const [noteItemId, setNoteItemId] = useState(null);     // item whose Fail-note editor is open
   const [noteDraft, setNoteDraft] = useState("");
   const [finalizing, setFinalizing] = useState(false);
+  const [photos, setPhotos] = useState([]);          // rig photos for the Photo view
+  const [photoUrls, setPhotoUrls] = useState({});     // photo id -> signed url
+  const [photoOpen, setPhotoOpen] = useState(false);  // full-screen photo viewer open
+  const [checkPhotoId, setCheckPhotoId] = useState(null);   // selected photo tab
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -5643,7 +5647,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
       setCheckId(cid);
       const [{ data: its }, { data: res }] = await Promise.all([
         supabase.from("apparatus_check_items")
-          .select("id, label, location, description, sort_order")
+          .select("id, label, location, description, sort_order, photo_id, x_pct, y_pct")
           .eq("apparatus_id", rig.id).eq("active", true)
           .order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
         supabase.from("apparatus_check_results")
@@ -5651,7 +5655,19 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
       ]);
       if (!alive) return;
       const mmap = {}; (res || []).forEach((r) => { if (r.item_id) mmap[r.item_id] = r; });
-      setItems(its || []); setMarks(mmap); setLoading(false);
+      setItems(its || []); setMarks(mmap);
+      // Rig photos + signed URLs for the photo view (same private-bucket pattern as ApparatusPhotos).
+      const { data: phs } = await supabase.from("apparatus_photos")
+        .select("id, angle_label, storage_path, sort_order").eq("apparatus_id", rig.id).is("deleted_at", null)
+        .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+      const plist = phs || [];
+      const ppaths = plist.map((p) => p.storage_path).filter(Boolean);
+      const umap = {};
+      if (ppaths.length) { const { data: signed } = await supabase.storage.from("station-documents").createSignedUrls(ppaths, 3600); (signed || []).forEach((s) => { const ph = s?.signedUrl && plist.find((p) => p.storage_path === s.path); if (ph) umap[ph.id] = s.signedUrl; }); }
+      if (!alive) return;
+      setPhotos(plist); setPhotoUrls(umap);
+      if (plist.length) { setCheckPhotoId(plist[0].id); setPhotoOpen(true); }   // default to Photo view when the rig has photos
+      setLoading(false);
     })();
     return () => { alive = false; };
   }, [rig.id]);
@@ -5689,6 +5705,29 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
   // items are loaded active=true, so "all active items marked" = every loaded item marked.
   const allMarked = !!items && items.length > 0 && markedCount === items.length;
   const unmarked = (items?.length || 0) - markedCount;
+  // Photo view (read-only dots colored by marks; taps → the Pass/Fail panel below).
+  const dotsFor = (pid) => (items || []).filter((it) => it.photo_id === pid && it.x_pct != null);
+  const checkPhoto = photos.find((p) => p.id === checkPhotoId) || photos[0] || null;
+  const photoTabs = photos.length > 1 ? photos.map((p) => { const ds = dotsFor(p.id); const md = ds.filter((d) => marks[d.id]).length; const active = checkPhoto && checkPhoto.id === p.id; return (
+    <button key={p.id} onClick={() => setCheckPhotoId(p.id)} style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0, ...(active ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{p.angle_label || "Photo"} {md}/{ds.length}</button>
+  ); }) : null;
+  const checkPanel = (it) => { const mk = marks[it.id]; const editingNote = noteItemId === it.id; return (
+    <div style={{ background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: "12px 16px" }}>
+      <div style={{ fontSize: 14.5, fontWeight: 700, color: FIRE.textPrimary }}>{it.label}</div>
+      {it.location && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{it.location}</div>}
+      {mk && <div style={{ fontSize: 11.5, color: mk.result === "fail" ? FIRE.redText : FIRE.greenText, marginTop: 3 }}>{mk.result === "fail" ? "✗ Fail" : "✓ Pass"} · {mk.marked_by_name || "—"}{mk.result === "fail" && mk.note ? ` · ${mk.note}` : ""}</div>}
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button disabled={savingItemId === it.id} onClick={() => onPass(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: mk?.result === "pass" ? FIRE.green : FIRE.btnBg, color: mk?.result === "pass" ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><CheckCircle2 size={16} /> Pass</button>
+        <button disabled={savingItemId === it.id} onClick={() => openFail(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: (mk?.result === "fail" || editingNote) ? FIRE.redBright : FIRE.btnBg, color: (mk?.result === "fail" || editingNote) ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><X size={16} /> Fail</button>
+      </div>
+      {editingNote && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
+          <input autoFocus value={noteDraft} placeholder="What's wrong? (required)" onChange={(e) => setNoteDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveFail(it); if (e.key === "Escape") { setNoteItemId(null); setNoteDraft(""); } }} style={{ ...FS.input, flex: 1, minWidth: 0, fontSize: 13, padding: "8px 10px" }} />
+          <button disabled={savingItemId === it.id || !noteDraft.trim()} onClick={() => saveFail(it)} style={{ ...FS.btnPrimary, padding: "8px 12px", opacity: (savingItemId === it.id || !noteDraft.trim()) ? 0.5 : 1 }}>{savingItemId === it.id ? <Loader2 size={14} className="spin" /> : "Save fail"}</button>
+        </div>
+      )}
+    </div>
+  ); };
   // Finalize: flip the draft to an immutable record. The RPC re-checks the mid-draft rule
   // (rejects "N item(s) still unmarked"), stamps the finalizer, computes outcome, and moves
   // the apparatus pointer. On success: close, reload the rig card + check history.
@@ -5703,6 +5742,9 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
   };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
+      {photoOpen && checkPhoto && <PhotoDotEditor S={S} url={photoUrls[checkPhoto.id]} photo={checkPhoto}
+        dots={dotsFor(checkPhoto.id)} unplaced={[]} marks={marks} editable={false}
+        tabs={photoTabs} checkPanel={checkPanel} onClose={() => setPhotoOpen(false)} busy={false} />}
       <div style={{ ...FS.card, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
           <Truck size={18} color={FIRE.btnIcon} />
@@ -5720,7 +5762,10 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
           ) : err ? (
             <div style={{ fontSize: 13.5, color: FIRE.redText, lineHeight: 1.5 }}>{err}</div>
           ) : (<>
-            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10 }}>{markedCount} of {(items || []).length} items marked · walk the truck and mark each one.</div>
+            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span>{markedCount} of {(items || []).length} items marked · walk the truck and mark each one.</span>
+              {photos.length > 0 && <button onClick={() => setPhotoOpen(true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}><ImageIcon size={14} color={FIRE.btnIcon} /> Photo view</button>}
+            </div>
             {groups.map((loc) => (
               <div key={loc} style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "6px 0 3px" }}>{loc}</div>
@@ -6159,7 +6204,7 @@ async function downscaleImage(file, maxPx = 1600, quality = 0.85) {
 // pan (library); one-finger on a DOT = move it (edit only, dot is panning.excluded); tap =
 // place/select. Dot-drag aborts the instant a 2nd pointer lands (let the pinch win).
 // editable=false → read-only viewer for CHECK mode (6c-2): no drag, no placement; tap selects.
-function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMove, onUnlink, onClose, busy, editable = true, marks, onSelectDot }) {
+function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMove, onUnlink, onClose, busy, editable = true, marks, tabs, checkPanel }) {
   const imgRef = useRef(null);
   const pointers = useRef(0);                      // active pointer count (pinch-abort)
   const [pending, setPending] = useState(null);    // { xp, yp } tapped empty spot awaiting new/link
@@ -6175,11 +6220,13 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
   // Portal to <body>: escapes the rig card's opacity (out-of-service = 0.68) and its stacking
   // context, so the modal is truly opaque AND above the app header (both were caused by that ancestor).
   return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+    <div onClick={(e) => { if (!editable && e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0, color: "#F0F2F5", fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.angle_label || "Apparatus photo"}</div>
         <button onClick={onClose} title="Close (Esc)" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", color: "#111", border: "none", borderRadius: 999, padding: "11px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}><X size={18} /> Close</button>
       </div>
+      {tabs && <div style={{ flexShrink: 0, padding: "0 12px 10px", display: "flex", gap: 6, overflowX: "auto" }}>{tabs}</div>}
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
         <TransformWrapper minScale={1} maxScale={6} doubleClick={{ mode: "toggle", step: 1.6 }} panning={{ excluded: ["apparatus-dot"] }} pinch={{ step: 5 }} wheel={{ step: 0.15 }}>
           {({ zoomIn, zoomOut, resetTransform }) => (<>
@@ -6190,7 +6237,7 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
             </div>
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }} contentStyle={{ width: "100%" }}>
               <div style={{ position: "relative", width: "100%" }}
-                onClick={(e) => { if (!editable || drag) return; const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
+                onClick={(e) => { if (drag) return; if (!editable) { setSelectedId(null); return; } const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
                 {url
                   ? <img ref={imgRef} src={url} alt={photo.angle_label || "Apparatus photo"} draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} />
                   : <div style={{ height: 260, background: FIRE.btnBg, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
@@ -6203,11 +6250,11 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
                     <div key={it.id} className="apparatus-dot"
                       onPointerDown={(e) => { pointers.current += 1; if (!editable) return; if (pointers.current > 1) { setDrag(null); return; } e.stopPropagation(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch {} setDrag({ id: it.id, xp: it.x_pct, yp: it.y_pct, sx: e.clientX, sy: e.clientY, moved: false }); }}
                       onPointerMove={(e) => { if (!editable) return; if (pointers.current > 1) { setDrag(null); return; } setDrag((d) => { if (!d || d.id !== it.id) return d; const { xp, yp } = pctFromEvent(e); return { ...d, xp, yp, moved: d.moved || Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5 }; }); }}
-                      onPointerUp={(e) => { pointers.current = Math.max(0, pointers.current - 1); if (!editable) { onSelectDot && onSelectDot(it); return; } e.stopPropagation(); setDrag((d) => { if (d && d.id === it.id) { if (d.moved) onMove(it, d.xp, d.yp); else { setSelectedId(it.id); setPending(null); } } return null; }); }}
+                      onPointerUp={(e) => { pointers.current = Math.max(0, pointers.current - 1); if (!editable) { setSelectedId(it.id); return; } e.stopPropagation(); setDrag((d) => { if (d && d.id === it.id) { if (d.moved) onMove(it, d.xp, d.yp); else { setSelectedId(it.id); setPending(null); } } return null; }); }}
                       onPointerCancel={() => { pointers.current = Math.max(0, pointers.current - 1); setDrag(null); }}
                       onClick={(e) => e.stopPropagation()}
                       style={{ position: "absolute", left: `${x}%`, top: `${y}%`, width: 44, height: 44, transform: "translate(-50%,-50%)", display: "grid", placeItems: "center", cursor: editable ? "grab" : "pointer", touchAction: "none", zIndex: 2 }}>
-                      <span style={{ width: 18, height: 18, borderRadius: 999, background: dotColor(it, sel), border: `2.5px solid ${sel ? "#fff" : "rgba(255,255,255,.9)"}`, boxShadow: "0 0 0 2px rgba(0,0,0,.5)" }} />
+                      <span style={{ width: 18, height: 18, borderRadius: 999, background: dotColor(it, sel), border: `2.5px solid ${sel ? "#fff" : "rgba(255,255,255,.9)"}`, boxShadow: sel ? "0 0 0 4px rgba(255,255,255,.85)" : "0 0 0 2px rgba(0,0,0,.5)" }} />
                     </div>
                   );
                 })}
@@ -6242,8 +6289,9 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
           )}
         </div>
       )}
+      {!editable && selected && checkPanel && <div style={{ flexShrink: 0 }}>{checkPanel(selected)}</div>}
       <div style={{ flexShrink: 0, background: "#0b0d10", borderTop: "1px solid rgba(255,255,255,.12)", padding: "10px 16px calc(12px + env(safe-area-inset-bottom))" }}>
-        <button onClick={onClose} style={{ width: "100%", display: "inline-flex", justifyContent: "center", alignItems: "center", gap: 8, background: "#fff", color: "#111", border: "none", borderRadius: 12, padding: "13px 16px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><X size={18} /> Done</button>
+        <button onClick={onClose} style={{ width: "100%", display: "inline-flex", justifyContent: "center", alignItems: "center", gap: 8, background: "#fff", color: "#111", border: "none", borderRadius: 12, padding: "13px 16px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><X size={18} /> {editable ? "Done" : "Back to list"}</button>
       </div>
     </div>,
     document.body
