@@ -93,6 +93,9 @@ const isDeptAdmin      = (rs) => hasAny(rs, DEPT_ADMIN_ROLES);
 const isBoard          = (rs) => hasAny(rs, ['Board Member']);
 const canManage        = (rs) => hasAny(rs, CANMANAGE_ROLES);
 const isTrainingLeader = (rs) => hasAny(rs, SIGNIN_ROLES);
+// Provenance pill for minutes that a human brought in (ai_outputs.source='imported') — so a human-authored
+// document is NEVER shown as if Claude drafted it. Shown wherever imported minutes appear.
+const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
 
 const TRACKS = {
   Fire:        { label: "Fire",        accent: "#B11E2A", Icon: Flame },
@@ -956,7 +959,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const [minutesRow, setMinutesRow] = useState(null);
   const [openItems, setOpenItems] = useState([]);
   useEffect(() => {
-    const cols = "id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by";
+    const cols = "id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by, source";
     const newest = (rows) => (rows || []).slice().sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))[0] || null;   // coalesce(edited_at, created_at) desc
     supabase.from("ai_outputs").select(cols).eq("feature", "minutes").is("deleted_at", null).then(({ data }) => setMinutesRow(newest(data)));
     supabase.from("action_items").select("*").eq("status", "open")   // full rows (text + due_date) — dept-scoped by RLS
@@ -989,7 +992,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
           <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><FileText size={13} color={FIRE.red} /> RECENT MINUTES</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             {minutesRow ? (<>
-              <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3 }}>{minutesRow.title || "Untitled minutes"}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{minutesRow.title || "Untitled minutes"}{minutesRow.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
               <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{govDate(minutesRow)}{minutesAuthor ? ` · by ${minutesAuthor}` : ""}</div>
             </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No minutes yet.</div>}
           </div>
@@ -2818,6 +2821,30 @@ async function extractPdfText(file) {
     text += tc.items.map((it) => it.str).join(" ") + "\n";   // items[].str = the selectable text spans on the page
   }
   return text;
+}
+// DOCX text extraction (imported minutes from Firefly/Word). mammoth's browser bundle is LAZY-imported —
+// only pulled on the first .docx import, never at page load (same pattern as pdfjs above).
+let _mammoth = null;
+async function loadMammoth() {
+  if (_mammoth) return _mammoth;
+  const mod = await import("mammoth/mammoth.browser.js");
+  _mammoth = mod.default || mod;
+  return _mammoth;
+}
+async function extractDocxText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const mammoth = await loadMammoth();
+  const { value } = await mammoth.extractRawText({ arrayBuffer });   // { value: plain text, messages: [] }
+  return value || "";
+}
+// Pull plain text from an imported minutes file by extension. Throws on an unsupported/unreadable file;
+// the caller stores the ORIGINAL file + an honest placeholder so nothing ever renders as blank.
+async function extractMinutesFileText(file) {
+  const name = (file?.name || "").toLowerCase();
+  if (name.endsWith(".txt") || name.endsWith(".md")) return (await file.text()) || "";
+  if (name.endsWith(".pdf"))  return await extractPdfText(file);
+  if (name.endsWith(".docx")) return await extractDocxText(file);
+  throw new Error("Unsupported file type. Upload a .docx, .pdf, or .txt file.");
 }
 const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
 function Documents({ S, role, notify, uploaderName, members }) {
@@ -6672,6 +6699,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const [mode, setMode] = useState(() => (initialMode === "agenda" || initialMode === "minutes" || initialMode === "action-items") ? (initialMode === "action-items" ? "minutes" : initialMode) : "agenda");   // role-guarded deep-link seed (via go("minutes", mode)); "action-items" opens the Minutes tab
   const scrollToActions = initialMode === "action-items";
   const actionItemsRef = useRef(null);
+  const reviewRef = useRef(null);   // extraction review card — scrolled into view when items land (esp. when extracting from the saved-minutes modal)
   useEffect(() => {
     if (scrollToActions && mode === "minutes") {
       const t = setTimeout(() => actionItemsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);   // let the Minutes branch paint first
@@ -6693,7 +6721,14 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
   const [review, setReview] = useState([]); const [creating, setCreating] = useState(false);
   const [showDone, setShowDone] = useState(false);   // Completed section — collapsed by default
-  const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items is a write → CANMANAGE (matches is_canmanage())
+  const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items + save minutes → CANMANAGE (is_canmanage(): Board/DA/Officer)
+  const canManageOps = hasAny(role, CANMANAGE_OPS_ROLES);   // file UPLOAD to station-documents is ops-only (DA/Officer) per station_docs_insert_leadership RLS; Board can still paste
+  // Import minutes written OUTSIDE B4C (Firefly/Word/typed elsewhere). Stored source='imported' — never as AI-drafted.
+  const [impMode, setImpMode] = useState("paste");   // 'paste' | 'upload'
+  const [impTitle, setImpTitle] = useState(""); const [impText, setImpText] = useState("");
+  const [impFile, setImpFile] = useState(null); const [importing, setImporting] = useState(false); const [impErr, setImpErr] = useState("");
+  // Which minutes produced the CURRENT review batch — stamped onto action_items (source_output_id/source_label) for the audit link.
+  const [reviewSource, setReviewSource] = useState({ id: null, label: null });
   // Map an AI-suggested owner name to a member id — CONSERVATIVE: exact, else a single unambiguous first/last-name token, else blank.
   function matchOwnerId(name) {
     const n = (name || "").trim().toLowerCase();
@@ -6733,6 +6768,46 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     if (error) { notify({ kind: "error", title: "Couldn't save the minutes", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     notify({ kind: "success", text: "Minutes saved." });
     loadDrafts();
+  }
+  // Save minutes brought in from OUTSIDE B4C. Paste path: text straight in (any minutes manager, Board incl.).
+  // Upload path: store the ORIGINAL file in station-documents FIRST (the legal record survives even if extraction
+  // is imperfect), then best-effort extract text. Stored source='imported' so it never renders as AI-drafted.
+  async function saveImported() {
+    setImpErr("");
+    const t = impTitle.trim();
+    if (!t) { setImpErr("Give these minutes a title."); return; }
+    const usingFile = impMode === "upload";
+    if (usingFile && !impFile) { setImpErr("Choose a .docx, .pdf, or .txt file."); return; }
+    if (!usingFile && !impText.trim()) { setImpErr("Paste the minutes text first."); return; }
+    setImporting(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setImporting(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    let bodyText = ""; let filePath = null;
+    if (usingFile) {
+      // 1) upload the original first (dept-id-first path required by the storage policy)
+      const safe = (impFile.name || "minutes").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
+      const path = `${deptId}/minutes/${Date.now()}-${safe}`;
+      const { error: upErr } = await supabase.storage.from("station-documents").upload(path, impFile, { upsert: false });
+      if (upErr) { setImporting(false); notify({ kind: "error", title: "Couldn't upload the file", text: /row-level|policy|violat/i.test(upErr.message || "") ? "File upload is limited to Department Admins and Officers. You can paste the text instead." : "Something went wrong uploading that file.", details: upErr.message }); return; }
+      filePath = path;
+      // 2) best-effort extraction — NEVER blocks the import; the original is already saved
+      try { bodyText = (await extractMinutesFileText(impFile)).trim(); } catch { bodyText = ""; }
+      if (!bodyText) bodyText = "(No text could be read from the uploaded file — it may be a scan or an image. The original file is stored: open “Download original” to read it, or add action items manually.)";
+    } else {
+      bodyText = impText.trim();
+    }
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "minutes", title: t, ai_text: bodyText, source: "imported", source_file_path: filePath, created_by: meId });
+    setImporting(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the imported minutes", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Imported minutes saved." });
+    setImpTitle(""); setImpText(""); setImpFile(null);
+    loadDrafts();
+  }
+  async function downloadOriginal(d) {
+    if (!d?.source_file_path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(d.source_file_path, 3600);
+    if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the file", text: "Please try again.", details: error?.message }); return; }
+    window.open(data.signedUrl, "_blank", "noopener");
   }
   async function loadDrafts() {
     const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "minutes").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
@@ -6789,30 +6864,37 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     }
     return clean;                                                   // [] is valid (empty extraction) — distinct from null (parse failure)
   }
-  async function extractActions() {
-    if (!out.trim()) return;
+  // Extract action items from ANY minutes text — the freshly drafted `out`, OR a saved/imported minutes
+  // opened from the list (sourceId/sourceLabel stamp the resulting action_items). Generalized from the old
+  // extractActions() so saved AI minutes AND imported minutes can be extracted, not just the in-memory draft.
+  async function extractActionsFrom(text, sourceId = null, sourceLabel = null) {
+    const body = (text || "").trim();
+    if (!body) return;
     setExtracting(true); setErr("");
+    setReviewSource({ id: sourceId, label: sourceLabel });
     const sys = "You extract the ACTION ITEMS from a volunteer fire department's approved meeting minutes, so they can be tracked. Return ONLY the concrete action items that were actually decided or assigned in the minutes — tasks someone agreed to do.\n\nRespond with ONLY one valid JSON object, no markdown, no code fences, no commentary before or after. Schema: {\"items\":[{\"task\":string,\"suggested_owner\":string|null,\"suggested_due_date\":string|null}]}.\n- task: the action, stated concisely (for example, 'Get a vendor quote for the Engine 2 pump repair').\n- suggested_owner: the person's name ONLY if the minutes name who is responsible; otherwise null. Do NOT guess or infer an owner — if the minutes say 'someone should follow up', suggested_owner is null.\n- suggested_due_date: a date ONLY if the minutes state one (YYYY-MM-DD if you can determine it, otherwise the date text as written); if no date is stated, null. Do NOT invent a deadline.\n\nCRITICAL — TRUTH GUARDRAIL: Extract ONLY action items actually present in the minutes. NEVER invent a task, an owner, or a date that is not there. These become real assigned work — a fabricated item, or a guessed owner, assigns someone a job they never agreed to. Suggest an owner or date ONLY when the minutes state it; leave it null otherwise for a human to fill in. If the minutes contain no action items, return {\"items\":[]}. Do not include discussion, decisions, or announcements that are not action items.";
     try {
-      const raw = await callClaude(sys, out);
+      const raw = await callClaude(sys, body);
       const items = parseActionItems(raw);
       if (items === null) { setErr("Couldn't read the extracted items — please add them manually below."); return; }
       setReview(items.map((it, i) => ({ id: Date.now() + i, task: it.task, ownerId: matchOwnerId(it.suggested_owner), due: normalizeDate(it.suggested_due_date), keep: true })));
+      setTimeout(() => reviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 70);   // reveal the review card (extraction may have been triggered from the now-closed modal)
     } catch { setErr("Couldn't extract action items just now. Try again, or add them manually."); }
     finally { setExtracting(false); }
   }
+  const extractActions = () => extractActionsFrom(out, null, (saveTitle || title || "Minutes").trim());   // fresh (unsaved) draft: no source row yet
   async function createActionItems() {
     const kept = review.filter((r) => r.keep && r.task.trim());
     if (!kept.length) return;
     setCreating(true);
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setCreating(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
-    const rows = kept.map((r) => ({ department_id: deptId, text: r.task.trim(), assigned_to: r.ownerId || null, due_date: r.due || null }));   // status defaults 'open'
+    const rows = kept.map((r) => ({ department_id: deptId, text: r.task.trim(), assigned_to: r.ownerId || null, due_date: r.due || null, source_output_id: reviewSource.id, source_label: reviewSource.label }));   // status defaults 'open'; source_* link back to the minutes for audit
     const { error } = await supabase.from("action_items").insert(rows);
     setCreating(false);
     if (error) { notify({ kind: "error", title: "Couldn't save the action items", text: "Something went wrong. Please try again.", details: error.message }); return; }
     notify({ kind: "success", text: `${kept.length} action item${kept.length === 1 ? "" : "s"} created.` });
-    setReview([]); loadActionItems();
+    setReview([]); setReviewSource({ id: null, label: null }); loadActionItems();
   }
   function addReviewRow() { setReview((rv) => [...rv, { id: Date.now(), task: "", ownerId: "", due: "", keep: true }]); }   // human backstop — blank editable row, same shape as extracted rows
   async function loadActionItems() {
@@ -6924,8 +7006,35 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         </div>
       </div>
 
+      {canManage && (
+        <div style={{ ...FS.card, padding: "16px 18px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
+          <div style={{ ...FS.kicker, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><Upload size={13} /> IMPORT MINUTES — WRITTEN OUTSIDE B4C</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 10, lineHeight: 1.45 }}>Bring in minutes from Firefly, Word, or typed elsewhere. These are saved as <b style={{ color: FIRE.amberText }}>Imported — not AI-generated</b>. You can extract action items from them just like AI minutes.</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            {[["paste", "Paste text"], ["upload", "Upload file"]].map(([k, l]) => {
+              const disabled = k === "upload" && !canManageOps;
+              const active = impMode === k && !disabled;
+              return <button key={k} disabled={disabled} title={disabled ? "File upload is limited to Department Admins and Officers — paste the text instead" : ""} onClick={() => { setImpMode(k); setImpErr(""); }} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, opacity: disabled ? 0.45 : 1, ...(active ? { borderColor: FIRE.amberText, color: FIRE.textPrimary } : {}) }}>{l}</button>;
+            })}
+          </div>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={impTitle} onChange={(e) => setImpTitle(e.target.value)} placeholder="e.g. Board Meeting — Jul 2026" /></label>
+          {impMode === "paste" ? (
+            <label style={{ ...S.field, marginTop: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Minutes text</span>
+              <textarea style={{ ...FS.input, minHeight: 130, resize: "vertical", lineHeight: 1.5 }} value={impText} placeholder="Paste the full minutes here…" onChange={(e) => setImpText(e.target.value)} /></label>
+          ) : (
+            <div style={{ marginTop: 10 }}>
+              <input type="file" accept=".docx,.pdf,.txt" onChange={(e) => { setImpFile(e.target.files?.[0] || null); setImpErr(""); }} style={{ fontSize: 13, color: FIRE.textSecondary }} />
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>.docx, .pdf, or .txt — the original file is stored as the record; text is extracted for action items.</div>
+              {impFile && <div style={{ fontSize: 12.5, color: FIRE.textPrimary, marginTop: 6, fontWeight: 600 }}>{impFile.name}</div>}
+            </div>
+          )}
+          {impErr && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 10 }}>{impErr}</div>}
+          <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: importing ? 0.7 : 1 }} onClick={saveImported} disabled={importing}>{importing ? <><Loader2 size={16} className="spin" /> Importing…</> : <><Upload size={16} /> Save imported minutes</>}</button>
+        </div>
+      )}
+
       {review.length > 0 && (
-        <div style={{ ...FS.card, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
+        <div ref={reviewRef} style={{ ...FS.card, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}>REVIEW EXTRACTED ITEMS — confirm owner &amp; due, then create</div>
           {review.map((r, i) => (
             <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
@@ -7006,7 +7115,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
           return (
             <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled minutes"}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{d.title || "Untitled minutes"}{d.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
               </div>
               <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
@@ -7018,9 +7127,14 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       {openDraft && (
         <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Minutes"}</div>
-              <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ ...FS.kicker, marginBottom: openDraft.source === "imported" ? 5 : 0 }}>{openDraft.title || "Minutes"}</div>
+                {openDraft.source === "imported" && <span style={IMPORTED_BADGE}>Imported — not AI-generated</span>}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} disabled={extracting} onClick={() => { const d = openDraft; closeDraft(); extractActionsFrom(d.current_text ?? d.ai_text, d.id, d.title || "Minutes"); }}>{extracting ? <><Loader2 size={14} className="spin" /> Reading…</> : <><Sparkles size={14} color={FIRE.btnIcon} /> Extract action items</>}</button>}
+                {!editing && openDraft.source === "imported" && openDraft.source_file_path && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={() => downloadOriginal(openDraft)}><Download size={14} color={FIRE.btnIcon} /> Download original</button>}
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
               </div>
