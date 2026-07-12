@@ -5593,6 +5593,7 @@ function Apparatus({ S, role, members, meId, notify }) {
                 </div>
               )}
               {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
+              {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
               <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} />
               <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
             </div>
@@ -6126,6 +6127,133 @@ function ApparatusServiceHistory({ S, rig }) {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+// Downscale an image to <= maxPx on its long edge (JPEG) BEFORE upload — so a
+// phone photo taken at the truck on weak LTE uploads in seconds, not minutes.
+// Best-effort: returns the ORIGINAL file if anything fails (never blocks upload).
+async function downscaleImage(file, maxPx = 1600, quality = 0.85) {
+  try {
+    if (!file || !file.type?.startsWith("image/")) return file;
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxPx / Math.max(bitmap.width, bitmap.height));
+    if (scale >= 1) return file;   // already small enough
+    const w = Math.round(bitmap.width * scale), h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+    if (!blob) return file;
+    return new File([blob], (file.name || "photo").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+  } catch { return file; }
+}
+// Slice 6b — per-rig photo management (leadership only; ops manage photos RLS).
+// Reuses the station-documents bucket + signed-URL display, exactly like Documents.
+// No dot placement here (that's 6c) — just upload / label / reorder / soft-delete.
+function ApparatusPhotos({ S, rig, meId, notify }) {
+  const [open, setOpen] = useState(false);
+  const [photos, setPhotos] = useState(null);   // null = not loaded yet
+  const [urls, setUrls] = useState({});          // photo id -> signed thumbnail url
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);       // upload/reorder/delete in flight — disables buttons (guards the reorder mash-race)
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase.from("apparatus_photos")
+      .select("id, storage_path, angle_label, sort_order")
+      .eq("apparatus_id", rig.id).is("deleted_at", null)
+      .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+    const list = data || [];
+    const paths = list.map((p) => p.storage_path).filter(Boolean);
+    const map = {};
+    if (paths.length) {
+      const { data: signed } = await supabase.storage.from("station-documents").createSignedUrls(paths, 3600);
+      (signed || []).forEach((s) => { const ph = s?.signedUrl && list.find((p) => p.storage_path === s.path); if (ph) map[ph.id] = s.signedUrl; });
+    }
+    setPhotos(list); setUrls(map); setLoading(false);
+  }
+  async function toggle() { const next = !open; setOpen(next); if (next && photos === null) await load(); }
+  async function addPhoto(file) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const { data: deptId } = await supabase.rpc("my_department_id");
+      if (!deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+      const small = await downscaleImage(file);   // ~1600px JPEG — a few hundred KB
+      const safe = (small.name || "photo.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `apparatus/${deptId}/${Date.now()}-${safe}`;
+      const { error: upErr } = await supabase.storage.from("station-documents").upload(path, small);
+      if (upErr) { notify({ kind: "error", title: "Upload failed", text: upErr.message || "Please try again." }); return; }
+      const nextOrder = (photos || []).reduce((m, p) => Math.max(m, p.sort_order ?? 0), -1) + 1;
+      const { error: insErr } = await supabase.from("apparatus_photos").insert({ department_id: deptId, apparatus_id: rig.id, storage_path: path, angle_label: "", sort_order: nextOrder, uploaded_by: meId });
+      if (insErr) { notify({ kind: "error", title: "Couldn't save the photo", text: insErr.message || "Please try again." }); return; }
+      notify({ kind: "success", text: "Photo added." });
+      await load();
+    } finally { setBusy(false); }
+  }
+  async function saveLabel(p, value) {
+    const label = (value || "").trim();
+    if (label === (p.angle_label || "")) return;   // unchanged
+    const { error } = await supabase.from("apparatus_photos").update({ angle_label: label }).eq("id", p.id);
+    if (error) { notify({ kind: "error", title: "Couldn't save the label", text: error.message }); await load(); return; }
+    setPhotos((ps) => (ps || []).map((x) => x.id === p.id ? { ...x, angle_label: label } : x));
+  }
+  async function move(i, dir) {
+    const list = photos || []; const j = i + dir;
+    if (j < 0 || j >= list.length || busy) return;
+    setBusy(true);
+    try {
+      const a = list[i], b = list[j];
+      const { error: e1 } = await supabase.from("apparatus_photos").update({ sort_order: b.sort_order }).eq("id", a.id);
+      const { error: e2 } = await supabase.from("apparatus_photos").update({ sort_order: a.sort_order }).eq("id", b.id);
+      if (e1 || e2) notify({ kind: "error", title: "Reorder didn't fully save", text: "Showing the real order." });
+      await load();   // reload from DB truth regardless
+    } finally { setBusy(false); }
+  }
+  async function del(p) {
+    if (!window.confirm(`Remove this photo${p.angle_label ? ` ("${p.angle_label}")` : ""}? It'll be hidden from the rig.`)) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.from("apparatus_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", p.id);
+      if (error) { notify({ kind: "error", title: "Couldn't remove the photo", text: error.message }); return; }
+      await load();
+    } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={toggle} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <ImageIcon size={13} color={FIRE.btnIcon} /> Photos{photos ? ` (${photos.length})` : ""}
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (
+            <>
+              {(photos || []).length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 8 }}>No photos yet — add one so you can build a visual check later.</div>}
+              {(photos || []).map((p, i) => (
+                <div key={p.id} style={{ ...FS.card, background: FIRE.btnBg, padding: 8, marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  {urls[p.id]
+                    ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
+                    : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
+                  <input defaultValue={p.angle_label || ""} placeholder="Label (e.g. Front, Driver side)" onBlur={(e) => saveLabel(p, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                    style={{ ...FS.input, flex: "1 1 150px", minWidth: 120, fontSize: 12.5, padding: "6px 8px" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                    <button title="Move up" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === 0) ? 0.4 : 1 }}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
+                    <button title="Move down" disabled={busy || i === (photos.length - 1)} onClick={() => move(i, 1)} style={{ ...FS.btn, padding: "6px 8px", opacity: (busy || i === (photos.length - 1)) ? 0.4 : 1 }}><ChevronDown size={14} color={FIRE.btnIcon} /></button>
+                    <button title="Remove photo" disabled={busy} onClick={() => del(p)} style={{ ...FS.btn, padding: "6px 8px", opacity: busy ? 0.4 : 1 }}><X size={14} color={FIRE.deleteRed} /></button>
+                  </div>
+                </div>
+              ))}
+              <label title="Take or choose a photo" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {busy ? <><Loader2 size={13} className="spin" /> Working…</> : <><Plus size={14} color={FIRE.btnIcon} /> Add photo</>}
+                <input type="file" accept="image/*" capture="environment" disabled={busy} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addPhoto(f); }} />
+              </label>
+            </>
+          )}
         </div>
       )}
     </div>
