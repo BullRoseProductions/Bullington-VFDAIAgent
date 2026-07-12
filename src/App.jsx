@@ -2026,8 +2026,11 @@ async function callClaude(system, user) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, user }),
   });
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || "AI request failed");
+  // Read as text first: a 404 (endpoint not deployed / running locally where /api is a Vercel
+  // function) or a 5xx gateway page is NOT JSON, so res.json() would throw a useless SyntaxError.
+  const bodyText = await res.text();
+  let data = {}; try { data = bodyText ? JSON.parse(bodyText) : {}; } catch { /* non-JSON error page */ }
+  if (!res.ok || data.error) throw new Error(data.error || `AI request failed (HTTP ${res.status})${bodyText ? ": " + bodyText.replace(/\s+/g, " ").trim().slice(0, 160) : ""}`);
   return data.text || "";
 }
 // Multi-turn variant — posts a full conversation array. messages = [{ role: 'user'|'assistant', content }, …].
@@ -2037,8 +2040,9 @@ async function callClaudeChat(system, messages) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, messages }),
   });
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || "AI request failed");
+  const bodyText = await res.text();
+  let data = {}; try { data = bodyText ? JSON.parse(bodyText) : {}; } catch { /* non-JSON error page */ }
+  if (!res.ok || data.error) throw new Error(data.error || `AI request failed (HTTP ${res.status})${bodyText ? ": " + bodyText.replace(/\s+/g, " ").trim().slice(0, 160) : ""}`);
   return data.text || "";
 }
 
@@ -6879,7 +6883,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       if (items === null) { setErr("Couldn't read the extracted items — please add them manually below."); return; }
       setReview(items.map((it, i) => ({ id: Date.now() + i, task: it.task, ownerId: matchOwnerId(it.suggested_owner), due: normalizeDate(it.suggested_due_date), keep: true })));
       setTimeout(() => reviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 70);   // reveal the review card (extraction may have been triggered from the now-closed modal)
-    } catch { setErr("Couldn't extract action items just now. Try again, or add them manually."); }
+    } catch (e) { console.error("extractActionsFrom failed (input", body.length, "chars):", e); setErr("Couldn't extract action items: " + (e?.message || "unknown error") + ". Try again, or add them manually."); }
     finally { setExtracting(false); }
   }
   const extractActions = () => extractActionsFrom(out, null, (saveTitle || title || "Minutes").trim());   // fresh (unsaved) draft: no source row yet
