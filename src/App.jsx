@@ -5515,6 +5515,8 @@ function Apparatus({ S, role, members, meId, notify }) {
   const [svc, setSvc] = useState("In service"); const [svcReason, setSvcReason] = useState("");   // initial availability on create
   const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
   const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper" });
+  const [editMode, setEditMode] = useState(false);   // false = clean cards; true = reveal Add + per-rig Edit/Remove. Service/Start-Check stay at rest (daily ops).
+  function toggleEditMode() { setEditMode((v) => { if (v) { setEditingRigId(null); setAdding(false); } return !v; }); }
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const loadRigs = () => {
     supabase.from("apparatus")
@@ -5574,7 +5576,14 @@ function Apparatus({ S, role, members, meId, notify }) {
         <Stat S={S} dark n={String(rigs.length)} label="Apparatus in station" />
       </div>
       {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
-      {canManage && (adding ? (
+      {canManage && rigs.length > 0 && (
+        <div style={{ display: "flex", marginBottom: 12 }}>
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+            {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit apparatus</>}
+          </button>
+        </div>
+      )}
+      {canManage && (editMode || rigs.length === 0) && (adding ? (
         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name / unit</span><input style={FS.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
@@ -5603,8 +5612,8 @@ function Apparatus({ S, role, members, meId, notify }) {
                 {outOfService
                   ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
                   : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
-                {canManage && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-                {canManage && <button title="Remove from station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
+                {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
+                {canManage && editMode && <button title="Remove from station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
               {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
               {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
