@@ -7,7 +7,7 @@ import {
   ThumbsUp, ThumbsDown, Pencil, MessageSquare, ChevronUp, ChevronDown,
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
-  Palette, Image as ImageIcon, Camera, MapPin, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
+  Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
@@ -6224,11 +6224,16 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
   // Portal to <body>: escapes the rig card's opacity (out-of-service = 0.68) and its stacking
   // context, so the modal is truly opaque AND above the app header (both were caused by that ancestor).
   return createPortal(
-    <div onClick={(e) => { if (!editable && e.target === e.currentTarget) onClose(); }}
-      style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#0b0d10", zIndex: 120, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0, color: "#F0F2F5", fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.angle_label || "Apparatus photo"}</div>
-        <button onClick={onClose} title="Close (Esc)" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", color: "#111", border: "none", borderRadius: 999, padding: "11px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}><X size={18} /> Close</button>
+        {editable
+          ? <button onClick={onClose} title="Close (Esc)" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", color: "#111", border: "none", borderRadius: 999, padding: "11px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}><X size={18} /> Close</button>
+          : (/* check: an explicit two-views-of-ONE-check toggle. Photo is active; List returns to the checklist. */
+            <div style={{ display: "flex", borderRadius: 999, overflow: "hidden", border: "1px solid rgba(255,255,255,.35)", flexShrink: 0 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "9px 15px", fontSize: 13.5, fontWeight: 700, background: "#fff", color: "#111" }}><ImageIcon size={14} /> Photo</div>
+              <button onClick={onClose} title="Go to the checklist" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "9px 15px", fontSize: 13.5, fontWeight: 700, background: "transparent", color: "#fff", border: "none", cursor: "pointer", fontFamily: "inherit" }}><List size={14} /> List</button>
+            </div>)}
       </div>
       {tabs && <div style={{ flexShrink: 0, padding: "0 12px 10px", display: "flex", gap: 6, overflowX: "auto" }}>{tabs}</div>}
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
