@@ -43,6 +43,7 @@ const FIRE = {
   green: "#3FB860",
   greenText: "#76C98D",
   amberText: "#D6A95E",
+  blueText: "#5B9BD5",   // Board-audience events (distinct from leadership amber + fire red)
   redText: "#E58A90",
   track: "rgba(255,255,255,.06)",
   // --- Phase 0 additive tokens (values previously hardcoded in the Training reskins) ---
@@ -93,6 +94,13 @@ const isDeptAdmin      = (rs) => hasAny(rs, DEPT_ADMIN_ROLES);
 const isBoard          = (rs) => hasAny(rs, ['Board Member']);
 const canManage        = (rs) => hasAny(rs, CANMANAGE_ROLES);
 const isTrainingLeader = (rs) => hasAny(rs, SIGNIN_ROLES);
+// Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
+// is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
+// expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
+const isRestrictedEvent = (s) => s?.audience === "leadership" || s?.audience === "board";
+const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
+  : s?.audience === "leadership" ? isLeader(m?.access)
+  : true;
 // Provenance pill for minutes that a human brought in (ai_outputs.source='imported') — so a human-authored
 // document is NEVER shown as if Claude drafted it. Shown wherever imported minutes appear.
 const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
@@ -649,7 +657,7 @@ function deptAttendance(members, sessions, year, range) {
   const inScope = range
     ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
     : (s) => s.y === year;
-  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && s.audience !== "leadership");   // TRAINING only — leadership EVENTS excluded (separate track); people/roles untouched
+  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && !isRestrictedEvent(s));   // TRAINING only — leadership EVENTS excluded (separate track); people/roles untouched
   const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
     const memberLeader = isLeader(m.access);
     const eligible = doneThisYear;   // all remaining are audience='everyone' → eligible for everyone (the memberLeader/audience filter is now redundant)
@@ -661,23 +669,25 @@ function deptAttendance(members, sessions, year, range) {
   const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
   return { rows, avg, doneThisYear };
 }
-// Separate LEADERSHIP-EVENT accountability track (Piece 2): leaders' attendance at
-// audience='leadership' sessions (board/officer meetings, leadership-only trainings).
-// Mirrors deptAttendance but scoped to leadership EVENTS + the leadership team as the roll.
-function leadershipAttendance(members, sessions, year, range) {
+// BOARD-EVENT accountability track: board members' attendance at audience='board' sessions
+// (board meetings). Board has a formal duty to attend, so this is the ONE governance stat we
+// measure. Leadership events still exist + are still pulled from training stats, but are NOT
+// measured (an officer attending an officers' meeting is just work). Non-board attendees of a
+// board event (e.g. an invited officer) are never in this roll -> never counted here.
+function boardAttendance(members, sessions, year, range) {
   const inScope = range
     ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
     : (s) => s.y === year;
-  const doneLeadership = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && s.audience === "leadership");   // leadership EVENTS with a roll taken
-  const leaders = (members || []).filter((m) => countsInStats(m) && isLeader(m.access) && m.status === "Active");   // accountable group: Board/Officer/DA (PA/owner/test excluded)
-  const rows = leaders.map((m) => {
-    const attended = doneLeadership.filter((s) => (s.attendance || []).includes(m.id)).length;
-    const pct = doneLeadership.length ? Math.round((attended / doneLeadership.length) * 100) : null;
-    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: doneLeadership.length, pct };
+  const doneBoard = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && s.audience === "board");   // board EVENTS with a roll taken
+  const board = (members || []).filter((m) => countsInStats(m) && isBoard(m.access) && m.status === "Active");   // accountable group: Board Members only (PA/owner/test excluded)
+  const rows = board.map((m) => {
+    const attended = doneBoard.filter((s) => (s.attendance || []).includes(m.id)).length;
+    const pct = doneBoard.length ? Math.round((attended / doneBoard.length) * 100) : null;
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: doneBoard.length, pct };
   });
   const rated = rows.filter((r) => r.pct != null);
   const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
-  return { rows, avg, doneLeadership };   // avg = leadership attendance %, doneLeadership.length = leadership events held
+  return { rows, avg, doneBoard };   // avg = board attendance %, doneBoard.length = board events held
 }
 // Rolling 90-day window for live participation (roster + member file) — feeds the SAME
 // deptAttendance calc as Reports, so a finalized drill moves these numbers immediately.
@@ -922,19 +932,23 @@ function Announcements({ role, members, meId, notify, style }) {
 // Board oversight dashboard — governance/health view (Board is oversight, not ops).
 // Derivations MIRROR DeptAdminDashboard exactly (deptAttendance, cert compliance, readiness 40/40/20).
 // SCAFFOLD: header + raw derived numbers for verification; cards/styling + governance queries land next.
-// Piece 4 — soonest FUTURE leadership event (audience='leadership'), for the leader dashboards.
-function NextLeadershipEventTile({ S, sessions, notify }) {
+// Soonest FUTURE restricted event (board or leadership) the VIEWER is on the roll for, for the
+// leader dashboards. Audience-aware: a board member sees the next board OR leadership event; an
+// officer (not board) sees the next leadership event only. Label reflects that event's audience.
+function NextLeadershipEventTile({ S, sessions, role, notify }) {
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const todayISO = toISODate(new Date());
-  const next = (sessions || []).filter((s) => !s.done && s.audience === "leadership" && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  const viewer = { access: role };
+  const next = (sessions || []).filter((s) => !s.done && isRestrictedEvent(s) && rollFor(s, viewer) && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  const kicker = next?.audience === "board" ? "NEXT BOARD EVENT" : "NEXT LEADERSHIP EVENT";
   return (
     <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> NEXT LEADERSHIP EVENT</div>
+      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> {kicker}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
         {next ? (<>
-          <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3 }}>{next.title}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{next.title}<EventAudienceTag audience={next.audience} /></div>
           <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{fmtSess(next)}</div>
-        </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No upcoming leadership events.</div>}
+        </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No upcoming leadership or board events.</div>}
       </div>
       {next?.plan && <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => openSessionPlans(next)}>View plan <ChevronRight size={13} color={FIRE.btnIcon} /></button>}
       {mounts}
@@ -947,7 +961,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const me = members.find((m) => m.id === meId) || null;
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);   // dept attendance % + drills
-  const { avg: ldrPct } = leadershipAttendance(members, sessions, yr);   // separate leadership-event track (% only)
+  const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const total = cm.length;
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
@@ -991,7 +1005,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       <div style={{ ...FS.kicker, marginBottom: 8 }}>MEETINGS &amp; GOVERNANCE</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
         {/* Next leadership event — soonest future audience='leadership' session (Piece 4; repointed from the old agenda-draft NEXT MEETING) */}
-        <NextLeadershipEventTile S={S} sessions={sessions} notify={notify} />
+        <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
         {/* Recent minutes — newest minutes draft */}
         <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><FileText size={13} color={FIRE.red} /> RECENT MINUTES</div>
@@ -1053,7 +1067,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
             ["Attendance", `${avgPart}%`],
             ["Active roster", String(total)],
             ["Drills held", String(drillsHeld)],
-            ["Leadership attendance", `${ldrPct}%`],
+            ["Board attendance", `${boardPct}%`],
           ].map(([label, val]) => (
             <div key={label}>
               <div style={{ fontFamily: DISPLAY, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1, ...FS.num }}>{val}</div>
@@ -1089,7 +1103,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same geometry as the member attendance ring
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const { avg: ldrPct } = leadershipAttendance(members, sessions, yr);   // separate leadership-event track (% only)
+  const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const total = cm.length;
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
@@ -1156,12 +1170,12 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <div style={FS.kicker}>DEPARTMENT READINESS</div>
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>40% certifications · 40% attendance · 20% duty completion</div>
         </div>
-        <button onClick={() => go("training")} className="stat-cta" title="Leadership attendance — view training" style={{ background: "none", border: "none", padding: "0 2px", cursor: "pointer", textAlign: "right", fontFamily: "inherit", flexShrink: 0, alignSelf: "center" }}>
-          <div style={FS.kicker}>LEADERSHIP ATTENDANCE</div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, ...FS.num, marginTop: 4, color: ldrPct > 75 ? FIRE.green : ldrPct >= 30 ? FIRE.amberText : FIRE.redText }}>{ldrPct}%</div>
+        <button onClick={() => go("training")} className="stat-cta" title="Board attendance — view training" style={{ background: "none", border: "none", padding: "0 2px", cursor: "pointer", textAlign: "right", fontFamily: "inherit", flexShrink: 0, alignSelf: "center" }}>
+          <div style={FS.kicker}>BOARD ATTENDANCE</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, ...FS.num, marginTop: 4, color: boardPct > 75 ? FIRE.green : boardPct >= 30 ? FIRE.amberText : FIRE.redText }}>{boardPct}%</div>
         </button>
       </div>
-      <div style={{ marginBottom: 12, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} notify={notify} /></div>
+      <div style={{ marginBottom: 12, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat S={S} dark n={String(total)} label="Members" onClick={() => go("roster", "members")} />
         <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" pct={expdC > 0 ? 0 : certPct} onClick={() => go("roster", "certs")} />
@@ -1245,7 +1259,7 @@ const REMINDER_SYS = "You're a volunteer fire department officer writing a brief
 function computeInsights({ sessions, members, openItems, openFailures, todayISO }) {
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
-  const eligibleFor = (m, s) => s.audience !== "leadership";   // TRAINING-gap only — leadership EVENTS excluded (event filter, not person); leaders' regular-training gaps still count
+  const eligibleFor = (m, s) => !isRestrictedEvent(s);   // TRAINING-gap only — leadership EVENTS excluded (event filter, not person); leaders' regular-training gaps still count
   const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
   const isPureBoard = (m) => isBoard(m.access) && !hasAny(m.access, ["Member", "Officer", "Department Admin", "Project Admin"]);   // governance-only → not expected at drills (overdue-items still flags them)
   const attendanceGaps = pastDone.length === 0 ? [] : (members || []).filter((m) => countsInStats(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
@@ -1417,7 +1431,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DA/Board
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const { avg: ldrPct } = leadershipAttendance(members, sessions, yr);   // separate leadership-event track (% only)
+  const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const activeCount = cm.filter((m) => m.status === "Active").length;
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
@@ -1499,9 +1513,9 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
         <Stat S={S} dark n={String(activeCount)} label="Active members" />
         <Stat S={S} dark n={String(drillsHeld)} label="Drills run" />
-        <Stat S={S} dark n={`${ldrPct}%`} label="Leadership attendance" />
+        <Stat S={S} dark n={`${boardPct}%`} label="Board attendance" />
       </div>
-      <div style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} notify={notify} /></div>
+      <div style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
         {cards.map((c) => (
@@ -1657,7 +1671,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   // per-CALENDAR-MONTH attendance rate for this member (null when a month has no recorded drills)
   const monthRate = (Y, M) => {
     const meLeader = isLeader(me?.access);   // score off the member's ACTUAL roles (not "View as")
-    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && (meLeader || s.audience !== "leadership"));
+    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && (meLeader || !isRestrictedEvent(s)));
     if (!rec.length) return null;
     const att = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
     return { total: rec.length, attended: att, pct: Math.round((att / rec.length) * 100) };
@@ -1720,7 +1734,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   useEffect(() => { const id = setTimeout(() => setRingOn(true), 50); return () => clearTimeout(id); }, [ringPct]);   // animate ring fill on load / when the rate changes
   // Get prepared: a Training next-event's attachments come from the already-loaded sessions prop (s.plans[] from slice 1) — no extra query.
   // NEXT EVENT: a non-leader's next event skips leadership training (still shown on the calendar). Leader sees it. Scored off actual roles (me.access), not "View as".
-  const nextEvent = upcomingAll.find((e) => isLeader(me?.access) || !(e.type === "Training" && e.audience === "leadership")) || null;
+  const nextEvent = upcomingAll.find((e) => isLeader(me?.access) || !(e.type === "Training" && isRestrictedEvent(e))) || null;
   const nextSession = nextEvent?.type === "Training" ? sess.find((x) => String(x.id) === String(nextEvent.id)) : null;
   const nextPlans = nextSession?.plans || [];
   return (
@@ -1787,7 +1801,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
                 <>
                   <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div>
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nextEvent.title || "—"}</div>
-                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}<LeadershipTag audience={nextEvent.audience} /></div>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}<EventAudienceTag audience={nextEvent.audience} /></div>
                 </>
               ) : (
                 <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 10 }}>Nothing scheduled</div>
@@ -2506,9 +2520,9 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={newCat} onChange={(e) => setNewCat(e.target.value)}><option value="">One-off (no category)</option>{(categories || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
                   <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Audience</span>
                     <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
-                      {[["everyone", "Everyone"], ["leadership", "Leadership only"]].map(([val, lbl], i) => {
+                      {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                         const on = newAudience === val;
-                        return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                        return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
                       })}
                     </div></label>
                   <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={scheduleOnDate} disabled={!newDate || saving}>{saving ? <><Loader2 size={16} className="spin" /> Scheduling…</> : <><Plus size={16} /> Schedule on date</>}</button>
@@ -3677,7 +3691,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         <MonthCalendar
           cur={cur} setCur={setCur} dark
           items={monthItems}
-          renderChip={(it) => { const ldr = it.source === "training" && it.audience === "leadership"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: ldr ? FIRE.amberText : it.color, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${ldr ? "Leadership only · " : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
+          renderChip={(it) => { const restricted = it.source === "training" && isRestrictedEvent(it); const isBoardEvt = it.audience === "board"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: restricted ? (isBoardEvt ? FIRE.blueText : FIRE.amberText) : it.color, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${restricted ? (isBoardEvt ? "Board only · " : "Leadership only · ") : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
           todayColor={FIRE.red}
           monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
           overflowIndicator
@@ -3687,7 +3701,8 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         const it = detailEvent;
         const isTraining = it.source === "training";
         const hasPlans = isTraining && (it.plans || []).length > 0;
-        const ldr = isTraining && it.audience === "leadership";
+        const ldr = isTraining && isRestrictedEvent(it);
+        const isBoardEvt = it.audience === "board";
         const SRC_LABEL = { training: "Training", actionitem: "Action item", recruit: "Recruitment", funding: "Funding", social: "Social" };
         const dateStr = new Date(it.y, it.m, it.d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
         return (
@@ -3703,7 +3718,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
               </div>
               <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ fontSize: 13.5, color: FIRE.textPrimary }}><Calendar size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} color={FIRE.textMuted} />{dateStr}{it.startTime ? ` · ${fmtTime(it.startTime)}` : ""}</div>
-                {ldr && <div style={{ fontSize: 12.5, color: FIRE.amberText, fontWeight: 600 }}>Leadership only</div>}
+                {ldr && <div style={{ fontSize: 12.5, color: isBoardEvt ? FIRE.blueText : FIRE.amberText, fontWeight: 600 }}>{isBoardEvt ? "Board only" : "Leadership only"}</div>}
                 {isTraining && (hasPlans
                   ? <button style={{ ...FS.btnPrimary, alignSelf: "flex-start", marginTop: 4 }} onClick={() => { openSessionPlans(it); setDetailEvent(null); }}><FileText size={15} /> View plan</button>
                   : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 2 }}>No plan attached yet.</div>)}
@@ -4648,7 +4663,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
 
       {(() => {
         const memberLeader = isLeader(member.access);   // score + list off the VIEWED member's actual roles
-        const done = (sessions || []).filter((s) => s.done && s.audience !== "leadership").sort((a, b) => sessDate(b) - sessDate(a));   // TRAINING only — leadership EVENTS excluded (event filter; the member is still fully counted for regular training)
+        const done = (sessions || []).filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a));   // TRAINING only — leadership EVENTS excluded (event filter; the member is still fully counted for regular training)
         const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
@@ -4661,7 +4676,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                   return (
                     <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
                       <CalendarCheck size={15} color={present ? FIRE.green : FIRE.redBright} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><LeadershipTag audience={s.audience} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><EventAudienceTag audience={s.audience} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
                       <Pill S={S} color={present ? FIRE.green : FIRE.redBright}>{present ? "PRESENT" : "ABSENT"}</Pill>
                     </div>
                   );
@@ -4871,7 +4886,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
   const activeMembers = (members || []).filter((m) => countsInStats(m) && m.status === "Active");
   const activeLeaders = activeMembers.filter((m) => isLeader(m.access));
   const recentEvents = (sessions || [])
-    .filter((s) => s.done && (s.attendance || []).length > 0 && s.audience !== "leadership")   // TRAINING only — leadership EVENTS excluded
+    .filter((s) => s.done && (s.attendance || []).length > 0 && !isRestrictedEvent(s))   // TRAINING only — leadership EVENTS excluded
     .sort((a, b) => new Date(b.y, b.m, b.d) - new Date(a.y, a.m, a.d))   // newest first
     .slice(0, 6)
     .map((s) => ({
@@ -4880,7 +4895,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
       date: new Date(s.y, s.m, s.d).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       category: (plan || []).find((p) => String(p.id) === String(s.planId))?.name || null,   // plan_id → training_plans.name
       present: (s.attendance || []).length,
-      total: (s.audience === "leadership" ? activeLeaders : activeMembers).length,   // eligible = Active members under the audience rule
+      total: (isRestrictedEvent(s) ? activeMembers.filter((m) => rollFor(s, m)) : activeMembers).length,   // eligible = Active members under the audience rule (board->Board, leadership->leaders)
     }));
   return (
     <div>
@@ -4935,15 +4950,15 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
   const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
   const recentTraining = (sessions || [])
-    .filter((s) => s.done && (s.attendance || []).length > 0 && s.audience !== "leadership")   // TRAINING only — leadership EVENTS excluded
+    .filter((s) => s.done && (s.attendance || []).length > 0 && !isRestrictedEvent(s))   // TRAINING only — leadership EVENTS excluded
     .sort((a, b) => sessMs(b) - sessMs(a))
     .slice(0, 6)
     .map((s) => ({
       name: s.title,
       date: new Date(s.y, s.m, s.d).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      type: s.audience === "leadership" ? "Leadership training" : "Training",
+      type: s.audience === "board" ? "Board meeting" : s.audience === "leadership" ? "Leadership training" : "Training",
       present: (s.attendance || []).length,
-      total: s.audience === "leadership" ? cm.filter((m) => isLeader(m.access)).length : cm.length,
+      total: isRestrictedEvent(s) ? cm.filter((m) => rollFor(s, m)).length : cm.length,
     }));
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
@@ -5089,7 +5104,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         <SubHead>Flagged certifications — {expd} expired · {expg} expiring</SubHead>
         {flaggedCerts.length === 0 ? <None /> : flaggedCerts.slice(0, 8).map((f, i) => <Line key={i}>{f.member} · {f.cert} · {f.exp} ({f.status})</Line>)}
         <SubHead>Upcoming training — {upcoming.length}</SubHead>
-        {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+        {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "board" ? " · board" : s.audience === "leadership" ? " · leadership" : ""}</Line>)}
         <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
         {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
       </div>
@@ -5253,7 +5268,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const chron = [...doneThisYear].sort(sessSort);   // chronological columns
   const gridCols = fullYear ? chron : chron.slice(-10);                        // screen default = recent 10 (CSV always exports full)
   // Audience-aware cell state — SAME predicate as the summary's eligible denominator, applied per session:
-  const cellState = (r, s) => (r.leader || s.audience !== "leadership")
+  const cellState = (r, s) => (r.leader || !isRestrictedEvent(s))
     ? ((s.attendance || []).includes(r.id) ? "present" : "absent")            // eligible → attended / eligible-but-absent
     : "na";                                                                    // not eligible → not expected (leadership session, non-leader)
   const CELL = { present: { ch: "✓", c: FIRE.green }, absent: { ch: "✗", c: FIRE.redText }, na: { ch: "—", c: FIRE.textMuted } };
@@ -5265,7 +5280,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     const sumBody = rows.map((r) => [r.name, r.role, r.status, r.attended, r.eligible, r.pct == null ? "—" : `${r.pct}%`]);
     // Section 2 — session-by-session grid; ALWAYS full year (chron), independent of the screen's recent/full toggle
     const cols = chron;
-    const gridHeader = ["Member", ...cols.map((s) => colLabel(s) + (s.audience === "leadership" ? " (L)" : "")), "Total"];
+    const gridHeader = ["Member", ...cols.map((s) => colLabel(s) + (s.audience === "board" ? " (B)" : s.audience === "leadership" ? " (L)" : "")), "Total"];
     const gridBody = rows.map((r) => [r.name, ...cols.map((s) => ({ present: "P", absent: "A", na: "" }[cellState(r, s)])), `${r.attended}/${r.eligible}`]);
     const allRows = [
       sumHeader, ...sumBody,
@@ -5273,7 +5288,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       [`Session-by-session — ${rangeText}`],
       gridHeader, ...gridBody,
       [],
-      ["Legend: P = present, A = absent, blank = not expected (leadership session, non-leader), (L) = leadership session"],
+      ["Legend: P = present, A = absent, blank = not expected (restricted session, not on that roll), (L) = leadership session, (B) = board session"],
     ];
     const csv = allRows.map((r) => r.map(csvField).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -5324,7 +5339,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
                 <th style={{ position: "sticky", left: 0, background: FIRE.card, textAlign: "left", padding: "6px 14px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", zIndex: 1 }}>Member</th>
                 {gridCols.map((s) => (
                   <th key={s.id} title={s.title} style={{ padding: "6px 9px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>
-                    {colLabel(s)}{s.audience === "leadership" && <span style={{ color: FIRE.amberText }}> ·L</span>}
+                    {colLabel(s)}{s.audience === "board" ? <span style={{ color: FIRE.blueText }}> ·B</span> : s.audience === "leadership" ? <span style={{ color: FIRE.amberText }}> ·L</span> : null}
                   </th>
                 ))}
                 <th style={{ padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>Total</th>
@@ -5340,7 +5355,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
               ))}
             </tbody>
           </table>
-          <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "8px 14px 2px" }}><span style={{ color: FIRE.green, fontWeight: 700 }}>✓</span> attended · <span style={{ color: FIRE.redText, fontWeight: 700 }}>✗</span> absent · <span style={{ fontWeight: 700 }}>—</span> not expected · <span style={{ color: FIRE.amberText }}>·L</span> leadership session</div>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "8px 14px 2px" }}><span style={{ color: FIRE.green, fontWeight: 700 }}>✓</span> attended · <span style={{ color: FIRE.redText, fontWeight: 700 }}>✗</span> absent · <span style={{ fontWeight: 700 }}>—</span> not expected · <span style={{ color: FIRE.amberText }}>·L</span> leadership · <span style={{ color: FIRE.blueText }}>·B</span> board</div>
         </div>
       ) : (
       <div style={{ ...FS.card, padding: "4px 16px", marginTop: 14 }}>
@@ -7264,7 +7279,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       `Other open duties: ${topN(otherOpen, (d) => `${d.duty}${d.assigned_to ? ` — ${nameById.get(d.assigned_to) || "unassigned"}` : ""}`)}`,
       `Certifications expired: ${topN(expired, (r) => `${r.member}'s ${r.cert} (${r.phrase})`)}`,
       `Certifications expiring within 90 days: ${topN(expiring, (r) => `${r.member}'s ${r.cert} (${r.phrase})`)}`,
-      `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}${s.audience === "leadership" ? " (leadership)" : ""}`)}`,
+      `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}${s.audience === "board" ? " (board)" : s.audience === "leadership" ? " (leadership)" : ""}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
     ];
     const user = lines.join("\n");
@@ -7338,7 +7353,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
             {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
 
             <SubHead>Upcoming training — {upcoming.length}</SubHead>
-            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "board" ? " · board" : s.audience === "leadership" ? " · leadership" : ""}</Line>)}
 
             <SubHead>Certifications — {expired.length} expired · {expiring.length} expiring</SubHead>
             {expired.length === 0 && expiring.length === 0 ? <None /> : [...expired, ...expiring].slice(0, 8).map((r, i) => <Line key={i}>{r.member} · {r.cert} · {r.phrase}</Line>)}
@@ -7789,9 +7804,12 @@ function usePlanViewer(S, notify) {
   </>);
   return { openSessionPlans, openPlan, setViewPlan, mounts };
 }
-function LeadershipTag({ audience }) {   // amber "Leadership" pill for leadership-audience events (list rows); returns null otherwise
-  if (audience !== "leadership") return null;
-  return <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>Leadership</span>;
+function EventAudienceTag({ audience }) {   // "Board" (blue) or "Leadership" (amber) pill for restricted events; null for 'everyone'
+  const cfg = audience === "board" ? { color: FIRE.blueText, label: "Board" }
+    : audience === "leadership" ? { color: FIRE.amberText, label: "Leadership" }
+    : null;
+  if (!cfg) return null;
+  return <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: cfg.color, border: `0.5px solid ${cfg.color}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>{cfg.label}</span>;
 }
 // Attach a saved agenda (ai_outputs feature='agenda') to a leadership event as a SNAPSHOT
 // session_plans ai-row → surfaces via the existing "View plan" / openSessionPlans path (zero new view code).
@@ -8134,7 +8152,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const catOf = (s) => plan.find((p) => String(p.id) === String(s.planId));
     // DATA HONESTY: a session only "has a record" once attendance was actually taken (non-empty).
     // Attendance doesn't persist yet, so today every array is empty → these fall to clean empty states.
-    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s) && s.audience !== "leadership");   // TRAINING only — leadership EVENTS excluded from a member's training %
+    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s) && !isRestrictedEvent(s));   // TRAINING only — leadership EVENTS excluded from a member's training %
     const totalRecorded = recorded.length;
     const attendedCount = recorded.filter((s) => (s.attendance || []).includes(me?.id)).length;
     const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
@@ -8143,7 +8161,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     // IDENTICAL chip logic to the leader calendar — colors/layout unchanged (do not alter).
     const renderChip = (s) => {
       const cat = plan.find((p) => String(p.id) === String(s.planId));
-      const base = s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
+      const base = s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
       const mix = (hex, tt) => {
         const h = hex.replace("#", "");
         const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
@@ -8152,7 +8170,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         return "#" + to2(Math.round(r + (tr - r) * tt)) + to2(Math.round(g + (tg - g) * tt)) + to2(Math.round(b + (tb - b) * tt));
       };
       const color = s.done ? mix(base, 0.45) : base;
-      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
     };
 
     const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
@@ -8229,7 +8247,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
                   <CalendarCheck size={15} color={cat?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<LeadershipTag audience={s.audience} /></div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<EventAudienceTag audience={s.audience} /></div>
                     <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""} · {s.planId ? "counts toward the plan" : "one-off"}</div>
                   </div>
                   {!s.done ? (
@@ -8266,7 +8284,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
   const statusColor = (label) => (label === "On track" || label === "Done") ? "#76C98D" : label === "Due soon" ? "#D6A95E" : "#E58A90";
   // Card 1 — most recent done session's attendance (empty until persistence lands)
-  const lastDone = sessions.filter((s) => s.done && s.audience !== "leadership").sort((a, b) => sessDate(b) - sessDate(a))[0];   // most recent TRAINING — leadership EVENTS excluded
+  const lastDone = sessions.filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a))[0];   // most recent TRAINING — leadership EVENTS excluded
   const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const totalMembers = cm.length;
@@ -8417,9 +8435,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
             <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
-              {[["everyone", "Everyone"], ["leadership", "Leadership only"]].map(([val, lbl], i) => {
+              {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                 const on = sAudience === val;
-                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
               })}
             </div></label>
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
@@ -8443,7 +8461,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             renderChip={(s) => {
               // base color = linked category's live color, or fallback blue for one-off / deleted category
               const cat = plan.find((p) => String(p.id) === String(s.planId));
-              const base = s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
+              const base = s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
               // dim toward dark slate for completed (keep dark enough for white text)
               const mix = (hex, t) => {
                 const h = hex.replace("#", "");
@@ -8453,7 +8471,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
               };
               const color = s.done ? mix(base, 0.45) : base;
-              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
             }}
             todayColor="#C8323A"
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
@@ -8472,10 +8490,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             monthSessions.map((s) => {
               const att = s.attendance || [];
               const open = openAtt === s.id;
-              const ldrEvent = s.audience === "leadership";
+              const restricted = isRestrictedEvent(s);
               const counted = members.filter(countsInStats);                                                          // exclude Project Admins (Ashlea + Demo, by role) + owner/test — same rule as deptAttendance/RECENT EVENTS
-              const expected = ldrEvent ? counted.filter((m) => isLeader(m.access)) : counted;                        // counted population (leaders for leadership events)
-              const roll = ldrEvent ? counted.filter((m) => isLeader(m.access) || att.includes(m.id)) : counted;      // shown = expected ∪ actual attendees (never hide a real check-in)
+              const expected = restricted ? counted.filter((m) => rollFor(s, m)) : counted;                           // expected roll: board->Board, leadership->leaders, else everyone
+              const roll = restricted ? counted.filter((m) => rollFor(s, m) || att.includes(m.id)) : counted;         // shown = expected ∪ actual attendees (an invited non-member still shows, tagged 'not counted')
               const expCount = expected.length;                                                                        // denominator M
               const attCount = expected.filter((m) => att.includes(m.id)).length;                                      // numerator N — expected who attended
               const locked = s.done || s.signinOpen || (s.attendance?.length > 0);   // editable only BEFORE QR sign-in starts / any check-in / done
@@ -8484,7 +8502,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   <div style={Lrow}>
                     <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                     <div style={FS.rowTitle}>
-                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<LeadershipTag audience={s.audience} /></span>
+                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<EventAudienceTag audience={s.audience} /></span>
                       <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
@@ -8494,7 +8512,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       {canManage && (
                         <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                       )}
-                      {s.audience === "leadership" && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
+                      {isRestrictedEvent(s) && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
                       {s.done
                         ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
                         : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
@@ -8510,9 +8528,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category</span><select style={Linput} value={sessEdit.planId} onChange={(e) => setSessEdit((b) => ({ ...b, planId: e.target.value }))}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="">One-off (no category)</option></select></label>
                       <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
                         <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
-                          {[["everyone", "Everyone"], ["leadership", "Leadership only"]].map(([val, lbl], i) => {
+                          {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                             const on = sessEdit.audience === val;
-                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
                           })}
                         </div></label>
                       <button style={LprimaryBtn} onClick={() => saveEditSession(s.id)}><CheckCircle2 size={15} /> Save</button>
@@ -8544,7 +8562,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                             {canManage && !s.done
                               ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#76C98D" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
                               : (present ? <CheckCircle2 size={18} color="#76C98D" /> : <X size={16} color="#E58A90" />)}
-                            <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}{ldrEvent && !isLeader(m.access) ? <span style={{ color: "#7E8794", fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
+                            <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}{restricted && !rollFor(s, m) ? <span style={{ color: "#7E8794", fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
                             <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#76C98D" : "#E58A90" }}>{present ? "PRESENT" : "ABSENT"}</span>
                           </div>
                         );
