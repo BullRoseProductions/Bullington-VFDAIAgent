@@ -65,6 +65,16 @@ const FS = {
   btnPrimary: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: FIRE.white, border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
   input: { border: `0.5px solid ${FIRE.inputBorder}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: FIRE.card, color: FIRE.textPrimary, colorScheme: "dark", width: "100%" },
   row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `0.5px solid ${FIRE.hairline}` },
+  // RESPONSIVE CONVENTION (fluid, no JS breakpoint — reflows by available width):
+  //  - A list row = FS.row (wraps) + FS.rowTitle on the label + FS.rowActions on the button cluster.
+  //    rowTitle holds a readable min so it never squishes to a sliver; rowActions wraps the buttons
+  //    as a unit beneath the title on narrow screens. Use these instead of `flex:1, minWidth:0`.
+  //  - A multi-column block that should stack on phones = S.twoColFluid (auto-collapsing grid).
+  //    Never hard-code a fixed `gridTemplateColumns` without a collapse rule (that's what broke the
+  //    Officer calendar / drill planner). The one hard breakpoint (900px) lives in Fonts() and is
+  //    for the nav drawer only.
+  rowTitle: { flex: "1 1 160px", minWidth: 150 },
+  rowActions: { display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginLeft: "auto" },
 };
 
 const ROLES = ["Project Admin", "Department Admin", "Board Member", "Officer", "Member"];
@@ -1495,9 +1505,9 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           </div>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 18, marginBottom: 6 }}>
+      <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 18, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} />
-        <div style={{ minWidth: 0 }}>
+        <div className="dash-cal" style={{ minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
@@ -7788,14 +7798,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           ) : (
             <div key={p.id} style={Lrow}>
               <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color || "#1F4E79", flexShrink: 0, display: "inline-block" }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={FS.rowTitle}>
                 <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{p.name}</span> <span style={{ color: "#9AA1AC", fontSize: 13 }}>· {p.cadence}</span>
                 <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>} · <span style={{ color: statusColor(info.label) }}>{info.rel}</span></div>
               </div>
-              <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
-              {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
-              {canManage && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
-              {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
+              <div style={FS.rowActions}>
+                <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
+                {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
+                {canManage && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
+                {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
+              </div>
             </div>
           )
         ))}
@@ -7870,22 +7882,24 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 <div key={s.id}>
                   <div style={Lrow}>
                     <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={FS.rowTitle}>
                       <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<LeadershipTag audience={s.audience} /></span>
                       <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
-                    {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete */}
-                    <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
-                    {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
-                    {canManage && (
-                      <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
-                    )}
-                    {s.audience === "leadership" && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
-                    {s.done
-                      ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
-                      : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
-                    {canManage && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
-                    {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
+                    {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
+                    <div style={FS.rowActions}>
+                      <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
+                      {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                      {canManage && (
+                        <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
+                      )}
+                      {s.audience === "leadership" && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
+                      {s.done
+                        ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
+                        : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
+                      {canManage && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
+                      {canManage && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
+                    </div>
                   </div>
                   {editingSessionId === s.id && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -9192,6 +9206,10 @@ function Fonts() {
         .dr-side { position: fixed; left: -290px; transition: left .22s ease; z-index: 40; height: 100dvh; }
         .dr-side.open { left: 0; }
         .dr-menu { display: inline-flex !important; }
+        /* Officer dashboard: stack to one column, calendar on top, announcements below.
+           Desktop (>900px) keeps the inline 1fr 1.7fr grid untouched. */
+        .dash-cal-2col { grid-template-columns: 1fr !important; }
+        .dash-cal-2col > .dash-cal { order: -1; }
       }
     `}</style>
   );
@@ -9298,7 +9316,10 @@ function baseStyles() {
     check: { display: "flex", alignItems: "flex-start", gap: 9, fontSize: 14, color: SLATE, lineHeight: 1.4, cursor: "pointer" },
     disclaimer: { display: "flex", gap: 9, background: "#F3F1EC", border: `1px solid ${LINE}`, borderLeft: "3px solid #E0A100", borderRadius: 8, padding: "12px 14px", fontSize: 12.5, color: SLATE, lineHeight: 1.5, marginBottom: 16 },
     /* AI */
-    aiGrid: { display: "grid", gridTemplateColumns: "360px 1fr", gap: 18, alignItems: "start" },
+    // Reusable auto-collapsing two-column: two columns when there's room, one column (stacked,
+    // source order) on phones. Use for any "side-by-side on desktop, stacked on mobile" block.
+    twoColFluid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12, alignItems: "start" },
+    aiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18, alignItems: "start" },   // was fixed "360px 1fr" — now collapses: form on top, plan underneath on phones
     aiForm: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 },
     aiResult: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 22, minHeight: 320 },
     aiPlaceholder: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, height: "100%", minHeight: 280, color: MUTED, textAlign: "center", fontSize: 14, padding: 20 },
