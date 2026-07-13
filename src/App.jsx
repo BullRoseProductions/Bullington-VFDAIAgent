@@ -646,6 +646,7 @@ const dashboardGreeting = (me) => {
 const STATS_EXCLUDED_IDS = new Set([
   "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // Ashlea (owner)
   "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
+  "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com) — has Board Member but NO Project Admin, so the by-role clause never caught it; exclude by id
 ]);
 const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, ['Project Admin']);   // owner/test by id + any Project Admin by role (robust across depts/ids)
 // Same two accounts must never be a selectable assignee (mentor/duty/action-item/owner pickers).
@@ -8491,7 +8492,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               const att = s.attendance || [];
               const open = openAtt === s.id;
               const restricted = isRestrictedEvent(s);
-              const counted = members.filter(countsInStats);                                                          // exclude Project Admins (Ashlea + Demo, by role) + owner/test — same rule as deptAttendance/RECENT EVENTS
+              const counted = members.filter(countsInStats);                                                          // same exclusion as every other stat: STATS_EXCLUDED_IDS (owner + Demo/test accounts) + any Project Admin
               const expected = restricted ? counted.filter((m) => rollFor(s, m)) : counted;                           // expected roll: board->Board, leadership->leaders, else everyone
               const roll = restricted ? counted.filter((m) => rollFor(s, m) || att.includes(m.id)) : counted;         // shown = expected ∪ actual attendees (an invited non-member still shows, tagged 'not counted')
               const expCount = expected.length;                                                                        // denominator M
