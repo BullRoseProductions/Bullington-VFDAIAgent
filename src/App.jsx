@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
@@ -447,7 +447,54 @@ function YourSix({ S, role, meId, members, notify }) {
     </div>
   );
 }
-function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests }) {
+// Member's optional "reach out" person — private, self-only. Reads the current value via a
+// self-read (RLS allows a member to read their own row); writes via the tightly-scoped
+// set_reach_out_person RPC (own row + reach_out_member_id column only).
+function ReachOutPersonPicker({ S, members, meId, notify }) {
+  const [current, setCurrent] = useState(undefined);   // undefined = loading, null = none, uuid = set
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let off = false;
+    supabase.from("members").select("reach_out_member_id").eq("id", meId).single()
+      .then(({ data }) => { if (!off) setCurrent(data ? (data.reach_out_member_id || null) : null); });
+    return () => { off = true; };
+  }, [meId]);
+  const options = (members || []).filter((m) => isAssignable(m) && m.id !== meId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const person = current ? (members || []).find((m) => m.id === current) : null;
+  async function choose(val) {
+    const target = val || null;
+    setSaving(true);
+    const { error } = await supabase.rpc("set_reach_out_person", { p_target: target });
+    setSaving(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save that", text: error.message || "Please try again." }); return; }
+    setCurrent(target);
+    notify({ kind: "success", text: target ? "Your person is set." : "Cleared your person." });
+  }
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>YOUR PERSON</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Who's your person?</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Optional. Pick someone on your crew you'd want to hear from in a hard moment — they'll be the first tap in “Reach out” on Your Six. This is private to you; only you can see or change it.</div>
+      </div>
+      <div style={{ ...FS.card, padding: 16 }}>
+        {current === undefined ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+        ) : (<>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Your person</span>
+            <select style={FS.input} value={current || ""} disabled={saving} onChange={(e) => choose(e.target.value)}>
+              <option value="">— None —</option>
+              {options.map((m) => <option key={m.id} value={m.id} disabled={!m.phone}>{m.name}{m.phone ? "" : " (no number on file)"}</option>)}
+            </select>
+          </label>
+          {person && <div style={{ marginTop: 12, fontSize: 13, color: FIRE.textSecondary }}>Currently: <b style={{ color: FIRE.textPrimary }}>{person.name}</b>{person.phone ? ` · ${person.phone}` : ""}</div>}
+          {person && !person.phone && <div style={{ marginTop: 6, fontSize: 12.5, color: FIRE.amberText }}>This person has no number on file, so “Reach out” can't call them yet — pick someone with a number, or ask an officer to add theirs.</div>}
+        </>)}
+      </div>
+    </div>
+  );
+}
+function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests, members, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
   const isDA = isDeptAdmin(role);
   const back = () => setView(null);
@@ -458,6 +505,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
   if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><div style={{ ...FS.card, padding: 18, marginTop: 12 }}><div style={FS.kicker}>CONTACT SUPPORT</div><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></div></div>;
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
+  if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
   if (view === "privacy") return doc("Privacy Policy", "Full text to be added before pilot.");
   if (view === "terms") return doc("Terms of Agreement", "Full text to be added before pilot.");
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 Ashlea Bullington. All rights reserved.</>);
@@ -480,6 +528,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
       <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Your department settings, brand, and help — all in one place.</div>
     </div>
     <div style={S.opGrid}>
+      {card("person", HeartHandshake, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
       {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
       {card("brand", Palette, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
       {card("support", Mail, "Support & Contact", "Get help, send feedback, or request custom training.")}
@@ -844,7 +893,7 @@ export default function App() {
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} initialMode={navArg} />}
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />}
-          {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} />}
+          {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} meId={myMemberId} notify={notify} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} />}
         </main>
