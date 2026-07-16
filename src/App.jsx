@@ -254,7 +254,14 @@ function ResourceActions({ r }) {
 }
 const YS_BLANK_FORM = { name: "", category: "", description: "", phone: "", text_number: "", website: "", email: "", address: "", is_wellness: false };
 const SPONSOR_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#111", background: FIRE.amberText, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
-const mapsHref = (addr) => `https://maps.google.com/?q=${encodeURIComponent(addr)}`;   // opens Maps on iOS + Android
+// One "Directions" link, no chooser: open the device's likely default — Apple Maps on iOS/iPadOS,
+// Google Maps on Android/desktop. Address is URL-encoded so spaces/commas survive (space->%20, comma->%2C).
+const mapsHref = (addr) => {
+  const q = encodeURIComponent(addr);
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+  const isApple = /iPad|iPhone|iPod/.test(ua) || (ua.includes("Macintosh") && (typeof navigator !== "undefined" ? navigator.maxTouchPoints || 0 : 0) > 1);   // iPadOS 13+ masquerades as Macintosh + touch
+  return isApple ? `https://maps.apple.com/?q=${q}` : `https://maps.google.com/?q=${q}`;
+};
 function YourSix({ S, role, meId, members, notify }) {
   const canManage = hasAny(role, CANMANAGE_ROLES);   // add/edit/remove local resources — is_canmanage() (Board/DA/Officer), mirrors the RLS
   const [resources, setResources] = useState(null);   // null = loading
