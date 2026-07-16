@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
@@ -231,6 +231,7 @@ const RESOURCE_CATEGORY_ORDER = ["Crisis lines", "Mental health & support", "Phy
 const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.btnBg, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const CRISIS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#fff", background: FIRE.redBright, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const MINI_BTN   = { display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none", fontFamily: "inherit", background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` };
+const WELLNESS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.amberText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: want digits (keep a leading +)
 // Only the contact methods a resource actually has, as tappable actions (real dial/text/compose on a phone).
 function ResourceActions({ r }) {
@@ -250,9 +251,74 @@ function ResourceActions({ r }) {
     </div>
   );
 }
+const YS_BLANK_FORM = { name: "", category: "", description: "", phone: "", text_number: "", website: "", email: "", is_wellness: false };
 function YourSix({ S, role, meId, members, notify }) {
+  const canManage = hasAny(role, CANMANAGE_ROLES);   // add/edit/remove local resources — is_canmanage() (Board/DA/Officer), mirrors the RLS
   const [resources, setResources] = useState(null);   // null = loading
-  useEffect(() => { supabase.from("resources").select("*").then(({ data }) => setResources(data || [])); }, []);   // dept-scoped by RLS
+  const [editMode, setEditMode] = useState(false);    // false = calm read-only; true = reveal Add + per-local-row Edit/Remove
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState(YS_BLANK_FORM);
+  function load() { supabase.from("resources").select("*").then(({ data }) => setResources(data || [])); }   // dept-scoped by RLS
+  useEffect(() => { load(); }, []);
+  function toggleEditMode() { setEditMode((v) => { if (v) { setAdding(false); setEditingId(null); setForm(YS_BLANK_FORM); } return !v; }); }   // leaving edit mode discards half-finished edits
+  function cancelForm() { setAdding(false); setEditingId(null); setForm(YS_BLANK_FORM); }
+  function startEdit(r) { setAdding(false); setEditingId(r.id); setForm({ name: r.name || "", category: r.category || "", description: r.description || "", phone: r.phone || "", text_number: r.text_number || "", website: r.website || "", email: r.email || "", is_wellness: !!r.is_wellness }); }
+  function beginAddWellness() { setEditMode(true); setEditingId(null); setForm({ ...YS_BLANK_FORM, category: "Department wellness", is_wellness: true }); setAdding(true); }
+  async function addResource() {
+    const name = form.name.trim(), category = form.category.trim();
+    if (!name || !category) { notify({ kind: "error", title: "Name and category required", text: "Give the resource a name and a category." }); return; }
+    setBusy(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+    const nextOrder = (resources || []).filter((r) => r.category === category).reduce((m, r) => Math.max(m, r.sort_order ?? 0), -1) + 1;
+    const { error } = await supabase.from("resources").insert({ department_id: deptId, category, name, description: form.description.trim() || null, phone: form.phone.trim() || null, text_number: form.text_number.trim() || null, website: form.website.trim() || null, email: form.email.trim() || null, is_national: false, is_crisis: false, is_wellness: form.is_wellness, sort_order: nextOrder, created_by: meId });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't add the resource", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    cancelForm(); load();
+  }
+  async function saveEdit(id) {
+    const name = form.name.trim(), category = form.category.trim();
+    if (!name || !category) { notify({ kind: "error", title: "Name and category required", text: "Give the resource a name and a category." }); return; }
+    setBusy(true);
+    const { data, error } = await supabase.from("resources").update({ name, category, description: form.description.trim() || null, phone: form.phone.trim() || null, text_number: form.text_number.trim() || null, website: form.website.trim() || null, email: form.email.trim() || null, is_wellness: form.is_wellness }).eq("id", id).select();
+    setBusy(false);
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the resource", text: "Something went wrong updating that. Please try again.", details: error?.message }); return; }   // 0-row = RLS blocked a national row
+    cancelForm(); load();
+  }
+  async function removeResource(r) {
+    if (!window.confirm(`Remove "${r.name}"? This can't be undone.`)) return;
+    const { data, error } = await supabase.from("resources").delete().eq("id", r.id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the resource", text: "Something went wrong. Please try again.", details: error?.message }); return; }
+    load();
+  }
+  const allCategories = [...new Set((resources || []).map((r) => r.category))].sort();
+  const hasWellness = (resources || []).some((r) => r.is_wellness);
+  // Add/Edit form (shared) — bound to `form`.
+  const formCard = (onSave, saveLabel) => (
+    <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} placeholder="e.g. Chaplain Dave, or Peer support" onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
+        <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><input style={FS.input} list="ys-cats" value={form.category} placeholder="e.g. Department wellness" onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} /><datalist id="ys-cats">{allCategories.map((c) => <option key={c} value={c} />)}</datalist></label>
+      </div>
+      <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 44, resize: "vertical" }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone (call)</span><input style={FS.input} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} /></label>
+        <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Text number</span><input style={FS.input} value={form.text_number} onChange={(e) => setForm((f) => ({ ...f, text_number: e.target.value }))} /></label>
+        <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Website</span><input style={FS.input} value={form.website} placeholder="https://" onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} /></label>
+        <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span><input style={FS.input} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></label>
+      </div>
+      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textSecondary, cursor: "pointer" }}>
+        <input type="checkbox" checked={form.is_wellness} onChange={(e) => setForm((f) => ({ ...f, is_wellness: e.target.checked }))} />
+        Department wellness contact — a real person members can reach in the “Reach out” flow
+      </label>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={onSave}>{busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> {saveLabel}</>}</button>
+        <button style={FS.btn} onClick={cancelForm} disabled={busy}>Cancel</button>
+      </div>
+    </div>
+  );
   // Crisis lines live in a compact always-there strip up top (NOT a big card block), so the page reads as a
   // resource library that includes crisis support -- not a crisis page. Everything else is the browsable body.
   const crisisItems = (resources || []).filter((r) => r.is_crisis).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order));
@@ -268,10 +334,17 @@ function YourSix({ S, role, meId, members, notify }) {
   }, [resources]);
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>YOUR SIX</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Support &amp; resources</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Help is here when you need it — for you, or someone on your crew. Every line below is real and answered.</div>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={FS.kicker}>YOUR SIX</div>
+          <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Support &amp; resources</h1>
+          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Help is here when you need it — for you, or someone on your crew. Every line below is real and answered.</div>
+        </div>
+        {canManage && resources && (
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+            {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit resources</>}
+          </button>
+        )}
       </div>
       {resources === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
@@ -293,20 +366,40 @@ function YourSix({ S, role, meId, members, notify }) {
             </div>
           </div>
         )}
+        {/* Gentle nudge: set the department's wellness contacts so members can reach a real person. */}
+        {canManage && !hasWellness && (
+          <div style={{ ...FS.card, padding: "14px 16px", marginBottom: 16, borderLeft: `3px solid ${FIRE.amberText}` }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 4 }}>Add your department's wellness contacts</div>
+            <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, marginBottom: 10 }}>These are your crew's real people — a chaplain, a peer supporter, an officer — who members can reach when they're struggling. They appear first in the “Reach out” flow, so a member always reaches a person before a hotline.</div>
+            <button style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddWellness}><Plus size={14} color={FIRE.btnIcon} /> Add a wellness contact</button>
+          </div>
+        )}
+        {/* Edit mode: panel-level Add. */}
+        {canManage && editMode && (adding ? formCard(addResource, "Add resource") : (
+          <button style={{ ...FS.btn, marginBottom: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => { setEditingId(null); setForm(YS_BLANK_FORM); setAdding(true); }}><Plus size={15} color={FIRE.btnIcon} /> Add resource</button>
+        ))}
         {groups.length === 0 && crisisItems.length === 0 ? (
           <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</div>
         ) : groups.map(({ cat, items }) => (
           <div key={cat} style={{ marginBottom: 18 }}>
             <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
             {items.map((r) => (
+              editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
               <div key={r.id} style={{ ...FS.card, padding: "14px 16px", marginBottom: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
                   {!r.is_national && <span style={LOCAL_TAG}>Your station</span>}
+                  {r.is_wellness && <span style={WELLNESS_TAG}>Wellness</span>}
+                  {editMode && canManage && (r.is_national
+                    ? <span title="Verified national resource — locked" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: FIRE.textMuted2 }}><Lock size={12} /> Locked</span>
+                    : <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+                        <button title="Edit" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => startEdit(r)}><Pencil size={13} color={FIRE.textSecondary} /></button>
+                        <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removeResource(r)}><X size={13} color={FIRE.deleteRed} /></button>
+                      </span>)}
                 </div>
                 {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.45 }}>{r.description}</div>}
                 <ResourceActions r={r} />
-              </div>
+              </div>)
             ))}
           </div>
         ))}
