@@ -233,21 +233,28 @@ const CRISIS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", 
 const WELLNESS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.amberText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: want digits (keep a leading +)
 // Only the contact methods a resource actually has, as tappable actions (real dial/text/compose on a phone).
-function ResourceActions({ r }) {
-  const btn = (href, Icon, label, filled) => (
+function ResourceActions({ r, compact }) {
+  // Labeled buttons (full-width contexts: the Reach-out modal). Icon-only (compact) for grid tiles.
+  const labelBtn = (href, Icon, label) => (
     <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
-       style={{ ...YS_ACTION_BTN,
-         ...(filled ? { background: FIRE.redBright, color: "#fff", border: "none" } : { background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }) }}>
-      <Icon size={14} color={filled ? "#fff" : FIRE.btnIcon} /> {label}
+       style={{ ...YS_ACTION_BTN, background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }}>
+      <Icon size={14} color={FIRE.btnIcon} /> {label}
     </a>
   );
+  const iconBtn = (href, Icon, label) => (
+    <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer" title={label} aria-label={label}
+       style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 36, borderRadius: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, textDecoration: "none" }}>
+      <Icon size={16} color={FIRE.btnIcon} />
+    </a>
+  );
+  const b = compact ? iconBtn : labelBtn;
   return (
-    <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
-      {r.phone       && btn(`tel:${telDigits(r.phone)}`,       Phone,         "Call",       false)}
-      {r.text_number && btn(`sms:${telDigits(r.text_number)}`, MessageSquare, "Text",       false)}
-      {r.address      && btn(mapsHref(r.address),               MapPin,        "Directions", false)}
-      {r.website     && btn(r.website,                          Globe,         "Website",    false)}
-      {r.email       && btn(`mailto:${r.email}`,                Mail,          "Email",      false)}
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+      {r.phone       && b(`tel:${telDigits(r.phone)}`,       Phone,         "Call")}
+      {r.text_number && b(`sms:${telDigits(r.text_number)}`, MessageSquare, "Text")}
+      {r.address     && b(mapsHref(r.address),               MapPin,        "Directions")}
+      {r.website     && b(r.website,                          Globe,         "Website")}
+      {r.email       && b(`mailto:${r.email}`,                Mail,          "Email")}
     </div>
   );
 }
@@ -258,6 +265,9 @@ const SPONSOR_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase",
 const YS_CARD       = { padding: "11px 14px", marginBottom: 8 };
 const YS_CARD_NAME  = { fontSize: 14, fontWeight: 700, color: FIRE.textPrimary };
 const YS_ACTION_BTN = { display: "inline-flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, textDecoration: "none", fontFamily: "inherit" };   // ~34px tall, tappable
+// Deck/grid layout: cards tile side-by-side within each section (~2-up on a phone, more on desktop).
+const YS_GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 };
+const YS_TILE_EDIT_BTN = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 24, borderRadius: 6, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, cursor: "pointer", padding: 0 };
 // One "Directions" link, no chooser: open the device's likely default — Apple Maps on iOS/iPadOS,
 // Google Maps on Android/desktop. Address is URL-encoded so spaces/commas survive (space->%20, comma->%2C).
 const mapsHref = (addr) => {
@@ -362,28 +372,36 @@ function YourSix({ S, role, meId, members, notify }) {
   // ONE card language for every resource (crisis / health / business). Crisis gets a small CALM accent
   // (thin left border + LifeBuoy) so it's findable without shouting; national vs local vs sponsor and the
   // edit-mode lock all live on the same small card. Inline-edit swaps the card for the form.
-  const renderCard = (r) => editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
-    <div key={r.id} style={{ ...FS.card, ...YS_CARD, ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {r.is_crisis && <LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0 }} />}
-        <span style={YS_CARD_NAME}>{r.name}</span>
-        {/* Untagged = national (noise to a member). Only the meaningful tags: local "Your station",
-            sponsor "Platform sponsor". The 🔒 lock still shows for admins in edit mode below. */}
-        {r.is_business
-          ? (r.is_national ? <span style={SPONSOR_TAG}>Platform sponsor</span> : null)
-          : (!r.is_national ? <span style={LOCAL_TAG}>Your station</span> : null)}
-        {r.is_wellness && <span style={WELLNESS_TAG}>Wellness</span>}
-        {editMode && canManage && (r.is_national
-          ? <span title={r.is_business ? "Platform sponsor — locked" : "Verified national resource — locked"} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: FIRE.textMuted2 }}><Lock size={12} /> Locked</span>
-          : <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
-              <button title="Edit" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => startEdit(r)}><Pencil size={13} color={FIRE.textSecondary} /></button>
-              <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removeResource(r)}><X size={13} color={FIRE.deleteRed} /></button>
-            </span>)}
+  // A grid TILE (~half-width on a phone): name + tags on top, short (2-line) description, icon actions below.
+  // Untagged = national (noise to a member); only "Your station"/"Platform sponsor"/"Wellness" show. The edit
+  // form spans the full grid width (gridColumn 1/-1) so it isn't squeezed into a narrow cell.
+  const renderCard = (r) => {
+    if (editingId === r.id) return <div key={r.id} style={{ gridColumn: "1 / -1" }}>{formCard(() => saveEdit(r.id), "Save changes")}</div>;
+    const localTag = !r.is_business && !r.is_national;
+    const sponsorTag = r.is_business && r.is_national;
+    const hasTag = localTag || sponsorTag || r.is_wellness;
+    return (
+      <div key={r.id} style={{ ...FS.card, ...YS_CARD, marginBottom: 0, display: "flex", flexDirection: "column", ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+          {r.is_crisis && <LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0, marginTop: 2 }} />}
+          <span style={{ ...YS_CARD_NAME, flex: 1, minWidth: 0, lineHeight: 1.25 }}>{r.name}</span>
+          {editMode && canManage && (r.is_national
+            ? <span title={r.is_business ? "Platform sponsor — locked" : "Verified national resource — locked"} style={{ flexShrink: 0, display: "inline-flex", marginTop: 2 }}><Lock size={13} color={FIRE.textMuted2} /></span>
+            : <span style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
+                <button title="Edit" style={YS_TILE_EDIT_BTN} onClick={() => startEdit(r)}><Pencil size={12} color={FIRE.textSecondary} /></button>
+                <button title="Remove" style={YS_TILE_EDIT_BTN} onClick={() => removeResource(r)}><X size={12} color={FIRE.deleteRed} /></button>
+              </span>)}
+        </div>
+        {hasTag && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 5 }}>
+          {localTag && <span style={LOCAL_TAG}>Your station</span>}
+          {sponsorTag && <span style={SPONSOR_TAG}>Platform sponsor</span>}
+          {r.is_wellness && <span style={WELLNESS_TAG}>Wellness</span>}
+        </div>}
+        {r.description && <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 5, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.description}</div>}
+        <ResourceActions r={r} compact />
       </div>
-      {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.4 }}>{r.description}</div>}
-      <ResourceActions r={r} />
-    </div>
-  );
+    );
+  };
   const crisisItems = (resources || []).filter((r) => r.is_crisis).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order));
   // Reach-out flow layers (in order): your person -> wellness contacts -> crisis lines (always seeded => never empty).
   const reachPerson = reachPersonId ? (members || []).find((m) => m.id === reachPersonId && m.phone) : null;   // only if they have a number
@@ -473,7 +491,7 @@ function YourSix({ S, role, meId, members, notify }) {
         {crisisItems.length > 0 && (
           <div style={{ marginBottom: 18 }}>
             <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Support lines · always here</div>
-            {crisisItems.map(renderCard)}
+            <div style={YS_GRID}>{crisisItems.map(renderCard)}</div>
           </div>
         )}
         {/* Gentle nudge: set the department's wellness contacts so members can reach a real person. */}
@@ -493,7 +511,7 @@ function YourSix({ S, role, meId, members, notify }) {
         ) : groups.map(({ cat, items }) => (
           <div key={cat} style={{ marginBottom: 18 }}>
             <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
-            {items.map(renderCard)}
+            <div style={YS_GRID}>{items.map(renderCard)}</div>
           </div>
         ))}
         {/* Businesses who support us — bottom section. Sponsors (national) pinned top per ordering (B). */}
@@ -504,7 +522,7 @@ function YourSix({ S, role, meId, members, notify }) {
               <button style={{ ...FS.btn, marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddBusiness}><Plus size={14} color={FIRE.btnIcon} /> Add business</button>
             ))}
             {businessItems.length === 0 && !(adding && formKind === "business") && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 6 }}>No supporter businesses yet{canManage ? " — add the local businesses that back your department." : "."}</div>}
-            {businessItems.map(renderCard)}
+            <div style={YS_GRID}>{businessItems.map(renderCard)}</div>
           </div>
         )}
       </>)}
