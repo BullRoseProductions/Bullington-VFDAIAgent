@@ -236,7 +236,7 @@ const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: 
 function ResourceActions({ r }) {
   const btn = (href, Icon, label, filled) => (
     <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
-       style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, textDecoration: "none", fontFamily: "inherit",
+       style={{ ...YS_ACTION_BTN,
          ...(filled ? { background: FIRE.redBright, color: "#fff", border: "none" } : { background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }) }}>
       <Icon size={14} color={filled ? "#fff" : FIRE.btnIcon} /> {label}
     </a>
@@ -253,6 +253,11 @@ function ResourceActions({ r }) {
 }
 const YS_BLANK_FORM = { name: "", category: "", description: "", phone: "", text_number: "", website: "", email: "", address: "", is_wellness: false };
 const SPONSOR_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#111", background: FIRE.amberText, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+// COMPACT CARD SIZING — the ONE source of truth for every Your Six card (crisis / health / business /
+// the "Your person" picker). Change these three to resize them all at once. Spread ...YS_CARD after ...FS.card.
+const YS_CARD       = { padding: "11px 14px", marginBottom: 8 };
+const YS_CARD_NAME  = { fontSize: 14, fontWeight: 700, color: FIRE.textPrimary };
+const YS_ACTION_BTN = { display: "inline-flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, textDecoration: "none", fontFamily: "inherit" };   // ~34px tall, tappable
 // One "Directions" link, no chooser: open the device's likely default — Apple Maps on iOS/iPadOS,
 // Google Maps on Android/desktop. Address is URL-encoded so spaces/commas survive (space->%20, comma->%2C).
 const mapsHref = (addr) => {
@@ -354,10 +359,10 @@ function YourSix({ S, role, meId, members, notify }) {
   // (thin left border + LifeBuoy) so it's findable without shouting; national vs local vs sponsor and the
   // edit-mode lock all live on the same small card. Inline-edit swaps the card for the form.
   const renderCard = (r) => editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
-    <div key={r.id} style={{ ...FS.card, padding: "11px 14px", marginBottom: 8, ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
+    <div key={r.id} style={{ ...FS.card, ...YS_CARD, ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {r.is_crisis && <LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0 }} />}
-        <span style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
+        <span style={YS_CARD_NAME}>{r.name}</span>
         {/* Untagged = national (noise to a member). Only the meaningful tags: local "Your station",
             sponsor "Platform sponsor". The 🔒 lock still shows for admins in edit mode below. */}
         {r.is_business
@@ -477,7 +482,7 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Who's your person?</h1>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Optional. Pick someone on your crew you'd want to hear from in a hard moment — they'll be the first tap in “Reach out” on Your Six. This is private to you; only you can see or change it.</div>
       </div>
-      <div style={{ ...FS.card, padding: 16 }}>
+      <div style={{ ...FS.card, ...YS_CARD }}>
         {current === undefined ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
         ) : (<>
