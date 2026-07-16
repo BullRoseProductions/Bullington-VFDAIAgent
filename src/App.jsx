@@ -230,7 +230,6 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
 const RESOURCE_CATEGORY_ORDER = ["Crisis lines", "Mental health & support", "Physical health", "Line-of-duty & family"];
 const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.btnBg, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const CRISIS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#fff", background: FIRE.redBright, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
-const MINI_BTN   = { display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none", fontFamily: "inherit", background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` };
 const WELLNESS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.amberText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: want digits (keep a leading +)
 // Only the contact methods a resource actually has, as tappable actions (real dial/text/compose on a phone).
@@ -244,7 +243,7 @@ function ResourceActions({ r }) {
   );
   return (
     <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
-      {r.phone       && btn(`tel:${telDigits(r.phone)}`,       Phone,         "Call",       r.is_crisis)}
+      {r.phone       && btn(`tel:${telDigits(r.phone)}`,       Phone,         "Call",       false)}
       {r.text_number && btn(`sms:${telDigits(r.text_number)}`, MessageSquare, "Text",       false)}
       {r.address      && btn(mapsHref(r.address),               MapPin,        "Directions", false)}
       {r.website     && btn(r.website,                          Globe,         "Website",    false)}
@@ -351,8 +350,31 @@ function YourSix({ S, role, meId, members, notify }) {
       </div>
     </div>
   ); };
-  // Crisis lines live in a compact always-there strip up top (NOT a big card block), so the page reads as a
-  // resource library that includes crisis support -- not a crisis page. Everything else is the browsable body.
+  // ONE card language for every resource (crisis / health / business). Crisis gets a small CALM accent
+  // (thin left border + LifeBuoy) so it's findable without shouting; national vs local vs sponsor and the
+  // edit-mode lock all live on the same small card. Inline-edit swaps the card for the form.
+  const renderCard = (r) => editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
+    <div key={r.id} style={{ ...FS.card, padding: "11px 14px", marginBottom: 8, ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {r.is_crisis && <LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0 }} />}
+        <span style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
+        {/* Untagged = national (noise to a member). Only the meaningful tags: local "Your station",
+            sponsor "Platform sponsor". The 🔒 lock still shows for admins in edit mode below. */}
+        {r.is_business
+          ? (r.is_national ? <span style={SPONSOR_TAG}>Platform sponsor</span> : null)
+          : (!r.is_national ? <span style={LOCAL_TAG}>Your station</span> : null)}
+        {r.is_wellness && <span style={WELLNESS_TAG}>Wellness</span>}
+        {editMode && canManage && (r.is_national
+          ? <span title={r.is_business ? "Platform sponsor — locked" : "Verified national resource — locked"} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: FIRE.textMuted2 }}><Lock size={12} /> Locked</span>
+          : <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+              <button title="Edit" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => startEdit(r)}><Pencil size={13} color={FIRE.textSecondary} /></button>
+              <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removeResource(r)}><X size={13} color={FIRE.deleteRed} /></button>
+            </span>)}
+      </div>
+      {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.4 }}>{r.description}</div>}
+      <ResourceActions r={r} />
+    </div>
+  );
   const crisisItems = (resources || []).filter((r) => r.is_crisis).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order));
   // ORDERING (B) — the ONE place to change business sort: national/platform sponsors PINNED TOP, then local businesses local-first.
   const businessItems = (resources || []).filter((r) => r.is_business).sort((a, b) => (b.is_national ? 1 : 0) - (a.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
@@ -383,21 +405,11 @@ function YourSix({ S, role, meId, members, notify }) {
       {resources === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
       ) : (<>
-        {/* Compact crisis strip — small dashboard-tile-sized cards, quiet accent, always reachable. */}
+        {/* Crisis lines: same unified card as everywhere, calm accent, at top so they're findable. */}
         {crisisItems.length > 0 && (
-          <div style={{ marginBottom: 22 }}>
+          <div style={{ marginBottom: 18 }}>
             <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Support lines · always here</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))", gap: 8 }}>
-              {crisisItems.map((r) => (
-                <div key={r.id} style={{ ...FS.card, padding: "9px 11px", borderTop: `2px solid ${FIRE.redBright}` }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.2, minHeight: 30 }}>{r.name}</div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                    {r.phone && <a href={`tel:${telDigits(r.phone)}`} style={MINI_BTN}><Phone size={13} color={FIRE.btnIcon} /> Call</a>}
-                    {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={MINI_BTN}><MessageSquare size={13} color={FIRE.btnIcon} /> Text</a>}
-                  </div>
-                </div>
-              ))}
-            </div>
+            {crisisItems.map(renderCard)}
           </div>
         )}
         {/* Gentle nudge: set the department's wellness contacts so members can reach a real person. */}
@@ -417,24 +429,7 @@ function YourSix({ S, role, meId, members, notify }) {
         ) : groups.map(({ cat, items }) => (
           <div key={cat} style={{ marginBottom: 18 }}>
             <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
-            {items.map((r) => (
-              editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
-              <div key={r.id} style={{ ...FS.card, padding: "11px 14px", marginBottom: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
-                  {!r.is_national && <span style={LOCAL_TAG}>Your station</span>}
-                  {r.is_wellness && <span style={WELLNESS_TAG}>Wellness</span>}
-                  {editMode && canManage && (r.is_national
-                    ? <span title="Verified national resource — locked" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: FIRE.textMuted2 }}><Lock size={12} /> Locked</span>
-                    : <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
-                        <button title="Edit" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => startEdit(r)}><Pencil size={13} color={FIRE.textSecondary} /></button>
-                        <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removeResource(r)}><X size={13} color={FIRE.deleteRed} /></button>
-                      </span>)}
-                </div>
-                {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.4 }}>{r.description}</div>}
-                <ResourceActions r={r} />
-              </div>)
-            ))}
+            {items.map(renderCard)}
           </div>
         ))}
         {/* Businesses who support us — bottom section. Sponsors (national) pinned top per ordering (B). */}
@@ -445,23 +440,7 @@ function YourSix({ S, role, meId, members, notify }) {
               <button style={{ ...FS.btn, marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddBusiness}><Plus size={14} color={FIRE.btnIcon} /> Add business</button>
             ))}
             {businessItems.length === 0 && !(adding && formKind === "business") && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 6 }}>No supporter businesses yet{canManage ? " — add the local businesses that back your department." : "."}</div>}
-            {businessItems.map((r) => (
-              editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
-              <div key={r.id} style={{ ...FS.card, padding: "11px 14px", marginBottom: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
-                  {r.is_national && <span style={SPONSOR_TAG}>Platform sponsor</span>}
-                  {editMode && canManage && (r.is_national
-                    ? <span title="Platform sponsor — locked" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: FIRE.textMuted2 }}><Lock size={12} /> Locked</span>
-                    : <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
-                        <button title="Edit" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => startEdit(r)}><Pencil size={13} color={FIRE.textSecondary} /></button>
-                        <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removeResource(r)}><X size={13} color={FIRE.deleteRed} /></button>
-                      </span>)}
-                </div>
-                {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.4 }}>{r.description}</div>}
-                <ResourceActions r={r} />
-              </div>)
-            ))}
+            {businessItems.map(renderCard)}
           </div>
         )}
       </>)}
