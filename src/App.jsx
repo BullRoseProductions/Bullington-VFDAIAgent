@@ -277,6 +277,10 @@ function YourSix({ S, role, meId, members, notify }) {
   const [formKind, setFormKind] = useState("resource");   // 'resource' | 'business' — drives which fields the form shows
   function load() { supabase.from("resources").select("*").then(({ data }) => setResources(data || [])); }   // dept-scoped by RLS
   useEffect(() => { load(); }, []);
+  const [reachOpen, setReachOpen] = useState(false);
+  const [reachPersonId, setReachPersonId] = useState(null);   // this member's chosen reach_out person (self-read)
+  useEffect(() => { if (!meId) return; let off = false; supabase.from("members").select("reach_out_member_id").eq("id", meId).single().then(({ data }) => { if (!off) setReachPersonId(data?.reach_out_member_id || null); }); return () => { off = true; }; }, [meId]);
+  useEffect(() => { if (!reachOpen) return; const onKey = (e) => { if (e.key === "Escape") setReachOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [reachOpen]);
   function toggleEditMode() { setEditMode((v) => { if (v) { setAdding(false); setEditingId(null); setForm(YS_BLANK_FORM); } return !v; }); }   // leaving edit mode discards half-finished edits
   function cancelForm() { setAdding(false); setEditingId(null); setForm(YS_BLANK_FORM); }
   function startEdit(r) { setAdding(false); setEditingId(r.id); setFormKind(r.is_business ? "business" : "resource"); setForm({ name: r.name || "", category: r.category || "", description: r.description || "", phone: r.phone || "", text_number: r.text_number || "", website: r.website || "", email: r.email || "", address: r.address || "", is_wellness: !!r.is_wellness }); }
@@ -381,6 +385,9 @@ function YourSix({ S, role, meId, members, notify }) {
     </div>
   );
   const crisisItems = (resources || []).filter((r) => r.is_crisis).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order));
+  // Reach-out flow layers (in order): your person -> wellness contacts -> crisis lines (always seeded => never empty).
+  const reachPerson = reachPersonId ? (members || []).find((m) => m.id === reachPersonId && m.phone) : null;   // only if they have a number
+  const wellnessContacts = (resources || []).filter((r) => r.is_wellness && r.phone);
   // ORDERING (B) — the ONE place to change business sort: national/platform sponsors PINNED TOP, then local businesses local-first.
   const businessItems = (resources || []).filter((r) => r.is_business).sort((a, b) => (b.is_national ? 1 : 0) - (a.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
   const groups = useMemo(() => {
@@ -410,6 +417,58 @@ function YourSix({ S, role, meId, members, notify }) {
       {resources === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
       ) : (<>
+        {/* Reach out — calm invitation (not an alarm), pinned at top. Opens the ordered flow. */}
+        <button onClick={() => setReachOpen(true)} style={{ ...FS.card, ...YS_CARD, width: "100%", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: `1px solid ${FIRE.greenText}44`, borderLeft: `3px solid ${FIRE.greenText}` }}>
+          <HeartHandshake size={22} color={FIRE.greenText} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>Reach out</div>
+            <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.35 }}>Talk to someone — your person, a wellness contact, or a 24/7 line.</div>
+          </div>
+          <ChevronRight size={18} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+        </button>
+        {reachOpen && createPortal(
+          <div onClick={() => setReachOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 120, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 460, width: "100%", padding: "18px 18px calc(18px + env(safe-area-inset-bottom))" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <HeartHandshake size={20} color={FIRE.greenText} />
+                <div style={{ flex: 1, fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 20, fontWeight: 700, color: FIRE.textPrimary }}>Reach out</div>
+                <button onClick={() => setReachOpen(false)} title="Close (Esc)" style={{ ...FS.btn, padding: "6px 8px" }}><X size={16} color={FIRE.btnIcon} /></button>
+              </div>
+              <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, marginBottom: 14 }}>You don't have to carry it alone. Start with a person — a 24/7 line is always here too.</div>
+              {reachPerson && (<>
+                <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", marginBottom: 6 }}>Your person</div>
+                <div style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.greenText}` }}>
+                  <div style={YS_CARD_NAME}>{reachPerson.name}</div>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
+                    <a href={`tel:${telDigits(reachPerson.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call {reachPerson.name.split(" ")[0]}</a>
+                  </div>
+                </div>
+              </>)}
+              {wellnessContacts.length > 0 && (<>
+                <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", margin: reachPerson ? "12px 0 6px" : "0 0 6px" }}>Department wellness contacts</div>
+                {wellnessContacts.map((r) => (
+                  <div key={r.id} style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.greenText}` }}>
+                    <div style={YS_CARD_NAME}>{r.name}</div>
+                    {r.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 2, lineHeight: 1.4 }}>{r.description}</div>}
+                    <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
+                      <a href={`tel:${telDigits(r.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call</a>
+                      {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={{ ...YS_ACTION_BTN, background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
+                    </div>
+                  </div>
+                ))}
+              </>)}
+              {/* Crisis lines — always seeded, so the flow is NEVER empty. Calm, below the people. */}
+              <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", margin: (reachPerson || wellnessContacts.length) ? "12px 0 6px" : "0 0 6px", display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Crisis lines · 24/7</div>
+              {crisisItems.map((r) => (
+                <div key={r.id} style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.redText}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}><LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0 }} /><span style={YS_CARD_NAME}>{r.name}</span></div>
+                  <ResourceActions r={r} />
+                </div>
+              ))}
+            </div>
+          </div>,
+          document.body
+        )}
         {/* Crisis lines: same unified card as everywhere, calm accent, at top so they're findable. */}
         {crisisItems.length > 0 && (
           <div style={{ marginBottom: 18 }}>
