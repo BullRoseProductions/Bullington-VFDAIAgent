@@ -279,7 +279,7 @@ function YourSix({ S, role, meId, members, notify }) {
         {/* Compact crisis strip — small dashboard-tile-sized cards, quiet accent, always reachable. */}
         {crisisItems.length > 0 && (
           <div style={{ marginBottom: 22 }}>
-            <div style={{ ...FS.kicker, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> IF YOU NEED SOMEONE NOW · 24/7</div>
+            <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Support lines · always here</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))", gap: 8 }}>
               {crisisItems.map((r) => (
                 <div key={r.id} style={{ ...FS.card, padding: "10px 12px", borderTop: `2px solid ${FIRE.redBright}` }}>
