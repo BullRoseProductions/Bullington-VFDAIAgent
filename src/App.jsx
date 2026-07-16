@@ -237,21 +237,24 @@ const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: 
 function ResourceActions({ r }) {
   const btn = (href, Icon, label, filled) => (
     <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
-       style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700, textDecoration: "none", fontFamily: "inherit",
+       style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, textDecoration: "none", fontFamily: "inherit",
          ...(filled ? { background: FIRE.redBright, color: "#fff", border: "none" } : { background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }) }}>
-      <Icon size={15} color={filled ? "#fff" : FIRE.btnIcon} /> {label}
+      <Icon size={14} color={filled ? "#fff" : FIRE.btnIcon} /> {label}
     </a>
   );
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-      {r.phone       && btn(`tel:${telDigits(r.phone)}`,       Phone,         "Call",    r.is_crisis)}
-      {r.text_number && btn(`sms:${telDigits(r.text_number)}`, MessageSquare, "Text",    false)}
-      {r.website     && btn(r.website,                          Globe,         "Website", false)}
-      {r.email       && btn(`mailto:${r.email}`,                Mail,          "Email",   false)}
+    <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
+      {r.phone       && btn(`tel:${telDigits(r.phone)}`,       Phone,         "Call",       r.is_crisis)}
+      {r.text_number && btn(`sms:${telDigits(r.text_number)}`, MessageSquare, "Text",       false)}
+      {r.address      && btn(mapsHref(r.address),               MapPin,        "Directions", false)}
+      {r.website     && btn(r.website,                          Globe,         "Website",    false)}
+      {r.email       && btn(`mailto:${r.email}`,                Mail,          "Email",      false)}
     </div>
   );
 }
-const YS_BLANK_FORM = { name: "", category: "", description: "", phone: "", text_number: "", website: "", email: "", is_wellness: false };
+const YS_BLANK_FORM = { name: "", category: "", description: "", phone: "", text_number: "", website: "", email: "", address: "", is_wellness: false };
+const SPONSOR_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#111", background: FIRE.amberText, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const mapsHref = (addr) => `https://maps.google.com/?q=${encodeURIComponent(addr)}`;   // opens Maps on iOS + Android
 function YourSix({ S, role, meId, members, notify }) {
   const canManage = hasAny(role, CANMANAGE_ROLES);   // add/edit/remove local resources — is_canmanage() (Board/DA/Officer), mirrors the RLS
   const [resources, setResources] = useState(null);   // null = loading
@@ -260,31 +263,50 @@ function YourSix({ S, role, meId, members, notify }) {
   const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(YS_BLANK_FORM);
+  const [formKind, setFormKind] = useState("resource");   // 'resource' | 'business' — drives which fields the form shows
   function load() { supabase.from("resources").select("*").then(({ data }) => setResources(data || [])); }   // dept-scoped by RLS
   useEffect(() => { load(); }, []);
   function toggleEditMode() { setEditMode((v) => { if (v) { setAdding(false); setEditingId(null); setForm(YS_BLANK_FORM); } return !v; }); }   // leaving edit mode discards half-finished edits
   function cancelForm() { setAdding(false); setEditingId(null); setForm(YS_BLANK_FORM); }
-  function startEdit(r) { setAdding(false); setEditingId(r.id); setForm({ name: r.name || "", category: r.category || "", description: r.description || "", phone: r.phone || "", text_number: r.text_number || "", website: r.website || "", email: r.email || "", is_wellness: !!r.is_wellness }); }
-  function beginAddWellness() { setEditMode(true); setEditingId(null); setForm({ ...YS_BLANK_FORM, category: "Department wellness", is_wellness: true }); setAdding(true); }
+  function startEdit(r) { setAdding(false); setEditingId(r.id); setFormKind(r.is_business ? "business" : "resource"); setForm({ name: r.name || "", category: r.category || "", description: r.description || "", phone: r.phone || "", text_number: r.text_number || "", website: r.website || "", email: r.email || "", address: r.address || "", is_wellness: !!r.is_wellness }); }
+  function beginAddWellness() { setEditMode(true); setEditingId(null); setFormKind("resource"); setForm({ ...YS_BLANK_FORM, category: "Department wellness", is_wellness: true }); setAdding(true); }
+  function beginAddBusiness() { setEditingId(null); setFormKind("business"); setForm({ ...YS_BLANK_FORM }); setAdding(true); }
   async function addResource() {
-    const name = form.name.trim(), category = form.category.trim();
-    if (!name || !category) { notify({ kind: "error", title: "Name and category required", text: "Give the resource a name and a category." }); return; }
+    const isBiz = formKind === "business";
+    const name = form.name.trim();
+    const category = isBiz ? "Businesses who support us" : form.category.trim();   // businesses live in their own bottom section; category fixed
+    if (!name || !category) { notify({ kind: "error", title: isBiz ? "Name required" : "Name and category required", text: isBiz ? "Give the business a name." : "Give the resource a name and a category." }); return; }
     setBusy(true);
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
-    const nextOrder = (resources || []).filter((r) => r.category === category).reduce((m, r) => Math.max(m, r.sort_order ?? 0), -1) + 1;
-    const { error } = await supabase.from("resources").insert({ department_id: deptId, category, name, description: form.description.trim() || null, phone: form.phone.trim() || null, text_number: form.text_number.trim() || null, website: form.website.trim() || null, email: form.email.trim() || null, is_national: false, is_crisis: false, is_wellness: form.is_wellness, sort_order: nextOrder, created_by: meId });
+    const nextOrder = (resources || []).filter((r) => isBiz ? r.is_business : (r.category === category && !r.is_business)).reduce((m, r) => Math.max(m, r.sort_order ?? 0), -1) + 1;
+    const { error } = await supabase.from("resources").insert({
+      department_id: deptId, category, name,
+      description: form.description.trim() || null,
+      phone: form.phone.trim() || null,
+      text_number: isBiz ? null : (form.text_number.trim() || null),
+      website: form.website.trim() || null,
+      email: form.email.trim() || null,
+      address: isBiz ? (form.address.trim() || null) : null,
+      is_national: false, is_crisis: false, is_business: isBiz,
+      is_wellness: isBiz ? false : form.is_wellness,
+      sort_order: nextOrder, created_by: meId,
+    });
     setBusy(false);
-    if (error) { notify({ kind: "error", title: "Couldn't add the resource", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    if (error) { notify({ kind: "error", title: isBiz ? "Couldn't add the business" : "Couldn't add the resource", text: "Something went wrong. Please try again.", details: error.message }); return; }
     cancelForm(); load();
   }
   async function saveEdit(id) {
+    const isBiz = formKind === "business";
     const name = form.name.trim(), category = form.category.trim();
-    if (!name || !category) { notify({ kind: "error", title: "Name and category required", text: "Give the resource a name and a category." }); return; }
+    if (!name || (!isBiz && !category)) { notify({ kind: "error", title: isBiz ? "Name required" : "Name and category required", text: "Please fill the required fields." }); return; }
+    const upd = { name, description: form.description.trim() || null, phone: form.phone.trim() || null, website: form.website.trim() || null, email: form.email.trim() || null };
+    if (isBiz) { upd.address = form.address.trim() || null; }
+    else { upd.category = category; upd.text_number = form.text_number.trim() || null; upd.is_wellness = form.is_wellness; }
     setBusy(true);
-    const { data, error } = await supabase.from("resources").update({ name, category, description: form.description.trim() || null, phone: form.phone.trim() || null, text_number: form.text_number.trim() || null, website: form.website.trim() || null, email: form.email.trim() || null, is_wellness: form.is_wellness }).eq("id", id).select();
+    const { data, error } = await supabase.from("resources").update(upd).eq("id", id).select();
     setBusy(false);
-    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the resource", text: "Something went wrong updating that. Please try again.", details: error?.message }); return; }   // 0-row = RLS blocked a national row
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save", text: "Something went wrong updating that. Please try again.", details: error?.message }); return; }   // 0-row = RLS blocked a national/sponsor row
     cancelForm(); load();
   }
   async function removeResource(r) {
@@ -296,35 +318,40 @@ function YourSix({ S, role, meId, members, notify }) {
   const allCategories = [...new Set((resources || []).map((r) => r.category))].sort();
   const hasWellness = (resources || []).some((r) => r.is_wellness);
   // Add/Edit form (shared) — bound to `form`.
-  const formCard = (onSave, saveLabel) => (
+  const formCard = (onSave, saveLabel) => {
+    const isBiz = formKind === "business";
+    return (
     <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} placeholder="e.g. Chaplain Dave, or Peer support" onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
-        <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><input style={FS.input} list="ys-cats" value={form.category} placeholder="e.g. Department wellness" onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} /><datalist id="ys-cats">{allCategories.map((c) => <option key={c} value={c} />)}</datalist></label>
+        <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} placeholder={isBiz ? "e.g. Miller's Hardware" : "e.g. Chaplain Dave, or Peer support"} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
+        {!isBiz && <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><input style={FS.input} list="ys-cats" value={form.category} placeholder="e.g. Department wellness" onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} /><datalist id="ys-cats">{allCategories.map((c) => <option key={c} value={c} />)}</datalist></label>}
       </div>
-      <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 44, resize: "vertical" }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
+      <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{isBiz ? "What they do / how they support us (optional)" : "Description (optional)"}</span><textarea style={{ ...FS.input, minHeight: 44, resize: "vertical" }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
+      {isBiz && <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address (tap-to-map, optional)</span><input style={FS.input} value={form.address} placeholder="123 Main St, Yourtown" onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone (call)</span><input style={FS.input} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} /></label>
-        <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Text number</span><input style={FS.input} value={form.text_number} onChange={(e) => setForm((f) => ({ ...f, text_number: e.target.value }))} /></label>
+        {!isBiz && <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Text number</span><input style={FS.input} value={form.text_number} onChange={(e) => setForm((f) => ({ ...f, text_number: e.target.value }))} /></label>}
         <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Website</span><input style={FS.input} value={form.website} placeholder="https://" onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} /></label>
         <label style={{ ...S.field, flex: 1, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span><input style={FS.input} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></label>
       </div>
-      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textSecondary, cursor: "pointer" }}>
+      {!isBiz && <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textSecondary, cursor: "pointer" }}>
         <input type="checkbox" checked={form.is_wellness} onChange={(e) => setForm((f) => ({ ...f, is_wellness: e.target.checked }))} />
         Department wellness contact — a real person members can reach in the “Reach out” flow
-      </label>
+      </label>}
       <div style={{ display: "flex", gap: 8 }}>
         <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={onSave}>{busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> {saveLabel}</>}</button>
         <button style={FS.btn} onClick={cancelForm} disabled={busy}>Cancel</button>
       </div>
     </div>
-  );
+  ); };
   // Crisis lines live in a compact always-there strip up top (NOT a big card block), so the page reads as a
   // resource library that includes crisis support -- not a crisis page. Everything else is the browsable body.
   const crisisItems = (resources || []).filter((r) => r.is_crisis).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order));
+  // ORDERING (B) — the ONE place to change business sort: national/platform sponsors PINNED TOP, then local businesses local-first.
+  const businessItems = (resources || []).filter((r) => r.is_business).sort((a, b) => (b.is_national ? 1 : 0) - (a.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
   const groups = useMemo(() => {
     const byCat = new Map();
-    (resources || []).filter((r) => !r.is_crisis).forEach((r) => { if (!byCat.has(r.category)) byCat.set(r.category, []); byCat.get(r.category).push(r); });
+    (resources || []).filter((r) => !r.is_crisis && !r.is_business).forEach((r) => { if (!byCat.has(r.category)) byCat.set(r.category, []); byCat.get(r.category).push(r); });
     const cats = [...byCat.keys()].sort((a, b) => {
       const ia = RESOURCE_CATEGORY_ORDER.indexOf(a), ib = RESOURCE_CATEGORY_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
@@ -355,8 +382,8 @@ function YourSix({ S, role, meId, members, notify }) {
             <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Support lines · always here</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))", gap: 8 }}>
               {crisisItems.map((r) => (
-                <div key={r.id} style={{ ...FS.card, padding: "10px 12px", borderTop: `2px solid ${FIRE.redBright}` }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.25, minHeight: 32 }}>{r.name}</div>
+                <div key={r.id} style={{ ...FS.card, padding: "9px 11px", borderTop: `2px solid ${FIRE.redBright}` }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.2, minHeight: 30 }}>{r.name}</div>
                   <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                     {r.phone && <a href={`tel:${telDigits(r.phone)}`} style={MINI_BTN}><Phone size={13} color={FIRE.btnIcon} /> Call</a>}
                     {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={MINI_BTN}><MessageSquare size={13} color={FIRE.btnIcon} /> Text</a>}
@@ -374,9 +401,9 @@ function YourSix({ S, role, meId, members, notify }) {
             <button style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddWellness}><Plus size={14} color={FIRE.btnIcon} /> Add a wellness contact</button>
           </div>
         )}
-        {/* Edit mode: panel-level Add. */}
-        {canManage && editMode && (adding ? formCard(addResource, "Add resource") : (
-          <button style={{ ...FS.btn, marginBottom: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => { setEditingId(null); setForm(YS_BLANK_FORM); setAdding(true); }}><Plus size={15} color={FIRE.btnIcon} /> Add resource</button>
+        {/* Edit mode: panel-level Add (resources). */}
+        {canManage && editMode && (adding && formKind === "resource" ? formCard(addResource, "Add resource") : (
+          <button style={{ ...FS.btn, marginBottom: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => { setEditingId(null); setFormKind("resource"); setForm(YS_BLANK_FORM); setAdding(true); }}><Plus size={15} color={FIRE.btnIcon} /> Add resource</button>
         ))}
         {groups.length === 0 && crisisItems.length === 0 ? (
           <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</div>
@@ -385,9 +412,9 @@ function YourSix({ S, role, meId, members, notify }) {
             <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
             {items.map((r) => (
               editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
-              <div key={r.id} style={{ ...FS.card, padding: "14px 16px", marginBottom: 10 }}>
+              <div key={r.id} style={{ ...FS.card, padding: "11px 14px", marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
                   {!r.is_national && <span style={LOCAL_TAG}>Your station</span>}
                   {r.is_wellness && <span style={WELLNESS_TAG}>Wellness</span>}
                   {editMode && canManage && (r.is_national
@@ -397,12 +424,39 @@ function YourSix({ S, role, meId, members, notify }) {
                         <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removeResource(r)}><X size={13} color={FIRE.deleteRed} /></button>
                       </span>)}
                 </div>
-                {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.45 }}>{r.description}</div>}
+                {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.4 }}>{r.description}</div>}
                 <ResourceActions r={r} />
               </div>)
             ))}
           </div>
         ))}
+        {/* Businesses who support us — bottom section. Sponsors (national) pinned top per ordering (B). */}
+        {(businessItems.length > 0 || (canManage && editMode)) && (
+          <div style={{ marginTop: 4, marginBottom: 18 }}>
+            <div style={{ ...FS.kicker, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Briefcase size={12} color={FIRE.btnIcon} /> BUSINESSES WHO SUPPORT US</div>
+            {canManage && editMode && (adding && formKind === "business" ? formCard(addResource, "Add business") : (
+              <button style={{ ...FS.btn, marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddBusiness}><Plus size={14} color={FIRE.btnIcon} /> Add business</button>
+            ))}
+            {businessItems.length === 0 && !(adding && formKind === "business") && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 6 }}>No supporter businesses yet{canManage ? " — add the local businesses that back your department." : "."}</div>}
+            {businessItems.map((r) => (
+              editingId === r.id ? <div key={r.id}>{formCard(() => saveEdit(r.id), "Save changes")}</div> : (
+              <div key={r.id} style={{ ...FS.card, padding: "11px 14px", marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
+                  {r.is_national && <span style={SPONSOR_TAG}>Platform sponsor</span>}
+                  {editMode && canManage && (r.is_national
+                    ? <span title="Platform sponsor — locked" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: FIRE.textMuted2 }}><Lock size={12} /> Locked</span>
+                    : <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+                        <button title="Edit" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => startEdit(r)}><Pencil size={13} color={FIRE.textSecondary} /></button>
+                        <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removeResource(r)}><X size={13} color={FIRE.deleteRed} /></button>
+                      </span>)}
+                </div>
+                {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.4 }}>{r.description}</div>}
+                <ResourceActions r={r} />
+              </div>)
+            ))}
+          </div>
+        )}
       </>)}
     </div>
   );
