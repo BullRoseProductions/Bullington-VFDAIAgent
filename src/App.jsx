@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw,
+  Maximize2, RotateCcw, Globe, LifeBuoy,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
@@ -226,6 +226,72 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
     </div>
   );
 }
+/* ---------------- Your Six — membership support & crisis resources (6a: read-only member page) ---------------- */
+const RESOURCE_CATEGORY_ORDER = ["Crisis lines", "Mental health & support", "Physical health", "Line-of-duty & family"];
+const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.btnBg, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const CRISIS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#fff", background: FIRE.redBright, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: want digits (keep a leading +)
+// Only the contact methods a resource actually has, as tappable actions (real dial/text/compose on a phone).
+function ResourceActions({ r }) {
+  const btn = (href, Icon, label, filled) => (
+    <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
+       style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700, textDecoration: "none", fontFamily: "inherit",
+         ...(filled ? { background: FIRE.redBright, color: "#fff", border: "none" } : { background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }) }}>
+      <Icon size={15} color={filled ? "#fff" : FIRE.btnIcon} /> {label}
+    </a>
+  );
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+      {r.phone       && btn(`tel:${telDigits(r.phone)}`,       Phone,         "Call",    r.is_crisis)}
+      {r.text_number && btn(`sms:${telDigits(r.text_number)}`, MessageSquare, "Text",    false)}
+      {r.website     && btn(r.website,                          Globe,         "Website", false)}
+      {r.email       && btn(`mailto:${r.email}`,                Mail,          "Email",   false)}
+    </div>
+  );
+}
+function YourSix({ S, role, meId, members, notify }) {
+  const [resources, setResources] = useState(null);   // null = loading
+  useEffect(() => { supabase.from("resources").select("*").then(({ data }) => setResources(data || [])); }, []);   // dept-scoped by RLS
+  const groups = useMemo(() => {
+    const byCat = new Map();
+    (resources || []).forEach((r) => { if (!byCat.has(r.category)) byCat.set(r.category, []); byCat.get(r.category).push(r); });
+    const cats = [...byCat.keys()].sort((a, b) => {
+      const ia = RESOURCE_CATEGORY_ORDER.indexOf(a), ib = RESOURCE_CATEGORY_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+    });
+    // within a category: LOCAL first, national second, then sort_order
+    return cats.map((cat) => ({ cat, items: byCat.get(cat).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name)) }));
+  }, [resources]);
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>YOUR SIX</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Support &amp; resources</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Help is here when you need it — for you, or someone on your crew. Every line below is real and answered.</div>
+      </div>
+      {resources === null ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+      ) : groups.length === 0 ? (
+        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</div>
+      ) : groups.map(({ cat, items }) => (
+        <div key={cat} style={{ marginBottom: 18 }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
+          {items.map((r) => (
+            <div key={r.id} style={{ ...FS.card, padding: "14px 16px", marginBottom: 10, ...(r.is_crisis ? { border: `1px solid ${FIRE.redBright}` } : {}) }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
+                {!r.is_national && <span style={LOCAL_TAG}>Your station</span>}
+                {r.is_crisis && <span style={CRISIS_TAG}>Crisis</span>}
+              </div>
+              {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.45 }}>{r.description}</div>}
+              <ResourceActions r={r} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests }) {
   const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
   const isDA = isDeptAdmin(role);
@@ -289,6 +355,7 @@ const NAV = [
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
+  { key: "resources", label: "Your Six", Icon: LifeBuoy, roles: ROLES },
   { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
   { key: "adddept", label: "Add Department", Icon: Landmark, roles: ["Project Admin"] },
@@ -612,6 +679,7 @@ export default function App() {
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
+          {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
