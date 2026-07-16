@@ -230,6 +230,7 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
 const RESOURCE_CATEGORY_ORDER = ["Crisis lines", "Mental health & support", "Physical health", "Line-of-duty & family"];
 const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.btnBg, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const CRISIS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#fff", background: FIRE.redBright, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const MINI_BTN   = { display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none", fontFamily: "inherit", background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` };
 const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: want digits (keep a leading +)
 // Only the contact methods a resource actually has, as tappable actions (real dial/text/compose on a phone).
 function ResourceActions({ r }) {
@@ -252,9 +253,12 @@ function ResourceActions({ r }) {
 function YourSix({ S, role, meId, members, notify }) {
   const [resources, setResources] = useState(null);   // null = loading
   useEffect(() => { supabase.from("resources").select("*").then(({ data }) => setResources(data || [])); }, []);   // dept-scoped by RLS
+  // Crisis lines live in a compact always-there strip up top (NOT a big card block), so the page reads as a
+  // resource library that includes crisis support -- not a crisis page. Everything else is the browsable body.
+  const crisisItems = (resources || []).filter((r) => r.is_crisis).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order));
   const groups = useMemo(() => {
     const byCat = new Map();
-    (resources || []).forEach((r) => { if (!byCat.has(r.category)) byCat.set(r.category, []); byCat.get(r.category).push(r); });
+    (resources || []).filter((r) => !r.is_crisis).forEach((r) => { if (!byCat.has(r.category)) byCat.set(r.category, []); byCat.get(r.category).push(r); });
     const cats = [...byCat.keys()].sort((a, b) => {
       const ia = RESOURCE_CATEGORY_ORDER.indexOf(a), ib = RESOURCE_CATEGORY_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
@@ -271,24 +275,42 @@ function YourSix({ S, role, meId, members, notify }) {
       </div>
       {resources === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
-      ) : groups.length === 0 ? (
-        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</div>
-      ) : groups.map(({ cat, items }) => (
-        <div key={cat} style={{ marginBottom: 18 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
-          {items.map((r) => (
-            <div key={r.id} style={{ ...FS.card, padding: "14px 16px", marginBottom: 10, ...(r.is_crisis ? { border: `1px solid ${FIRE.redBright}` } : {}) }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
-                {!r.is_national && <span style={LOCAL_TAG}>Your station</span>}
-                {r.is_crisis && <span style={CRISIS_TAG}>Crisis</span>}
-              </div>
-              {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.45 }}>{r.description}</div>}
-              <ResourceActions r={r} />
+      ) : (<>
+        {/* Compact crisis strip — small dashboard-tile-sized cards, quiet accent, always reachable. */}
+        {crisisItems.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            <div style={{ ...FS.kicker, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> IF YOU NEED SOMEONE NOW · 24/7</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))", gap: 8 }}>
+              {crisisItems.map((r) => (
+                <div key={r.id} style={{ ...FS.card, padding: "10px 12px", borderTop: `2px solid ${FIRE.redBright}` }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.25, minHeight: 32 }}>{r.name}</div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                    {r.phone && <a href={`tel:${telDigits(r.phone)}`} style={MINI_BTN}><Phone size={13} color={FIRE.btnIcon} /> Call</a>}
+                    {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={MINI_BTN}><MessageSquare size={13} color={FIRE.btnIcon} /> Text</a>}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ))}
+          </div>
+        )}
+        {groups.length === 0 && crisisItems.length === 0 ? (
+          <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</div>
+        ) : groups.map(({ cat, items }) => (
+          <div key={cat} style={{ marginBottom: 18 }}>
+            <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
+            {items.map((r) => (
+              <div key={r.id} style={{ ...FS.card, padding: "14px 16px", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{r.name}</span>
+                  {!r.is_national && <span style={LOCAL_TAG}>Your station</span>}
+                </div>
+                {r.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.45 }}>{r.description}</div>}
+                <ResourceActions r={r} />
+              </div>
+            ))}
+          </div>
+        ))}
+      </>)}
     </div>
   );
 }
