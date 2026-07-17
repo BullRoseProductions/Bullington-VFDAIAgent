@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase, APP_URL } from "./supabaseClient";
+
+const RESEND_COOLDOWN = 30; // seconds — protects Supabase's auth-email rate limit from repeat taps
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -7,6 +9,15 @@ export default function Login() {
   const [sent, setSent] = useState(null); // null | "link" | "reset"
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0); // seconds left before an email can be re-sent
+
+  // Tick the resend cooldown down once per second. Both email buttons share it — they
+  // hit the same auth-email rate limit — so a confused user can't tap 5 times and trip it.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   async function signInPassword() {
     setErr("");
@@ -32,6 +43,7 @@ export default function Login() {
     setLoading(false);
     if (error) { setErr(error.message); return; }
     setSent("link");
+    setCooldown(RESEND_COOLDOWN);
   }
 
   // Forgot password: Supabase emails a reset link back to APP_URL (the same proven
@@ -46,7 +58,11 @@ export default function Login() {
     setLoading(false);
     if (error) { setErr(error.message); return; }
     setSent("reset");
+    setCooldown(RESEND_COOLDOWN);
   }
+
+  // Both email buttons are locked while a request is in flight OR during the shared cooldown.
+  const busy = loading || cooldown > 0;
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20 }}>
@@ -94,28 +110,25 @@ export default function Login() {
 
           <button
             onClick={resetPassword}
-            disabled={loading}
-            style={{ display: "block", width: "100%", margin: "0 0 14px", padding: "2px 0", fontSize: 13, fontWeight: 600, color: "#8FA3C4", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}
+            disabled={busy}
+            style={{ display: "block", width: "100%", margin: "0 0 14px", padding: "2px 0", fontSize: 13, fontWeight: 600, color: "#8FA3C4", background: "none", border: "none", cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1, textDecoration: "underline", fontFamily: "inherit" }}
           >
-            Forgot password?
+            {cooldown > 0 && sent === "reset" ? `Resend in ${cooldown}s…` : "Forgot password?"}
           </button>
 
           <div style={{ borderTop: "1px solid rgba(90,130,200,.14)", paddingTop: 14 }}>
-            {sent ? (
-              <div style={{ fontSize: 13.5, color: "#76C98D", lineHeight: 1.5 }}>
-                {sent === "reset"
-                  ? <>Check your email — we sent a password-reset link to <b>{email}</b>. Tap it, then pick a new password.</>
-                  : <>Check your email — we sent a sign-in link to <b>{email}</b>.</>}
+            {sent && (
+              <div style={{ fontSize: 13.5, color: "#76C98D", lineHeight: 1.5, marginBottom: 12 }}>
+                Sent — check your email. We sent a {sent === "reset" ? "password-reset" : "sign-in"} link to <b>{email}</b>.{sent === "reset" ? " Tap it, then pick a new password." : ""}
               </div>
-            ) : (
-              <button
-                onClick={sendLink}
-                disabled={loading}
-                style={{ width: "100%", padding: "9px", fontSize: 13.5, fontWeight: 600, color: "#8FA3C4", background: "rgba(90,130,200,.06)", border: "1px solid rgba(90,130,200,.20)", borderRadius: 10, cursor: "pointer" }}
-              >
-                Or email me a login link instead
-              </button>
             )}
+            <button
+              onClick={sendLink}
+              disabled={busy}
+              style={{ width: "100%", padding: "9px", fontSize: 13.5, fontWeight: 600, color: "#8FA3C4", background: "rgba(90,130,200,.06)", border: "1px solid rgba(90,130,200,.20)", borderRadius: 10, cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
+            >
+              {cooldown > 0 && sent === "link" ? `Resend in ${cooldown}s…` : "Or email me a login link instead"}
+            </button>
           </div>
         </div>
       </div>
