@@ -5284,11 +5284,12 @@ function RosterPending({ S, members, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't reject", text: "Something went wrong rejecting that. Please try again.", details: error.message }); return; }
     loadPending();
   }
+  const [viewerProof, setViewerProof] = useState(null);   // in-app DocViewer for a cert proof (usually an image)
   async function viewProof(row) {
     if (!row.proof_path) return;
     const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.proof_path, 3600);
     if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the proof", text: "Please try again.", details: error?.message }); return; }
-    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+    setViewerProof({ url: data.signedUrl, name: (row.proof_path || "").split("/").pop() });   // inline image (most proofs) or PDF; Download opens the original
   }
 
   if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>Loading…</div>;
@@ -5309,6 +5310,7 @@ function RosterPending({ S, members, notify }) {
           <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
         </div>
       ))}
+      {viewerProof && <DocViewer url={viewerProof.url} name={viewerProof.name} onClose={() => setViewerProof(null)} />}
     </div>
   );
 }
@@ -8223,11 +8225,12 @@ function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
 function usePlanViewer(S, notify) {
   const [viewPlan, setViewPlan] = useState(null);
   const [chooserSession, setChooserSession] = useState(null);
+  const [viewerDoc, setViewerDoc] = useState(null);   // in-app DocViewer target ({url, name})
   async function openPlan(plan) {                                   // single FILE plan → signed URL (deduped from the 2 identical copies)
     if (!plan?.storage_path) return;
     const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(plan.storage_path, 3600);
     if (error || !data?.signedUrl) { notify({ kind: "error", title: "Couldn't open the plan", text: "The plan couldn't be opened — please try again.", details: error?.message ?? "no signed URL" }); return; }
-    const a = document.createElement("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+    setViewerDoc({ url: data.signedUrl, name: (plan.storage_path || "").split("/").pop() });   // in-app viewer; Download inside opens the original
   }
   function openSessionPlans(s) {                                    // session-level: 0→toast, 1→open, N→chooser
     const plans = s.plans || [];
@@ -8237,6 +8240,7 @@ function usePlanViewer(S, notify) {
   }
   const mounts = (<>
     {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
+    {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} onClose={() => setViewerDoc(null)} />}
     {chooserSession && <SessionPlanChooser S={S} session={chooserSession} onView={(p) => { setViewPlan(p); setChooserSession(null); }} onOpen={(p) => { openPlan(p); setChooserSession(null); }} onClose={() => setChooserSession(null)} />}
   </>);
   return { openSessionPlans, openPlan, setViewPlan, mounts };
