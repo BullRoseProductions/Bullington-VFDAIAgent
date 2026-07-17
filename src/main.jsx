@@ -4,6 +4,19 @@ import App from "./App.jsx";
 import Login from "./Login.jsx";
 import { supabase } from "./supabaseClient";
 
+/* ---------------- Password-recovery URL capture ----------------
+ * A reset link lands with `#...type=recovery` in the hash. The auth SDK's
+ * onAuthStateChange PASSWORD_RECOVERY event is unreliable here: it's emitted from
+ * the SDK's auto-initialize() at module import via setTimeout(0) and races React's
+ * useEffect subscription — if the emit wins, the event hits zero listeners and is
+ * lost, and the SDK then wipes the hash (window.location.hash = ''), so a later read
+ * finds nothing. So we read the marker SYNCHRONOUSLY at module scope, on the import
+ * stack, BEFORE the SDK's async initialize() clears it. Seeds `recovery` below. */
+const IS_RECOVERY =
+  typeof window !== "undefined" &&
+  (window.location.hash.includes("type=recovery") ||
+    new URLSearchParams(window.location.search).get("type") === "recovery");
+
 /* ---------------- Stale-bundle guard (no service worker) ----------------
  * index.html points at a content-hashed bundle. Installed PWAs — iOS standalone especially —
  * keep the OLD index.html (and old bundle) cached until the app is force-quit, so deployed
@@ -55,14 +68,21 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 // exact dead-end that loses non-technical users. Letting them SEE what they typed is
 // safer than making them type it twice. On success they're already in a live session,
 // so onDone drops them straight into the app — no second login.
-function SetNewPassword({ onDone }) {
+function SetNewPassword({ hasSession, onDone }) {
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // The recovery screen shows the instant we spot type=recovery, but the token
+  // validates a beat later (a network round-trip). Gate Save on the live session so a
+  // fast typer can't fire updateUser before it lands — a disabled-then-enabled button
+  // beats an error our audience would have to decode and retry.
+  const ready = hasSession && !loading;
+
   async function save() {
     setErr("");
+    if (!ready) return;
     if (!password || password.length < 6) { setErr("Pick a password with at least 6 characters."); return; }
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password });
@@ -100,10 +120,10 @@ function SetNewPassword({ onDone }) {
 
           <button
             onClick={save}
-            disabled={loading}
-            style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2E6FC7", border: "none", borderRadius: 10, cursor: "pointer", opacity: loading ? 0.7 : 1, boxShadow: "0 4px 16px rgba(46,111,199,.35)" }}
+            disabled={!ready}
+            style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2E6FC7", border: "none", borderRadius: 10, cursor: ready ? "pointer" : "default", opacity: ready ? 1 : 0.7, boxShadow: "0 4px 16px rgba(46,111,199,.35)" }}
           >
-            {loading ? "Saving…" : "Save password & sign in"}
+            {loading ? "Saving…" : !hasSession ? "Preparing…" : "Save password & sign in"}
           </button>
         </div>
       </div>
@@ -114,7 +134,7 @@ function SetNewPassword({ onDone }) {
 function Root() {
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
-  const [recovery, setRecovery] = useState(false);
+  const [recovery, setRecovery] = useState(IS_RECOVERY); // seeded from URL; event is a backup
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -138,7 +158,7 @@ function Root() {
     );
   }
 
-  if (recovery) return <SetNewPassword onDone={() => setRecovery(false)} />;
+  if (recovery) return <SetNewPassword hasSession={!!session} onDone={() => setRecovery(false)} />;
 
   if (!session) return <Login />;
 
