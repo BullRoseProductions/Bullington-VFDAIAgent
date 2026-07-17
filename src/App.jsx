@@ -9154,7 +9154,27 @@ const DEFAULT_BRAND = {
 function BrandKit({ S, role, brand, setBrand, setDept }) {
   const canManage = hasAny(role, DEPT_ADMIN_ROLES);
   const set = (k, v) => setBrand((b) => ({ ...b, [k]: v }));
-  function onLogo(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => set("logo", r.result); r.readAsDataURL(file); }
+  // Downscale to <=512px longest edge and re-encode -> a small PNG data URI (~30-80KB). logo_url is stored on the
+  // departments row (read app-wide), so it must stay lean. Transparency preserved (PNG). Falls back to the raw file if it won't decode.
+  function onLogo(e) {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 512;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        set("logo", canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => set("logo", reader.result);
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
   async function saveBrand() {
@@ -9162,11 +9182,11 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
     const { data: id } = await supabase.rpc("my_department_id");   // same dept-id source as the load; BrandKit has no dept.id
     if (!id) { setSaving(false); setSaveState("err"); return; }
     const { data, error } = await supabase.from("departments").update({
-      name: brand.name, station: brand.station, primary_color: brand.primary, accent_color: brand.accent, font: brand.font, tagline: brand.tagline, voice: brand.voice,
-    }).eq("id", id).select();   // .select() so we can detect a silent 0-row RLS block (logo_url + guidelines excluded in v1)
+      name: brand.name, station: brand.station, primary_color: brand.primary, accent_color: brand.accent, font: brand.font, tagline: brand.tagline, voice: brand.voice, logo_url: brand.logo ?? null,   // logo now PERSISTS (small downscaled data URI); null clears it
+    }).eq("id", id).select();   // .select() so we can detect a silent 0-row RLS block (guidelines still excluded in v1)
     setSaving(false);
     if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked → surface an error, never a false "Saved"
-    setDept?.((d) => ({ ...(d || {}), name: brand.name }));   // keep the sidebar/header crest name in sync live
+    setDept?.((d) => ({ ...(d || {}), name: brand.name, logo_url: brand.logo ?? null }));   // sync the header/sidebar/dashboard/print crest (name + logo) live — no reload
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
   const swatch = (k, label) => (
@@ -9208,7 +9228,7 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
             {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
           </div>}
         </div>
-        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0, color: FIRE.textMuted }}>PNG with a transparent background works best. The logo is stored in this session for the prototype.</p>
+        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0, color: FIRE.textMuted }}>PNG with a transparent background works best. Saved to your department when you tap Save — it appears on your header, sidebar, dashboard, and printed roster.</p>
       </div>
       <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
         <div style={{ ...FS.kicker, marginBottom: 8 }}>VOICE & TAGLINE</div>
