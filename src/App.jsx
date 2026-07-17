@@ -4740,13 +4740,30 @@ function Initials({ S, name, dark }) {
 // already-filtered roster list — no new query, no fields beyond what the leader already sees. Sorted by
 // last name; inactive members included and marked so the paper roster is a complete record. Blanks for
 // missing phone/email (never "undefined").
-function printRoster(list, dept) {
+// Fetch a logo URL (or pass through a data: URI) into a data URI, so the crest renders AND prints
+// reliably inside the standalone print window (no remote-fetch race, no cross-origin print quirk).
+// Returns null on absence/CORS/failure -> caller falls back to the monogram, same as the app crest.
+async function logoDataUri(url) {
+  if (!url) return null;
+  if (url.startsWith("data:")) return url;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => { const r = new FileReader(); r.onloadend = () => resolve(typeof r.result === "string" ? r.result : null); r.onerror = () => resolve(null); r.readAsDataURL(blob); });
+  } catch { return null; }
+}
+async function printRoster(list, dept) {
+  const w = window.open("", "_blank");   // open SYNC (before any await) so the user gesture isn't consumed -> no pop-up block
+  if (!w) return false;   // pop-up blocked
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const lastName = (m) => { const p = (m.name || "").trim().split(/\s+/); return (p[p.length - 1] || m.name || "").toLowerCase(); };
   const rows = [...(list || [])].sort((a, b) => lastName(a).localeCompare(lastName(b)) || (a.name || "").localeCompare(b.name || ""));
   const now = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const deptName = dept?.name || "Department";
   const meta = [dept?.station ? `Station ${esc(dept.station)}` : "", `${rows.length} member${rows.length === 1 ? "" : "s"}`, `Printed ${esc(now)}`].filter(Boolean).join(" &middot; ");
+  const logo = await logoDataUri(dept?.logo_url);   // real crest when persisted (embedded); else monogram fallback (same as the app)
+  const crest = logo ? `<img class="crest" src="${logo}" alt="">` : `<div class="crest mono">${esc(deptMonogram(dept?.name))}</div>`;
   const body = rows.map((m) => {
     const inactive = m.status === "Inactive";
     const nameCell = esc(m.name || "") + (inactive ? ' <span class="inact">(inactive)</span>' : "");
@@ -4754,19 +4771,19 @@ function printRoster(list, dept) {
   }).join("");
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(deptName)} Roster</title><style>
     *{box-sizing:border-box} body{font-family:Georgia,'Times New Roman',serif;color:#000;background:#fff;margin:32px}
-    h1{font-size:20px;margin:0 0 3px} .sub{font-size:12px;color:#333;margin:0 0 16px}
+    .head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:14px}
+    .crest{width:58px;height:58px;flex-shrink:0;object-fit:contain}
+    .crest.mono{display:flex;align-items:center;justify-content:center;border:2px solid #000;border-radius:8px;font-weight:700;font-size:20px;letter-spacing:.02em}
+    h1{font-size:20px;margin:0 0 3px} .sub{font-size:12px;color:#333;margin:0}
     table{width:100%;border-collapse:collapse;font-size:12.5px} th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #aaa;vertical-align:top}
     th{border-bottom:2px solid #000;font-size:11px;text-transform:uppercase;letter-spacing:.04em} .inact{color:#777;font-style:italic;font-size:11px} .r-inact td{color:#555}
     @media print{body{margin:.5in}}
   </style></head><body>
-    <h1>${esc(deptName)} &mdash; Roster</h1>
-    <div class="sub">${meta}</div>
+    <div class="head">${crest}<div><h1>${esc(deptName)} &mdash; Roster</h1><div class="sub">${meta}</div></div></div>
     <table><thead><tr><th>Name</th><th>Rank</th><th>Phone</th><th>Email</th></tr></thead><tbody>${body}</tbody></table>
   </body></html>`;
-  const w = window.open("", "_blank");
-  if (!w) return false;   // pop-up blocked
   w.document.write(html); w.document.close(); w.focus();
-  setTimeout(() => { try { w.print(); } catch {} }, 300);
+  setTimeout(() => { try { w.print(); } catch {} }, 350);
   return true;
 }
 function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, initialTab, dept }) {
@@ -4803,8 +4820,8 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
 function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
   const canPrint = isLeader(role);   // is_canmanage (Board/DA/Officer) + Project Admin/owner — LEADERSHIP set
-  function handlePrint() {
-    if (!printRoster(members, dept)) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+  async function handlePrint() {
+    if (!(await printRoster(members, dept))) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
   }
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
