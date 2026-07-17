@@ -4,7 +4,7 @@ import { supabase, APP_URL } from "./supabaseClient";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState(null); // null | "link" | "reset"
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -23,7 +23,7 @@ export default function Login() {
 
   async function sendLink() {
     setErr("");
-    if (!email.trim()) { setErr("Please enter your email."); return; }
+    if (!email.trim()) { setErr("Enter your email first."); return; }
     setLoading(true);
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
@@ -31,7 +31,21 @@ export default function Login() {
     });
     setLoading(false);
     if (error) { setErr(error.message); return; }
-    setSent(true);
+    setSent("link");
+  }
+
+  // Forgot password: Supabase emails a reset link back to APP_URL (the same proven
+  // redirect the magic link uses). Clicking it fires a PASSWORD_RECOVERY event that
+  // main.jsx catches to show the set-new-password screen. Supabase owns the token,
+  // expiry, and verification — we only kick off the email.
+  async function resetPassword() {
+    setErr("");
+    if (!email.trim()) { setErr("Enter your email first, then tap “Forgot password?”"); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: APP_URL });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    setSent("reset");
   }
 
   return (
@@ -78,10 +92,20 @@ export default function Login() {
             {loading ? "Working…" : "Sign in"}
           </button>
 
+          <button
+            onClick={resetPassword}
+            disabled={loading}
+            style={{ display: "block", width: "100%", margin: "0 0 14px", padding: "2px 0", fontSize: 13, fontWeight: 600, color: "#8FA3C4", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}
+          >
+            Forgot password?
+          </button>
+
           <div style={{ borderTop: "1px solid rgba(90,130,200,.14)", paddingTop: 14 }}>
             {sent ? (
               <div style={{ fontSize: 13.5, color: "#76C98D", lineHeight: 1.5 }}>
-                Check your email — we sent a sign-in link to <b>{email}</b>.
+                {sent === "reset"
+                  ? <>Check your email — we sent a password-reset link to <b>{email}</b>. Tap it, then pick a new password.</>
+                  : <>Check your email — we sent a sign-in link to <b>{email}</b>.</>}
               </div>
             ) : (
               <button

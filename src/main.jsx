@@ -49,16 +49,82 @@ async function checkForUpdate(isColdStart) {
 checkForUpdate(true);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(false); });
 
+// Set-new-password screen. Only shown after a reset link lands and Supabase fires
+// PASSWORD_RECOVERY (see Root). Built for the lowest common denominator: ONE field
+// plus a Show-password toggle — no confirm field, because a confirm-mismatch is the
+// exact dead-end that loses non-technical users. Letting them SEE what they typed is
+// safer than making them type it twice. On success they're already in a live session,
+// so onDone drops them straight into the app — no second login.
+function SetNewPassword({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function save() {
+    setErr("");
+    if (!password || password.length < 6) { setErr("Pick a password with at least 6 characters."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    onDone(); // recovery session is already live → straight into the app, signed in
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20 }}>
+      <style>{`.b4c-input:focus{outline:none;border-color:#2E6FC7;box-shadow:0 0 0 3px rgba(46,111,199,.25)} .b4c-input::placeholder{color:#5D6B85}`}</style>
+      <div style={{ width: "100%", maxWidth: 380 }}>
+        <img src="/B4C-Main.png" alt="Before the Call" style={{ display: "block", width: "100%", maxWidth: 360, height: "auto", margin: "0 auto 24px" }} />
+        <div style={{ background: "#0E1220", borderRadius: 16, border: "1px solid rgba(90,130,200,.14)", padding: 26, boxShadow: "0 12px 34px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 16, color: "#EAEEF5", fontWeight: 700, textAlign: "center", margin: "0 0 6px" }}>Set a new password</div>
+          <div style={{ fontSize: 13, color: "#8FA3C4", textAlign: "center", margin: "0 0 18px", lineHeight: 1.5 }}>
+            Type a new password and you're in. Turn on “Show password” so you can see what you type.
+          </div>
+
+          <input
+            className="b4c-input"
+            type={show ? "text" : "password"}
+            placeholder="New password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+            autoFocus
+            style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid rgba(90,130,200,.22)", background: "#10141F", color: "#EAEEF5", colorScheme: "dark", marginBottom: 10 }}
+          />
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "#8FA3C4", cursor: "pointer", marginBottom: 14, userSelect: "none" }}>
+            <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Show password
+          </label>
+
+          {err && <div style={{ fontSize: 13, color: "#E58A90", marginBottom: 12 }}>{err}</div>}
+
+          <button
+            onClick={save}
+            disabled={loading}
+            style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2E6FC7", border: "none", borderRadius: 10, cursor: "pointer", opacity: loading ? 0.7 : 1, boxShadow: "0 4px 16px rgba(46,111,199,.35)" }}
+          >
+            {loading ? "Saving…" : "Save password & sign in"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Root() {
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
+  const [recovery, setRecovery] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setReady(true);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      // A reset link establishes a real session AND fires PASSWORD_RECOVERY. Flag it so
+      // we show the set-new-password screen instead of silently dropping them in the app.
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(s);
     });
     return () => sub.subscription.unsubscribe();
@@ -71,6 +137,8 @@ function Root() {
       </div>
     );
   }
+
+  if (recovery) return <SetNewPassword onDone={() => setRecovery(false)} />;
 
   if (!session) return <Login />;
 
