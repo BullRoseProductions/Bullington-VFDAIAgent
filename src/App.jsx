@@ -3225,6 +3225,92 @@ async function extractMinutesFileText(file) {
   throw new Error("Unsupported file type. Upload a .docx, .pdf, or .txt file.");
 }
 const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
+// One PDF page rendered to a canvas at the container width (x devicePixelRatio for crispness).
+function PdfPage({ pdf, pageNum, width }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const page = await pdf.getPage(pageNum);
+        if (cancelled || !ref.current) return;
+        const dpr = window.devicePixelRatio || 1;
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: (width > 0 ? width / base.width : 1) * dpr });
+        const canvas = ref.current;
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      } catch { /* a single page failing shouldn't blank the whole doc */ }
+    })();
+    return () => { cancelled = true; };
+  }, [pdf, pageNum, width]);
+  return <canvas ref={ref} style={{ display: "block", width: "100%", height: "auto", marginBottom: 8, borderRadius: 6, background: "#fff" }} />;
+}
+// In-app document viewer. Takes the ALREADY-signed URL (no new RLS surface). PDF -> pdfjs page
+// canvases; docx -> mammoth HTML (text + basic structure, download fallback); image -> inline;
+// anything else -> download-only. The Download button opens the original (today's behavior).
+function DocViewer({ url, name, onClose }) {
+  const ext = (name || "").toLowerCase().split(".").pop();
+  const kind = ext === "pdf" ? "pdf" : ext === "docx" ? "docx" : ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext) ? "image" : "other";
+  const [status, setStatus] = useState(kind === "other" ? "error" : "loading");   // loading | ready | error(=download-only)
+  const [pdf, setPdf] = useState(null);
+  const [numPages, setNumPages] = useState(0);
+  const [html, setHtml] = useState("");
+  const contentRef = useRef(null);
+  const [w, setW] = useState(0);
+  useEffect(() => { const onKey = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onClose]);
+  useEffect(() => { const measure = () => setW(contentRef.current?.clientWidth || 0); measure(); window.addEventListener("resize", measure); return () => window.removeEventListener("resize", measure); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (kind === "pdf") {
+          const lib = await loadPdfjs();
+          const doc = await lib.getDocument({ url }).promise;
+          if (cancelled) return;
+          setPdf(doc); setNumPages(doc.numPages); setStatus("ready");
+        } else if (kind === "docx") {
+          const buf = await (await fetch(url)).arrayBuffer();
+          const mammoth = await loadMammoth();
+          const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });   // text + basic structure (NOT pixel-perfect Word)
+          if (cancelled) return;
+          if (value && value.trim()) { setHtml(value); setStatus("ready"); } else { setStatus("error"); }   // empty => download fallback
+        } else if (kind === "image") {
+          if (!cancelled) setStatus("ready");
+        }
+      } catch { if (!cancelled) setStatus("error"); }   // any failure => clean download-only fallback
+    })();
+    return () => { cancelled = true; };
+  }, [url, kind]);
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 130, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxWidth: 820, width: "100%", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: FIRE.card, borderBottom: `0.5px solid ${FIRE.hairline}`, flexShrink: 0 }}>
+          <FileText size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+          <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...FS.btn, padding: "6px 10px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0 }}><Download size={14} color={FIRE.btnIcon} /> Download</a>
+          <button onClick={onClose} title="Close (Esc)" style={{ ...FS.btn, padding: "6px 8px", flexShrink: 0 }}><X size={16} color={FIRE.btnIcon} /></button>
+        </div>
+        <div ref={contentRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#0b0d10", padding: 12, paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
+          {status === "loading" && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: FIRE.textMuted, fontSize: 13, padding: "40px 0" }}><Loader2 size={16} className="spin" /> Loading…</div>}
+          {status === "error" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "40px 16px", textAlign: "center" }}>
+              <div style={{ color: FIRE.textSecondary, fontSize: 14, lineHeight: 1.5 }}>{kind === "docx" ? "This document can't be shown in-app. Download it to read the full file." : "This file can't be previewed here — download it to open it."}</div>
+              <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}><Download size={16} /> Download</a>
+            </div>
+          )}
+          {status === "ready" && kind === "pdf" && pdf && w > 0 && Array.from({ length: numPages }).map((_, i) => <PdfPage key={i} pdf={pdf} pageNum={i + 1} width={w} />)}
+          {status === "ready" && kind === "docx" && (<>
+            <style>{`.docx-view img{max-width:100%;height:auto} .docx-view table{border-collapse:collapse;width:100%;margin:8px 0} .docx-view td,.docx-view th{border:1px solid rgba(255,255,255,.16);padding:6px 8px;text-align:left} .docx-view a{color:${FIRE.blueText}} .docx-view h1,.docx-view h2,.docx-view h3{color:#fff;margin:12px 0 6px} .docx-view p{margin:0 0 8px} .docx-view ul,.docx-view ol{margin:0 0 8px;padding-left:22px}`}</style>
+            <div className="docx-view" style={{ ...FS.card, padding: "16px 18px", fontSize: 14, lineHeight: 1.6, color: FIRE.textPrimary, wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: html }} />
+          </>)}
+          {status === "ready" && kind === "image" && <img src={url} alt={name} style={{ display: "block", maxWidth: "100%", margin: "0 auto", borderRadius: 8 }} />}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 function Documents({ S, role, notify, uploaderName, members }) {
   const leader = isLeader(role);
   const canManageDocs = hasAny(role, CANMANAGE_OPS_ROLES);
@@ -3331,6 +3417,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
     await uploadFiles(Array.from(input.files || []));
     input.value = "";   // reset unconditionally so re-selecting the same file(s) refires onChange
   }
+  const [viewerDoc, setViewerDoc] = useState(null);   // in-app DocViewer target ({url, name}); null = closed
   async function openDoc(item) {
     if (!item?.storage_path) return;
     const { data, error } = await supabase.storage
@@ -3340,13 +3427,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
       notify({ kind: "error", title: "Couldn't open file", text: "The document couldn't be opened — please try again.", details: error?.message ?? "no signed URL" });
       return;
     }
-    const a = document.createElement("a");
-    a.href = data.signedUrl;
-    a.target = "_blank";
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    setViewerDoc({ url: data.signedUrl, name: item.name });   // in-app viewer; Download inside opens the original (today's behavior)
   }
   // Soft-delete: move to trash (DA/PA, server-stamped). File STAYS in Storage so it can be restored.
   async function deleteDoc(item) {
@@ -3524,6 +3605,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
           )}
         </div>
       )}
+      {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} onClose={() => setViewerDoc(null)} />}
     </div>
   );
 }
