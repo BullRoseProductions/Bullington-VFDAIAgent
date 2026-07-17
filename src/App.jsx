@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
@@ -966,7 +966,7 @@ export default function App() {
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
-          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} />}
+          {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
@@ -4736,7 +4736,40 @@ function Initials({ S, name, dark }) {
   return <span style={dark ? { ...S.avatar, border: `0.5px solid ${FIRE.btnBorder}` } : S.avatar}>{i}</span>;
 }
 
-function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, initialTab }) {
+// Standalone black-on-white printable roster (browser print / save-as-PDF). Reuses the ALREADY-loaded,
+// already-filtered roster list — no new query, no fields beyond what the leader already sees. Sorted by
+// last name; inactive members included and marked so the paper roster is a complete record. Blanks for
+// missing phone/email (never "undefined").
+function printRoster(list, dept) {
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const lastName = (m) => { const p = (m.name || "").trim().split(/\s+/); return (p[p.length - 1] || m.name || "").toLowerCase(); };
+  const rows = [...(list || [])].sort((a, b) => lastName(a).localeCompare(lastName(b)) || (a.name || "").localeCompare(b.name || ""));
+  const now = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const deptName = dept?.name || "Department";
+  const meta = [dept?.station ? `Station ${esc(dept.station)}` : "", `${rows.length} member${rows.length === 1 ? "" : "s"}`, `Printed ${esc(now)}`].filter(Boolean).join(" &middot; ");
+  const body = rows.map((m) => {
+    const inactive = m.status === "Inactive";
+    const nameCell = esc(m.name || "") + (inactive ? ' <span class="inact">(inactive)</span>' : "");
+    return `<tr class="${inactive ? "r-inact" : ""}"><td>${nameCell}</td><td>${esc(m.role || "Member")}</td><td>${esc(m.phone || "")}</td><td>${esc(m.email || "")}</td></tr>`;
+  }).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(deptName)} Roster</title><style>
+    *{box-sizing:border-box} body{font-family:Georgia,'Times New Roman',serif;color:#000;background:#fff;margin:32px}
+    h1{font-size:20px;margin:0 0 3px} .sub{font-size:12px;color:#333;margin:0 0 16px}
+    table{width:100%;border-collapse:collapse;font-size:12.5px} th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #aaa;vertical-align:top}
+    th{border-bottom:2px solid #000;font-size:11px;text-transform:uppercase;letter-spacing:.04em} .inact{color:#777;font-style:italic;font-size:11px} .r-inact td{color:#555}
+    @media print{body{margin:.5in}}
+  </style></head><body>
+    <h1>${esc(deptName)} &mdash; Roster</h1>
+    <div class="sub">${meta}</div>
+    <table><thead><tr><th>Name</th><th>Rank</th><th>Phone</th><th>Email</th></tr></thead><tbody>${body}</tbody></table>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) return false;   // pop-up blocked
+  w.document.write(html); w.document.close(); w.focus();
+  setTimeout(() => { try { w.print(); } catch {} }, 300);
+  return true;
+}
+function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, initialTab, dept }) {
   const leader = isLeader(role);
   const tabs = leader
     ? [["members", "Members"], ["certs", "Certifications"], ["attendance", "Attendance"], ...(hasAny(role, DEPT_ADMIN_ROLES) ? [["pending", "Pending Items"]] : [])]
@@ -4760,15 +4793,19 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
       <div style={S.segRow}>
         {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
-      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} />}
+      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
     </div>
   );
 }
-function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
+function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
+  const canPrint = isLeader(role);   // is_canmanage (Board/DA/Officer) + Project Admin/owner — LEADERSHIP set
+  function handlePrint() {
+    if (!printRoster(members, dept)) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+  }
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
@@ -4853,7 +4890,10 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify }) {
         <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search members by name, email, or role…" value={query} onChange={(e) => setQuery(e.target.value)} />
         {query && <button style={S.clearBtn} onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
       </div>
-      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10 }}>Showing {filtered.length} of {rosterTotal}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
+        {canPrint && <button onClick={handlePrint} title="Print or save the roster as a PDF" style={{ ...FS.btn, marginLeft: "auto", padding: "6px 11px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }}><Printer size={14} color={FIRE.btnIcon} /> Print roster</button>}
+      </div>
       {members.some((m) => m.status === "Inactive") && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
           <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
