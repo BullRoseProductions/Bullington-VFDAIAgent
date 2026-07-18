@@ -8438,6 +8438,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
+  const [openPlans, setOpenPlans] = useState(null);   // per-session attached-plans section: collapsed by default (calm-at-rest), expand deliberately
   // Live codes come from open_signin and are held locally for display only — never persisted/loaded, so a member can't read a code without scanning.
   const [signinTokens, setSigninTokens] = useState({});   // sessionId -> 6-char code (this browser, this open)
   async function openSI(s) {
@@ -9068,6 +9069,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
                     <div style={FS.rowActions}>
                       <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
+                      {s.plans.length > 0 && <button style={Lbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
                       {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                       {canManage && (
                         <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
@@ -9098,7 +9100,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       <button style={Lbtn} onClick={() => setEditingSessionId(null)}>Cancel</button>
                     </div>
                   )}
-                  {s.plans.length > 0 && (
+                  {s.plans.length > 0 && openPlans === s.id && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
                       <div style={{ fontSize: 11, color: "#7E8794", marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
                       {s.plans.map((p) => (
