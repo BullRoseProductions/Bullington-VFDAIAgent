@@ -831,7 +831,11 @@ export default function App() {
     supabase.from("training_plans")
       .select("id, name, cadence, last_iso, color")
       .then(({ data, error }) => {
-        if (error || !data) { setTrainingPlan([]); return; }
+        if (error || !data) {   // a failed READ is not "zero categories" — keep last-known, log, offer retry (never blank on error)
+          console.error("[loadPlans] training_plans read failed — keeping last-known categories:", error);
+          notify({ kind: "error", title: "Couldn't load training categories", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: error?.message, action: { label: "Retry", onClick: loadPlans } });
+          return;
+        }
         setTrainingPlan(data.map((r) => ({ id: r.id, name: r.name, cadence: r.cadence, lastISO: r.last_iso, color: r.color })));
       });
   };
@@ -3714,7 +3718,11 @@ function ContentCalendar({ S, role, notify }) {
     supabase.from("content_calendar")
       .select("id, date, theme, caption, color")
       .then(({ data, error }) => {
-        if (error || !data) { setPosts([]); return; }
+        if (error || !data) {   // a failed READ is not "zero posts" — keep last-known, log, offer retry (never blank on error)
+          console.error("[loadPosts] content_calendar read failed — keeping last-known posts:", error);
+          notify({ kind: "error", title: "Couldn't load the content calendar", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: error?.message, action: { label: "Retry", onClick: loadPosts } });
+          return;
+        }
         setPosts(
           data.filter((r) => r.date).map((r) => {
             const [yy, mm, dd] = r.date.split("-").map(Number);
@@ -3880,7 +3888,11 @@ function RecruitmentCalendar({ S, role, notify }) {
     supabase.from("recruitment_events")
       .select("id, date, title, color, notes")
       .then(({ data, error }) => {
-        if (error || !data) { setItems([]); return; }
+        if (error || !data) {   // a failed READ is not "zero events" — keep last-known, log, offer retry (never blank on error)
+          console.error("[loadItems] recruitment_events read failed — keeping last-known events:", error);
+          notify({ kind: "error", title: "Couldn't load recruitment events", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: error?.message, action: { label: "Retry", onClick: loadItems } });
+          return;
+        }
         setItems(
           data.filter((r) => r.date).map((r) => {
             const [yy, mm, dd] = r.date.split("-").map(Number);
@@ -3965,7 +3977,11 @@ function FundingCalendar({ S, role, notify }) {
     supabase.from("funding_events")
       .select("id, date, title, color, notes")
       .then(({ data, error }) => {
-        if (error || !data) { setItems([]); return; }
+        if (error || !data) {   // a failed READ is not "zero events" — keep last-known, log, offer retry (never blank on error)
+          console.error("[loadItems] funding_events read failed — keeping last-known events:", error);
+          notify({ kind: "error", title: "Couldn't load fundraising events", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: error?.message, action: { label: "Retry", onClick: loadItems } });
+          return;
+        }
         setItems(
           data.filter((r) => r.date).map((r) => {
             const [yy, mm, dd] = r.date.split("-").map(Number);
