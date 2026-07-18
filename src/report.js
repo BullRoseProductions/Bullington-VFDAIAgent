@@ -185,9 +185,12 @@ export function buildReportDoc(data) {
 
   // ---------- Recent Training ----------
   header("Recent Training");
+  // Optional (off-hours/one-off) sessions are marked so a bare "4 / 25" on a printed
+  // report can't read as terrible turnout — it's recorded attendance, not a rate.
   table(["Session", "Date", "Type", "Attendance"],
-    data.activity.map((e) => [e.name, e.date, e.type, `${e.present} / ${e.total}`]),
+    data.activity.map((e) => [e.optional ? `${e.name} (Optional)` : e.name, e.date, e.type, e.optional ? `${e.present} / ${e.total} — optional` : `${e.present} / ${e.total}`]),
     { columnStyles: { 0: { fontStyle: "bold" }, 3: { halign: "right" } } });
+  if ((data.activity || []).some((e) => e.optional)) para("“Optional” sessions (off-hours or one-off trainings) are recorded for those who attended but are not counted toward attendance rates — their turnout should not be read as a participation figure.", GRAY, 8);
 
   // ---------- Upcoming Training ----------
   header("Upcoming Training");
