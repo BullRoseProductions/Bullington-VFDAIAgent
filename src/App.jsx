@@ -658,7 +658,7 @@ const NAV = [
 const PA_NAV = ["dashboard", "settings", "admin", "adddept"];
 
 /* ================================================================== */
-function Notification({ S, kind, title, text, details, onClose }) {
+function Notification({ S, kind, title, text, details, action, onClose }) {
   const [showDetails, setShowDetails] = useState(false);
   const isErr = kind === "error";
   const accent = isErr ? "#B11E2A" : "#2E7D52";                 // ENGINE red / success green — app palette
@@ -680,6 +680,9 @@ function Notification({ S, kind, title, text, details, onClose }) {
           </>)}
         </>) : (
           <div style={{ fontWeight: 600, fontSize: 13.5, color: "#191C20" }}>{text || title}</div>
+        )}
+        {action && (
+          <button onClick={() => { action.onClick(); onClose(); }} style={{ marginTop: 9, border: "none", background: accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 13px", borderRadius: 7, fontFamily: "inherit" }}>{action.label}</button>
         )}
       </div>
       <button onClick={onClose} title="Dismiss" aria-label="Dismiss" style={{ border: "none", background: "transparent", color: "#6A7178", cursor: "pointer", padding: 0, flexShrink: 0, display: "inline-flex" }}>
@@ -840,7 +843,15 @@ export default function App() {
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
-    if (sErr || !srows) { setTrainingSessions([]); return; }   // sessions are source of truth; attendance/plan reads are non-fatal
+    // A failed READ is NOT "zero trainings." Never overwrite last-known sessions on error —
+    // a transient API hiccup (e.g. a PostgREST schema-cache lag right after a migration) once
+    // blanked the whole calendar and read as deleted data. Keep what we have, log it, offer retry.
+    // (A genuinely empty result is srows === [] — truthy — and flows through to set [] correctly.)
+    if (sErr || !srows) {
+      console.error("[loadSessions] sessions read failed — keeping last-known sessions:", sErr);
+      notify({ kind: "error", title: "Couldn't load trainings", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: sErr?.message, action: { label: "Retry", onClick: loadSessions } });
+      return;
+    }
     const byS = {};
     (arows || []).forEach((a) => {
       const e = byS[a.session_id] || (byS[a.session_id] = { attendance: [], times: {} });
@@ -918,7 +929,7 @@ export default function App() {
   return (
     <div style={S.app}>
       <Fonts />
-      {toast && <Notification S={S} kind={toast.kind} title={toast.title} text={toast.text} details={toast.details} onClose={() => setToast(null)} />}
+      {toast && <Notification S={S} kind={toast.kind} title={toast.title} text={toast.text} details={toast.details} action={toast.action} onClose={() => setToast(null)} />}
       {drawer && <div style={S.scrim} onClick={() => setDrawer(false)} />}
       <aside className={`dr-side${drawer ? " open" : ""}`} style={S.sidebar}>
         <div style={S.brandRow}>
