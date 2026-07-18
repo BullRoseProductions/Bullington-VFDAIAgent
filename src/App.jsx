@@ -98,6 +98,12 @@ const isTrainingLeader = (rs) => hasAny(rs, SIGNIN_ROLES);
 // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
 // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
 const isRestrictedEvent = (s) => s?.audience === "leadership" || s?.audience === "board";
+// A session feeds the attendance RATE only if it's a regular (non-restricted) event AND not
+// flagged optional. Two INDEPENDENT reasons to exclude — they compose: a restricted event stays
+// out via audience, a regular off-hours/one-off stays out via the flag, a normal drill counts.
+// Optional sessions still record + display attendance; we drop them from the denominator, not the record.
+const isOptionalEvent = (s) => s?.countsAttendance === false;
+const countsTowardRate = (s) => !isRestrictedEvent(s) && !isOptionalEvent(s);
 const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
   : s?.audience === "leadership" ? isLeader(m?.access)
   : true;
@@ -830,7 +836,7 @@ export default function App() {
   const [trainingSessions, setTrainingSessions] = useState([]);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience, counts_toward_attendance"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -854,7 +860,7 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // audience: 'everyone' | 'leadership' (default everyone); plans[] = all; plan = newest (backward-compat alias)
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
     );
   };
@@ -1012,7 +1018,7 @@ function deptAttendance(members, sessions, year, range) {
   const inScope = range
     ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
     : (s) => s.y === year;
-  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && !isRestrictedEvent(s));   // TRAINING only — leadership EVENTS excluded (separate track); people/roles untouched
+  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && countsTowardRate(s));   // TRAINING only — leadership EVENTS + optional (off-hours/one-off) sessions excluded from the rate; people/roles untouched
   const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
     const memberLeader = isLeader(m.access);
     const eligible = doneThisYear;   // all remaining are audience='everyone' → eligible for everyone (the memberLeader/audience filter is now redundant)
@@ -2026,7 +2032,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   // per-CALENDAR-MONTH attendance rate for this member (null when a month has no recorded drills)
   const monthRate = (Y, M) => {
     const meLeader = isLeader(me?.access);   // score off the member's ACTUAL roles (not "View as")
-    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && (meLeader || !isRestrictedEvent(s)));
+    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && !isOptionalEvent(s) && (meLeader || !isRestrictedEvent(s)));
     if (!rec.length) return null;
     const att = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
     return { total: rec.length, attended: att, pct: Math.round((att / rec.length) * 100) };
@@ -2775,6 +2781,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)
   const [newDate, setNewDate] = useState(""); const [newTime, setNewTime] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
+  const [newCounts, setNewCounts] = useState(true);   // AI schedule-on-a-date "counts toward attendance rate"; default ON
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null);
@@ -2807,14 +2814,14 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const title = newTitle.trim() || `${form.topic} — AI drill plan`;
     // a) create the session on the picked date (reuses addSession's insert shape; the type=date value is already YYYY-MM-DD)
-    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, start_time: newTime || null, done: false, audience: newAudience }).select().single();
+    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, start_time: newTime || null, done: false, audience: newAudience, counts_toward_attendance: newCounts }).select().single();
     if (e1 || !sess) { setSaving(false); notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong creating that session. Please try again.", details: e1?.message }); return; }
     // b) attach the plan to the new session (reuses saveToSession's attach). Non-atomic — recoverable if this fails.
     const { error: e2 } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: sess.id, title, source: "ai", ai_text: serializeDrillPlan(plan, form.topic), created_by: me?.name || "Unknown" });
     setSaving(false);
     if (e2) { notify({ kind: "error", title: "Session created — plan didn't attach", text: "The session was scheduled, but attaching the plan failed. You can attach it from the planner's session picker.", details: e2.message }); loadSessions && loadSessions(); return; }
     notify({ kind: "success", title: "Scheduled", text: `Training scheduled on ${newDate} with its plan.` });
-    setNewDate(""); setNewTime(""); setNewTitle(""); setNewCat(""); setNewAudience("everyone");
+    setNewDate(""); setNewTime(""); setNewTitle(""); setNewCat(""); setNewAudience("everyone"); setNewCounts(true);
     loadSessions && loadSessions();
   }
   return (
@@ -2880,6 +2887,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                         return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
                       })}
                     </div></label>
+                  <CountsAttendanceCheckbox checked={newCounts} onChange={setNewCounts} fieldStyle={S.field} labelStyle={{ ...S.fieldLabel, color: FIRE.textSecondary }} />
                   <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={scheduleOnDate} disabled={!newDate || saving}>{saving ? <><Loader2 size={16} className="spin" /> Scheduling…</> : <><Plus size={16} /> Schedule on date</>}</button>
                 </div>
               )}
@@ -5170,7 +5178,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                   return (
                     <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
                       <CalendarCheck size={15} color={present ? FIRE.green : FIRE.redBright} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><EventAudienceTag audience={s.audience} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
                       <Pill S={S} color={present ? FIRE.green : FIRE.redBright}>{present ? "PRESENT" : "ABSENT"}</Pill>
                     </div>
                   );
@@ -5392,6 +5400,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
       category: (plan || []).find((p) => String(p.id) === String(s.planId))?.name || null,   // plan_id → training_plans.name
       present: (s.attendance || []).length,
       total: (isRestrictedEvent(s) ? activeMembers.filter((m) => rollFor(s, m)) : activeMembers).length,   // eligible = Active members under the audience rule (board->Board, leadership->leaders)
+      optional: isOptionalEvent(s),   // kept visible (the present did something good) but bar is neutral — not an accountability number
     }));
   return (
     <div>
@@ -5407,9 +5416,10 @@ function RosterAttendance({ S, members, sessions, plan }) {
                 <div style={{ ...S.personMeta, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <span>{e.date}</span>
                   {e.category && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px" }}>{e.category}</span>}
+                  <EventOptionalTag optional={e.optional} />
                 </div>
               </div>
-              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total} ({pct}%)</div><Bar S={S} pct={pct} track={FIRE.track} color={pct >= 75 ? FIRE.green : FIRE.amberText} /></div>
+              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total}{e.optional ? "" : ` (${pct}%)`}</div><Bar S={S} pct={pct} track={FIRE.track} color={e.optional ? FIRE.textMuted : (pct >= 75 ? FIRE.green : FIRE.amberText)} /></div>
             </div>
           );
         })}
@@ -5455,6 +5465,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       type: s.audience === "board" ? "Board meeting" : s.audience === "leadership" ? "Leadership training" : "Training",
       present: (s.attendance || []).length,
       total: isRestrictedEvent(s) ? cm.filter((m) => rollFor(s, m)).length : cm.length,
+      optional: isOptionalEvent(s),   // shown, but not an accountability number
     }));
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
@@ -8309,6 +8320,27 @@ function EventAudienceTag({ audience }) {   // "Board" (blue) or "Leadership" (a
   if (!cfg) return null;
   return <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: cfg.color, border: `0.5px solid ${cfg.color}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>{cfg.label}</span>;
 }
+// Neutral grey "Optional" pill: an off-hours/one-off session kept OUT of the attendance rate
+// (still recorded + visible). Independent of audience — a session can be Everyone AND Optional.
+function EventOptionalTag({ session, optional }) {
+  if (!(optional ?? isOptionalEvent(session))) return null;
+  return <span title="Attendance is recorded, but this session isn't counted toward the attendance rate" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textMuted, border: `0.5px solid ${FIRE.textMuted}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>Optional</span>;
+}
+// "Counts toward attendance rate" checkbox — ON by default in every session form (create, AI-schedule,
+// edit). Officers only uncheck the unusual off-hours/one-off. Wording is deliberately plain so an
+// officer instantly knows unchecking means "recorded, but doesn't lower anyone's rate."
+function CountsAttendanceCheckbox({ checked, onChange, fieldStyle, labelStyle }) {
+  return (
+    <label style={{ ...fieldStyle, minWidth: 250, cursor: "pointer" }}>
+      <span style={labelStyle}>Attendance</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
+        <span style={{ fontSize: 12.5, color: "#C7CDD6" }}>Counts toward attendance rate</span>
+      </span>
+      <span style={{ fontSize: 10.5, color: "#8A929E", lineHeight: 1.3, maxWidth: 240 }}>On for normal drills. Uncheck an off-hours or one-off session so it won't lower anyone's rate — attendance is still recorded.</span>
+    </label>
+  );
+}
 // Attach a saved agenda (ai_outputs feature='agenda') to a leadership event as a SNAPSHOT
 // session_plans ai-row → surfaces via the existing "View plan" / openSessionPlans path (zero new view code).
 function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) {
@@ -8436,9 +8468,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [stitle, setStitle] = useState(""); const [sTime, setSTime] = useState("");
   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
-  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", planId: "", audience: "everyone" });
+  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", planId: "", audience: "everyone", countsAttendance: true });
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
+  const [sCounts, setSCounts] = useState(true);   // create-session "counts toward attendance rate"; default ON, feeds addSession + scheduleRecurring
   const [rCad, setRCad] = useState("Bi-weekly");        // recurring cadence (defaults from the picked category)
   const [rCount, setRCount] = useState("26");           // N occurrences (defaults from cadence)
   // AI training-plan drafter (Card 2) + ai_text viewer
@@ -8517,6 +8550,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       start_time: sTime || null,
       done: false,
       audience: sAudience,
+      counts_toward_attendance: sCounts,
     });
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setShowSess(false); setStitle(""); setSTime(""); loadSessions();
@@ -8547,7 +8581,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
-    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience }));
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem) await supabase.from("training_plans").update({ starts_on: toISO(new Date(startY, startM, startD)) }).eq("id", pItem.id);
@@ -8601,14 +8635,14 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   function startEditSession(s) {
     setEditingSessionId(s.id);
-    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), planId: s.planId || "", audience: s.audience || "everyone" });
+    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false });
   }
   async function saveEditSession(id) {
     if (!sessEdit.date) { notify({ kind: "error", title: "Pick a date", text: "Choose a date for this training." }); return; }
     const pItem = plan.find((p) => String(p.id) === String(sessEdit.planId));
     const title = sessEdit.title.trim() || pItem?.name || "Training session";
     const { data, error } = await supabase.from("training_sessions")
-      .update({ title, date: sessEdit.date, start_time: sessEdit.startTime || null, plan_id: sessEdit.planId || null, audience: sessEdit.audience })
+      .update({ title, date: sessEdit.date, start_time: sessEdit.startTime || null, plan_id: sessEdit.planId || null, audience: sessEdit.audience, counts_toward_attendance: sessEdit.countsAttendance })
       .eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the training", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS/lock block fails loudly
     setEditingSessionId(null); loadSessions();
@@ -8650,7 +8684,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const catOf = (s) => plan.find((p) => String(p.id) === String(s.planId));
     // DATA HONESTY: a session only "has a record" once attendance was actually taken (non-empty).
     // Attendance doesn't persist yet, so today every array is empty → these fall to clean empty states.
-    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s) && !isRestrictedEvent(s));   // TRAINING only — leadership EVENTS excluded from a member's training %
+    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s) && countsTowardRate(s));   // TRAINING only — leadership EVENTS + optional sessions excluded from a member's training %
     const totalRecorded = recorded.length;
     const attendedCount = recorded.filter((s) => (s.attendance || []).includes(me?.id)).length;
     const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
@@ -8745,7 +8779,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
                   <CalendarCheck size={15} color={cat?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<EventAudienceTag audience={s.audience} /></div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></div>
                     <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""} · {s.planId ? "counts toward the plan" : "one-off"}</div>
                   </div>
                   {!s.done ? (
@@ -8938,6 +8972,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
               })}
             </div></label>
+          <CountsAttendanceCheckbox checked={sCounts} onChange={setSCounts} fieldStyle={Lfield} labelStyle={LfieldLabel} />
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
             <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? "#F0F2F5" : "#9AA1AC" }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
           {repeat && <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>How often</span>
@@ -8948,7 +8983,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             : <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>}
           <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
+      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
 
       {/* calendar wrapped in dark card; dark calendar in dark card; red today marker */}
       <div style={{ ...Lcard, marginBottom: 16 }}>
@@ -9000,7 +9035,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   <div style={Lrow}>
                     <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                     <div style={FS.rowTitle}>
-                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<EventAudienceTag audience={s.audience} /></span>
+                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></span>
                       <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? " · counts toward the plan" : " · one-off"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
@@ -9031,6 +9066,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                             return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
                           })}
                         </div></label>
+                      <CountsAttendanceCheckbox checked={sessEdit.countsAttendance} onChange={(v) => setSessEdit((b) => ({ ...b, countsAttendance: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />
                       <button style={LprimaryBtn} onClick={() => saveEditSession(s.id)}><CheckCircle2 size={15} /> Save</button>
                       <button style={Lbtn} onClick={() => setEditingSessionId(null)}>Cancel</button>
                     </div>
