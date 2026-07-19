@@ -60,7 +60,23 @@ async function checkForUpdate(isColdStart) {
   }
 }
 checkForUpdate(true);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(false); });
+
+// Proactively re-auth a resumed phone BEFORE the user acts, so a stale access token never reaches
+// a write. A locked/backgrounded phone suspends the SDK's auto-refresh timer; on resume the token
+// may be expired or about to be. Refresh if it's expired or expiring within 2 min. This PREVENTS
+// the stale-token race; authFetch in supabaseClient is the safety net that RECOVERS from it.
+async function refreshAuthIfStale() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const s = data && data.session;
+    if (!s) return;
+    const secsLeft = (s.expires_at || 0) - Math.floor(Date.now() / 1000);
+    if (secsLeft < 120) await supabase.auth.refreshSession();
+  } catch { /* the next request's authFetch guard will still handle a stale token */ }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") { checkForUpdate(false); refreshAuthIfStale(); }
+});
 
 // Set-new-password screen. Only shown after a reset link lands and Supabase fires
 // PASSWORD_RECOVERY (see Root). Built for the lowest common denominator: ONE field

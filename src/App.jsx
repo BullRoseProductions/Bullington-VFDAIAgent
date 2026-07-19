@@ -14,7 +14,7 @@ import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { supabase, APP_URL } from "./supabaseClient";
+import { supabase, APP_URL, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 // that parser is lazy-imported in extractPdfText() on first upload.
@@ -917,6 +917,12 @@ export default function App() {
   }, [pendingCheckin, identityChecked, myMemberId]);
   const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
   const notify = (n) => setToast(n);
+  // When a token refresh fails (dead refresh token), authFetch calls this — surface an actionable
+  // re-login instead of a dead-end write error. "Sign in" clears the dead session → Login screen.
+  useEffect(() => {
+    setOnSessionExpired(() => notify({ kind: "error", title: "Your session expired", text: "Please sign back in to keep working — your data is safe.", action: { label: "Sign in", onClick: () => supabase.auth.signOut() } }));
+    return () => setOnSessionExpired(null);
+  }, []);
   const S = baseStyles();
 
   function go(k, arg) { setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null); }
