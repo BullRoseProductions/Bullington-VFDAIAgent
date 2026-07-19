@@ -8208,11 +8208,23 @@ function Onboarding({ S, members, setMembers, notify, role }) {
 /* ---------------- Training Plan + Calendar ---------------- */
 const CADENCE_DAYS = { Weekly: 7, "Bi-weekly": 14, Monthly: 30, Quarterly: 90, "Semi-annual": 180, Annual: 365, Biennial: 730 };
 const N_FOR_CADENCE = { Weekly: 52, "Bi-weekly": 26, Monthly: 12, Quarterly: 4, "Semi-annual": 2, Annual: 1 };   // a year's worth (recurring default N)
-const CADENCE_DAY_STEP = { Weekly: 7, "Bi-weekly": 14 };                              // exact-day cadences
-const CADENCE_MONTH_STEP = { Monthly: 1, Quarterly: 3, "Semi-annual": 6, Annual: 12 };
-function addMonthsKeepDom(y, m0, dom, k) {   // +k calendar months, keep day-of-month, clamp (Jan31+1mo→Feb28/29)
-  const total = m0 + k, yy = y + Math.floor(total / 12), mm = ((total % 12) + 12) % 12;
-  return new Date(yy, mm, Math.min(dom, new Date(yy, mm + 1, 0).getDate()));
+// Recurrence is by DAY-OF-WEEK, not calendar date — VFDs schedule "every Thursday" / "first Sunday",
+// which drift across dates. dow = 0..6 (Sun..Sat); ordinal = 1..4 or "last".
+const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_ORDINALS = [["first", 1], ["second", 2], ["third", 3], ["fourth", 4], ["last", "last"]];
+// Nth [weekday] of a month. Returns a Date, or null if it doesn't exist (e.g. a 5th of that weekday).
+// Ordinal-parameterized on purpose so a future "first AND third [weekday]" can iterate a set of
+// ordinals per month without reworking this.
+function nthWeekdayOfMonth(y, m0, dow, ord) {
+  if (ord === "last") {
+    let d = new Date(y, m0 + 1, 0).getDate();                       // last day of month
+    while (new Date(y, m0, d).getDay() !== dow) d--;
+    return new Date(y, m0, d);
+  }
+  const firstDow = new Date(y, m0, 1).getDay();
+  const day = 1 + ((dow - firstDow + 7) % 7) + (ord - 1) * 7;        // first matching weekday + (ord-1) weeks
+  const dt = new Date(y, m0, day);
+  return dt.getMonth() === m0 ? dt : null;                           // guard: a 5th that spilled into next month
 }
 const CADENCES = ["Weekly", "Bi-weekly", "Monthly", "Quarterly", "Semi-annual", "Annual", "One-off"];
 const TRAIN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -8506,8 +8518,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
   const [sCounts, setSCounts] = useState(true);   // create-session "counts toward attendance rate"; default ON, feeds addSession + scheduleRecurring
-  const [rCad, setRCad] = useState("Bi-weekly");        // recurring cadence (defaults from the picked category)
-  const [rCount, setRCount] = useState("26");           // N occurrences (defaults from cadence)
+  const [rPattern, setRPattern] = useState("biweekly");     // "weekly" | "biweekly" | "monthly"
+  const [rDow, setRDow] = useState(new Date().getDay());    // day-of-week 0..6 (Sun..Sat)
+  const [rOrd, setROrd] = useState(1);                      // monthly ordinal: 1..4 or "last"
+  const [rCount, setRCount] = useState("26");               // N occurrences (the end condition)
   // AI training-plan drafter (Card 2) + ai_text viewer
   const [draftOpen, setDraftOpen] = useState(false);
   const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);
@@ -8590,24 +8604,36 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     setShowSess(false); setStitle(""); setSTime(""); loadSessions();
   }
   function toggleRepeat() {
-    if (!repeat) {   // opening: seed cadence from the selected category, N from cadence
+    if (!repeat) {   // opening: seed pattern from the selected category's cadence, day from today
       const pItem = plan.find((p) => String(p.id) === String(spid));
       const cad = (pItem?.cadence && pItem.cadence !== "One-off") ? pItem.cadence : "Bi-weekly";
-      setRCad(cad); setRCount(String(N_FOR_CADENCE[cad] || 12));
+      setRPattern(cad === "Weekly" ? "weekly" : cad === "Bi-weekly" ? "biweekly" : "monthly");
+      setRCount(String(N_FOR_CADENCE[cad] || 12));
+      setRDow(today.getDay()); setROrd(1);
     }
     setRepeat((v) => !v);
   }
   async function scheduleRecurring() {
     const pItem = plan.find((p) => String(p.id) === String(spid));
-    const cad = rCad || pItem?.cadence || "Monthly";
-    const n = Math.max(1, Math.min(Number(rCount) || N_FOR_CADENCE[cad] || 12, 104));   // clamp 1..104 (no fat-finger table bloat)
+    const n = Math.max(1, Math.min(Number(rCount) || 12, 104));   // clamp 1..104 (no fat-finger table bloat)
     const title = stitle.trim() || pItem?.name || "Training session";
-    const startY = cur.y, startM = cur.m, startD = Number(sd);
-    const dayStep = CADENCE_DAY_STEP[cad], monthStep = CADENCE_MONTH_STEP[cad] || 1;
+    // Anchor = the displayed month; never backfill before today (current month → today, future → the 1st).
+    const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
+    const monthStart = new Date(cur.y, cur.m, 1);
+    const anchor = monthStart < t0 ? t0 : monthStart;
     const dates = [];
-    for (let k = 0; k < n; k++) {
-      const d = dayStep ? new Date(startY, startM, startD + k * dayStep) : addMonthsKeepDom(startY, startM, startD, k * monthStep);
-      dates.push(toISO(d));
+    if (rPattern === "weekly" || rPattern === "biweekly") {
+      const step = rPattern === "weekly" ? 7 : 14;
+      const d = new Date(anchor);
+      while (d.getDay() !== rDow) d.setDate(d.getDate() + 1);        // first selected weekday on/after the anchor
+      for (let k = 0; k < n; k++) { dates.push(toISO(d)); d.setDate(d.getDate() + step); }
+    } else {   // monthly on the [ordinal] [weekday]
+      let y = cur.y, m = cur.m, guard = 0;
+      while (dates.length < n && guard < 200) {
+        const d = nthWeekdayOfMonth(y, m, rDow, rOrd);
+        if (d && d >= anchor) dates.push(toISO(d));
+        m++; if (m > 11) { m = 0; y++; } guard++;
+      }
     }
     const existing = new Set((sessions || []).filter((s) => String(s.planId) === String(pItem?.id)).map((s) => toISO(sessDate(s))));
     const fresh = dates.filter((iso) => !existing.has(iso));   // DEDUPE (plan_id, date)
@@ -8618,9 +8644,12 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
-    if (pItem) await supabase.from("training_plans").update({ starts_on: toISO(new Date(startY, startM, startD)) }).eq("id", pItem.id);
+    if (pItem && dates.length) await supabase.from("training_plans").update({ starts_on: dates[0] }).eq("id", pItem.id);
+    const dow = WEEKDAY_LABELS[rDow];
+    const ordName = (MONTH_ORDINALS.find(([, v]) => v === rOrd) || ["first"])[0];
+    const desc = rPattern === "weekly" ? `weekly on ${dow}` : rPattern === "biweekly" ? `every other week on ${dow}` : `the ${ordName} ${dow} each month`;
     const skipped = dates.length - fresh.length;
-    notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} ${cad.toLowerCase()} session${fresh.length === 1 ? "" : "s"}${skipped ? ` (${skipped} already existed)` : ""}.` });
+    notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} session${fresh.length === 1 ? "" : "s"} — ${desc}${skipped ? ` (${skipped} already existed)` : ""}.` });
     setShowSess(false); setRepeat(false); setStitle(""); setSTime(""); loadSessions();
   }
   // "Done for the night" — does NOT lock. Opens the roll writable so the officer can
@@ -8995,7 +9024,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       <div style={{ ...Lkick, marginTop: 22, marginBottom: 10 }}><Calendar size={13} /> TRAINING CALENDAR</div>
       {canManage && (showSess ? (
         <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>{repeat ? "Start day" : "Day"}</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          {!repeat && <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>}
           <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sTime} onChange={(e) => setSTime(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
@@ -9009,8 +9038,12 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <CountsAttendanceCheckbox checked={sCounts} onChange={setSCounts} fieldStyle={Lfield} labelStyle={LfieldLabel} />
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
             <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? "#F0F2F5" : "#9AA1AC" }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
-          {repeat && <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>How often</span>
-            <select style={Linput} value={rCad} onChange={(e) => { setRCad(e.target.value); setRCount(String(N_FOR_CADENCE[e.target.value] || 12)); }}>{Object.keys(N_FOR_CADENCE).map((c) => <option key={c}>{c}</option>)}</select></label>}
+          {repeat && <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Pattern</span>
+            <select style={Linput} value={rPattern} onChange={(e) => setRPattern(e.target.value)}><option value="weekly">Weekly</option><option value="biweekly">Every other week</option><option value="monthly">Monthly</option></select></label>}
+          {repeat && rPattern === "monthly" && <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>On the</span>
+            <select style={Linput} value={String(rOrd)} onChange={(e) => setROrd(e.target.value === "last" ? "last" : Number(e.target.value))}>{MONTH_ORDINALS.map(([lbl, v]) => <option key={lbl} value={String(v)}>{lbl}</option>)}</select></label>}
+          {repeat && <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Day</span>
+            <select style={Linput} value={rDow} onChange={(e) => setRDow(Number(e.target.value))}>{WEEKDAY_LABELS.map((d, i) => <option key={d} value={i}>{d}</option>)}</select></label>}
           {repeat && <label style={{ ...Lfield, minWidth: 100 }}><span style={LfieldLabel}>Occurrences</span><input type="number" min="1" max="104" style={Linput} value={rCount} onChange={(e) => setRCount(e.target.value)} /></label>}
           {repeat
             ? <button style={LprimaryBtn} onClick={scheduleRecurring}><Plus size={15} /> Schedule {Math.min(Number(rCount) || 0, 104) || "…"} sessions</button>
