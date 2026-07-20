@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
@@ -623,6 +623,27 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
       {card("privacy", ShieldAlert, "Privacy Policy", "How your department's data is handled.")}
       {card("terms", FileText, "Terms of Agreement", "The terms of using Before the Call.")}
       {card("about", Award, "About", "App info and copyright.")}
+    </div>
+    {/* Legal & Trust — external links to the public documentation center. No role gate: every member sees these. */}
+    <div style={{ marginTop: 18 }}>
+      <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
+      <div style={FS.kicker}>LEGAL &amp; TRUST</div>
+      <div style={{ ...FS.card, padding: "4px 14px", marginTop: 8 }}>
+        {[
+          { label: "Terms of Service", href: "https://b4thecall.com/legal/terms", Icon: FileText },
+          { label: "Privacy Policy", href: "https://b4thecall.com/legal/privacy", Icon: ShieldAlert },
+          { label: "How we use AI", href: "https://b4thecall.com/legal/responsible-ai", Icon: Sparkles },
+          { label: "Trust Center", href: "https://b4thecall.com/legal", Icon: Globe },
+        ].map(({ label, href, Icon }, i, arr) => (
+          <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="b4c-legal-link"
+             style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 2px", textDecoration: "none",
+                      borderBottom: i < arr.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+            <Icon size={16} color={FIRE.red} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{label}</span>
+            <ExternalLink size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+          </a>
+        ))}
+      </div>
     </div>
     {/* Build id — matches the deployed commit's short hash + /version.json. Lets anyone confirm a
         phone actually picked up a new deploy (vs. running a stale cached bundle). Tap to force a fresh reload. */}
