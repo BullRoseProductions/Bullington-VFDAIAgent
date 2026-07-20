@@ -594,8 +594,6 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><div style={{ ...FS.card, padding: 18, marginTop: 12 }}><div style={FS.kicker}>CONTACT SUPPORT</div><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></div></div>;
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
-  if (view === "privacy") return doc("Privacy Policy", "Full text to be added before pilot.");
-  if (view === "terms") return doc("Terms of Agreement", "Full text to be added before pilot.");
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 Ashlea Bullington. All rights reserved.</>);
   const card = (key, Icon, title, desc) => (
     <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
@@ -620,8 +618,6 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
       {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
       {card("brand", Palette, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
       {card("support", Mail, "Support & Contact", "Get help, send feedback, or request custom training.")}
-      {card("privacy", ShieldAlert, "Privacy Policy", "How your department's data is handled.")}
-      {card("terms", FileText, "Terms of Agreement", "The terms of using Before the Call.")}
       {card("about", Award, "About", "App info and copyright.")}
     </div>
     {/* Legal & Trust — external links to the public documentation center. No role gate: every member sees these. */}
