@@ -7342,6 +7342,10 @@ function Equipment({ S, role, members, meId, notify }) {
   const [uMfr, setUMfr] = useState(""); const [uModel, setUModel] = useState(""); const [uSize, setUSize] = useState(""); const [uMfg, setUMfg] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [buf, setBuf] = useState({ serial_number: "", asset_number: "", condition: "Serviceable" });
+  const [addingType, setAddingType] = useState(false);
+  const [tName, setTName] = useState(""); const [tCatSel, setTCatSel] = useState("__new__"); const [tCatNew, setTCatNew] = useState(""); const [tReturnable, setTReturnable] = useState(true);
+  const [editingTypeId, setEditingTypeId] = useState(null);
+  const [tb, setTb] = useState({ name: "", catSel: "__new__", catNew: "", returnable: true });
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
@@ -7365,7 +7369,8 @@ function Equipment({ S, role, members, meId, notify }) {
   const totalUnits = allUnits.length;
   const available = allUnits.filter((u) => u.status === "in_inventory").length;
   const flagged = allUnits.filter((u) => u.condition !== "Serviceable").length;
-  function toggleEditMode() { setEditMode((v) => { if (v) setEditingId(null); return !v; }); }
+  const categories = [...new Set(types.map((t) => t.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  function toggleEditMode() { setEditMode((v) => { if (v) { setEditingId(null); setEditingTypeId(null); } return !v; }); }
   function toggleExpand(id) { setExpanded((cur) => (cur === id ? null : id)); setAddingFor(null); setEditingId(null); setMore(false); }
   const resetAddUnit = () => { setUSerial(""); setUAsset(""); setUCond("Serviceable"); setUMfr(""); setUModel(""); setUSize(""); setUMfg(""); setMore(false); setAddingFor(null); };
   async function addUnit(typeId) {
@@ -7391,6 +7396,44 @@ function Equipment({ S, role, members, meId, notify }) {
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the unit", text: "Something went wrong removing that. Please try again.", details: error?.message }); return; }
     loadEquipment();
   }
+  const resetAddType = () => { setTName(""); setTCatSel(categories[0] || "__new__"); setTCatNew(""); setTReturnable(true); setAddingType(false); };
+  function catOf(sel, txt) { return (sel === "__new__" ? txt.trim() : sel).trim(); }
+  async function addType() {
+    const name = tName.trim();
+    if (!name) { notify({ kind: "error", title: "Name required", text: "Give the type a name (e.g. Structure Helmet)." }); return; }
+    const category = catOf(tCatSel, tCatNew);
+    if (!category) { notify({ kind: "error", title: "Category required", text: "Pick a category or add a new one." }); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { data, error } = await supabase.from("equipment_type").insert({ department_id: deptId, name, category, returnable: tReturnable, sort_order: 999, active: true }).select("id");   // 999 → lands at the end of its category
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the type", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
+    resetAddType(); loadEquipment();
+  }
+  function startEditType(t) { setEditingTypeId(t.id); setTb({ name: t.name || "", catSel: t.category || "__new__", catNew: "", returnable: t.returnable !== false }); }
+  async function saveEditType(id) {
+    const name = tb.name.trim();
+    if (!name) { notify({ kind: "error", title: "Name required", text: "Give the type a name." }); return; }
+    const category = catOf(tb.catSel, tb.catNew);
+    if (!category) { notify({ kind: "error", title: "Category required", text: "Pick a category or add a new one." }); return; }
+    const { data, error } = await supabase.from("equipment_type").update({ name, category, returnable: tb.returnable }).eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the type", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard
+    setEditingTypeId(null); loadEquipment();
+  }
+  async function removeType(t) {
+    if (!window.confirm(`Remove the "${t.name}" type?`)) return;
+    const { data, error } = await supabase.from("equipment_type").delete().eq("id", t.id).select();
+    if (error) {   // FK ON DELETE RESTRICT: units still point at this type (Postgres 23503) — human message, not a raw error
+      if (error.code === "23503" || /foreign key|still referenced|violates/i.test(error.message || "")) {
+        notify({ kind: "error", title: "Type still has units", text: `Remove its units first — this type still has ${t.total}.` });
+      } else { notify({ kind: "error", title: "Couldn't remove the type", text: "Something went wrong removing that. Please try again.", details: error.message }); }
+      return;
+    }
+    if (!data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the type", text: "Something went wrong removing that. Please try again." }); return; }
+    loadEquipment();
+  }
+  const groups = {};
+  types.forEach((t) => { (groups[t.category || "Uncategorized"] = groups[t.category || "Uncategorized"] || []).push(t); });
+  const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));   // types already ordered sort_order,name → preserved within each group
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -7403,35 +7446,62 @@ function Equipment({ S, role, members, meId, notify }) {
         <Stat S={S} dark n={String(available)} label="Available" />
         <Stat S={S} dark n={String(flagged)} label="Needs attention" warn={flagged > 0} />
       </div>
-      {canManage && types.length > 0 && (
-        <div style={{ display: "flex", marginBottom: 12 }}>
-          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
-            {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit units</>}
-          </button>
+      {canManage && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+          <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
+          {types.length > 0 && (
+            <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+              {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
+            </button>
+          )}
+        </div>
+      )}
+      {canManage && addingType && (
+        <div style={{ ...FS.card, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={tName} placeholder="e.g. Structure Helmet" onChange={(e) => setTName(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={tCatSel} onChange={(e) => setTCatSel(e.target.value)}>{categories.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">New category…</option></select></label>
+          {tCatSel === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category</span><input style={FS.input} value={tCatNew} placeholder="e.g. Wildland gear" onChange={(e) => setTCatNew(e.target.value)} /></label>}
+          <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Returnable</span><select style={FS.input} value={tReturnable ? "yes" : "no"} onChange={(e) => setTReturnable(e.target.value === "yes")}><option value="yes">Returnable</option><option value="no">Consumable</option></select></label>
+          <button style={FS.btnPrimary} onClick={addType}><Plus size={15} /> Add type</button>
+          <button style={FS.btn} onClick={resetAddType}>Cancel</button>
         </div>
       )}
       {types.length === 0 ? (
         <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Briefcase size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
-          <div>No equipment types yet. Types are set up per department.</div>
+          <div>No equipment types yet.{canManage ? " Use “Add type” to create one." : ""}</div>
         </div>
       ) : (
-        <div style={S.opGrid}>
-          {types.map((t) => {
-            const open = expanded === t.id;
-            return (
-              <div key={t.id} style={{ ...S.opCard, ...FS.card }}>
-                <button onClick={() => toggleExpand(t.id)} style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                  <Briefcase size={20} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ ...S.personName, color: FIRE.textPrimary }}>{t.name}</div>
-                    <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{t.category}{t.returnable ? "" : " · consumable"}</div>
-                  </div>
-                  <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.green : FIRE.textMuted }}>{t.available} available</span></div>
-                  <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronUp size={16} color={FIRE.textMuted} /> : <ChevronDown size={16} color={FIRE.textMuted} />}</span>
-                </button>
-                {open && (
-                  <div style={{ marginTop: 12 }}>
+        <div style={{ ...FS.card, padding: "2px 16px" }}>
+          {groupNames.map((cat, gi) => (
+            <div key={cat}>
+              <div style={{ ...FS.kicker, padding: gi === 0 ? "12px 0 6px" : "18px 0 6px" }}>{cat}</div>
+              {groups[cat].map((t, ti) => {
+                const open = expanded === t.id;
+                const lastRow = gi === groupNames.length - 1 && ti === groups[cat].length - 1;
+                return (
+                  <div key={t.id} style={{ borderBottom: lastRow ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 44 }}>
+                      <button onClick={() => toggleExpand(t.id)} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, minHeight: 44, background: "none", border: "none", padding: "6px 0", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}{!t.returnable && <span style={{ fontWeight: 400, fontSize: 11.5, color: FIRE.textMuted }}> · consumable</span>}</div>
+                        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.green : FIRE.textMuted }}>{t.available} available</span></div>
+                        <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronDown size={16} color={FIRE.textMuted} /> : <ChevronRight size={16} color={FIRE.textMuted} />}</span>
+                      </button>
+                      {canManage && editMode && <button title="Edit type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEditType(t)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
+                      {canManage && editMode && <button title="Remove type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeType(t)}><X size={13} color={FIRE.deleteRed} /></button>}
+                    </div>
+                    {editingTypeId === t.id && (
+                      <div style={{ ...FS.card, padding: 12, margin: "2px 0 10px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                        <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={tb.name} onChange={(e) => setTb((b) => ({ ...b, name: e.target.value }))} /></label>
+                        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={tb.catSel} onChange={(e) => setTb((b) => ({ ...b, catSel: e.target.value }))}>{categories.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">New category…</option></select></label>
+                        {tb.catSel === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category</span><input style={FS.input} value={tb.catNew} onChange={(e) => setTb((b) => ({ ...b, catNew: e.target.value }))} /></label>}
+                        <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Returnable</span><select style={FS.input} value={tb.returnable ? "yes" : "no"} onChange={(e) => setTb((b) => ({ ...b, returnable: e.target.value === "yes" }))}><option value="yes">Returnable</option><option value="no">Consumable</option></select></label>
+                        <button style={FS.btnPrimary} onClick={() => saveEditType(t.id)}><CheckCircle2 size={15} /> Save</button>
+                        <button style={FS.btn} onClick={() => setEditingTypeId(null)}>Cancel</button>
+                      </div>
+                    )}
+                    {open && (
+                      <div style={{ margin: "2px 0 12px" }}>
                     {t.units.length === 0 ? (
                       <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 8px" }}>No units yet.</div>
                     ) : t.units.map((u, i) => {
@@ -7473,11 +7543,13 @@ function Equipment({ S, role, members, meId, notify }) {
                         <button style={FS.btn} onClick={resetAddUnit}>Cancel</button>
                       </div>
                     ) : <button style={{ ...FS.btn, marginTop: 8 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add unit</button>)}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>
