@@ -655,6 +655,7 @@ const NAV = [
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
+  { key: "equipment", label: "Equipment", Icon: Briefcase, roles: ROLES },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
@@ -1013,6 +1014,7 @@ export default function App() {
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
+          {screen === "equipment" && <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -7324,6 +7326,163 @@ function MaintenancePanel({ S, role, rigs, notify }) {
   );
 }
 /* ---------------- Meeting Minutes + Action Items ---------------- */
+// Equipment registry — TYPE-FIRST. equipment_type is the seeded catalog; equipment holds the units.
+// One row per type ("Structure Jacket — 12 total · 4 available"); tap to expand its units and add more.
+// available = units with status='in_inventory'. status is owned by the custody ledger (later slice) —
+// NEVER set from the form; the form only touches `condition`. Requires equipment_type + equipment
+// tables + RLS (members read; is_canmanage_ops manage), same shape as apparatus.
+function Equipment({ S, role, members, meId, notify }) {
+  const [types, setTypes] = useState([]);
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops DB RLS
+  const [expanded, setExpanded] = useState(null);   // type id currently expanded
+  const [editMode, setEditMode] = useState(false);  // reveal per-unit Edit/Remove (calm by default)
+  const [addingFor, setAddingFor] = useState(null); // type id whose Add-unit form is open
+  const [more, setMore] = useState(false);          // "More detail" toggle on the add-unit form
+  const [uSerial, setUSerial] = useState(""); const [uAsset, setUAsset] = useState(""); const [uCond, setUCond] = useState("Serviceable");
+  const [uMfr, setUMfr] = useState(""); const [uModel, setUModel] = useState(""); const [uSize, setUSize] = useState(""); const [uMfg, setUMfg] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [buf, setBuf] = useState({ serial_number: "", asset_number: "", condition: "Serviceable" });
+  const loadEquipment = async () => {
+    const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
+      supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
+      supabase.from("equipment").select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, notes, created_at").order("created_at", { ascending: true }),
+    ]);
+    if (tErr || !tData) return;   // keep last-known on a flaky read (mirrors loadRigs)
+    const units = (uErr || !uData) ? [] : uData;
+    const byType = {};
+    units.forEach((u) => { (byType[u.equipment_type_id] = byType[u.equipment_type_id] || []).push(u); });
+    setTypes(tData.map((t) => {
+      const list = (byType[t.id] || []).map((u) => ({
+        id: u.id, serial: u.serial_number || "", asset: u.asset_number || "", condition: u.condition || "Serviceable", status: u.status,
+        manufacturer: u.manufacturer || "", model: u.model || "", size: u.size || "", manufactureDate: u.manufacture_date || "", notes: u.notes || "",
+      }));
+      return { id: t.id, category: t.category, name: t.name, returnable: t.returnable !== false, serviceLifeYears: t.service_life_years,
+        units: list, total: list.length, available: list.filter((x) => x.status === "in_inventory").length };
+    }));
+  };
+  useEffect(() => { loadEquipment(); }, [members]);
+  const allUnits = types.flatMap((t) => t.units);
+  const totalUnits = allUnits.length;
+  const available = allUnits.filter((u) => u.status === "in_inventory").length;
+  const flagged = allUnits.filter((u) => u.condition !== "Serviceable").length;
+  function toggleEditMode() { setEditMode((v) => { if (v) setEditingId(null); return !v; }); }
+  function toggleExpand(id) { setExpanded((cur) => (cur === id ? null : id)); setAddingFor(null); setEditingId(null); setMore(false); }
+  const resetAddUnit = () => { setUSerial(""); setUAsset(""); setUCond("Serviceable"); setUMfr(""); setUModel(""); setUSize(""); setUMfg(""); setMore(false); setAddingFor(null); };
+  async function addUnit(typeId) {
+    if (!uSerial.trim() && !uAsset.trim()) { notify({ kind: "error", title: "Enter an ID", text: "Give the unit a serial or asset number so it can be told apart." }); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { data, error } = await supabase.from("equipment").insert({
+      department_id: deptId, equipment_type_id: typeId, serial_number: uSerial.trim() || null, asset_number: uAsset.trim() || null,
+      condition: uCond, manufacturer: uMfr.trim() || null, model: uModel.trim() || null, size: uSize.trim() || null, manufacture_date: uMfg || null, created_by: meId,
+    }).select("id");   // status intentionally NOT set — defaults; the custody ledger owns it
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the unit", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
+    resetAddUnit(); loadEquipment();
+  }
+  function startEdit(u) { setEditingId(u.id); setBuf({ serial_number: u.serial || "", asset_number: u.asset || "", condition: u.condition || "Serviceable" }); }
+  async function saveEdit(id) {
+    const { data, error } = await supabase.from("equipment").update({ serial_number: buf.serial_number.trim() || null, asset_number: buf.asset_number.trim() || null, condition: buf.condition }).eq("id", id).select();   // status untouched — ledger owns it
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the unit", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard
+    setEditingId(null); loadEquipment();
+  }
+  async function removeUnit(id, label) {
+    if (!window.confirm(`Remove ${label || "this unit"} from the registry?`)) return;
+    const { data, error } = await supabase.from("equipment").delete().eq("id", id).select();
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the unit", text: "Something went wrong removing that. Please try again.", details: error?.message }); return; }
+    loadEquipment();
+  }
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>EQUIPMENT REGISTRY</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Know what you've got</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}</div>
+      </div>
+      <div style={S.statRow}>
+        <Stat S={S} dark n={String(totalUnits)} label="Total units" />
+        <Stat S={S} dark n={String(available)} label="Available" />
+        <Stat S={S} dark n={String(flagged)} label="Needs attention" warn={flagged > 0} />
+      </div>
+      {canManage && types.length > 0 && (
+        <div style={{ display: "flex", marginBottom: 12 }}>
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+            {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit units</>}
+          </button>
+        </div>
+      )}
+      {types.length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+          <Briefcase size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
+          <div>No equipment types yet. Types are set up per department.</div>
+        </div>
+      ) : (
+        <div style={S.opGrid}>
+          {types.map((t) => {
+            const open = expanded === t.id;
+            return (
+              <div key={t.id} style={{ ...S.opCard, ...FS.card }}>
+                <button onClick={() => toggleExpand(t.id)} style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                  <Briefcase size={20} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ ...S.personName, color: FIRE.textPrimary }}>{t.name}</div>
+                    <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{t.category}{t.returnable ? "" : " · consumable"}</div>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.green : FIRE.textMuted }}>{t.available} available</span></div>
+                  <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronUp size={16} color={FIRE.textMuted} /> : <ChevronDown size={16} color={FIRE.textMuted} />}</span>
+                </button>
+                {open && (
+                  <div style={{ marginTop: 12 }}>
+                    {t.units.length === 0 ? (
+                      <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 8px" }}>No units yet.</div>
+                    ) : t.units.map((u, i) => {
+                      const ok = u.condition === "Serviceable"; const color = ok ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
+                      const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
+                      return (
+                        <div key={u.id}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                            <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
+                            <Pill S={S} color={color}>{u.condition.toUpperCase()}</Pill>
+                            {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
+                            {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
+                          </div>
+                          {editingId === u.id && (
+                            <div style={{ ...FS.card, padding: 12, margin: "2px 0 8px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                              <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Serial number</span><input style={FS.input} value={buf.serial_number} onChange={(ev) => setBuf((b) => ({ ...b, serial_number: ev.target.value }))} /></label>
+                              <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Asset number</span><input style={FS.input} value={buf.asset_number} onChange={(ev) => setBuf((b) => ({ ...b, asset_number: ev.target.value }))} /></label>
+                              <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={buf.condition} onChange={(ev) => setBuf((b) => ({ ...b, condition: ev.target.value }))}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
+                              <button style={FS.btnPrimary} onClick={() => saveEdit(u.id)}><CheckCircle2 size={15} /> Save</button>
+                              <button style={FS.btn} onClick={() => setEditingId(null)}>Cancel</button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {canManage && (addingFor === t.id ? (
+                      <div style={{ ...FS.card, padding: 12, marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                        <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Serial number</span><input style={FS.input} value={uSerial} placeholder="serial or asset #" onChange={(e) => setUSerial(e.target.value)} /></label>
+                        <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Asset number</span><input style={FS.input} value={uAsset} onChange={(e) => setUAsset(e.target.value)} /></label>
+                        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
+                        {more && (<>
+                          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacturer</span><input style={FS.input} value={uMfr} onChange={(e) => setUMfr(e.target.value)} /></label>
+                          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Model</span><input style={FS.input} value={uModel} onChange={(e) => setUModel(e.target.value)} /></label>
+                          <label style={{ ...S.field, minWidth: 100 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Size</span><input style={FS.input} value={uSize} onChange={(e) => setUSize(e.target.value)} /></label>
+                          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacture date</span><input type="date" style={FS.input} value={uMfg} onChange={(e) => setUMfg(e.target.value)} /></label>
+                        </>)}
+                        <button style={FS.btn} onClick={() => setMore((v) => !v)}>{more ? "Less detail" : "More detail"}</button>
+                        <button style={FS.btnPrimary} onClick={() => addUnit(t.id)}><Plus size={15} /> Add unit</button>
+                        <button style={FS.btn} onClick={resetAddUnit}>Cancel</button>
+                      </div>
+                    ) : <button style={{ ...FS.btn, marginTop: 8 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add unit</button>)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }) {
   const [mode, setMode] = useState(() => (initialMode === "agenda" || initialMode === "minutes" || initialMode === "action-items") ? (initialMode === "action-items" ? "minutes" : initialMode) : "agenda");   // role-guarded deep-link seed (via go("minutes", mode)); "action-items" opens the Minutes tab
   const scrollToActions = initialMode === "action-items";
