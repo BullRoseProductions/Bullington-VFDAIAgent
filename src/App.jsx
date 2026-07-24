@@ -7338,7 +7338,11 @@ function Equipment({ S, role, members, meId, notify }) {
   const [editMode, setEditMode] = useState(false);  // reveal per-unit Edit/Remove (calm by default)
   const [addingFor, setAddingFor] = useState(null); // type id whose Add-unit form is open
   const [more, setMore] = useState(false);          // "More detail" toggle on the add-unit form
-  const [uSerial, setUSerial] = useState(""); const [uAsset, setUAsset] = useState(""); const [uCond, setUCond] = useState("Serviceable");
+  const [uCond, setUCond] = useState("Serviceable");   // shared across the batch
+  const [bulkMode, setBulkMode] = useState("ids");        // "ids" | "qty"
+  const [bulkText, setBulkText] = useState("");           // one serial/asset per line (mode "ids")
+  const [bulkIdKind, setBulkIdKind] = useState("serial"); // "serial" | "asset" — which field pasted lines fill
+  const [bulkQty, setBulkQty] = useState("1");            // count for mode "qty" (1–50)
   const [uMfr, setUMfr] = useState(""); const [uModel, setUModel] = useState(""); const [uSize, setUSize] = useState(""); const [uMfg, setUMfg] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [buf, setBuf] = useState({ serial_number: "", asset_number: "", condition: "Serviceable" });
@@ -7372,16 +7376,34 @@ function Equipment({ S, role, members, meId, notify }) {
   const categories = [...new Set(types.map((t) => t.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingId(null); setEditingTypeId(null); } return !v; }); }
   function toggleExpand(id) { setExpanded((cur) => (cur === id ? null : id)); setAddingFor(null); setEditingId(null); setMore(false); }
-  const resetAddUnit = () => { setUSerial(""); setUAsset(""); setUCond("Serviceable"); setUMfr(""); setUModel(""); setUSize(""); setUMfg(""); setMore(false); setAddingFor(null); };
-  async function addUnit(typeId) {
-    if (!uSerial.trim() && !uAsset.trim()) { notify({ kind: "error", title: "Enter an ID", text: "Give the unit a serial or asset number so it can be told apart." }); return; }
+  const resetAddUnit = () => { setBulkMode("ids"); setBulkText(""); setBulkIdKind("serial"); setBulkQty("1"); setUCond("Serviceable"); setUMfr(""); setUModel(""); setUSize(""); setUMfg(""); setMore(false); setAddingFor(null); };
+  async function addUnit(typeId, typeName) {
+    const shared = { condition: uCond, manufacturer: uMfr.trim() || null, model: uModel.trim() || null, size: uSize.trim() || null, manufacture_date: uMfg || null };
+    let rows;
+    if (bulkMode === "qty") {
+      const n = Math.max(0, Math.min(50, Math.floor(Number(bulkQty) || 0)));
+      if (!n) { notify({ kind: "error", title: "Enter a quantity", text: "How many units to add? (1–50)" }); return; }
+      rows = Array.from({ length: n }, () => ({ serial_number: null, asset_number: null, ...shared }));   // untagged gear
+    } else {
+      const lines = bulkText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);   // trim + drop blanks
+      if (!lines.length) { notify({ kind: "error", title: "No IDs entered", text: "Enter one serial or asset number per line." }); return; }
+      // 1. duplicates within the pasted list — CASE-INSENSITIVE; name offenders as typed
+      const seenLower = new Set(); const dupes = [];
+      lines.forEach((v) => { const k = v.toLowerCase(); if (seenLower.has(k)) { if (!dupes.some((d) => d.toLowerCase() === k)) dupes.push(v); } else seenLower.add(k); });
+      if (dupes.length) { notify({ kind: "error", title: "Duplicate IDs in the list", text: `These appear more than once: ${dupes.join(", ")}. Nothing was added.` }); return; }
+      // 2. collisions with existing units — department-wide, SAME field, CASE-INSENSITIVE (matches unique(department_id, lower(field)))
+      const field = bulkIdKind === "asset" ? "asset" : "serial";
+      const existingLower = new Set(allUnits.map((u) => (u[field] || "").toLowerCase()).filter(Boolean));
+      const clash = lines.filter((v) => existingLower.has(v.toLowerCase()));
+      if (clash.length) { notify({ kind: "error", title: "Already in the registry", text: `${clash.length === 1 ? "This" : "These"} ${field} number${clash.length === 1 ? "" : "s"} already exist in your department: ${clash.join(", ")}. Nothing was added.` }); return; }
+      rows = lines.map((v) => ({ serial_number: field === "serial" ? v : null, asset_number: field === "asset" ? v : null, ...shared }));   // store ORIGINAL casing as typed
+    }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    const { data, error } = await supabase.from("equipment").insert({
-      department_id: deptId, equipment_type_id: typeId, serial_number: uSerial.trim() || null, asset_number: uAsset.trim() || null,
-      condition: uCond, manufacturer: uMfr.trim() || null, model: uModel.trim() || null, size: uSize.trim() || null, manufacture_date: uMfg || null, created_by: meId,
-    }).select("id");   // status intentionally NOT set — defaults; the custody ledger owns it
-    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the unit", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
+    const payload = rows.map((r) => ({ department_id: deptId, equipment_type_id: typeId, created_by: meId, ...r }));   // status NOT set — defaults; ledger owns it
+    const { data, error } = await supabase.from("equipment").insert(payload).select("id");   // single array = atomic, all-or-nothing
+    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the units", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
+    notify({ kind: "success", title: "Units added", text: `Added ${data.length} unit${data.length === 1 ? "" : "s"} to ${typeName}.` });
     resetAddUnit(); loadEquipment();
   }
   function startEdit(u) { setEditingId(u.id); setBuf({ serial_number: u.serial || "", asset_number: u.asset || "", condition: u.condition || "Serviceable" }); }
@@ -7529,8 +7551,23 @@ function Equipment({ S, role, members, meId, notify }) {
                     })}
                     {canManage && (addingFor === t.id ? (
                       <div style={{ ...FS.card, padding: 12, marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                        <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Serial number</span><input style={FS.input} value={uSerial} placeholder="serial or asset #" onChange={(e) => setUSerial(e.target.value)} /></label>
-                        <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Asset number</span><input style={FS.input} value={uAsset} onChange={(e) => setUAsset(e.target.value)} /></label>
+                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, minHeight: 44 }}>
+                          {[["ids", "Enter IDs"], ["qty", "Just a quantity"]].map(([val, lbl], i) => { const on = bulkMode === val; return <button key={val} type="button" onClick={() => setBulkMode(val)} style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
+                        </div>
+                        {bulkMode === "ids" ? (
+                          <div style={{ ...S.field, flex: 1, minWidth: 240 }}>
+                            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, marginBottom: 6, alignSelf: "flex-start" }}>
+                              {[["serial", "These are serial numbers"], ["asset", "These are asset numbers"]].map(([val, lbl], i) => { const on = bulkIdKind === val; return <button key={val} type="button" onClick={() => setBulkIdKind(val)} style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
+                            </div>
+                            <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={4} placeholder={`One ${bulkIdKind} number per line`} style={{ ...FS.input, minHeight: 88, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+                          </div>
+                        ) : (
+                          <div style={{ ...S.field, minWidth: 170 }}>
+                            <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How many (1–50)</span>
+                            <input type="number" min="1" max="50" value={bulkQty} onChange={(e) => setBulkQty(e.target.value)} style={{ ...FS.input, minHeight: 44 }} />
+                            <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.4 }}>Units without an ID can't be told apart. You can add serials later.</span>
+                          </div>
+                        )}
                         <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
                         {more && (<>
                           <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacturer</span><input style={FS.input} value={uMfr} onChange={(e) => setUMfr(e.target.value)} /></label>
@@ -7539,10 +7576,10 @@ function Equipment({ S, role, members, meId, notify }) {
                           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacture date</span><input type="date" style={FS.input} value={uMfg} onChange={(e) => setUMfg(e.target.value)} /></label>
                         </>)}
                         <button style={FS.btn} onClick={() => setMore((v) => !v)}>{more ? "Less detail" : "More detail"}</button>
-                        <button style={FS.btnPrimary} onClick={() => addUnit(t.id)}><Plus size={15} /> Add unit</button>
+                        <button style={{ ...FS.btnPrimary, minHeight: 44 }} onClick={() => addUnit(t.id, t.name)}><Plus size={15} /> Add units</button>
                         <button style={FS.btn} onClick={resetAddUnit}>Cancel</button>
                       </div>
-                    ) : <button style={{ ...FS.btn, marginTop: 8 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add unit</button>)}
+                    ) : <button style={{ ...FS.btn, marginTop: 8, minHeight: 44 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add units</button>)}
                       </div>
                     )}
                   </div>
