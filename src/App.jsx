@@ -7599,6 +7599,69 @@ function IssueEquipmentModal({ S, availableUnits, members, managers, meId, notif
     document.body
   );
 }
+// Confirm-return modal (manager/DA). Closes the custody period via confirm_equipment_return:
+// condition defaults to "Needs attention" (returned gear is unverified until inspected — never
+// silently Serviceable), plus an optional condition photo uploaded to station-documents and passed
+// as p_photo_path (the RPC links it to the custody period as kind='condition'). Orphan-cleans the
+// upload if the RPC then fails, mirroring EquipmentUnitPhotos.addPhoto.
+function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
+  const [cond, setCond] = useState("Needs attention");
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    let path = null;
+    try {
+      if (file) {
+        const { data: deptId } = await supabase.rpc("my_department_id");
+        if (!deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+        const small = await downscaleImage(file);
+        const safe = (small.name || "photo.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+        path = `${deptId}/equipment/${Date.now()}-${safe}`;   // deptId FIRST — storage policy gates on first folder = dept
+        const { error: upErr } = await supabase.storage.from("station-documents").upload(path, small);
+        if (upErr) { notify({ kind: "error", title: "Upload failed", text: upErr.message || "Please try again." }); return; }
+      }
+      const { error } = await supabase.rpc("confirm_equipment_return", {
+        p_equipment_id: row.equipment_id,
+        p_condition: cond,
+        p_photo_path: path,
+      });
+      if (error) {
+        if (path) await supabase.storage.from("station-documents").remove([path]).catch(() => {});   // orphan cleanup — no dangling file if the close is rejected
+        notify({ kind: "error", title: "Couldn't confirm return", text: error.message || "Please try again." }); return;
+      }
+      notify({ kind: "success", title: "Return confirmed", text: `${row.equipment_name} is back in inventory.` });
+      onConfirmed();
+    } finally { setBusy(false); }
+  }
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.kicker}>CONFIRM RETURN</div>
+          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{row.equipment_name}</div>
+        <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 14 }}>Returned by {row.holder_name}</div>
+        <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition on return</span>
+          <select style={FS.input} value={cond} onChange={(e) => setCond(e.target.value)}>
+            <option value="Needs attention">Needs attention</option>
+            <option value="Serviceable">Serviceable</option>
+            <option value="Out of service">Out of service</option>
+          </select>
+        </label>
+        <label style={{ ...S.field, marginBottom: 16 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition photo (optional)</span>
+          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} style={{ fontSize: 13, color: FIRE.textSecondary }} />
+        </label>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Confirming…" : "Confirm return"}</button>
+          <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 // My Equipment — the member-facing counterpart to the manager ledger. Shows the member's OWN open
 // custody periods (what they're currently signed for). Read-only this pass; transfer/return actions
 // arrive with their RPCs in steps 4–5. Reads straight off the append-only custody snapshot — no join:
@@ -7608,16 +7671,31 @@ function IssueEquipmentModal({ S, availableUnits, members, managers, meId, notif
 function MyEquipment({ S, meId, notify }) {
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
+  const [busyId, setBusyId] = useState(null);   // equipment_id mid mark/cancel
+  const load = () => {
     if (!meId) return;
-    let alive = true;
     supabase.from("equipment_custody")
-      .select("id, equipment_name, opened_at, condition_at_open, open_action, opened_by_name")
+      .select("id, equipment_id, equipment_name, opened_at, condition_at_open, open_action, opened_by_name, return_requested_at")
       .eq("holder_member_id", meId).is("closed_at", null)   // .eq is REQUIRED: a manager's "read all custody" RLS would otherwise return the whole dept — scope to self
       .order("opened_at", { ascending: false })
-      .then(({ data, error }) => { if (!alive) return; if (!error && data) setRows(data); setLoaded(true); });
-    return () => { alive = false; };
-  }, [meId]);
+      .then(({ data, error }) => { if (!error && data) setRows(data); setLoaded(true); });
+  };
+  useEffect(() => { load(); }, [meId]);
+  async function markReturned(r) {
+    setBusyId(r.equipment_id);
+    const { error } = await supabase.rpc("mark_equipment_returned", { p_equipment_id: r.equipment_id });
+    setBusyId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't mark returned", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Marked for return", text: "A manager will confirm when they have it in hand." });
+    load();
+  }
+  async function cancelReturn(r) {
+    setBusyId(r.equipment_id);
+    const { error } = await supabase.rpc("cancel_equipment_return", { p_equipment_id: r.equipment_id });
+    setBusyId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't cancel the request", text: error.message || "Please try again." }); return; }
+    load();
+  }
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
   const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
   return (
@@ -7635,15 +7713,25 @@ function MyEquipment({ S, meId, notify }) {
         </div>
       ) : (
         <div style={{ ...FS.card, padding: "6px 16px" }}>
-          {rows.map((r, i) => (
-            <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
-                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
+          {rows.map((r, i) => {
+            const pending = !!r.return_requested_at;
+            const busy = busyId === r.equipment_id;
+            return (
+              <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
+                  {pending && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Return pending — a manager will confirm receipt.</div>}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                  <Pill S={S} color={condColor(r.condition_at_open)}>{(r.condition_at_open || "—").toUpperCase()}</Pill>
+                  {pending
+                    ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
+                    : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
+                </div>
               </div>
-              <Pill S={S} color={condColor(r.condition_at_open)}>{(r.condition_at_open || "—").toUpperCase()}</Pill>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -7672,6 +7760,8 @@ function Equipment({ S, role, members, meId, notify }) {
   const [managers, setManagers] = useState([]);   // active equipment_manager rows for the dept (members-read)
   const [mgrPick, setMgrPick] = useState(""); const [mgrBusy, setMgrBusy] = useState(false);
   const [issuing, setIssuing] = useState(false);   // issue-equipment modal open
+  const [pending, setPending] = useState([]);         // open custody rows flagged for return (manager queue)
+  const [confirming, setConfirming] = useState(null); // pending row being confirmed (modal)
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
@@ -7698,6 +7788,14 @@ function Equipment({ S, role, members, meId, notify }) {
     const nameById = new Map((members || []).map((m) => [m.id, m.name]));
     setManagers(data.map((r) => ({ id: r.id, memberId: r.member_id, name: nameById.get(r.member_id) || "A member" })));
   };
+  const loadPending = async () => {
+    const { data, error } = await supabase.from("equipment_custody")
+      .select("id, equipment_id, equipment_name, holder_name, return_requested_at, condition_at_open")
+      .is("closed_at", null).not("return_requested_at", "is", null)   // open + flagged for return
+      .order("return_requested_at", { ascending: true });             // oldest request first
+    if (error || !data) return;   // keep last-known on a flaky read
+    setPending(data);
+  };
   async function assignManager(memberId) {
     if (!memberId) return;
     setMgrBusy(true);
@@ -7714,7 +7812,7 @@ function Equipment({ S, role, members, meId, notify }) {
     if (error || !data) { notify({ kind: "error", title: "Couldn't remove manager", text: error?.message || "Please try again." }); return; }
     loadManagers();
   }
-  useEffect(() => { loadEquipment(); loadManagers(); }, [members]);
+  useEffect(() => { loadEquipment(); loadManagers(); loadPending(); }, [members]);
   const allUnits = types.flatMap((t) => t.units);
   const totalUnits = allUnits.length;
   const available = allUnits.filter((u) => u.status === "in_inventory").length;
@@ -7855,6 +7953,20 @@ function Equipment({ S, role, members, meId, notify }) {
           ))}
         </div>
       )}
+      {(isManager || isDA) && pending.length > 0 && (
+        <div style={{ ...FS.card, padding: "14px 16px", marginBottom: 12 }}>
+          <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ClipboardCheck size={13} color={FIRE.amberText} /> PENDING RETURNS · {pending.length}</div>
+          {pending.map((p, i) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: i === pending.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.equipment_name}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 1 }}>{p.holder_name} · requested {new Date(p.return_requested_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+              </div>
+              <button onClick={() => setConfirming(p)} style={{ ...FS.btnPrimary, padding: "6px 12px", fontSize: 12.5, flexShrink: 0 }}><CheckCircle2 size={14} /> Confirm return</button>
+            </div>
+          ))}
+        </div>
+      )}
       {canManage && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
           <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
@@ -7989,6 +8101,13 @@ function Equipment({ S, role, members, meId, notify }) {
           S={S} availableUnits={availableUnits} members={members} managers={managers} meId={meId}
           notify={notify} onClose={() => setIssuing(false)}
           onIssued={() => { setIssuing(false); loadEquipment(); }}
+        />
+      )}
+      {confirming && (
+        <ConfirmReturnModal
+          S={S} row={confirming} meId={meId} notify={notify}
+          onClose={() => setConfirming(null)}
+          onConfirmed={() => { setConfirming(null); loadEquipment(); loadPending(); }}
         />
       )}
     </div>
