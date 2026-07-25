@@ -1633,6 +1633,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} />
+      <MyActionItems meId={meId} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
@@ -1917,6 +1918,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         <Stat S={S} dark n={`${boardPct}%`} label="Board attendance" />
       </div>
       <div style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
+      <MyActionItems meId={meId} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
         {cards.map((c) => (
@@ -1937,6 +1939,42 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         </div>
       </div>
       <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
+    </div>
+  );
+}
+// Read-only "my open action items" — one component for every role's dashboard, so a person sees
+// their own items regardless of which dashboard their top role lands them on. Fetches its own rows
+// (assigned_to = meId, status open); relies on the "members read own action_items" RLS policy.
+// No complete button — completion stays leader-only (complete_action_item is is_canmanage()-gated).
+function MyActionItems({ meId }) {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    if (!meId) return;
+    supabase.from("action_items")
+      .select("id, text, due_date, status")
+      .eq("assigned_to", meId).eq("status", "open")
+      .order("due_date", { ascending: true })   // soonest first; no-due-date last (Postgres ASC → nulls last)
+      .then(({ data }) => setItems(data || []));
+  }, [meId]);
+  if (!items.length) return null;   // empty state: render nothing (keeps every dashboard clean)
+  const fmtDue = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  return (
+    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> MY ACTION ITEMS · {items.length}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {items.map((it) => {
+          const due = fmtDue(it.due_date);
+          return (
+            <div key={it.id} style={{ padding: "4px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, lineHeight: 1.35 }}>{it.text}</div>
+                <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", padding: "1px 5px", borderRadius: 5, color: FIRE.textMuted2, border: `0.5px solid ${FIRE.hairline}` }}>{it.status}</span>
+              </div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>{due ? `due ${due}` : "no due date"}</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2309,6 +2347,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
             )}
           </div>
         </div>
+        <MyActionItems meId={meId} />
         {/* Upcoming Training — unchanged */}
         <div style={{ ...FS.card, padding: 18 }}>
           <div style={FS.kicker}>UPCOMING TRAINING</div>
