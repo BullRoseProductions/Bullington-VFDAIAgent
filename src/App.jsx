@@ -7365,6 +7365,44 @@ function MaintenancePanel({ S, role, rigs, notify }) {
   );
 }
 /* ---------------- Meeting Minutes + Action Items ---------------- */
+// Signature capture pad (net-new — the app had no signature capture). Canvas → PNG data-URL on each
+// stroke-end via onChange(dataUrl); onChange("") when cleared. touchAction:none so signing doesn't
+// scroll the page (cf. the pinch-zoom fix); scaled by devicePixelRatio for crisp lines.
+function SignaturePad({ onChange, height = 160 }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const dirty = useRef(false);
+  const last = useRef(null);
+  useEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = Math.round(rect.width * dpr); c.height = Math.round(rect.height * dpr);
+    const ctx = c.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#111";
+  }, []);
+  const pos = (e) => { const r = canvasRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const down = (e) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); drawing.current = true; last.current = pos(e); };
+  const move = (e) => {
+    if (!drawing.current) return; e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d"); const p = pos(e);
+    ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    last.current = p; dirty.current = true;
+  };
+  const up = () => { if (!drawing.current) return; drawing.current = false; if (dirty.current && onChange) onChange(canvasRef.current.toDataURL("image/png")); };
+  const clear = () => { const c = canvasRef.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); dirty.current = false; onChange && onChange(""); };
+  return (
+    <div>
+      <canvas ref={canvasRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
+        style={{ width: "100%", height, background: "#fff", borderRadius: 8, border: `1px solid ${FIRE.btnBorder}`, touchAction: "none", display: "block", cursor: "crosshair" }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+        <span style={{ fontSize: 11, color: FIRE.textMuted }}>Sign above</span>
+        <button type="button" onClick={clear} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}>Clear</button>
+      </div>
+    </div>
+  );
+}
 // Two fixed photo slots per equipment unit (device + NFPA label), reusing the ApparatusPhotos flow
 // verbatim — compress → dept-first path → upload → insert → orphan-cleanup on insert failure; display
 // via 1-hour signed URLs, deleted_at filtered, soft-delete on remove. Lazy: mounts (and loads) only
@@ -7456,6 +7494,109 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
 // available = units with status='in_inventory'. status is owned by the custody ledger (later slice) —
 // NEVER set from the form; the form only touches `condition`. Requires equipment_type + equipment
 // tables + RLS (members read; is_canmanage_ops manage), same shape as apparatus.
+//
+// Issue flow (ledger side). Manager/DA picks a recipient + their available (in_inventory) items;
+// the recipient signs; calls issue_equipment_batch. signed_name is LOCKED to the recipient's roster
+// name (snapshotted, never free-text). Self-issue (recipient === you) reveals a witness picker
+// (another manager/DA) + a 2nd signature — the RPC re-enforces this server-side.
+function IssueEquipmentModal({ S, availableUnits, members, managers, meId, notify, onClose, onIssued }) {
+  const [recipientId, setRecipientId] = useState("");
+  const [selected, setSelected] = useState(() => new Set());
+  const [sig, setSig] = useState("");
+  const [witnessId, setWitnessId] = useState("");
+  const [witnessSig, setWitnessSig] = useState("");
+  const [busy, setBusy] = useState(false);
+  const recipients = (members || []).filter((m) => isAssignable(m) && m.status === "Active").sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const recipient = recipients.find((m) => m.id === recipientId) || null;
+  const selfIssue = !!recipientId && recipientId === meId;
+  const witnessOptions = (members || []).filter((m) => m.id !== meId && m.status === "Active"
+    && (managers.some((mg) => mg.memberId === m.id) || hasAny(m.access, DEPT_ADMIN_ROLES)))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const toggle = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const grouped = {};
+  availableUnits.forEach((u) => { const k = u.category || "Other"; (grouped[k] = grouped[k] || []).push(u); });
+  const groupNames = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  async function submit() {
+    if (!recipientId) { notify({ kind: "error", title: "Pick a recipient", text: "Choose who's receiving the equipment." }); return; }
+    if (!selected.size) { notify({ kind: "error", title: "No items selected", text: "Select at least one item to issue." }); return; }
+    if (!sig) { notify({ kind: "error", title: "Signature required", text: `${recipient?.name || "The recipient"} must sign to accept custody.` }); return; }
+    if (selfIssue && !witnessId) { notify({ kind: "error", title: "Witness required", text: "Issuing to yourself needs a witness (another manager or a DA)." }); return; }
+    if (selfIssue && !witnessSig) { notify({ kind: "error", title: "Witness signature required", text: "The witness must sign too." }); return; }
+    setBusy(true);
+    const { data, error } = await supabase.rpc("issue_equipment_batch", {
+      p_member_id: recipientId,
+      p_equipment_ids: [...selected],
+      p_signature_data: sig,
+      p_signed_name: recipient?.name || "",              // LOCKED to the recipient's roster name
+      p_witness_member_id: selfIssue ? witnessId : null,
+      p_witness_signature: selfIssue ? witnessSig : null,
+    });
+    setBusy(false);
+    if (error || !data) { notify({ kind: "error", title: "Couldn't issue", text: error?.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Equipment issued", text: `Issued ${selected.size} item${selected.size === 1 ? "" : "s"} to ${recipient?.name || "the member"}.` });
+    onIssued();
+  }
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 480, padding: 20, margin: "24px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.kicker}>ISSUE EQUIPMENT</div>
+          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
+        </div>
+
+        <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Issue to</span>
+          <select style={FS.input} value={recipientId} onChange={(e) => { setRecipientId(e.target.value); setSig(""); }}>
+            <option value="">Choose a member…</option>
+            {recipients.map((m) => <option key={m.id} value={m.id}>{m.name}{m.id === meId ? " (you)" : ""}</option>)}
+          </select>
+        </label>
+
+        <div style={{ ...FS.kicker, marginBottom: 6 }}>ITEMS · {selected.size} selected</div>
+        <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${FIRE.hairline}`, borderRadius: 10, padding: "2px 10px", marginBottom: 14 }}>
+          {availableUnits.length === 0 ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No available items — everything is issued or out of inventory.</div>
+          ) : groupNames.map((cat) => (
+            <div key={cat}>
+              <div style={{ ...FS.kicker, padding: "8px 0 4px" }}>{cat}</div>
+              {grouped[cat].map((u) => {
+                const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
+                return (
+                  <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 40, padding: "4px 0", cursor: "pointer", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggle(u.id)} style={{ width: 16, height: 16, flexShrink: 0, accentColor: FIRE.red }} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary }}>{u.typeName} · {idLabel}</span>
+                    <span style={{ fontSize: 11, color: u.condition === "Serviceable" ? FIRE.greenText : FIRE.textMuted2 }}>{u.condition}</span>
+                  </label>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ ...FS.kicker, marginBottom: 6 }}>SIGNATURE</div>
+        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 6 }}>{recipient ? <><b style={{ color: FIRE.textPrimary }}>{recipient.name}</b> signs to accept custody:</> : "Choose a recipient first."}</div>
+        {recipient && <div style={{ marginBottom: 14 }}><SignaturePad key={recipientId} onChange={setSig} /></div>}
+
+        {selfIssue && (<>
+          <div style={{ ...FS.kicker, marginBottom: 6 }}>WITNESS · REQUIRED FOR SELF-ISSUE</div>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 6 }}>You can't be the only signature on your own custody — another manager or a DA witnesses.</div>
+          <label style={{ ...S.field, marginBottom: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Witness</span>
+            <select style={FS.input} value={witnessId} onChange={(e) => { setWitnessId(e.target.value); setWitnessSig(""); }}>
+              <option value="">Choose a witness…</option>
+              {witnessOptions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+          {witnessId && <div style={{ marginBottom: 14 }}><SignaturePad key={witnessId} onChange={setWitnessSig} /></div>}
+        </>)}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Issuing…" : selected.size ? `Issue ${selected.size} item${selected.size === 1 ? "" : "s"}` : "Issue"}</button>
+          <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 function Equipment({ S, role, members, meId, notify }) {
   const [types, setTypes] = useState([]);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops DB RLS
@@ -7478,6 +7619,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const [tb, setTb] = useState({ name: "", catSel: "__new__", catNew: "", returnable: true });
   const [managers, setManagers] = useState([]);   // active equipment_manager rows for the dept (members-read)
   const [mgrPick, setMgrPick] = useState(""); const [mgrBusy, setMgrBusy] = useState(false);
+  const [issuing, setIssuing] = useState(false);   // issue-equipment modal open
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
@@ -7528,6 +7670,8 @@ function Equipment({ S, role, members, meId, notify }) {
   const categories = [...new Set(types.map((t) => t.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const isManager = managers.some((m) => m.memberId === meId);
   const eligibleForMgr = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !managers.some((mg) => mg.memberId === m.id));
+  const availableUnits = types.flatMap((t) => t.units.filter((u) => u.status === "in_inventory")
+    .map((u) => ({ id: u.id, typeName: t.name, category: t.category, serial: u.serial, asset: u.asset, condition: u.condition })));
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingId(null); setEditingTypeId(null); } return !v; }); }
   function toggleExpand(id) { setExpanded((cur) => (cur === id ? null : id)); setAddingFor(null); setEditingId(null); setMore(false); }
   const resetAddUnit = () => { setBulkMode("ids"); setBulkText(""); setBulkIdKind("serial"); setBulkQty("1"); setUCond("Serviceable"); setUMfr(""); setUModel(""); setUSize(""); setUMfg(""); setMore(false); setAddingFor(null); };
@@ -7622,6 +7766,11 @@ function Equipment({ S, role, members, meId, notify }) {
         <Stat S={S} dark n={String(available)} label="Available" />
         <Stat S={S} dark n={String(flagged)} label="Needs attention" warn={flagged > 0} />
       </div>
+      {(isManager || isDA) && (
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setIssuing(true)} style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={15} /> Issue equipment</button>
+        </div>
+      )}
       {(isDA || isManager) && (
         <div style={{ ...FS.card, padding: "12px 16px", marginBottom: 14 }}>
           <div style={FS.kicker}>EQUIPMENT MANAGERS</div>
@@ -7775,6 +7924,13 @@ function Equipment({ S, role, members, meId, notify }) {
             </div>
           ))}
         </div>
+      )}
+      {issuing && (
+        <IssueEquipmentModal
+          S={S} availableUnits={availableUnits} members={members} managers={managers} meId={meId}
+          notify={notify} onClose={() => setIssuing(false)}
+          onIssued={() => { setIssuing(false); loadEquipment(); }}
+        />
       )}
     </div>
   );
