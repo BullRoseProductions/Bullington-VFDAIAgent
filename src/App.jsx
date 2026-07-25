@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
@@ -656,6 +656,7 @@ const NAV = [
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: ["Project Admin", "Department Admin"] },
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "equipment", label: "Equipment", Icon: Briefcase, roles: ROLES },
+  { key: "myequipment", label: "My Equipment", Icon: HardHat, roles: ROLES },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
@@ -1015,6 +1016,7 @@ export default function App() {
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "equipment" && <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
+          {screen === "myequipment" && <MyEquipment S={S} meId={myMemberId} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -7595,6 +7597,56 @@ function IssueEquipmentModal({ S, availableUnits, members, managers, meId, notif
       </div>
     </div>,
     document.body
+  );
+}
+// My Equipment — the member-facing counterpart to the manager ledger. Shows the member's OWN open
+// custody periods (what they're currently signed for). Read-only this pass; transfer/return actions
+// arrive with their RPCs in steps 4–5. Reads straight off the append-only custody snapshot — no join:
+// equipment_name / opened_at / condition_at_open were all frozen at issue, so history survives a later
+// rename or condition change. condition_at_open is intentional: the condition they SIGNED FOR, not the
+// item's current state.
+function MyEquipment({ S, meId, notify }) {
+  const [rows, setRows] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!meId) return;
+    let alive = true;
+    supabase.from("equipment_custody")
+      .select("id, equipment_name, opened_at, condition_at_open, open_action, opened_by_name")
+      .eq("holder_member_id", meId).is("closed_at", null)   // .eq is REQUIRED: a manager's "read all custody" RLS would otherwise return the whole dept — scope to self
+      .order("opened_at", { ascending: false })
+      .then(({ data, error }) => { if (!alive) return; if (!error && data) setRows(data); setLoaded(true); });
+    return () => { alive = false; };
+  }, [meId]);
+  const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
+  const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>MY EQUIPMENT</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>What you're signed for</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The gear currently in your custody — what you signed for, and the condition it was in when you took it.</div>
+      </div>
+      {!loaded ? null : rows.length === 0 ? (
+        <div style={{ ...FS.card, padding: "26px 18px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6 }}>
+          <HardHat size={26} color={FIRE.textMuted2} />
+          <div style={{ fontSize: 14, color: FIRE.textSecondary }}>You're not signed for any equipment.</div>
+          <div style={{ fontSize: 12, color: FIRE.textMuted }}>When an equipment manager issues you gear, it shows up here.</div>
+        </div>
+      ) : (
+        <div style={{ ...FS.card, padding: "6px 16px" }}>
+          {rows.map((r, i) => (
+            <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
+              </div>
+              <Pill S={S} color={condColor(r.condition_at_open)}>{(r.condition_at_open || "—").toUpperCase()}</Pill>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 function Equipment({ S, role, members, meId, notify }) {
