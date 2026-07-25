@@ -7623,7 +7623,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
-      supabase.from("equipment").select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, notes, created_at").order("created_at", { ascending: true }),
+      supabase.from("equipment").select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, current_holder_name, notes, created_at").order("created_at", { ascending: true }),
     ]);
     if (tErr || !tData) return;   // keep last-known on a flaky read (mirrors loadRigs)
     const units = (uErr || !uData) ? [] : uData;
@@ -7631,7 +7631,7 @@ function Equipment({ S, role, members, meId, notify }) {
     units.forEach((u) => { (byType[u.equipment_type_id] = byType[u.equipment_type_id] || []).push(u); });
     setTypes(tData.map((t) => {
       const list = (byType[t.id] || []).map((u) => ({
-        id: u.id, serial: u.serial_number || "", asset: u.asset_number || "", condition: u.condition || "Serviceable", status: u.status,
+        id: u.id, serial: u.serial_number || "", asset: u.asset_number || "", condition: u.condition || "Serviceable", status: u.status, holderName: u.current_holder_name || "",
         manufacturer: u.manufacturer || "", model: u.model || "", size: u.size || "", manufactureDate: u.manufacture_date || "", notes: u.notes || "",
       }));
       return { id: t.id, category: t.category, name: t.name, returnable: t.returnable !== false, serviceLifeYears: t.service_life_years,
@@ -7862,13 +7862,20 @@ function Equipment({ S, role, members, meId, notify }) {
                     {t.units.length === 0 ? (
                       <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 8px" }}>No units yet.</div>
                     ) : t.units.map((u, i) => {
-                      const ok = u.condition === "Serviceable"; const color = ok ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
+                      const badge = u.status === "held"        ? { label: "Checked out",    color: FIRE.blueText }
+                                  : u.status === "maintenance" ? { label: "In maintenance", color: FIRE.amberText }
+                                  : u.status === "retired"     ? { label: "Retired",        color: FIRE.textMuted2 }
+                                  : u.status === "lost"        ? { label: "Lost",           color: FIRE.redBright }
+                                  : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright };
                       const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
                       return (
                         <div key={u.id}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                            <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
-                            <Pill S={S} color={color}>{u.condition.toUpperCase()}</Pill>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
+                              {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
+                            </div>
+                            <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>
                             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
                             {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
                           </div>
