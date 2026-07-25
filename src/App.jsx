@@ -7326,6 +7326,92 @@ function MaintenancePanel({ S, role, rigs, notify }) {
   );
 }
 /* ---------------- Meeting Minutes + Action Items ---------------- */
+// Two fixed photo slots per equipment unit (device + NFPA label), reusing the ApparatusPhotos flow
+// verbatim — compress → dept-first path → upload → insert → orphan-cleanup on insert failure; display
+// via 1-hour signed URLs, deleted_at filtered, soft-delete on remove. Lazy: mounts (and loads) only
+// when the type is expanded. Section renders for everyone (members-read RLS); only canManage sees the
+// Add/Remove controls. One photo per slot: a new upload retires the previous of that kind AFTER the
+// new insert succeeds, so a failed upload never deletes the existing photo.
+function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
+  const [byKind, setByKind] = useState(null);   // { device: row|null, label: row|null }; null = loading
+  const [urls, setUrls] = useState({});          // kind → signed url
+  const [busy, setBusy] = useState(false);
+  const SLOTS = [["device", "Device photo"], ["label", "NFPA label photo"]];
+  async function load() {
+    const { data } = await supabase.from("equipment_photos")
+      .select("id, storage_path, kind, created_at")
+      .eq("equipment_id", unit.id).is("deleted_at", null)
+      .order("created_at", { ascending: false });   // newest first → most-recent per slot wins
+    const list = data || [];
+    const bk = { device: null, label: null };
+    list.forEach((p) => { if ((p.kind === "device" || p.kind === "label") && !bk[p.kind]) bk[p.kind] = p; });
+    const paths = [bk.device, bk.label].filter(Boolean).map((p) => p.storage_path).filter(Boolean);
+    const map = {};
+    if (paths.length) {
+      const { data: signed } = await supabase.storage.from("station-documents").createSignedUrls(paths, 3600);
+      (signed || []).forEach((s) => { if (!s?.signedUrl) return; const row = list.find((p) => p.storage_path === s.path); if (row) map[row.kind] = s.signedUrl; });
+    }
+    setByKind(bk); setUrls(map);
+  }
+  useEffect(() => { load(); }, [unit.id]);   // lazy — mounts only when the type is expanded
+  async function addPhoto(file, kind) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const prevId = byKind?.[kind]?.id || null;   // existing photo of this slot — retired only AFTER the new one lands
+      const { data: deptId } = await supabase.rpc("my_department_id");
+      if (!deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+      const small = await downscaleImage(file);   // ~1600px JPEG — a few hundred KB
+      const safe = (small.name || "photo.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${deptId}/equipment/${Date.now()}-${safe}`;   // deptId FIRST — station-documents storage policy gates on first folder = dept
+      const { error: upErr } = await supabase.storage.from("station-documents").upload(path, small);
+      if (upErr) { notify({ kind: "error", title: "Upload failed", text: upErr.message || "Please try again." }); return; }
+      const { error: insErr } = await supabase.from("equipment_photos").insert({ department_id: deptId, equipment_id: unit.id, storage_path: path, kind, caption: "", sort_order: kind === "device" ? 0 : 1, uploaded_by: meId });
+      if (insErr) {
+        await supabase.storage.from("station-documents").remove([path]).catch(() => {});   // orphan cleanup — no dangling file if the row is rejected (e.g. RLS)
+        notify({ kind: "error", title: "Couldn't save the photo", text: insErr.message || "Please try again." }); return;
+      }
+      // one photo per slot: retire the previous one ONLY now that the new insert succeeded
+      if (prevId) await supabase.from("equipment_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", prevId);
+      notify({ kind: "success", text: "Photo added." });
+      await load();
+    } finally { setBusy(false); }
+  }
+  async function remove(row) {
+    if (!row || !window.confirm("Remove this photo?")) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.from("equipment_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", row.id);
+      if (error) { notify({ kind: "error", title: "Couldn't remove the photo", text: error.message }); return; }
+      await load();
+    } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "4px 0 10px" }}>
+      {SLOTS.map(([kind, label]) => {
+        const row = byKind?.[kind] || null; const url = urls[kind];
+        return (
+          <div key={kind}>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 4 }}>{label}</div>
+            {url ? (
+              <div style={{ position: "relative", width: 96, height: 96 }}>
+                <img src={url} alt={label} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: `1px solid ${FIRE.hairline}`, display: "block" }} />
+                {canManage && <button title="Remove photo" onClick={() => remove(row)} disabled={busy} style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 999, background: FIRE.pageBg, border: `1px solid ${FIRE.btnBorder}`, cursor: busy ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={12} color={FIRE.deleteRed} /></button>}
+              </div>
+            ) : canManage ? (
+              <label style={{ ...FS.btn, width: 96, height: 96, minHeight: 44, display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1, fontSize: 11, textAlign: "center" }}>
+                <Camera size={16} color={FIRE.btnIcon} /> {busy ? "Working…" : "Add photo"}
+                <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) addPhoto(f, kind); }} />
+              </label>
+            ) : (
+              <div style={{ width: 96, height: 96, borderRadius: 8, border: `1px dashed ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", color: FIRE.textMuted2, fontSize: 11 }}>No photo</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 // Equipment registry — TYPE-FIRST. equipment_type is the seeded catalog; equipment holds the units.
 // One row per type ("Structure Jacket — 12 total · 4 available"); tap to expand its units and add more.
 // available = units with status='in_inventory'. status is owned by the custody ledger (later slice) —
@@ -7546,6 +7632,7 @@ function Equipment({ S, role, members, meId, notify }) {
                               <button style={FS.btn} onClick={() => setEditingId(null)}>Cancel</button>
                             </div>
                           )}
+                          <EquipmentUnitPhotos unit={u} canManage={canManage} meId={meId} notify={notify} />
                         </div>
                       );
                     })}
