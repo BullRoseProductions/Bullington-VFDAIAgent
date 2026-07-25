@@ -7420,6 +7420,7 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
 function Equipment({ S, role, members, meId, notify }) {
   const [types, setTypes] = useState([]);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops DB RLS
+  const isDA = isDeptAdmin(role);   // Department Admin (or PA) — the only one who assigns/removes managers
   const [expanded, setExpanded] = useState(null);   // type id currently expanded
   const [editMode, setEditMode] = useState(false);  // reveal per-unit Edit/Remove (calm by default)
   const [addingFor, setAddingFor] = useState(null); // type id whose Add-unit form is open
@@ -7436,6 +7437,8 @@ function Equipment({ S, role, members, meId, notify }) {
   const [tName, setTName] = useState(""); const [tCatSel, setTCatSel] = useState("__new__"); const [tCatNew, setTCatNew] = useState(""); const [tReturnable, setTReturnable] = useState(true);
   const [editingTypeId, setEditingTypeId] = useState(null);
   const [tb, setTb] = useState({ name: "", catSel: "__new__", catNew: "", returnable: true });
+  const [managers, setManagers] = useState([]);   // active equipment_manager rows for the dept (members-read)
+  const [mgrPick, setMgrPick] = useState(""); const [mgrBusy, setMgrBusy] = useState(false);
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
@@ -7454,12 +7457,38 @@ function Equipment({ S, role, members, meId, notify }) {
         units: list, total: list.length, available: list.filter((x) => x.status === "in_inventory").length };
     }));
   };
-  useEffect(() => { loadEquipment(); }, [members]);
+  const loadManagers = async () => {
+    const { data, error } = await supabase.from("equipment_manager")
+      .select("id, member_id, assigned_at").is("removed_at", null)
+      .order("assigned_at", { ascending: true });
+    if (error || !data) return;   // keep last-known on a flaky read
+    const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+    setManagers(data.map((r) => ({ id: r.id, memberId: r.member_id, name: nameById.get(r.member_id) || "A member" })));
+  };
+  async function assignManager(memberId) {
+    if (!memberId) return;
+    setMgrBusy(true);
+    const { data, error } = await supabase.rpc("assign_equipment_manager", { p_member_id: memberId });
+    setMgrBusy(false);
+    if (error || !data) { notify({ kind: "error", title: "Couldn't assign manager", text: error?.message || "Please try again." }); return; }   // surfaces cap-reached / already-assigned
+    setMgrPick(""); loadManagers();
+  }
+  async function removeManager(memberId, name) {
+    if (!window.confirm(`Remove ${name} as an equipment manager?`)) return;
+    setMgrBusy(true);
+    const { data, error } = await supabase.rpc("remove_equipment_manager", { p_member_id: memberId });
+    setMgrBusy(false);
+    if (error || !data) { notify({ kind: "error", title: "Couldn't remove manager", text: error?.message || "Please try again." }); return; }
+    loadManagers();
+  }
+  useEffect(() => { loadEquipment(); loadManagers(); }, [members]);
   const allUnits = types.flatMap((t) => t.units);
   const totalUnits = allUnits.length;
   const available = allUnits.filter((u) => u.status === "in_inventory").length;
   const flagged = allUnits.filter((u) => u.condition !== "Serviceable").length;
   const categories = [...new Set(types.map((t) => t.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const isManager = managers.some((m) => m.memberId === meId);
+  const eligibleForMgr = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !managers.some((mg) => mg.memberId === m.id));
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingId(null); setEditingTypeId(null); } return !v; }); }
   function toggleExpand(id) { setExpanded((cur) => (cur === id ? null : id)); setAddingFor(null); setEditingId(null); setMore(false); }
   const resetAddUnit = () => { setBulkMode("ids"); setBulkText(""); setBulkIdKind("serial"); setBulkQty("1"); setUCond("Serviceable"); setUMfr(""); setUModel(""); setUSize(""); setUMfg(""); setMore(false); setAddingFor(null); };
@@ -7554,6 +7583,38 @@ function Equipment({ S, role, members, meId, notify }) {
         <Stat S={S} dark n={String(available)} label="Available" />
         <Stat S={S} dark n={String(flagged)} label="Needs attention" warn={flagged > 0} />
       </div>
+      {(isDA || isManager) && (
+        <div style={{ ...FS.card, padding: "12px 16px", marginBottom: 14 }}>
+          <div style={FS.kicker}>EQUIPMENT MANAGERS</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 10px", lineHeight: 1.4 }}>Up to two people control the equipment ledger.{isDA ? " You assign them." : ""}</div>
+          {managers.length === 0 ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted }}>No managers assigned yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {managers.map((m) => (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 40 }}>
+                  <Users size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}{m.memberId === meId ? " (you)" : ""}</span>
+                  {isDA && <button disabled={mgrBusy} onClick={() => removeManager(m.memberId, m.name)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, minHeight: 40, opacity: mgrBusy ? 0.6 : 1 }}><X size={13} color={FIRE.deleteRed} /> Remove</button>}
+                </div>
+              ))}
+            </div>
+          )}
+          {isDA && (managers.length < 2 ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+              <label style={{ ...S.field, minWidth: 190 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign a manager</span>
+                <select style={{ ...FS.input, minHeight: 40 }} value={mgrPick} onChange={(e) => setMgrPick(e.target.value)}>
+                  <option value="">Choose a member…</option>
+                  {eligibleForMgr.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </label>
+              <button disabled={mgrBusy || !mgrPick} onClick={() => assignManager(mgrPick)} style={{ ...FS.btnPrimary, minHeight: 40, opacity: (mgrBusy || !mgrPick) ? 0.6 : 1 }}><Plus size={15} /> Assign</button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 10 }}>Two managers is the maximum — remove one to assign someone else.</div>
+          ))}
+        </div>
+      )}
       {canManage && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
           <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
