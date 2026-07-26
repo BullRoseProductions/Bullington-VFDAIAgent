@@ -1,3 +1,10 @@
 .env
 node_modules/
 dist/
+sbp_token.txt
+.sbp_token
+.slice5_run/
+.DS_Store
+err.txt
+_to_delete/
+.claude/
