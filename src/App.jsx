@@ -7971,6 +7971,17 @@ function Equipment({ S, role, members, meId, notify }) {
   const [issuing, setIssuing] = useState(false);   // issue-equipment modal open
   const [pending, setPending] = useState([]);         // open custody rows flagged for return (manager queue)
   const [confirming, setConfirming] = useState(null); // pending row being confirmed (modal)
+  const [recovering, setRecovering] = useState(null); // held unit being recovered (modal)
+  const [lostId, setLostId] = useState(null);         // equipment_id mid mark-lost
+  async function markLost(u, idLabel) {
+    if (!window.confirm(`Mark ${idLabel} lost? This records it as missing and closes ${u.holderName || "the holder"}'s custody. It can't be undone in the app.`)) return;
+    setLostId(u.id);
+    const { error } = await supabase.rpc("mark_equipment_lost", { p_equipment_id: u.id });
+    setLostId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't mark it lost", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Marked lost", text: `${idLabel} is recorded as lost.` });
+    loadEquipment(); loadPending();
+  }
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
@@ -8176,9 +8187,11 @@ function Equipment({ S, role, members, meId, notify }) {
           ))}
         </div>
       )}
-      {canManage && (
+      {(canManage || isManager || isDA) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-          <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
+          {canManage && (
+            <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
+          )}
           {types.length > 0 && (
             <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
               {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
@@ -8251,6 +8264,8 @@ function Equipment({ S, role, members, meId, notify }) {
                             <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>
                             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
                             {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
+                            {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
+                            {(isManager || isDA) && editMode && u.status === "held" && <button title="Mark lost" disabled={lostId === u.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5, color: FIRE.deleteRed, opacity: lostId === u.id ? 0.6 : 1 }} onClick={() => markLost(u, idLabel)}>Lost</button>}
                           </div>
                           {editingId === u.id && (
                             <div style={{ ...FS.card, padding: 12, margin: "2px 0 8px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -8317,6 +8332,13 @@ function Equipment({ S, role, members, meId, notify }) {
           S={S} row={confirming} meId={meId} notify={notify}
           onClose={() => setConfirming(null)}
           onConfirmed={() => { setConfirming(null); loadEquipment(); loadPending(); }}
+        />
+      )}
+      {recovering && (
+        <RecoverModal
+          S={S} unit={recovering} meId={meId} notify={notify}
+          onClose={() => setRecovering(null)}
+          onRecovered={() => { setRecovering(null); loadEquipment(); loadPending(); }}
         />
       )}
     </div>
