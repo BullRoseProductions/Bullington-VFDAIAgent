@@ -901,6 +901,8 @@ export default function App() {
   useEffect(() => { loadSessions(); }, []);
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
+  const [handoffResult, setHandoffResult] = useState(null);
+  const [pendingHandoff, setPendingHandoff] = useState(null);
   // Self-serve check-in: the DB RPC enforces identity (my_member_id), department, not-done, and token match.
   async function doCheckIn(sessionId, token) {
     const title = trainingSessions.find((x) => String(x.id) === String(sessionId))?.title;
@@ -911,6 +913,12 @@ export default function App() {
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     return { ok: true, at: now, title };
   }
+  // Receiver scans a handoff QR/deep-link → move custody to the signed-in member.
+  async function doAcceptHandoff(handoffId, code) {
+    const { data, error } = await supabase.rpc("accept_equipment_handoff", { p_handoff_id: handoffId, p_code: code });
+    if (error) return { ok: false, reason: error.message || "We couldn't complete the transfer — ask the sender for a fresh code." };
+    return { ok: true, items: (data && data.items) || 0 };
+  }
   // Capture a QR/deep-link check-in on mount; don't act until we know who's signed in.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -919,6 +927,19 @@ export default function App() {
       setPendingCheckin({ cid, token: p.get("t") });
       setCheckinResult({ pending: true });
       setScreen("checkin");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+  // Capture a QR/deep-link equipment handoff on mount; don't act until we know who's signed in.
+  // (The check-in effect above only clears the URL when a `checkin` param is present, so a `handoff`
+  //  URL is still intact here.)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const hid = p.get("handoff");
+    if (hid) {
+      setPendingHandoff({ hid, code: p.get("t") });
+      setHandoffResult({ pending: true });
+      setScreen("handoff");
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -934,6 +955,18 @@ export default function App() {
     setPendingCheckin(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCheckin, identityChecked, myMemberId]);
+  // Perform the accept for the REAL signed-in member only — mirrors the check-in guard.
+  useEffect(() => {
+    if (!pendingHandoff) return;
+    if (!identityChecked) return;                 // wait for the authoritative identity lookup
+    if (myMemberId == null) {
+      setHandoffResult({ ok: false, reason: "We couldn't match your sign-in to a member record, so nothing was transferred. Please sign in as yourself and scan again." });
+    } else {
+      doAcceptHandoff(pendingHandoff.hid, pendingHandoff.code).then(setHandoffResult);
+    }
+    setPendingHandoff(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingHandoff, identityChecked, myMemberId]);
   const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
   const notify = (n) => setToast(n);
   // When a token refresh fails (dead refresh token), authFetch calls this — surface an actionable
@@ -1009,6 +1042,7 @@ export default function App() {
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
+          {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
@@ -9094,6 +9128,28 @@ function CheckinConfirm({ S, result, members, meId, go }) {
             : (result?.reason || "Something went wrong.")}
         </p>
         <button style={{ ...S.primaryBtn, marginTop: 18 }} onClick={() => go("training")}><GraduationCap size={16} /> Go to my training</button>
+      </div>
+    </div>
+  );
+}
+// Post-scan confirmation for an equipment handoff — the receiver's sibling of CheckinConfirm.
+function HandoffConfirm({ S, result, go }) {
+  const ok = result?.ok;
+  const pending = result?.pending;
+  const n = result?.items || 0;
+  return (
+    <div style={{ maxWidth: 520, margin: "0 auto" }}>
+      <div style={{ ...S.opCard, textAlign: "center", padding: "34px 22px" }}>
+        {pending ? <Loader2 size={48} color="#6A7178" /> : ok ? <CheckCircle2 size={48} color="#2E7D52" /> : <AlertTriangle size={48} color="#B11E2A" />}
+        <h2 style={{ ...S.featTitle, marginTop: 14 }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
+        <p style={{ color: "#3A4750", fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
+          {pending
+            ? "One moment while we move custody to you."
+            : ok
+            ? <>{n === 1 ? "1 item is" : `${n} items are`} now in your custody. You're responsible for {n === 1 ? "it" : "them"} until {n === 1 ? "it's" : "they're"} returned or transferred.</>
+            : (result?.reason || "Something went wrong.")}
+        </p>
+        <button style={{ ...S.primaryBtn, marginTop: 18 }} onClick={() => go("myequipment")}><HardHat size={16} /> Go to My Equipment</button>
       </div>
     </div>
   );
