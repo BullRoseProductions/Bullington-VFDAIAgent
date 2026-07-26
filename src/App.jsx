@@ -7702,6 +7702,85 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
 // equipment_name / opened_at / condition_at_open were all frozen at issue, so history survives a later
 // rename or condition change. condition_at_open is intentional: the condition they SIGNED FOR, not the
 // item's current state.
+// Giver's "Start transfer" screen. create_equipment_handoff mints a hashed, single-use, 60s code and
+// returns the RAW code once (for the QR) — it moves NO custody. The receiver scanning + accept_equipment_handoff
+// is what moves it. `items` = [{ equipment_id, equipment_name }] the giver picked from My Equipment.
+function HandoffModal({ items, notify, onClose }) {
+  const [st, setSt] = useState({ phase: "loading" });   // loading | live | expired | error
+  const [secs, setSecs] = useState(60);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (started.current) return; started.current = true;   // create exactly once (guards StrictMode double-mount)
+    (async () => {
+      const ids = items.map((i) => i.equipment_id);
+      const { data, error } = await supabase.rpc("create_equipment_handoff", { p_equipment_ids: ids });
+      if (error || !data) { setSt({ phase: "error", msg: error?.message || "Couldn't start the transfer — please try again." }); return; }
+      setSt({ phase: "live", handoffId: data.handoff_id, code: data.code, expiresAt: data.expires_at });
+    })();
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (st.phase !== "live") return;
+    const tick = () => {
+      const left = Math.max(0, Math.round((new Date(st.expiresAt).getTime() - Date.now()) / 1000));
+      setSecs(left);
+      if (left <= 0) setSt((s) => ({ ...s, phase: "expired" }));
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [st.phase, st.expiresAt]);
+
+  async function cancelAndClose() {
+    if (st.handoffId) { try { await supabase.rpc("cancel_equipment_handoff", { p_handoff_id: st.handoffId }); } catch { /* best effort */ } }
+    onClose();
+  }
+
+  const url = (st.phase === "live")
+    ? `${window.location.origin}${window.location.pathname}?handoff=${st.handoffId}&t=${st.code}`
+    : "";
+
+  return createPortal(
+    <div onClick={cancelAndClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0", textAlign: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.kicker}>START TRANSFER</div>
+          <button onClick={cancelAndClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
+        </div>
+
+        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 12 }}>
+          Have the receiver scan this with their phone camera. Custody moves to them when they confirm — it can’t happen without the scan.
+        </div>
+
+        {st.phase === "loading" && <div style={{ padding: "26px 0", color: FIRE.textMuted, fontSize: 13 }}>Generating code…</div>}
+        {st.phase === "error" && <div style={{ padding: "18px 0", color: FIRE.redText, fontSize: 13 }}>{st.msg}</div>}
+
+        {st.phase === "live" && (<>
+          <div style={{ background: "#fff", padding: 12, borderRadius: 12, display: "inline-block" }}>
+            <QRCodeCanvas value={url} size={196} />
+          </div>
+          <div style={{ marginTop: 12, fontSize: 13, color: secs <= 10 ? FIRE.redText : FIRE.textSecondary, fontWeight: 700, ...FS.num }}>
+            Expires in {secs}s
+          </div>
+          <div style={{ marginTop: 4, fontSize: 11.5, color: FIRE.textMuted }}>
+            Transferring: {items.map((i) => i.equipment_name).join(", ")}
+          </div>
+        </>)}
+
+        {st.phase === "expired" && (
+          <div style={{ padding: "18px 0" }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Code expired</div>
+            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Close and start the transfer again for a fresh code.</div>
+          </div>
+        )}
+
+        <button onClick={cancelAndClose} style={{ ...FS.btn, marginTop: 16 }}>{st.phase === "live" ? "Cancel transfer" : "Close"}</button>
+      </div>
+    </div>,
+    document.body
+  );
+}
 function MyEquipment({ S, meId, notify }) {
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
