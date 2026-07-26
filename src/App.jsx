@@ -7696,6 +7696,68 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
     document.body
   );
 }
+// Manager/DA recovery — reclaim a HELD item the holder didn't return (found in station, holder
+// unreachable). Twin of ConfirmReturnModal, but calls recover_equipment (stamps close_action
+// 'manager_recovery'). `unit` = { equipment_id, label, holder_name }.
+function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
+  const [cond, setCond] = useState("Needs attention");
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    let path = null;
+    try {
+      if (file) {
+        const { data: deptId } = await supabase.rpc("my_department_id");
+        if (!deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+        const small = await downscaleImage(file);
+        const safe = (small.name || "photo.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+        path = `${deptId}/equipment/${Date.now()}-${safe}`;   // deptId FIRST — storage policy gates on first folder = dept
+        const { error: upErr } = await supabase.storage.from("station-documents").upload(path, small);
+        if (upErr) { notify({ kind: "error", title: "Upload failed", text: upErr.message || "Please try again." }); return; }
+      }
+      const { error } = await supabase.rpc("recover_equipment", {
+        p_equipment_id: unit.equipment_id,
+        p_condition: cond,
+        p_photo_path: path,
+      });
+      if (error) {
+        if (path) await supabase.storage.from("station-documents").remove([path]).catch(() => {});   // orphan cleanup
+        notify({ kind: "error", title: "Couldn't recover the item", text: error.message || "Please try again." }); return;
+      }
+      notify({ kind: "success", title: "Item recovered", text: `${unit.label} is back in inventory.` });
+      onRecovered();
+    } finally { setBusy(false); }
+  }
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.kicker}>RECOVER ITEM</div>
+          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{unit.label}</div>
+        <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 8 }}>{unit.holder_name ? `Currently signed to ${unit.holder_name}` : "Currently checked out"}</div>
+        <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 14, lineHeight: 1.45 }}>Reclaiming without a member return — this closes their custody as a manager recovery and puts the item back in inventory.</div>
+        <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition on recovery</span>
+          <select style={FS.input} value={cond} onChange={(e) => setCond(e.target.value)}>
+            <option value="Needs attention">Needs attention</option>
+            <option value="Serviceable">Serviceable</option>
+            <option value="Out of service">Out of service</option>
+          </select>
+        </label>
+        <label style={{ ...S.field, marginBottom: 16 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition photo (optional)</span>
+          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} style={{ fontSize: 13, color: FIRE.textSecondary }} />
+        </label>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Recovering…" : "Recover to inventory"}</button>
+          <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 // My Equipment — the member-facing counterpart to the manager ledger. Shows the member's OWN open
 // custody periods (what they're currently signed for). Read-only this pass; transfer/return actions
 // arrive with their RPCs in steps 4–5. Reads straight off the append-only custody snapshot — no join:
