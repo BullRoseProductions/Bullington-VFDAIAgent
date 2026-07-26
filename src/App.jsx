@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
 } from "lucide-react";
 import { downloadDepartmentReport } from "./report.js";
 import { createPortal } from "react-dom";
@@ -7785,6 +7785,13 @@ function MyEquipment({ S, meId, notify }) {
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [busyId, setBusyId] = useState(null);   // equipment_id mid mark/cancel
+  const [selMode, setSelMode] = useState(false);
+  const [sel, setSel] = useState(() => new Set());        // equipment_ids picked to transfer
+  const [handoffItems, setHandoffItems] = useState(null); // non-null → HandoffModal open
+  const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const exitSelMode = () => { setSelMode(false); setSel(new Set()); };
+  // Only items actually held (open period, real unit, not mid-return) can be transferred.
+  const transferable = (r) => !!r.equipment_id && !r.return_requested_at;
   const load = () => {
     if (!meId) return;
     supabase.from("equipment_custody")
@@ -7818,6 +7825,13 @@ function MyEquipment({ S, meId, notify }) {
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>What you're signed for</h1>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The gear currently in your custody — what you signed for, and the condition it was in when you took it.</div>
       </div>
+      {rows.some(transferable) && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          {!selMode
+            ? <button onClick={() => setSelMode(true)} style={FS.btn}><ArrowLeftRight size={14} color={FIRE.btnIcon} /> Transfer to someone</button>
+            : <button onClick={exitSelMode} style={FS.btn}>Cancel</button>}
+        </div>
+      )}
       {!loaded ? null : rows.length === 0 ? (
         <div style={{ ...FS.card, padding: "26px 18px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6 }}>
           <HardHat size={26} color={FIRE.textMuted2} />
@@ -7831,6 +7845,10 @@ function MyEquipment({ S, meId, notify }) {
             const busy = busyId === r.equipment_id;
             return (
               <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                {selMode && (
+                  <input type="checkbox" disabled={!transferable(r)} checked={sel.has(r.equipment_id)} onChange={() => toggleSel(r.equipment_id)}
+                    style={{ width: 16, height: 16, marginTop: 3, flexShrink: 0, accentColor: FIRE.red, opacity: transferable(r) ? 1 : 0.35 }} />
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
@@ -7846,6 +7864,22 @@ function MyEquipment({ S, meId, notify }) {
             );
           })}
         </div>
+      )}
+      {selMode && sel.size > 0 && (
+        <div style={{ position: "sticky", bottom: 0, marginTop: 12, display: "flex", justifyContent: "center" }}>
+          <button
+            onClick={() => setHandoffItems(rows.filter((r) => sel.has(r.equipment_id)).map((r) => ({ equipment_id: r.equipment_id, equipment_name: r.equipment_name })))}
+            style={{ ...FS.btnPrimary }}>
+            <ArrowLeftRight size={15} /> Start transfer ({sel.size})
+          </button>
+        </div>
+      )}
+      {handoffItems && (
+        <HandoffModal
+          items={handoffItems}
+          notify={notify}
+          onClose={() => { setHandoffItems(null); exitSelMode(); load(); }}
+        />
       )}
     </div>
   );
