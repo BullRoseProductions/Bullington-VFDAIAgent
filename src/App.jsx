@@ -2881,10 +2881,9 @@ function serializeDrillPlan(plan, topic) {
   // NOTE: use ONLY bold sub-labels (**...**) inside this block, never `## ` — the viewer splits the
   // saved text on `## ` headings to separate the run sheet from the full plan.
   const R = ["## Quick Run Sheet"];
-  if (plan.summary) R.push("", plan.summary);
   if (Array.isArray(plan.steps) && plan.steps.length) {
     R.push("", `**Run it${plan.durationMin ? ` (${plan.durationMin} min total)` : ""}:**`);
-    plan.steps.forEach((s, i) => R.push(`${i + 1}. ${s.title}${s.minutes ? ` — ${s.minutes} min` : ""}`));
+    plan.steps.forEach((s, i) => R.push(`${i + 1}. **${s.title}**${s.minutes ? ` (${s.minutes} min)` : ""}${s.detail ? ` — ${s.detail}` : ""}`));
   }
   if (Array.isArray(plan.safetyNotes) && plan.safetyNotes.length) {
     R.push("", "**Safety first:**", ...plan.safetyNotes.map((i) => `- ${i}`));
@@ -2909,13 +2908,14 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
+  const [view, setView] = useState("full");   // 'full' | 'quick' — preview toggle; resets to full on each generate
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)
   const [newDate, setNewDate] = useState(""); const [newTime, setNewTime] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
   const [newCounts, setNewCounts] = useState(true);   // AI schedule-on-a-date "counts toward attendance rate"; default ON
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
-    setLoading(true); setErr(""); setPlan(null);
+    setLoading(true); setErr(""); setPlan(null); setView("full");
     const sys = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"detail\":string,\"minutes\":number}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Realistic for the stated staffing and apparatus.";
     const user = `${dept?.name ? `Department: ${dept.name}\n` : ""}Department size: ${form.size} members\nApparatus/equipment: ${form.apparatus}\nTopic: ${form.topic}\nSkill level: ${form.level}\nTime: ${form.time} minutes\nRecent history: ${form.history}`;
     try {
@@ -2981,20 +2981,42 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
             <div>
               <Disclaimer S={S} compact dark />
               <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{form.topic}</h3>
-              <p style={{ ...S.body, color: FIRE.textSecondary }}>{plan.summary}</p>
-              {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
-              <AIList S={S} dark Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
-              <AIList S={S} dark Icon={Wrench} title="Equipment" items={plan.equipment} />
-              {Array.isArray(plan.steps) && (
-                <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Drill steps</div>
-                  <div style={S.steps}>{plan.steps.map((s, i) => (
-                    <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
-                      <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div></div></div>
-                  ))}</div></div>
+              <div style={{ display: "flex", gap: 8, margin: "6px 0 12px" }}>
+                {["full", "quick"].map((k) => (
+                  <button key={k} onClick={() => setView(k)} style={{ ...FS.btn, ...(view === k ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{k === "quick" ? "Quick run sheet" : "Full plan"}</button>
+                ))}
+              </div>
+              {view === "quick" ? (
+                <>
+                  {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
+                  {Array.isArray(plan.steps) && (
+                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Run it</div>
+                      <div style={S.steps}>{plan.steps.map((s, i) => (
+                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
+                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div></div></div>
+                      ))}</div></div>
+                  )}
+                  <AIList S={S} dark Icon={ShieldAlert} title="Safety first" items={plan.safetyNotes} warn />
+                  <AIList S={S} dark Icon={CheckCircle2} title="You're done when" items={plan.evaluationChecklist} />
+                </>
+              ) : (
+                <>
+                  <p style={{ ...S.body, color: FIRE.textSecondary }}>{plan.summary}</p>
+                  {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
+                  <AIList S={S} dark Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
+                  <AIList S={S} dark Icon={Wrench} title="Equipment" items={plan.equipment} />
+                  {Array.isArray(plan.steps) && (
+                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Drill steps</div>
+                      <div style={S.steps}>{plan.steps.map((s, i) => (
+                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
+                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div></div></div>
+                      ))}</div></div>
+                  )}
+                  <AIList S={S} dark Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
+                  <AIList S={S} dark Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
+                  <AIList S={S} dark Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
+                </>
               )}
-              <AIList S={S} dark Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
-              <AIList S={S} dark Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
-              <AIList S={S} dark Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
               <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
                 <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save to session</span>
@@ -9293,8 +9315,8 @@ function AiPlanViewer({ S, plan, onClose }) {
   const isRun = (b) => /^#{1,6}\s+Quick Run Sheet\b/i.test(b.trim());
   const runSheet = blocks.filter(isRun).join("\n").trim();
   const rest = blocks.filter((b) => !isRun(b)).join("\n").trim();
-  const hasRun = !!runSheet;
-  const shown = !hasRun ? full : (view === "quick" ? runSheet : rest);
+  const hasRun = runSheet.split("\n").slice(1).join("\n").trim().length > 0;   // heading alone doesn't count — never offer an empty Quick tab
+  const shown = !hasRun ? rest : (view === "quick" ? runSheet : rest);
   const tab = (key, label) => (
     <button onClick={() => setView(key)} style={{ ...FS.btn, ...(view === key ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>
   );
