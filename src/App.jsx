@@ -2877,7 +2877,23 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
 /* ---------------- AI Training Assistant ---------------- */
 // structured drill plan → RichOutput-friendly text (## headings, - bullets, 1. ordered) — full plan, nothing dropped
 function serializeDrillPlan(plan, topic) {
-  const L = [`## ${topic || "Drill"} — Drill Plan`];
+  // Quick Run Sheet — the skimmable "just run it" version, built from the same structured plan.
+  // NOTE: use ONLY bold sub-labels (**...**) inside this block, never `## ` — the viewer splits the
+  // saved text on `## ` headings to separate the run sheet from the full plan.
+  const R = ["## Quick Run Sheet"];
+  if (plan.summary) R.push("", plan.summary);
+  if (Array.isArray(plan.steps) && plan.steps.length) {
+    R.push("", `**Run it${plan.durationMin ? ` (${plan.durationMin} min total)` : ""}:**`);
+    plan.steps.forEach((s, i) => R.push(`${i + 1}. ${s.title}${s.minutes ? ` — ${s.minutes} min` : ""}`));
+  }
+  if (Array.isArray(plan.safetyNotes) && plan.safetyNotes.length) {
+    R.push("", "**Safety first:**", ...plan.safetyNotes.map((i) => `- ${i}`));
+  }
+  if (Array.isArray(plan.evaluationChecklist) && plan.evaluationChecklist.length) {
+    R.push("", "**You're done when:**", ...plan.evaluationChecklist.map((i) => `- ${i}`));
+  }
+
+  const L = [...R, "", `## ${topic || "Drill"} — Drill Plan`];
   if (plan.summary) L.push("", plan.summary);
   if (plan.durationMin) L.push("", `Duration: ${plan.durationMin} minutes`);
   const sec = (title, items) => { if (Array.isArray(items) && items.length) L.push("", `## ${title}`, ...items.map((i) => `- ${i}`)); };
