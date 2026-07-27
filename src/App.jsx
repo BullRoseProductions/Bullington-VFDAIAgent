@@ -2877,28 +2877,35 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
 /* ---------------- AI Training Assistant ---------------- */
 // structured drill plan → RichOutput-friendly text (## headings, - bullets, 1. ordered) — full plan, nothing dropped
 function serializeDrillPlan(plan, topic) {
-  // Quick Run Sheet — the skimmable "just run it" version, built from the same structured plan.
-  // NOTE: use ONLY bold sub-labels (**...**) inside this block, never `## ` — the viewer splits the
-  // saved text on `## ` headings to separate the run sheet from the full plan.
-  const R = ["## Quick Run Sheet"];
-  if (Array.isArray(plan.steps) && plan.steps.length) {
-    R.push("", `**Run it${plan.durationMin ? ` (${plan.durationMin} min total)` : ""}:**`);
-    plan.steps.forEach((s, i) => R.push(`${i + 1}. **${s.title}**${s.minutes ? ` (${s.minutes} min)` : ""}${s.detail ? ` — ${s.detail}` : ""}`));
-  }
-  if (Array.isArray(plan.safetyNotes) && plan.safetyNotes.length) {
-    R.push("", "**Safety first:**", ...plan.safetyNotes.map((i) => `- ${i}`));
-  }
-  if (Array.isArray(plan.evaluationChecklist) && plan.evaluationChecklist.length) {
-    R.push("", "**You're done when:**", ...plan.evaluationChecklist.map((i) => `- ${i}`));
-  }
+  // Each step: a bold header (renders as a heading) + its actions as bullets. Falls back to the old
+  // prose `detail` for any step that predates the actions schema.
+  // NOTE: only `## ` headings split the saved text — the viewer relies on the two `## ` headings below
+  // (Quick Run Sheet / the drill title) to separate the run sheet from the full plan.
+  const stepLines = () => {
+    const out = [];
+    (plan.steps || []).forEach((s, i) => {
+      out.push("", `**${i + 1}. ${s.title}${s.minutes ? ` — ${s.minutes} min` : ""}**`);
+      const acts = Array.isArray(s.actions) && s.actions.length ? s.actions : (s.detail ? [s.detail] : []);
+      acts.forEach((a) => out.push(`- ${a}`));
+    });
+    return out;
+  };
 
+  // Quick Run Sheet — the step-by-step guide.
+  const R = ["## Quick Run Sheet"];
+  if (plan.durationMin) R.push("", `Total time: ${plan.durationMin} min`);
+  if (Array.isArray(plan.steps) && plan.steps.length) R.push(...stepLines());
+  if (Array.isArray(plan.safetyNotes) && plan.safetyNotes.length) R.push("", "**Safety first:**", ...plan.safetyNotes.map((i) => `- ${i}`));
+  if (Array.isArray(plan.evaluationChecklist) && plan.evaluationChecklist.length) R.push("", "**You're done when:**", ...plan.evaluationChecklist.map((i) => `- ${i}`));
+
+  // Full plan follows (still one saved text; the viewer toggle splits on the "## " headings).
   const L = [...R, "", `## ${topic || "Drill"} — Drill Plan`];
   if (plan.summary) L.push("", plan.summary);
   if (plan.durationMin) L.push("", `Duration: ${plan.durationMin} minutes`);
   const sec = (title, items) => { if (Array.isArray(items) && items.length) L.push("", `## ${title}`, ...items.map((i) => `- ${i}`)); };
   sec("Safety notes", plan.safetyNotes);
   sec("Equipment", plan.equipment);
-  if (Array.isArray(plan.steps) && plan.steps.length) { L.push("", "## Drill steps"); plan.steps.forEach((s, i) => L.push(`${i + 1}. **${s.title}**${s.minutes ? ` (${s.minutes} min)` : ""}${s.detail ? ` — ${s.detail}` : ""}`)); }
+  if (Array.isArray(plan.steps) && plan.steps.length) { L.push("", ...stepLines()); }
   sec("Instructor talking points", plan.talkingPoints);
   sec("Debrief questions", plan.debriefQuestions);
   sec("Evaluation checklist", plan.evaluationChecklist);
@@ -2916,7 +2923,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null); setView("full");
-    const sys = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"detail\":string,\"minutes\":number}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Realistic for the stated staffing and apparatus.";
+    const sys = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"minutes\":number,\"actions\":string[]}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Each step's \"actions\" are short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences. 3-6 actions per step. Realistic for the stated staffing and apparatus.";
     const user = `${dept?.name ? `Department: ${dept.name}\n` : ""}Department size: ${form.size} members\nApparatus/equipment: ${form.apparatus}\nTopic: ${form.topic}\nSkill level: ${form.level}\nTime: ${form.time} minutes\nRecent history: ${form.history}`;
     try {
       let t = (await callClaude(sys, user)).replace(/```json|```/g, "").trim();
@@ -2993,7 +3000,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                     <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Run it</div>
                       <div style={S.steps}>{plan.steps.map((s, i) => (
                         <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
-                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div></div></div>
+                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div>{Array.isArray(s.actions) && s.actions.length ? <ul style={{ ...S.list, color: FIRE.textSecondary, marginTop: 4 }}>{s.actions.map((a, j) => <li key={j}>{a}</li>)}</ul> : (s.detail ? <div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div> : null)}</div></div>
                       ))}</div></div>
                   )}
                   <AIList S={S} dark Icon={ShieldAlert} title="Safety first" items={plan.safetyNotes} warn />
@@ -3009,7 +3016,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                     <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Drill steps</div>
                       <div style={S.steps}>{plan.steps.map((s, i) => (
                         <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
-                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div></div></div>
+                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div>{Array.isArray(s.actions) && s.actions.length ? <ul style={{ ...S.list, color: FIRE.textSecondary, marginTop: 4 }}>{s.actions.map((a, j) => <li key={j}>{a}</li>)}</ul> : (s.detail ? <div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div> : null)}</div></div>
                       ))}</div></div>
                   )}
                   <AIList S={S} dark Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
