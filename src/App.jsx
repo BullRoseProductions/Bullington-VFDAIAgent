@@ -9285,7 +9285,19 @@ function HandoffConfirm({ S, result, go }) {
 }
 // Re-viewable AI plan: modal showing an ai_text session_plan (reused by Training + MemberDashboard)
 function AiPlanViewer({ S, plan, onClose }) {
+  const [view, setView] = useState("quick");   // 'quick' | 'full' — hook BEFORE the early return
   if (!plan) return null;
+  // Split the saved text on `## ` headings; isolate the "Quick Run Sheet" block from the rest.
+  const full = plan.ai_text || "";
+  const blocks = full.split(/\n(?=#{1,6}\s+)/);
+  const isRun = (b) => /^#{1,6}\s+Quick Run Sheet\b/i.test(b.trim());
+  const runSheet = blocks.filter(isRun).join("\n").trim();
+  const rest = blocks.filter((b) => !isRun(b)).join("\n").trim();
+  const hasRun = !!runSheet;
+  const shown = !hasRun ? full : (view === "quick" ? runSheet : rest);
+  const tab = (key, label) => (
+    <button onClick={() => setView(key)} style={{ ...FS.btn, ...(view === key ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>
+  );
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "20px 22px" }}>
@@ -9293,8 +9305,9 @@ function AiPlanViewer({ S, plan, onClose }) {
           <div style={{ ...FS.kicker, marginBottom: 0 }}>{plan.title || "AI-drafted plan"}</div>
           <button style={{ ...FS.btn, padding: "6px 10px", flexShrink: 0 }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /> Close</button>
         </div>
+        {hasRun && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{tab("quick", "Quick run sheet")}{tab("full", "Full plan")}</div>}
         <Disclaimer S={S} compact dark />
-        <RichOutput S={S} text={plan.ai_text || ""} dark />
+        <RichOutput S={S} text={shown} dark />
       </div>
     </div>
   );
