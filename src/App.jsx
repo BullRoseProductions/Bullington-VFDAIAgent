@@ -2877,7 +2877,23 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
 /* ---------------- AI Training Assistant ---------------- */
 // structured drill plan → RichOutput-friendly text (## headings, - bullets, 1. ordered) — full plan, nothing dropped
 function serializeDrillPlan(plan, topic) {
-  const L = [`## ${topic || "Drill"} — Drill Plan`];
+  // Quick Run Sheet — the skimmable "just run it" version, built from the same structured plan.
+  // NOTE: use ONLY bold sub-labels (**...**) inside this block, never `## ` — the viewer splits the
+  // saved text on `## ` headings to separate the run sheet from the full plan.
+  const R = ["## Quick Run Sheet"];
+  if (plan.summary) R.push("", plan.summary);
+  if (Array.isArray(plan.steps) && plan.steps.length) {
+    R.push("", `**Run it${plan.durationMin ? ` (${plan.durationMin} min total)` : ""}:**`);
+    plan.steps.forEach((s, i) => R.push(`${i + 1}. ${s.title}${s.minutes ? ` — ${s.minutes} min` : ""}`));
+  }
+  if (Array.isArray(plan.safetyNotes) && plan.safetyNotes.length) {
+    R.push("", "**Safety first:**", ...plan.safetyNotes.map((i) => `- ${i}`));
+  }
+  if (Array.isArray(plan.evaluationChecklist) && plan.evaluationChecklist.length) {
+    R.push("", "**You're done when:**", ...plan.evaluationChecklist.map((i) => `- ${i}`));
+  }
+
+  const L = [...R, "", `## ${topic || "Drill"} — Drill Plan`];
   if (plan.summary) L.push("", plan.summary);
   if (plan.durationMin) L.push("", `Duration: ${plan.durationMin} minutes`);
   const sec = (title, items) => { if (Array.isArray(items) && items.length) L.push("", `## ${title}`, ...items.map((i) => `- ${i}`)); };
@@ -9269,7 +9285,19 @@ function HandoffConfirm({ S, result, go }) {
 }
 // Re-viewable AI plan: modal showing an ai_text session_plan (reused by Training + MemberDashboard)
 function AiPlanViewer({ S, plan, onClose }) {
+  const [view, setView] = useState("quick");   // 'quick' | 'full' — hook BEFORE the early return
   if (!plan) return null;
+  // Split the saved text on `## ` headings; isolate the "Quick Run Sheet" block from the rest.
+  const full = plan.ai_text || "";
+  const blocks = full.split(/\n(?=#{1,6}\s+)/);
+  const isRun = (b) => /^#{1,6}\s+Quick Run Sheet\b/i.test(b.trim());
+  const runSheet = blocks.filter(isRun).join("\n").trim();
+  const rest = blocks.filter((b) => !isRun(b)).join("\n").trim();
+  const hasRun = !!runSheet;
+  const shown = !hasRun ? full : (view === "quick" ? runSheet : rest);
+  const tab = (key, label) => (
+    <button onClick={() => setView(key)} style={{ ...FS.btn, ...(view === key ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>
+  );
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "20px 22px" }}>
@@ -9277,8 +9305,9 @@ function AiPlanViewer({ S, plan, onClose }) {
           <div style={{ ...FS.kicker, marginBottom: 0 }}>{plan.title || "AI-drafted plan"}</div>
           <button style={{ ...FS.btn, padding: "6px 10px", flexShrink: 0 }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /> Close</button>
         </div>
+        {hasRun && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{tab("quick", "Quick run sheet")}{tab("full", "Full plan")}</div>}
         <Disclaimer S={S} compact dark />
-        <RichOutput S={S} text={plan.ai_text || ""} dark />
+        <RichOutput S={S} text={shown} dark />
       </div>
     </div>
   );
