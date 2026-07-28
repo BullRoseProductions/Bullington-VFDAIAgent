@@ -197,18 +197,34 @@ const SEED = [
 const SUPPORT_EMAIL = "ashlea@bullroseproductions.com";
 // DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
 function DeptSettings({ S, dept, setDept, setBrand }) {
-  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "" });
+  // ?? not || on the coordinates: latitude/longitude 0 are real places, and || would wipe them to "".
+  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "", lat: dept?.station_lat ?? "", lng: dept?.station_lng ?? "", radius: dept?.station_radius_m ?? 150 });
   const [saving, setSaving] = useState(false);
-  const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
+  const [saveState, setSaveState] = useState("");   // "" | "ok" | "err" | "coords"
+  const [geo, setGeo] = useState("");   // "" | "busy" | a human message — geolocation is best-effort, never blocking
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const num = (v) => (String(v).trim() === "" ? null : (Number.isFinite(parseFloat(v)) ? parseFloat(v) : NaN));   // blank → null (clears it), garbage → NaN (caught before save)
+  // Best-effort device location. A denied prompt is an ordinary outcome, not an error state: the fields
+  // stay editable and the DA can type coordinates in by hand.
+  function fillFromDevice() {
+    if (!navigator.geolocation) { setGeo("This browser can't share a location — enter the coordinates manually."); return; }
+    setGeo("busy");
+    navigator.geolocation.getCurrentPosition(
+      (p) => { setForm((f) => ({ ...f, lat: p.coords.latitude.toFixed(6), lng: p.coords.longitude.toFixed(6) })); setGeo(""); },
+      (e) => setGeo(e.code === 1 ? "Location permission denied — enter the coordinates manually." : "Couldn't get your location — enter the coordinates manually."),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
   async function save() {
+    const lat = num(form.lat), lng = num(form.lng), radius = num(form.radius);
+    if ([lat, lng, radius].some(Number.isNaN) || (lat !== null && Math.abs(lat) > 90) || (lng !== null && Math.abs(lng) > 180) || (radius !== null && radius <= 0)) { setSaveState("coords"); return; }
     setSaving(true); setSaveState("");
     const { data: id } = await supabase.rpc("my_department_id");   // same dept-id source as brand save
     if (!id) { setSaving(false); setSaveState("err"); return; }
-    const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable
+    const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city, station_lat: lat, station_lng: lng, station_radius_m: radius ?? 150 }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable; radius is NOT NULL → blank falls back to the 150 m default
     setSaving(false);
     if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked (non-DA) → error, never a false "Saved"
-    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city }));   // sync sidebar crest + this form's source
+    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city, station_lat: lat, station_lng: lng, station_radius_m: radius }));   // sync sidebar crest + this form's source
     setBrand?.((b) => ({ ...b, name: form.name, station: form.station }));       // keep Brand Kit's name/station consistent
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
@@ -223,10 +239,23 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station number</span><input style={FS.input} value={form.station} placeholder="e.g. Station 20" onChange={(e) => set("station", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={form.city} onChange={(e) => set("city", e.target.value)} /></label>
+        <div style={{ borderTop: `0.5px solid ${FIRE.hairline}`, margin: "6px 0 2px" }} />
+        <div style={FS.kicker}>STATION LOCATION</div>
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 4px", lineHeight: 1.45 }}>Where the station sits, and how close a member has to be for a verified check-in. Optional — leave it blank until you're standing at the station.</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 128 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Latitude</span><input style={FS.input} value={form.lat} placeholder="e.g. 34.052235" onChange={(e) => set("lat", e.target.value)} /></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 128 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Longitude</span><input style={FS.input} value={form.lng} placeholder="e.g. -118.243683" onChange={(e) => set("lng", e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 104 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Radius (m)</span><input style={FS.input} value={form.radius} inputMode="numeric" onChange={(e) => set("radius", e.target.value)} /></label>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }} onClick={fillFromDevice} disabled={geo === "busy"}>{geo === "busy" ? <><Loader2 size={14} className="spin" /> Locating…</> : <><MapPin size={14} color={FIRE.btnIcon} /> Use my current location</>}</button>
+          {geo && geo !== "busy" && <span style={{ fontSize: 12, color: FIRE.amberText, lineHeight: 1.35 }}>{geo}</span>}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
           <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
           {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
           {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
+          {saveState === "coords" && <span style={{ fontSize: 13, color: FIRE.redText }}>Check the station location — latitude −90…90, longitude −180…180, radius above 0.</span>}
         </div>
       </div>
     </div>
@@ -845,7 +874,7 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules").eq("id", id).single().then(({ data }) => {
+      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m").eq("id", id).single().then(({ data }) => {
         if (!data) return;
         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
