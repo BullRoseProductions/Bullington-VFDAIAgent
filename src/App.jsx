@@ -196,19 +196,24 @@ const SEED = [
 /* ---------------- Settings & Support hub (card → sub-screen, mirrors Reports) ---------------- */
 const SUPPORT_EMAIL = "ashlea@bullroseproductions.com";
 // DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
-function DeptSettings({ S, dept, setDept, setBrand }) {
-  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "" });
+function DeptSettings({ S, role, dept, setDept, setBrand }) {
+  const isPA = hasAny(role, ["Project Admin"]);   // module visibility is PA-only; a DA edits identity but never the module set
+  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "", disabled: Array.isArray(dept?.disabled_modules) ? dept.disabled_modules : [] });
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  // switch semantics: checked = visible. The column stores the DISABLED keys, so on → remove, off → add.
+  const setModule = (key, on) => setForm((f) => ({ ...f, disabled: on ? f.disabled.filter((k) => k !== key) : [...f.disabled, key] }));
   async function save() {
     setSaving(true); setSaveState("");
     const { data: id } = await supabase.rpc("my_department_id");   // same dept-id source as brand save
     if (!id) { setSaving(false); setSaveState("err"); return; }
-    const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable
+    const payload = { name: form.name, station: form.station, city: form.city };
+    if (isPA) payload.disabled_modules = form.disabled;   // PA-only field — a DA's save never touches it, so it can't clobber the module set from a stale dept
+    const { data, error } = await supabase.from("departments").update(payload).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable
     setSaving(false);
     if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked (non-DA) → error, never a false "Saved"
-    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city }));   // sync sidebar crest + this form's source
+    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city, ...(isPA ? { disabled_modules: form.disabled } : {}) }));   // sync sidebar crest + the live nav filter — no reload
     setBrand?.((b) => ({ ...b, name: form.name, station: form.station }));       // keep Brand Kit's name/station consistent
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
@@ -223,6 +228,24 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station number</span><input style={FS.input} value={form.station} placeholder="e.g. Station 20" onChange={(e) => set("station", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={form.city} onChange={(e) => set("city", e.target.value)} /></label>
+        {isPA && (<>
+          <div style={{ borderTop: `0.5px solid ${FIRE.hairline}`, margin: "6px 0 2px" }} />
+          <div style={FS.kicker}>MODULE VISIBILITY · PROJECT ADMIN</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 4px", lineHeight: 1.45 }}>Switch off the pieces this department doesn't use and they leave everyone's navigation here — including this department's admins. This hides modules; it does not restrict data.</div>
+          {TOGGLEABLE_MODULES.map((k) => {
+            const n = NAV.find((x) => x.key === k);
+            if (!n) return null;
+            const on = !form.disabled.includes(k);
+            return (
+              <label key={k} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={on} onChange={(e) => setModule(k, e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
+                <n.Icon size={15} color={on ? FIRE.btnIcon : FIRE.textMuted2} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: on ? FIRE.textPrimary : FIRE.textMuted }}>{n.label}</span>
+                {!on && <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2 }}>HIDDEN</span>}
+              </label>
+            );
+          })}
+        </>)}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
           <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
           {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
@@ -592,7 +615,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
   if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><div style={{ ...FS.card, padding: 18, marginTop: 12 }}><div style={FS.kicker}>CONTACT SUPPORT</div><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></div></div>;
-  if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
+  if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} role={role} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 Big Bull Technologies, LLC. All rights reserved.</>);
   const card = (key, Icon, title, desc) => (
