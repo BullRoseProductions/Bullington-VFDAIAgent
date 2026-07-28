@@ -196,24 +196,19 @@ const SEED = [
 /* ---------------- Settings & Support hub (card → sub-screen, mirrors Reports) ---------------- */
 const SUPPORT_EMAIL = "ashlea@bullroseproductions.com";
 // DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
-function DeptSettings({ S, role, dept, setDept, setBrand }) {
-  const isPA = hasAny(role, ["Project Admin"]);   // module visibility is PA-only; a DA edits identity but never the module set
-  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "", disabled: Array.isArray(dept?.disabled_modules) ? dept.disabled_modules : [] });
+function DeptSettings({ S, dept, setDept, setBrand }) {
+  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "" });
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  // switch semantics: checked = visible. The column stores the DISABLED keys, so on → remove, off → add.
-  const setModule = (key, on) => setForm((f) => ({ ...f, disabled: on ? f.disabled.filter((k) => k !== key) : [...f.disabled, key] }));
   async function save() {
     setSaving(true); setSaveState("");
     const { data: id } = await supabase.rpc("my_department_id");   // same dept-id source as brand save
     if (!id) { setSaving(false); setSaveState("err"); return; }
-    const payload = { name: form.name, station: form.station, city: form.city };
-    if (isPA) payload.disabled_modules = form.disabled;   // PA-only field — a DA's save never touches it, so it can't clobber the module set from a stale dept
-    const { data, error } = await supabase.from("departments").update(payload).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable
+    const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable
     setSaving(false);
     if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked (non-DA) → error, never a false "Saved"
-    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city, ...(isPA ? { disabled_modules: form.disabled } : {}) }));   // sync sidebar crest + the live nav filter — no reload
+    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city }));   // sync sidebar crest + this form's source
     setBrand?.((b) => ({ ...b, name: form.name, station: form.station }));       // keep Brand Kit's name/station consistent
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
@@ -228,24 +223,6 @@ function DeptSettings({ S, role, dept, setDept, setBrand }) {
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station number</span><input style={FS.input} value={form.station} placeholder="e.g. Station 20" onChange={(e) => set("station", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={form.city} onChange={(e) => set("city", e.target.value)} /></label>
-        {isPA && (<>
-          <div style={{ borderTop: `0.5px solid ${FIRE.hairline}`, margin: "6px 0 2px" }} />
-          <div style={FS.kicker}>MODULE VISIBILITY · PROJECT ADMIN</div>
-          <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 4px", lineHeight: 1.45 }}>Switch off the pieces this department doesn't use and they leave everyone's navigation here — including this department's admins. This hides modules; it does not restrict data.</div>
-          {TOGGLEABLE_MODULES.map((k) => {
-            const n = NAV.find((x) => x.key === k);
-            if (!n) return null;
-            const on = !form.disabled.includes(k);
-            return (
-              <label key={k} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0", cursor: "pointer" }}>
-                <input type="checkbox" checked={on} onChange={(e) => setModule(k, e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
-                <n.Icon size={15} color={on ? FIRE.btnIcon : FIRE.textMuted2} style={{ flexShrink: 0 }} />
-                <span style={{ fontSize: 13, color: on ? FIRE.textPrimary : FIRE.textMuted }}>{n.label}</span>
-                {!on && <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2 }}>HIDDEN</span>}
-              </label>
-            );
-          })}
-        </>)}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
           <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
           {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
@@ -615,7 +592,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
   if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><div style={{ ...FS.card, padding: 18, marginTop: 12 }}><div style={FS.kicker}>CONTACT SUPPORT</div><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></div></div>;
-  if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} role={role} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
+  if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 Big Bull Technologies, LLC. All rights reserved.</>);
   const card = (key, Icon, title, desc) => (
@@ -693,11 +670,12 @@ const NAV = [
   { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
   { key: "adddept", label: "Add Department", Icon: Landmark, roles: ["Project Admin"] },
+  { key: "department", label: "Department", Icon: Building2, roles: ["Project Admin"] },
 ];
 
 // A Project-Admin-ONLY user gets a trimmed oversight+support nav (no department-operation screens,
 // which are RLS-scoped to their own department anyway). Keys must exist in NAV above.
-const PA_NAV = ["dashboard", "settings", "admin", "adddept"];
+const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
 
 // Per-department module toggles (Project-Admin controlled). departments.disabled_modules holds the NAV
 // keys a department has switched off. ONLY keys listed here may be disabled — everything else is an
@@ -1107,6 +1085,7 @@ export default function App() {
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} meId={myMemberId} notify={notify} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} />}
+          {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} />}
         </main>
       </div>
     </div>
@@ -2062,7 +2041,7 @@ function MyActionItems({ meId }) {
   );
 }
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
-  if (hasAny(role, ["Project Admin"])) return <ProgramOverview S={S} role={role} notify={notify} />;   // PA home = Program Overview (must be FIRST — PA also passes isDeptAdmin)
+  if (hasAny(role, ["Project Admin"])) return <ProgramOverview S={S} role={role} notify={notify} go={go} />;   // PA home = Program Overview (must be FIRST — PA also passes isDeptAdmin)
   if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isBoard(role) && !hasAny(role, ['Officer'])) return <BoardDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
@@ -11347,7 +11326,7 @@ function AddDepartment({ S, role, notify }) {
 }
 
 /* ---------------- Program Overview (Project-Admin-only, cross-department health/issue radar) ---------------- */
-function ProgramOverview({ S, role, notify }) {
+function ProgramOverview({ S, role, notify, go }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const [rows, setRows] = useState(null);   // null = loading, [] = loaded/empty
   const [err, setErr] = useState(null);
@@ -11376,13 +11355,13 @@ function ProgramOverview({ S, role, notify }) {
       {rows !== null && rows.length === 0 && !err && <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>No departments found.</div>}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {(rows || []).map((d) => <ProgramDeptCard key={d.department_id} S={S} d={d} notify={notify} refresh={load} />)}
+        {(rows || []).map((d) => <ProgramDeptCard key={d.department_id} S={S} d={d} notify={notify} refresh={load} go={go} />)}
       </div>
     </div>
   );
 }
 
-function ProgramDeptCard({ S, d, notify, refresh }) {
+function ProgramDeptCard({ S, d, notify, refresh, go }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const [showNoEmail, setShowNoEmail] = useState(false);
   const healthColor = d.health === "GREEN" ? FIRE.green : d.health === "YELLOW" ? FIRE.amberText : FIRE.redText;
@@ -11411,6 +11390,11 @@ function ProgramDeptCard({ S, d, notify, refresh }) {
         {(d.station || d.city) && <span style={{ fontSize: 12.5, color: FIRE.textMuted }}>{[d.station, d.city].filter(Boolean).join(" · ")}</span>}
         <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: healthColor }}>{healthLabel}</span>
       </div>
+      {go && (
+        <div style={{ marginTop: 10 }}>
+          <button onClick={() => go("department", { id: d.department_id, name: d.department_name })} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}><Building2 size={14} color={FIRE.btnIcon} /> Open department</button>
+        </div>
+      )}
 
       {/* Support: primary admin + resend login link — ONLY when a DA with an email exists.
           When admin_email is null, this hides and the no-email fix below is what applies. */}
@@ -11489,6 +11473,73 @@ function ProgramDeptCard({ S, d, notify, refresh }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// PA-only per-department admin page, reached from a Program-overview card via go("department", {...}).
+// Writes through the PA-scoped DB functions rather than a direct departments update: ordinary RLS
+// scopes that table to the actor's OWN department, and this configures someone else's.
+function DepartmentAdmin({ S, role, target, notify }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const isPA = hasAny(role, ["Project Admin"]);
+  const deptId = target?.id || null, deptName = target?.name || "";
+  const [disabled, setDisabled] = useState(null);   // null = loading, [] = loaded
+  const [err, setErr] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
+  useEffect(() => {
+    if (!isPA || !deptId) return;
+    supabase.rpc("pa_get_disabled_modules", { p_department_id: deptId }).then(({ data, error }) => {
+      if (error) { setErr(error.message); setDisabled([]); return; }   // surface, never a silent empty set
+      setErr(null); setDisabled(Array.isArray(data) ? data : []);
+    });
+  }, [deptId]);
+  const setModule = (key, on) => setDisabled((ds) => on ? (ds || []).filter((k) => k !== key) : [...(ds || []), key]);
+  async function save() {
+    setSaving(true); setSaveState("");
+    const { error } = await supabase.rpc("pa_set_disabled_modules", { p_department_id: deptId, p_modules: disabled || [] });
+    setSaving(false);
+    if (error) { setSaveState("err"); notify?.({ kind: "error", title: "Couldn't save module visibility", text: error.message || "Please try again." }); return; }
+    setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
+  }
+
+  // Screen-level PA gate (nav already filters, but guard the render too — mirrors the DB self-gate)
+  if (!isPA) return <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>This screen is available to Project Admins only.</div>;
+  if (!deptId) return <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>Open a department from the Program overview to configure it.</div>;
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>PROJECT ADMIN · DEPARTMENT</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "6px 0 4px", letterSpacing: "-0.01em" }}>{deptName || "Department"}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Choose which parts of the app this department sees. Hidden modules leave everyone's navigation here — including this department's admins. This hides modules; it does not restrict data.</div>
+      </div>
+      {err && <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", color: FIRE.redText, marginBottom: 12 }}>Couldn't load module visibility: {err}</div>}
+      {disabled === null && !err && <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading…</div>}
+      {disabled !== null && (
+        <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 2, maxWidth: 460 }}>
+          <div style={FS.kicker}>MODULE VISIBILITY</div>
+          {TOGGLEABLE_MODULES.map((k) => {
+            const n = NAV.find((x) => x.key === k);
+            if (!n) return null;
+            const on = !disabled.includes(k);
+            return (
+              <label key={k} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={on} onChange={(e) => setModule(k, e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
+                <n.Icon size={15} color={on ? FIRE.btnIcon : FIRE.textMuted2} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: on ? FIRE.textPrimary : FIRE.textMuted }}>{n.label}</span>
+                {!on && <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2 }}>HIDDEN</span>}
+              </label>
+            );
+          })}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save module visibility</>}</button>
+            {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
+            {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
