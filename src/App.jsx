@@ -7741,6 +7741,68 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
     document.body
   );
 }
+// Manager/DA recovery — reclaim a HELD item the holder didn't return (found in station, holder
+// unreachable). Twin of ConfirmReturnModal, but calls recover_equipment (stamps close_action
+// 'manager_recovery'). `unit` = { equipment_id, label, holder_name }.
+function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
+  const [cond, setCond] = useState("Needs attention");
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    let path = null;
+    try {
+      if (file) {
+        const { data: deptId } = await supabase.rpc("my_department_id");
+        if (!deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+        const small = await downscaleImage(file);
+        const safe = (small.name || "photo.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+        path = `${deptId}/equipment/${Date.now()}-${safe}`;   // deptId FIRST — storage policy gates on first folder = dept
+        const { error: upErr } = await supabase.storage.from("station-documents").upload(path, small);
+        if (upErr) { notify({ kind: "error", title: "Upload failed", text: upErr.message || "Please try again." }); return; }
+      }
+      const { error } = await supabase.rpc("recover_equipment", {
+        p_equipment_id: unit.equipment_id,
+        p_condition: cond,
+        p_photo_path: path,
+      });
+      if (error) {
+        if (path) await supabase.storage.from("station-documents").remove([path]).catch(() => {});   // orphan cleanup
+        notify({ kind: "error", title: "Couldn't recover the item", text: error.message || "Please try again." }); return;
+      }
+      notify({ kind: "success", title: "Item recovered", text: `${unit.label} is back in inventory.` });
+      onRecovered();
+    } finally { setBusy(false); }
+  }
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.kicker}>RECOVER ITEM</div>
+          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{unit.label}</div>
+        <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 8 }}>{unit.holder_name ? `Currently signed to ${unit.holder_name}` : "Currently checked out"}</div>
+        <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 14, lineHeight: 1.45 }}>Reclaiming without a member return — this closes their custody as a manager recovery and puts the item back in inventory.</div>
+        <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition on recovery</span>
+          <select style={FS.input} value={cond} onChange={(e) => setCond(e.target.value)}>
+            <option value="Needs attention">Needs attention</option>
+            <option value="Serviceable">Serviceable</option>
+            <option value="Out of service">Out of service</option>
+          </select>
+        </label>
+        <label style={{ ...S.field, marginBottom: 16 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition photo (optional)</span>
+          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} style={{ fontSize: 13, color: FIRE.textSecondary }} />
+        </label>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Recovering…" : "Recover to inventory"}</button>
+          <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 // My Equipment — the member-facing counterpart to the manager ledger. Shows the member's OWN open
 // custody periods (what they're currently signed for). Read-only this pass; transfer/return actions
 // arrive with their RPCs in steps 4–5. Reads straight off the append-only custody snapshot — no join:
@@ -7954,6 +8016,17 @@ function Equipment({ S, role, members, meId, notify }) {
   const [issuing, setIssuing] = useState(false);   // issue-equipment modal open
   const [pending, setPending] = useState([]);         // open custody rows flagged for return (manager queue)
   const [confirming, setConfirming] = useState(null); // pending row being confirmed (modal)
+  const [recovering, setRecovering] = useState(null); // held unit being recovered (modal)
+  const [lostId, setLostId] = useState(null);         // equipment_id mid mark-lost
+  async function markLost(u, idLabel) {
+    if (!window.confirm(`Mark ${idLabel} lost? This records it as missing and closes ${u.holderName || "the holder"}'s custody. It can't be undone in the app.`)) return;
+    setLostId(u.id);
+    const { error } = await supabase.rpc("mark_equipment_lost", { p_equipment_id: u.id });
+    setLostId(null);
+    if (error) { notify({ kind: "error", title: "Couldn't mark it lost", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Marked lost", text: `${idLabel} is recorded as lost.` });
+    loadEquipment(); loadPending();
+  }
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
@@ -8159,9 +8232,11 @@ function Equipment({ S, role, members, meId, notify }) {
           ))}
         </div>
       )}
-      {canManage && (
+      {(canManage || isManager || isDA) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-          <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
+          {canManage && (
+            <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
+          )}
           {types.length > 0 && (
             <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
               {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
@@ -8234,6 +8309,8 @@ function Equipment({ S, role, members, meId, notify }) {
                             <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>
                             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
                             {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
+                            {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
+                            {(isManager || isDA) && editMode && u.status === "held" && <button title="Mark lost" disabled={lostId === u.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5, color: FIRE.deleteRed, opacity: lostId === u.id ? 0.6 : 1 }} onClick={() => markLost(u, idLabel)}>Lost</button>}
                           </div>
                           {editingId === u.id && (
                             <div style={{ ...FS.card, padding: 12, margin: "2px 0 8px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -8300,6 +8377,13 @@ function Equipment({ S, role, members, meId, notify }) {
           S={S} row={confirming} meId={meId} notify={notify}
           onClose={() => setConfirming(null)}
           onConfirmed={() => { setConfirming(null); loadEquipment(); loadPending(); }}
+        />
+      )}
+      {recovering && (
+        <RecoverModal
+          S={S} unit={recovering} meId={meId} notify={notify}
+          onClose={() => setRecovering(null)}
+          onRecovered={() => { setRecovering(null); loadEquipment(); loadPending(); }}
         />
       )}
     </div>
