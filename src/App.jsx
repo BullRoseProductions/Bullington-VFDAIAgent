@@ -676,6 +676,23 @@ const NAV = [
 // which are RLS-scoped to their own department anyway). Keys must exist in NAV above.
 const PA_NAV = ["dashboard", "settings", "admin", "adddept"];
 
+// Per-department module toggles (Project-Admin controlled). departments.disabled_modules holds the NAV
+// keys a department has switched off. ONLY keys listed here may be disabled — everything else is an
+// entry point or oversight screen that must always resolve.
+// EXCLUDED ON PURPOSE: dashboard (initial screen + the redirect target — disabling it would loop),
+// settings (support/legal/your-person, and where these toggles are configured), admin + adddept
+// (Project-Admin oversight, not department modules).
+const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "equipment", "myequipment", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
+// "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
+// so it follows library's toggle. The sidebar already treats it as library's child for the active state.
+const SCREEN_PARENT = { packet: "library" };
+// Visibility only. Disabling a module hides it; it does NOT restrict the underlying data, which stays
+// governed by RLS. Never treat a toggle as a permission.
+const moduleEnabled = (key, disabled) => {
+  const k = SCREEN_PARENT[key] || key;
+  return !(TOGGLEABLE_MODULES.includes(k) && (disabled || []).includes(k));
+};
+
 /* ================================================================== */
 function Notification({ S, kind, title, text, details, action, onClose }) {
   const [showDetails, setShowDetails] = useState(false);
@@ -827,7 +844,7 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url").eq("id", id).single().then(({ data }) => {
+      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules").eq("id", id).single().then(({ data }) => {
         if (!data) return;
         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
@@ -983,9 +1000,16 @@ export default function App() {
   // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —
   // falls through to the unchanged hasAny filter.
   const isProjectAdminOnly = Array.isArray(role) && hasAny(role, ["Project Admin"]) && role.every((r) => r === "Project Admin");
-  const visibleNav = isProjectAdminOnly
+  const disabledModules = Array.isArray(dept?.disabled_modules) ? dept.disabled_modules : [];   // null/absent column → nothing disabled
+  const visibleNav = (isProjectAdminOnly
     ? NAV.filter((n) => PA_NAV.includes(n.key))
-    : NAV.filter((n) => hasAny(role, n.roles));
+    : NAV.filter((n) => hasAny(role, n.roles))
+  ).filter((n) => moduleEnabled(n.key, disabledModules));
+  // Closes the hole the nav filter can't: go() is called from dashboard tiles and CTAs, and ?checkin=/
+  // ?handoff= set the screen directly, so a disabled module stays reachable without passing the sidebar.
+  // Also covers a module being switched off while a member is standing on it. Mirrors the retired-"ai"
+  // redirect at the top of the component.
+  useEffect(() => { if (!moduleEnabled(screen, disabledModules)) setScreen("dashboard"); }, [screen, dept]);
   const packet = library.find((p) => p.id === packetId);
 
   return (
