@@ -2206,6 +2206,44 @@ function CertProposals({ S, notify }) {
     </div>
   );
 }
+// Dashboard shortcut for Station Hours. DISPLAY-ONLY on purpose: the page owns clock in/out, so there's
+// one place to punch and no way for two live copies of this state to disagree mid-shift.
+// Self-fetching like CertProposals, and renders null until the read lands — a status that hasn't
+// arrived must never paint as "Not on the clock".
+function StationClockCard({ S, dept, go }) {
+  const [open, setOpen] = useState(null);     // the open station_presence row, or null when clocked out
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    supabase.rpc("my_open_station_session").then(({ data, error }) => {
+      if (error) setFailed(true);
+      else setOpen(Array.isArray(data) ? (data[0] || null) : (data || null));   // same tolerant shape read as StationHours — these two must never disagree
+      setLoaded(true);
+    });
+  }, []);
+  if (!loaded || failed) return null;   // a read that failed is not "clocked out" — say nothing rather than something wrong
+  const onClock = !!open;
+  const since = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+  return (
+    <div style={{ ...FS.card, padding: "14px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <Clock size={14} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>STATION HOURS</div>
+      </div>
+      {onClock ? (
+        <>
+          <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, marginTop: 9 }}>On the clock since {since(open.checked_in_at)}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: 12, fontWeight: 600, color: open.verified ? FIRE.greenText : FIRE.amberText }}>
+            {open.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{open.verified ? "Verified" : "Not verified"}
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 14, color: FIRE.textMuted, marginTop: 9 }}>Not on the clock</div>
+      )}
+      <button style={{ ...FS.btn, marginTop: 12 }} onClick={() => go("stationhours")}>{onClock ? "Clock out →" : "Clock in →"}</button>
+    </div>
+  );
+}
 function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
@@ -2375,6 +2413,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
             </div>
           )}
         </div>
+        {/* third stat box — station clock status; hidden entirely for a department that's toggled the module off, matching the nav */}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
       </div>
 
       {mounts}
