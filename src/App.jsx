@@ -193,6 +193,21 @@ const SEED = [
 ];
 
 
+// Shared one-shot device-location capture. Resolves { lat, lng, accuracy }; rejects with a BARE reason
+// (no trailing punctuation) so each caller appends its own guidance — a DA can type coordinates in by
+// hand, a member clocking in cannot. A denied prompt is an ordinary outcome, not a bug: never log it,
+// never block on it.
+function getPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error("This browser can't share a location")); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
+      (e) => reject(new Error(e.code === 1 ? "Location permission denied" : "Couldn't get your location")),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+}
+
 /* ---------------- Settings & Support hub (card → sub-screen, mirrors Reports) ---------------- */
 const SUPPORT_EMAIL = "ashlea@bullroseproductions.com";
 // DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
@@ -207,12 +222,10 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
   // Best-effort device location. A denied prompt is an ordinary outcome, not an error state: the fields
   // stay editable and the DA can type coordinates in by hand.
   function fillFromDevice() {
-    if (!navigator.geolocation) { setGeo("This browser can't share a location — enter the coordinates manually."); return; }
     setGeo("busy");
-    navigator.geolocation.getCurrentPosition(
-      (p) => { setForm((f) => ({ ...f, lat: p.coords.latitude.toFixed(6), lng: p.coords.longitude.toFixed(6) })); setGeo(""); },
-      (e) => setGeo(e.code === 1 ? "Location permission denied — enter the coordinates manually." : "Couldn't get your location — enter the coordinates manually."),
-      { enableHighAccuracy: true, timeout: 10000 }
+    getPosition().then(
+      (p) => { setForm((f) => ({ ...f, lat: p.lat.toFixed(6), lng: p.lng.toFixed(6) })); setGeo(""); },
+      (e) => setGeo(`${e.message} — enter the coordinates manually.`)
     );
   }
   async function save() {
@@ -686,6 +699,7 @@ const NAV = [
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
   { key: "equipment", label: "Equipment", Icon: Briefcase, roles: ROLES },
   { key: "myequipment", label: "My Equipment", Icon: HardHat, roles: ROLES },
+  { key: "stationhours", label: "Station Hours", Icon: Clock, roles: ROLES },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
@@ -712,7 +726,7 @@ const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
 // EXCLUDED ON PURPOSE: dashboard (initial screen + the redirect target — disabling it would loop),
 // settings (support/legal/your-person, and where these toggles are configured), admin + adddept
 // (Project-Admin oversight, not department modules).
-const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "equipment", "myequipment", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
+const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
 // "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
 // so it follows library's toggle. The sidebar already treats it as library's child for the active state.
 const SCREEN_PARENT = { packet: "library" };
@@ -1105,6 +1119,7 @@ export default function App() {
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "equipment" && <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "myequipment" && <MyEquipment S={S} meId={myMemberId} notify={notify} />}
+          {screen === "stationhours" && <StationHours S={S} dept={dept} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -8042,6 +8057,112 @@ function MyEquipment({ S, meId, notify }) {
           notify={notify}
           onClose={() => { setHandoffItems(null); exitSelMode(); load(); }}
         />
+      )}
+    </div>
+  );
+}
+/* ---------------- Station Hours — the member's own clock in / clock out ---------------- */
+// Presence is verified server-side and stored WITHOUT a position: station_check_in takes the device's
+// coordinates as ARGUMENTS, tests them against the station, and keeps only verified true/false — the
+// table has no coordinate columns. So nothing here caches, stores, or displays a location, and we
+// deliberately never show a distance. Verified / not verified is the whole story anyone ever sees.
+// No meId prop: all three functions scope to the caller internally, and station_presence has RLS with
+// no client policies, so a direct table select is denied by design — never add one here.
+function StationHours({ S, dept, notify }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const BADGE = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", background: FIRE.btnBg, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+  const [open, setOpen] = useState(null);       // the open station_presence row, or null when clocked out
+  const [ready, setReady] = useState(false);    // a read has SUCCEEDED — gates the status card
+  const [tried, setTried] = useState(false);    // a read has finished either way — stops the first-paint flash
+  const [err, setErr] = useState("");           // a failed read is NOT "clocked out"; say so and keep a retry
+  const [busy, setBusy] = useState("");         // "" | "in" | "out"
+  const [geoNote, setGeoNote] = useState("");   // location refused/unavailable — the punch still lands, just unverified
+  const [now, setNow] = useState(() => Date.now());
+  const one = (d) => (Array.isArray(d) ? (d[0] || null) : (d || null));   // tolerate a set-returning shape
+  const load = () => {
+    supabase.rpc("my_open_station_session").then(({ data, error }) => {
+      setTried(true);
+      if (error) { setErr(error.message || "Please try again."); return; }   // keep the last-known row — a read that failed must never render as "clocked out"
+      setOpen(one(data)); setErr(""); setReady(true);
+    });
+  };
+  useEffect(() => { load(); }, []);
+  // Tick only while the clock is running — the elapsed line is the one thing here that goes stale on its own.
+  useEffect(() => { if (!open) return; const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, [open]);
+  const spanText = (a, b) => {
+    const ms = (b ? new Date(b).getTime() : now) - new Date(a).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "0 min";
+    const m = Math.floor(ms / 60000);
+    return m < 60 ? `${m} min` : `${Math.floor(m / 60)} hr ${m % 60} min`;
+  };
+  const fmtAt = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : `${d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} at ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`; };
+  async function clockIn() {
+    setBusy("in"); setGeoNote("");
+    let pos = null;
+    try { pos = await getPosition(); }   // best-effort BY DESIGN: refusing the prompt doesn't block the punch, it just lands unverified
+    catch (e) { setGeoNote(`${e.message} — you can still clock in, but the shift won't be verified.`); }
+    const { data, error } = await supabase.rpc("station_check_in", { p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null, p_accuracy: pos?.accuracy ?? null });
+    setBusy("");
+    if (error) { notify({ kind: "error", title: "Couldn't clock in", text: error.message || "Please try again." }); return; }
+    const row = one(data);   // already clocked in? check-in hands back the existing open row, so this stays correct
+    setOpen(row); setErr(""); setReady(true);
+    notify({ kind: "success", title: "Clocked in", text: row?.verified ? "You're on the clock at the station." : "You're on the clock — this shift isn't location-verified." });
+  }
+  async function clockOut() {
+    setBusy("out");
+    const { data, error } = await supabase.rpc("station_check_out");
+    setBusy("");
+    if (error) { notify({ kind: "error", title: "Couldn't clock out", text: error.message || "Please try again." }); load(); return; }   // reload: "not currently checked in" means our row was stale
+    const row = one(data);
+    setOpen(null); setErr(""); setGeoNote("");
+    notify({ kind: "success", title: "Clocked out", text: row?.checked_in_at ? `You were on the clock for ${spanText(row.checked_in_at, row.checked_out_at)}.` : "Your shift is closed." });
+  }
+  const stationSet = dept?.station_lat != null && dept?.station_lng != null;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION HOURS</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your time at the station</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Clock in when you get to the station, out when you leave. If your phone shares its location we check it against the station and mark the shift verified — the location itself is never stored.</div>
+      </div>
+      {!tried ? null : (
+        <>
+          {err && (
+            <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+              <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't check your clock status</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{err}</div>
+              </div>
+              <button onClick={load} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+            </div>
+          )}
+          {ready && (open ? (
+            <div style={{ ...FS.card, padding: "20px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ width: 9, height: 9, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
+                <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>On the clock</div>
+                {open.verified
+                  ? <span style={{ ...BADGE, color: FIRE.greenText, border: `1px solid ${FIRE.greenText}55` }}>Verified ✓</span>
+                  : <span style={{ ...BADGE, color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55` }}>Not verified</span>}
+              </div>
+              <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: FIRE.textPrimary, margin: "10px 0 2px", letterSpacing: "-0.01em" }}>{spanText(open.checked_in_at, open.checked_out_at)}</div>
+              <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Since {fmtAt(open.checked_in_at)}</div>
+              <button disabled={busy === "out"} onClick={clockOut} style={{ ...FS.btnPrimary, marginTop: 16, opacity: busy === "out" ? 0.7 : 1 }}>{busy === "out" ? <><Loader2 size={16} className="spin" /> Clocking out…</> : <><Clock size={16} /> Clock out</>}</button>
+            </div>
+          ) : (
+            <div style={{ ...FS.card, padding: "20px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 999, background: FIRE.textMuted2, flexShrink: 0 }} />
+                <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>Not on the clock</div>
+              </div>
+              <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 6 }}>Clock in when you arrive at the station.</div>
+              <button disabled={busy === "in"} onClick={clockIn} style={{ ...FS.btnPrimary, marginTop: 16, opacity: busy === "in" ? 0.7 : 1 }}>{busy === "in" ? <><Loader2 size={16} className="spin" /> Clocking in…</> : <><Clock size={16} /> Clock in</>}</button>
+            </div>
+          ))}
+          {geoNote && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 12, lineHeight: 1.45 }}>{geoNote}</div>}
+          {ready && !stationSet && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.45 }}>Your department hasn't set a station location yet, so shifts can't be marked verified. An admin can add it under Settings &amp; Support.</div>}
+        </>
       )}
     </div>
   );
