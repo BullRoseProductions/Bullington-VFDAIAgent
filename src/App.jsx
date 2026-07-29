@@ -706,6 +706,7 @@ const NAV = [
   { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
+  { key: "stationreport", label: "Station Hours Report", Icon: BarChart3, roles: LEADERSHIP },
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
@@ -729,7 +730,10 @@ const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
 const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
 // "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
 // so it follows library's toggle. The sidebar already treats it as library's child for the active state.
-const SCREEN_PARENT = { packet: "library" };
+// "stationreport" is the leadership view of the same timeclock data, so it rides Station Hours' toggle
+// rather than carrying one of its own — switching the module off hides both. Deliberately NOT in
+// TOGGLEABLE_MODULES: it has no independent switch on the PA Department page.
+const SCREEN_PARENT = { packet: "library", stationreport: "stationhours" };
 // Visibility only. Disabling a module hides it; it does NOT restrict the underlying data, which stays
 // governed by RLS. Never treat a toggle as a permission.
 const moduleEnabled = (key, disabled) => {
@@ -1120,6 +1124,7 @@ export default function App() {
           {screen === "equipment" && <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "myequipment" && <MyEquipment S={S} meId={myMemberId} notify={notify} />}
           {screen === "stationhours" && <StationHours S={S} dept={dept} notify={notify} />}
+          {screen === "stationreport" && <StationHoursReport S={S} dept={dept} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -6041,6 +6046,197 @@ function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
       </div>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From</span><input type="date" style={FS.input} value={range.from} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, from: e.target.value })); }} /></label>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>To</span><input type="date" style={FS.input} value={range.to} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, to: e.target.value })); }} /></label>
+    </div>
+  );
+}
+/* ---------------- Station Hours report (leadership view of the timeclock) ---------------- */
+// Ranges are computed at click time, not module load, so a session left open overnight still reports
+// against the right month. `to` is "now" for open-ended ranges — a period that hasn't finished yet.
+const RANGES = {
+  month:   () => { const n = new Date(); return { from: new Date(n.getFullYear(), n.getMonth(), 1), to: n, label: "This month" }; },
+  last:    () => { const n = new Date(); return { from: new Date(n.getFullYear(), n.getMonth() - 1, 1), to: new Date(n.getFullYear(), n.getMonth(), 1), label: "Last month" }; },
+  quarter: () => { const n = new Date(); const q = Math.floor(n.getMonth() / 3) * 3; return { from: new Date(n.getFullYear(), q, 1), to: n, label: "This quarter" }; },
+  year:    () => { const n = new Date(); return { from: new Date(n.getFullYear(), 0, 1), to: n, label: "This year" }; },
+};
+// Two reads in parallel; the per-member rollup is done here rather than in SQL so the shift log and the
+// summary are guaranteed to be the same rows. Still no coordinates anywhere — a shift carries only
+// verified true/false, and no distance is ever computed or shown.
+function StationHoursReport({ S, dept }) {
+  const [rangeKey, setRangeKey] = useState("month");
+  const [shifts, setShifts] = useState([]);
+  const [onNow, setOnNow] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [first, setFirst] = useState(true);  // ONLY the first load blanks the screen; a range switch keeps the chrome and swaps the numbers
+  const [err, setErr] = useState("");        // a failed read is not "zero hours" — never report an empty department as fact
+  const [showAll, setShowAll] = useState(false);
+  const reqRef = useRef(0);                  // newest-request wins: chips stay live during a fetch, so two fast clicks could otherwise land out of order
+  const LOG_CAP = 50;
+  function load(key) {
+    const r = RANGES[key]();
+    const my = ++reqRef.current;
+    setLoaded(false); setErr("");
+    Promise.all([
+      supabase.rpc("dept_station_shifts", { p_from: r.from.toISOString(), p_to: r.to.toISOString() }),
+      supabase.rpc("dept_on_station_now"),
+    ]).then(([a, b]) => {
+      if (my !== reqRef.current) return;   // superseded by a newer range click — drop it, or the table would show the wrong period
+      setLoaded(true); setFirst(false);
+      if (a.error || b.error) { setErr((a.error || b.error).message || "Please try again."); return; }   // keep the last-known rows behind the banner
+      setShifts(Array.isArray(a.data) ? a.data : []);
+      setOnNow(Array.isArray(b.data) ? b.data : []);
+    });
+  }
+  useEffect(() => { load(rangeKey); setShowAll(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
+  // ---- client rollup from raw shift rows ----
+  const byMember = {};
+  for (const s of shifts) {
+    const m = (byMember[s.member_id] ||= { name: s.member_name, standby: 0, training: 0, vTrue: 0, n: 0 });
+    if (s.kind === "training") m.training += Number(s.hours) || 0;
+    else m.standby += Number(s.hours) || 0;      // standby is the only other surfaced kind
+    if (s.verified) m.vTrue += 1;
+    m.n += 1;
+  }
+  const rows = Object.values(byMember)
+    .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
+    .sort((x, y) => y.total - x.total);
+  const dept_standby  = rows.reduce((a, r) => a + r.standby, 0);
+  const dept_training = rows.reduce((a, r) => a + r.training, 0);
+  const dept_total    = dept_standby + dept_training;
+  const dept_n        = rows.reduce((a, r) => a + r.n, 0);
+  const dept_vtrue    = rows.reduce((a, r) => a + r.vTrue, 0);
+  const dept_vpct     = dept_n ? Math.round(100 * dept_vtrue / dept_n) : 0;
+  if (first) return null;   // first paint only — after that the chrome stays put and the figures swap under it
+  // ---- render ----
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);            // hours, always 1 decimal
+  const vColor = (p) => (p < 85 ? FIRE.amberText : FIRE.green);                      // 85% is the "mostly at the station" line
+  const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  const fmtHm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };   // NOT the module-scope fmtTime — that one parses a bare "HH:MM", this takes a full timestamp
+  const sinceText = (iso) => {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const mins = Math.floor(ms / 60000);
+    return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} hr ${mins % 60} min`;
+  };
+  const TH = { textAlign: "left", padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" };
+  const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
+  const log = showAll ? shifts : shifts.slice(0, LOG_CAP);
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION HOURS REPORT</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Who's putting in time at the station, and how much of it was verified on location.</div>
+      </div>
+      {err && (
+        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load station hours</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{err} — the figures below may be out of date.</div>
+          </div>
+          <button onClick={() => load(rangeKey)} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+        </div>
+      )}
+      {/* range chips */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+        {Object.entries(RANGES).map(([k, fn]) => {
+          const on = rangeKey === k;
+          return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
+        })}
+      </div>
+      {/* summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <Stat S={S} dark n={h1(dept_total)} label="Total station hours" />
+        <Stat S={S} dark n={h1(dept_standby)} label="Standby / duty" />
+        <Stat S={S} dark n={h1(dept_training)} label="Training" />
+        <Stat S={S} dark n={`${dept_vpct}%`} label="Verified at station" pct={dept_vpct} />
+      </div>
+      {/* on station right now */}
+      <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+        <div style={FS.kicker}>ON STATION RIGHT NOW</div>
+        {onNow.length === 0 ? (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 10 }}>No one is clocked in right now.</div>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            {onNow.map((p, i) => (
+              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === onNow.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
+                <div style={FS.rowTitle}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>Since {fmtHm(p.checked_in_at)} · {sinceText(p.checked_in_at)}</div>
+                </div>
+                <div style={{ ...FS.rowActions, gap: 8 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{p.kind === "training" ? "Training" : "Standby"}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: p.verified ? FIRE.greenText : FIRE.amberText }}>
+                    {p.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{p.verified ? "Verified" : "Not verified"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {/* hours by member */}
+      <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>HOURS BY MEMBER</div>
+        {rows.length === 0 ? (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
+        ) : (
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Total</th><th style={{ ...TH, textAlign: "right" }}>Verified</th></tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name || "—"}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(r.total)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: vColor(r.vpct), fontWeight: 700 }}>{r.vpct}%</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+                <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_standby)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_training)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_total)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: vColor(dept_vpct) }}>{dept_vpct}%</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </div>
+      {/* shift log */}
+      <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
+        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFT LOG</div>
+        {shifts.length === 0 ? (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No shifts in this range.</div>
+        ) : (<>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th><th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
+            <tbody>
+              {log.map((s, i) => (
+                <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={TD}>{fmtDate(s.checked_in_at)}</td>
+                  <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{s.member_name || "—"}</td>
+                  <td style={TD}>{fmtHm(s.checked_in_at)}</td>
+                  <td style={TD}>{s.checked_out_at ? fmtHm(s.checked_out_at) : <span style={{ color: FIRE.greenText, fontWeight: 600 }}>Open</span>}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(s.hours)}</td>
+                  <td style={TD}>{s.kind === "training" ? "Training" : "Standby"}</td>
+                  <td style={{ ...TD, color: s.verified ? FIRE.greenText : FIRE.amberText, fontWeight: 600 }}>{s.verified ? "✓" : "⚠"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {shifts.length > LOG_CAP && (
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "10px 12px 4px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              {showAll
+                ? <>Showing all {shifts.length} shifts. <button onClick={() => setShowAll(false)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show first {LOG_CAP}</button></>
+                : <>Showing {LOG_CAP} of {shifts.length} shifts — {shifts.length - LOG_CAP} more not displayed. <button onClick={() => setShowAll(true)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show all</button></>}
+            </div>
+          )}
+        </>)}
+      </div>
     </div>
   );
 }
