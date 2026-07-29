@@ -706,7 +706,6 @@ const NAV = [
   { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
-  { key: "stationreport", label: "Station Hours Report", Icon: BarChart3, roles: LEADERSHIP },
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
@@ -730,10 +729,7 @@ const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
 const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
 // "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
 // so it follows library's toggle. The sidebar already treats it as library's child for the active state.
-// "stationreport" is the leadership view of the same timeclock data, so it rides Station Hours' toggle
-// rather than carrying one of its own — switching the module off hides both. Deliberately NOT in
-// TOGGLEABLE_MODULES: it has no independent switch on the PA Department page.
-const SCREEN_PARENT = { packet: "library", stationreport: "stationhours" };
+const SCREEN_PARENT = { packet: "library" };
 // Visibility only. Disabling a module hides it; it does NOT restrict the underlying data, which stays
 // governed by RLS. Never treat a toggle as a permission.
 const moduleEnabled = (key, disabled) => {
@@ -1124,7 +1120,6 @@ export default function App() {
           {screen === "equipment" && <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "myequipment" && <MyEquipment S={S} meId={myMemberId} notify={notify} />}
           {screen === "stationhours" && <StationHours S={S} dept={dept} notify={notify} />}
-          {screen === "stationreport" && <StationHoursReport S={S} dept={dept} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -5976,6 +5971,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
   if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
+  if (view === "stationhours") return <StationHoursReport S={S} dept={dept} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -6014,6 +6010,19 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
             <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
           </div>
         </div>
+        {/* hidden for a department that's switched the Station Hours module off — the report is that module's data */}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && (
+          <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("stationhours")}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <Clock size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Station Hours</div></div>
+            </div>
+            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Verified standby and training hours by member — for ISO, LOSAP, and staffing.</div>
+            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -6061,7 +6070,7 @@ const RANGES = {
 // Two reads in parallel; the per-member rollup is done here rather than in SQL so the shift log and the
 // summary are guaranteed to be the same rows. Still no coordinates anywhere — a shift carries only
 // verified true/false, and no distance is ever computed or shown.
-function StationHoursReport({ S, dept }) {
+function StationHoursReport({ S, dept, back }) {
   const [rangeKey, setRangeKey] = useState("month");
   const [shifts, setShifts] = useState([]);
   const [onNow, setOnNow] = useState([]);
@@ -6123,6 +6132,7 @@ function StationHoursReport({ S, dept }) {
   const log = showAll ? shifts : shifts.slice(0, LOG_CAP);
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>STATION HOURS REPORT</div>
         <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
