@@ -224,7 +224,7 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
     const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city, station_lat: lat, station_lng: lng, station_radius_m: radius ?? 150 }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable; radius is NOT NULL → blank falls back to the 150 m default
     setSaving(false);
     if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked (non-DA) → error, never a false "Saved"
-    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city, station_lat: lat, station_lng: lng, station_radius_m: radius }));   // sync sidebar crest + this form's source
+    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city, station_lat: lat, station_lng: lng, station_radius_m: radius ?? 150 }));   // sync sidebar crest + this form's source; same ?? 150 as the update, so a cleared radius shows 150 without a reload
     setBrand?.((b) => ({ ...b, name: form.name, station: form.station }));       // keep Brand Kit's name/station consistent
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
