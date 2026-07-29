@@ -5971,6 +5971,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
   if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
+  if (view === "stationhours") return <StationHoursReport S={S} dept={dept} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -6009,6 +6010,19 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
             <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
           </div>
         </div>
+        {/* hidden for a department that's switched the Station Hours module off — the report is that module's data */}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && (
+          <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("stationhours")}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <Clock size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Station Hours</div></div>
+            </div>
+            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Verified standby and training hours by member — for ISO, LOSAP, and staffing.</div>
+            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -6041,6 +6055,198 @@ function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
       </div>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From</span><input type="date" style={FS.input} value={range.from} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, from: e.target.value })); }} /></label>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>To</span><input type="date" style={FS.input} value={range.to} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, to: e.target.value })); }} /></label>
+    </div>
+  );
+}
+/* ---------------- Station Hours report (leadership view of the timeclock) ---------------- */
+// Ranges are computed at click time, not module load, so a session left open overnight still reports
+// against the right month. `to` is "now" for open-ended ranges — a period that hasn't finished yet.
+const RANGES = {
+  month:   () => { const n = new Date(); return { from: new Date(n.getFullYear(), n.getMonth(), 1), to: n, label: "This month" }; },
+  last:    () => { const n = new Date(); return { from: new Date(n.getFullYear(), n.getMonth() - 1, 1), to: new Date(n.getFullYear(), n.getMonth(), 1), label: "Last month" }; },
+  quarter: () => { const n = new Date(); const q = Math.floor(n.getMonth() / 3) * 3; return { from: new Date(n.getFullYear(), q, 1), to: n, label: "This quarter" }; },
+  year:    () => { const n = new Date(); return { from: new Date(n.getFullYear(), 0, 1), to: n, label: "This year" }; },
+};
+// Two reads in parallel; the per-member rollup is done here rather than in SQL so the shift log and the
+// summary are guaranteed to be the same rows. Still no coordinates anywhere — a shift carries only
+// verified true/false, and no distance is ever computed or shown.
+function StationHoursReport({ S, dept, back }) {
+  const [rangeKey, setRangeKey] = useState("month");
+  const [shifts, setShifts] = useState([]);
+  const [onNow, setOnNow] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [first, setFirst] = useState(true);  // ONLY the first load blanks the screen; a range switch keeps the chrome and swaps the numbers
+  const [err, setErr] = useState("");        // a failed read is not "zero hours" — never report an empty department as fact
+  const [showAll, setShowAll] = useState(false);
+  const reqRef = useRef(0);                  // newest-request wins: chips stay live during a fetch, so two fast clicks could otherwise land out of order
+  const LOG_CAP = 50;
+  function load(key) {
+    const r = RANGES[key]();
+    const my = ++reqRef.current;
+    setLoaded(false); setErr("");
+    Promise.all([
+      supabase.rpc("dept_station_shifts", { p_from: r.from.toISOString(), p_to: r.to.toISOString() }),
+      supabase.rpc("dept_on_station_now"),
+    ]).then(([a, b]) => {
+      if (my !== reqRef.current) return;   // superseded by a newer range click — drop it, or the table would show the wrong period
+      setLoaded(true); setFirst(false);
+      if (a.error || b.error) { setErr((a.error || b.error).message || "Please try again."); return; }   // keep the last-known rows behind the banner
+      setShifts(Array.isArray(a.data) ? a.data : []);
+      setOnNow(Array.isArray(b.data) ? b.data : []);
+    });
+  }
+  useEffect(() => { load(rangeKey); setShowAll(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
+  // ---- client rollup from raw shift rows ----
+  const byMember = {};
+  for (const s of shifts) {
+    const m = (byMember[s.member_id] ||= { name: s.member_name, standby: 0, training: 0, vTrue: 0, n: 0 });
+    if (s.kind === "training") m.training += Number(s.hours) || 0;
+    else m.standby += Number(s.hours) || 0;      // standby is the only other surfaced kind
+    if (s.verified) m.vTrue += 1;
+    m.n += 1;
+  }
+  const rows = Object.values(byMember)
+    .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
+    .sort((x, y) => y.total - x.total);
+  const dept_standby  = rows.reduce((a, r) => a + r.standby, 0);
+  const dept_training = rows.reduce((a, r) => a + r.training, 0);
+  const dept_total    = dept_standby + dept_training;
+  const dept_n        = rows.reduce((a, r) => a + r.n, 0);
+  const dept_vtrue    = rows.reduce((a, r) => a + r.vTrue, 0);
+  const dept_vpct     = dept_n ? Math.round(100 * dept_vtrue / dept_n) : 0;
+  if (first) return null;   // first paint only — after that the chrome stays put and the figures swap under it
+  // ---- render ----
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);            // hours, always 1 decimal
+  const vColor = (p) => (p < 85 ? FIRE.amberText : FIRE.green);                      // 85% is the "mostly at the station" line
+  const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  const fmtHm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };   // NOT the module-scope fmtTime — that one parses a bare "HH:MM", this takes a full timestamp
+  const sinceText = (iso) => {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const mins = Math.floor(ms / 60000);
+    return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} hr ${mins % 60} min`;
+  };
+  const TH = { textAlign: "left", padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" };
+  const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
+  const log = showAll ? shifts : shifts.slice(0, LOG_CAP);
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>STATION HOURS REPORT</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Who's putting in time at the station, and how much of it was verified on location.</div>
+      </div>
+      {err && (
+        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load station hours</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{err} — the figures below may be out of date.</div>
+          </div>
+          <button onClick={() => load(rangeKey)} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+        </div>
+      )}
+      {/* range chips */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+        {Object.entries(RANGES).map(([k, fn]) => {
+          const on = rangeKey === k;
+          return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
+        })}
+      </div>
+      {/* summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <Stat S={S} dark n={h1(dept_total)} label="Total station hours" />
+        <Stat S={S} dark n={h1(dept_standby)} label="Standby / duty" />
+        <Stat S={S} dark n={h1(dept_training)} label="Training" />
+        <Stat S={S} dark n={`${dept_vpct}%`} label="Verified at station" pct={dept_vpct} />
+      </div>
+      {/* on station right now */}
+      <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+        <div style={FS.kicker}>ON STATION RIGHT NOW</div>
+        {onNow.length === 0 ? (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 10 }}>No one is clocked in right now.</div>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            {onNow.map((p, i) => (
+              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === onNow.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
+                <div style={FS.rowTitle}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>Since {fmtHm(p.checked_in_at)} · {sinceText(p.checked_in_at)}</div>
+                </div>
+                <div style={{ ...FS.rowActions, gap: 8 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{p.kind === "training" ? "Training" : "Standby"}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: p.verified ? FIRE.greenText : FIRE.amberText }}>
+                    {p.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{p.verified ? "Verified" : "Not verified"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {/* hours by member */}
+      <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>HOURS BY MEMBER</div>
+        {rows.length === 0 ? (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
+        ) : (
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Total</th><th style={{ ...TH, textAlign: "right" }}>Verified</th></tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name || "—"}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(r.total)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: vColor(r.vpct), fontWeight: 700 }}>{r.vpct}%</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+                <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_standby)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_training)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_total)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: vColor(dept_vpct) }}>{dept_vpct}%</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </div>
+      {/* shift log */}
+      <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
+        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFT LOG</div>
+        {shifts.length === 0 ? (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No shifts in this range.</div>
+        ) : (<>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th><th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
+            <tbody>
+              {log.map((s, i) => (
+                <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={TD}>{fmtDate(s.checked_in_at)}</td>
+                  <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{s.member_name || "—"}</td>
+                  <td style={TD}>{fmtHm(s.checked_in_at)}</td>
+                  <td style={TD}>{s.checked_out_at ? fmtHm(s.checked_out_at) : <span style={{ color: FIRE.greenText, fontWeight: 600 }}>Open</span>}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(s.hours)}</td>
+                  <td style={TD}>{s.kind === "training" ? "Training" : "Standby"}</td>
+                  <td style={{ ...TD, color: s.verified ? FIRE.greenText : FIRE.amberText, fontWeight: 600 }}>{s.verified ? "✓" : "⚠"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {shifts.length > LOG_CAP && (
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "10px 12px 4px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              {showAll
+                ? <>Showing all {shifts.length} shifts. <button onClick={() => setShowAll(false)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show first {LOG_CAP}</button></>
+                : <>Showing {LOG_CAP} of {shifts.length} shifts — {shifts.length - LOG_CAP} more not displayed. <button onClick={() => setShowAll(true)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show all</button></>}
+            </div>
+          )}
+        </>)}
+      </div>
     </div>
   );
 }
@@ -8118,6 +8324,13 @@ function StationHours({ S, dept, notify }) {
   const [busy, setBusy] = useState("");         // "" | "in" | "out"
   const [geoNote, setGeoNote] = useState("");   // location refused/unavailable — the punch still lands, just unverified
   const [now, setNow] = useState(() => Date.now());
+  // ---- my hours (own state, own fetch — my_station_shifts scopes to the caller like the other three) ----
+  const [rangeKey, setRangeKey] = useState("month");
+  const [myShifts, setMyShifts] = useState([]);
+  const [hoursLoaded, setHoursLoaded] = useState(false);
+  const [hoursFailed, setHoursFailed] = useState(false);
+  const [showAllHours, setShowAllHours] = useState(false);
+  const MY_LOG_CAP = 50;   // same cap as the leadership report — a year of daily standby is a lot of rows on a phone
   const one = (d) => (Array.isArray(d) ? (d[0] || null) : (d || null));   // tolerate a set-returning shape
   const load = () => {
     supabase.rpc("my_open_station_session").then(({ data, error }) => {
@@ -8126,7 +8339,18 @@ function StationHours({ S, dept, notify }) {
       setOpen(one(data)); setErr(""); setReady(true);
     });
   };
+  function loadHours(key) {
+    const r = RANGES[key]();   // the same module-scope ranges the leadership report uses, so the two agree on what "this month" means
+    setHoursLoaded(false); setHoursFailed(false);
+    supabase.rpc("my_station_shifts", { p_from: r.from.toISOString(), p_to: r.to.toISOString() })
+      .then(({ data, error }) => {
+        if (error) { setHoursFailed(true); setHoursLoaded(true); return; }   // don't render zeros as truth
+        setMyShifts(Array.isArray(data) ? data : []);
+        setHoursLoaded(true);
+      });
+  }
   useEffect(() => { load(); }, []);
+  useEffect(() => { loadHours(rangeKey); setShowAllHours(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
   // Tick only while the clock is running — the elapsed line is the one thing here that goes stale on its own.
   useEffect(() => { if (!open) return; const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, [open]);
   const spanText = (a, b) => {
@@ -8146,6 +8370,7 @@ function StationHours({ S, dept, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't clock in", text: error.message || "Please try again." }); return; }
     const row = one(data);   // already clocked in? check-in hands back the existing open row, so this stays correct
     setOpen(row); setErr(""); setReady(true);
+    loadHours(rangeKey);   // a punch changes the shift set — refetch so the list below can't disagree with the clock above
     notify({ kind: "success", title: "Clocked in", text: row?.verified ? "You're on the clock at the station." : "You're on the clock — this shift isn't location-verified." });
   }
   async function clockOut() {
@@ -8155,9 +8380,17 @@ function StationHours({ S, dept, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't clock out", text: error.message || "Please try again." }); load(); return; }   // reload: "not currently checked in" means our row was stale
     const row = one(data);
     setOpen(null); setErr(""); setGeoNote("");
+    loadHours(rangeKey);   // the shift just closed and gained its hours — refetch rather than patch locally
     notify({ kind: "success", title: "Clocked out", text: row?.checked_in_at ? `You were on the clock for ${spanText(row.checked_in_at, row.checked_out_at)}.` : "Your shift is closed." });
   }
   const stationSet = dept?.station_lat != null && dept?.station_lng != null;
+  // rollup (same math as the leadership report, just the caller's rows)
+  const myStandby  = myShifts.filter((s) => s.kind !== "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  const myTraining = myShifts.filter((s) => s.kind === "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  const myTotal    = myStandby + myTraining;
+  const h1n = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);   // hours, 1 decimal — matches the report
+  const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  const fmtHm2 = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -8202,6 +8435,61 @@ function StationHours({ S, dept, notify }) {
           ))}
           {geoNote && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 12, lineHeight: 1.45 }}>{geoNote}</div>}
           {ready && !stationSet && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.45 }}>Your department hasn't set a station location yet, so shifts can't be marked verified. An admin can add it under Settings &amp; Support.</div>}
+          {/* ---- my hours ---- chips stay put while a range reloads; only the figures below are gated on the read */}
+          <div style={{ ...FS.card, padding: 18, marginTop: 14 }}>
+            <div style={FS.kicker}>MY HOURS</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "10px 0 12px" }}>
+              {Object.entries(RANGES).map(([k, fn]) => {
+                const on = rangeKey === k;
+                return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
+              })}
+            </div>
+            {hoursFailed ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 160, fontSize: 12.5, color: FIRE.textMuted }}>Couldn't load your hours.</span>
+                <button onClick={() => loadHours(rangeKey)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><RefreshCw size={13} color={FIRE.btnIcon} /> Try again</button>
+              </div>
+            ) : !hoursLoaded ? null : (<>
+              <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "baseline" }}>
+                <div>
+                  <div style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, letterSpacing: "-0.01em", ...FS.num }}>{h1n(myTotal)}</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginTop: 1 }}>Total hours</div>
+                </div>
+                <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+                  <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myStandby)}</span> standby / duty</div>
+                  <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myTraining)}</span> training</div>
+                </div>
+              </div>
+              {myShifts.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12 }}>No shifts in this range.</div>
+              ) : (
+                <div style={{ marginTop: 12 }}>
+                  {(showAllHours ? myShifts : myShifts.slice(0, MY_LOG_CAP)).map((s, i, shown) => (
+                    <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, padding: "9px 2px" }}>
+                      <div style={FS.rowTitle}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{fmtDay(s.checked_in_at)}</div>
+                        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}</div>
+                      </div>
+                      <div style={{ ...FS.rowActions, gap: 10 }}>
+                        <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(s.hours)} h</span>
+                        <span title={s.verified ? "Verified at the station" : "Not location-verified"} style={{ display: "inline-flex", color: s.verified ? FIRE.greenText : FIRE.amberText }}>
+                          {s.verified ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {myShifts.length > MY_LOG_CAP && (
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {showAllHours
+                        ? <>Showing all {myShifts.length} shifts. <button onClick={() => setShowAllHours(false)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show first {MY_LOG_CAP}</button></>
+                        : <>Showing {MY_LOG_CAP} of {myShifts.length} shifts — {myShifts.length - MY_LOG_CAP} more not displayed. <button onClick={() => setShowAllHours(true)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show all</button></>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>)}
+          </div>
         </>
       )}
     </div>
