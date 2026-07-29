@@ -8324,6 +8324,13 @@ function StationHours({ S, dept, notify }) {
   const [busy, setBusy] = useState("");         // "" | "in" | "out"
   const [geoNote, setGeoNote] = useState("");   // location refused/unavailable — the punch still lands, just unverified
   const [now, setNow] = useState(() => Date.now());
+  // ---- my hours (own state, own fetch — my_station_shifts scopes to the caller like the other three) ----
+  const [rangeKey, setRangeKey] = useState("month");
+  const [myShifts, setMyShifts] = useState([]);
+  const [hoursLoaded, setHoursLoaded] = useState(false);
+  const [hoursFailed, setHoursFailed] = useState(false);
+  const [showAllHours, setShowAllHours] = useState(false);
+  const MY_LOG_CAP = 50;   // same cap as the leadership report — a year of daily standby is a lot of rows on a phone
   const one = (d) => (Array.isArray(d) ? (d[0] || null) : (d || null));   // tolerate a set-returning shape
   const load = () => {
     supabase.rpc("my_open_station_session").then(({ data, error }) => {
@@ -8332,7 +8339,18 @@ function StationHours({ S, dept, notify }) {
       setOpen(one(data)); setErr(""); setReady(true);
     });
   };
+  function loadHours(key) {
+    const r = RANGES[key]();   // the same module-scope ranges the leadership report uses, so the two agree on what "this month" means
+    setHoursLoaded(false); setHoursFailed(false);
+    supabase.rpc("my_station_shifts", { p_from: r.from.toISOString(), p_to: r.to.toISOString() })
+      .then(({ data, error }) => {
+        if (error) { setHoursFailed(true); setHoursLoaded(true); return; }   // don't render zeros as truth
+        setMyShifts(Array.isArray(data) ? data : []);
+        setHoursLoaded(true);
+      });
+  }
   useEffect(() => { load(); }, []);
+  useEffect(() => { loadHours(rangeKey); setShowAllHours(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
   // Tick only while the clock is running — the elapsed line is the one thing here that goes stale on its own.
   useEffect(() => { if (!open) return; const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, [open]);
   const spanText = (a, b) => {
@@ -8352,6 +8370,7 @@ function StationHours({ S, dept, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't clock in", text: error.message || "Please try again." }); return; }
     const row = one(data);   // already clocked in? check-in hands back the existing open row, so this stays correct
     setOpen(row); setErr(""); setReady(true);
+    loadHours(rangeKey);   // a punch changes the shift set — refetch so the list below can't disagree with the clock above
     notify({ kind: "success", title: "Clocked in", text: row?.verified ? "You're on the clock at the station." : "You're on the clock — this shift isn't location-verified." });
   }
   async function clockOut() {
@@ -8361,9 +8380,17 @@ function StationHours({ S, dept, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't clock out", text: error.message || "Please try again." }); load(); return; }   // reload: "not currently checked in" means our row was stale
     const row = one(data);
     setOpen(null); setErr(""); setGeoNote("");
+    loadHours(rangeKey);   // the shift just closed and gained its hours — refetch rather than patch locally
     notify({ kind: "success", title: "Clocked out", text: row?.checked_in_at ? `You were on the clock for ${spanText(row.checked_in_at, row.checked_out_at)}.` : "Your shift is closed." });
   }
   const stationSet = dept?.station_lat != null && dept?.station_lng != null;
+  // rollup (same math as the leadership report, just the caller's rows)
+  const myStandby  = myShifts.filter((s) => s.kind !== "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  const myTraining = myShifts.filter((s) => s.kind === "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  const myTotal    = myStandby + myTraining;
+  const h1n = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);   // hours, 1 decimal — matches the report
+  const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  const fmtHm2 = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -8408,6 +8435,61 @@ function StationHours({ S, dept, notify }) {
           ))}
           {geoNote && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 12, lineHeight: 1.45 }}>{geoNote}</div>}
           {ready && !stationSet && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.45 }}>Your department hasn't set a station location yet, so shifts can't be marked verified. An admin can add it under Settings &amp; Support.</div>}
+          {/* ---- my hours ---- chips stay put while a range reloads; only the figures below are gated on the read */}
+          <div style={{ ...FS.card, padding: 18, marginTop: 14 }}>
+            <div style={FS.kicker}>MY HOURS</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "10px 0 12px" }}>
+              {Object.entries(RANGES).map(([k, fn]) => {
+                const on = rangeKey === k;
+                return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
+              })}
+            </div>
+            {hoursFailed ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 160, fontSize: 12.5, color: FIRE.textMuted }}>Couldn't load your hours.</span>
+                <button onClick={() => loadHours(rangeKey)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><RefreshCw size={13} color={FIRE.btnIcon} /> Try again</button>
+              </div>
+            ) : !hoursLoaded ? null : (<>
+              <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "baseline" }}>
+                <div>
+                  <div style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, letterSpacing: "-0.01em", ...FS.num }}>{h1n(myTotal)}</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginTop: 1 }}>Total hours</div>
+                </div>
+                <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+                  <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myStandby)}</span> standby / duty</div>
+                  <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myTraining)}</span> training</div>
+                </div>
+              </div>
+              {myShifts.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12 }}>No shifts in this range.</div>
+              ) : (
+                <div style={{ marginTop: 12 }}>
+                  {(showAllHours ? myShifts : myShifts.slice(0, MY_LOG_CAP)).map((s, i, shown) => (
+                    <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, padding: "9px 2px" }}>
+                      <div style={FS.rowTitle}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{fmtDay(s.checked_in_at)}</div>
+                        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}</div>
+                      </div>
+                      <div style={{ ...FS.rowActions, gap: 10 }}>
+                        <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(s.hours)} h</span>
+                        <span title={s.verified ? "Verified at the station" : "Not location-verified"} style={{ display: "inline-flex", color: s.verified ? FIRE.greenText : FIRE.amberText }}>
+                          {s.verified ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {myShifts.length > MY_LOG_CAP && (
+                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {showAllHours
+                        ? <>Showing all {myShifts.length} shifts. <button onClick={() => setShowAllHours(false)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show first {MY_LOG_CAP}</button></>
+                        : <>Showing {MY_LOG_CAP} of {myShifts.length} shifts — {myShifts.length - MY_LOG_CAP} more not displayed. <button onClick={() => setShowAllHours(true)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show all</button></>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>)}
+          </div>
         </>
       )}
     </div>
