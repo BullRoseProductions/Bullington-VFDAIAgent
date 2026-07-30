@@ -10,7 +10,7 @@ import {
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
 } from "lucide-react";
-import { downloadDepartmentReport } from "./report.js";
+import { downloadDepartmentReport, downloadCapitalPlan } from "./report.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -5972,6 +5972,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
   if (view === "stationhours") return <StationHoursReport S={S} dept={dept} back={() => setView(null)} />;
+  if (view === "capital") return <CapitalPlanReport S={S} dept={dept} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -6023,6 +6024,19 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
             </div>
           </div>
         )}
+        {/* hidden for a department that's switched the Apparatus module off — the plan is that module's data */}
+        {moduleEnabled("apparatus", dept?.disabled_modules) && (
+          <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("capital")}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <Truck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Capital Replacement Plan</div></div>
+            </div>
+            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>What the fleet cost and when each unit comes due — the forecast a chief hands the selectboard.</div>
+            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -6058,6 +6072,138 @@ function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
     </div>
   );
 }
+/* ---------------- Capital Replacement Plan (leadership) ---------------- */
+// Self-fetching for the same reason CertProposals is: the Apparatus screen keeps its rig list in its OWN
+// component state, so there is no App-level list to thread in. Same `apparatus` table, same department
+// RLS, no new RPC — this just reads the four capital columns alongside name/type.
+function CapitalPlanReport({ S, dept, back }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const [rigs, setRigs] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState("");   // a failed read is not "no capital plan" — never show an empty plan as fact
+  const load = () => {
+    setErr("");
+    supabase.from("apparatus").select("id, name, type, purchase_year, purchase_cost, replace_year, replace_cost").order("name", { ascending: true })
+      .then(({ data, error }) => {
+        setLoaded(true);
+        if (error) { setErr(error.message || "Please try again."); return; }
+        setRigs((data || []).map((r) => ({ id: r.id, name: r.name, type: r.type, purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null, replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null })));
+      });
+  };
+  useEffect(() => { load(); }, []);
+  const money = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
+  // Planned = has a replacement year. Everything else falls to "Not yet planned" — including rigs with no
+  // capital data at all, because an unplanned rig is exactly what leadership needs to see.
+  const planned = rigs.filter((r) => r.replaceYear != null);
+  const unplanned = rigs.filter((r) => r.replaceYear == null);
+  const groups = [...new Set(planned.map((r) => r.replaceYear))].sort((a, b) => a - b).map((year) => {
+    const rows = planned.filter((r) => r.replaceYear === year).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return { year, rows, subtotal: rows.reduce((a, r) => a + (Number(r.replaceCost) || 0), 0) };
+  });
+  const grandTotal = groups.reduce((a, g) => a + g.subtotal, 0);
+  const anyCost = planned.some((r) => r.replaceCost != null);
+  const TH = { textAlign: "left", padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" };
+  const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
+      <div style={{ marginBottom: 16, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={FS.kicker}>CAPITAL REPLACEMENT PLAN</div>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
+          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>What the fleet cost, when each unit is due for replacement, and what that adds up to by year.</div>
+        </div>
+        {loaded && !err && (planned.length > 0 || unplanned.length > 0) && (
+          <button style={FS.btn} onClick={() => downloadCapitalPlan({ deptName: dept?.name || "Department", station: dept?.station || "", groups, unplanned, grandTotal })}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
+        )}
+      </div>
+      {err && (
+        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load the apparatus list</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{err}</div>
+          </div>
+          <button onClick={load} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+        </div>
+      )}
+      {!loaded || err ? null : rigs.length === 0 ? (
+        <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+          <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
+          <div>No apparatus on record yet.</div>
+        </div>
+      ) : (<>
+        {/* forecast */}
+        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>FORECAST BY YEAR</div>
+          {groups.length === 0 ? (
+            <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No apparatus has a planned replacement year yet. Add one from the Apparatus page.</div>
+          ) : (<>
+            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+              <thead><tr><th style={TH}>Year</th><th style={{ ...TH, textAlign: "right" }}>Units</th><th style={{ ...TH, textAlign: "right" }}>Estimated cost</th></tr></thead>
+              <tbody>
+                {groups.map((g) => (
+                  <tr key={g.year} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                    <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary, ...FS.num }}>{g.year}</td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{g.rows.length}</td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+                  <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Total</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{planned.length}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{money(grandTotal)}</td>
+                </tr>
+              </tbody>
+            </table>
+            {!anyCost && <div style={{ fontSize: 11.5, color: FIRE.amberText, padding: "8px 12px 4px" }}>No estimated replacement costs recorded yet — the totals above are $0 until those are filled in.</div>}
+          </>)}
+        </div>
+        {/* per-year detail */}
+        {groups.map((g) => (
+          <div key={g.year} style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+            <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>{g.year} — {money(g.subtotal)}</div>
+            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+              <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={{ ...TH, textAlign: "right" }}>Est. replacement</th></tr></thead>
+              <tbody>
+                {g.rows.map((r) => (
+                  <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                    <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</td>
+                    <td style={TD}>{r.type || "—"}</td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{money(r.purchaseCost)}</td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(r.replaceCost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+        {/* not yet planned */}
+        {unplanned.length > 0 && (
+          <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
+            <div style={{ ...FS.kicker, padding: "10px 12px 4px", color: FIRE.textMuted2 }}>NOT YET PLANNED</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "0 12px 6px" }}>No planned replacement year on record.</div>
+            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+              <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th></tr></thead>
+              <tbody>
+                {unplanned.map((r) => (
+                  <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                    <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</td>
+                    <td style={TD}>{r.type || "—"}</td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{money(r.purchaseCost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
 /* ---------------- Station Hours report (leadership view of the timeclock) ---------------- */
 // Ranges are computed at click time, not module load, so a session left open overnight still reports
 // against the right month. `to` is "now" for open-ended ranges — a period that hasn't finished yet.
@@ -6486,6 +6632,30 @@ function ActionItemsReport({ S, members, back }) {
 
 /* ---------------- Apparatus ---------------- */
 const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "Ladder / Aerial", "Squad", "Command", "Ambulance", "Other"];
+// Capital-planning inputs, shared by the apparatus add form and the inline edit row. Every field is
+// optional — a department that doesn't track this leaves them blank and nothing is written. Plain
+// numbers on input (currency formatting is for display only); DA/Officer gate comes from the caller,
+// since both mount points already sit behind canManage.
+function CapitalFields({ S, v, set }) {
+  const f = (label, key, ph) => (
+    <label style={{ ...S.field, flex: 1, minWidth: 128 }}>
+      <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
+      <input style={FS.input} value={v[key] ?? ""} placeholder={ph} inputMode="numeric" onChange={(e) => set(key, e.target.value)} />
+    </label>
+  );
+  return (
+    <div style={{ flexBasis: "100%", borderTop: `0.5px solid ${FIRE.hairline}`, marginTop: 4, paddingTop: 10 }}>
+      <div style={{ ...FS.kicker, marginBottom: 2 }}>CAPITAL PLANNING (OPTIONAL)</div>
+      <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 6 }}>What it cost and when it's due to be replaced — feeds the Capital Replacement Plan report.</div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        {f("Purchase year", "purchaseYear", "e.g. 2014")}
+        {f("Purchase cost", "purchaseCost", "e.g. 350000")}
+        {f("Planned replacement year", "replaceYear", "e.g. 2034")}
+        {f("Est. replacement cost", "replaceCost", "e.g. 750000")}
+      </div>
+    </div>
+  );
+}
 function Apparatus({ S, role, members, meId, notify }) {
   const [rigs, setRigs] = useState([]);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
@@ -6524,18 +6694,33 @@ function Apparatus({ S, role, members, meId, notify }) {
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
   const [svc, setSvc] = useState("In service"); const [svcReason, setSvcReason] = useState("");   // initial availability on create
   const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
-  const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper" });
+  const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper", purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" });
+  const [cap, setCap] = useState({ purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" });   // add-form capital fields
+  // Blank → null (never 0, never NaN); anything non-numeric → NaN so the caller can refuse the save.
+  // Costs accept "$180,000" style input — strip the formatting rather than reject it.
+  const capNum = (v) => { const s = String(v ?? "").replace(/[$,\s]/g, "").trim(); return s === "" ? null : (Number.isFinite(Number(s)) ? Number(s) : NaN); };
+  // Returns the payload, or null after notifying — years sane, costs non-negative.
+  function capPayload(src) {
+    const py = capNum(src.purchaseYear), pc = capNum(src.purchaseCost), ry = capNum(src.replaceYear), rc = capNum(src.replaceCost);
+    const badYear = (v) => v !== null && (Number.isNaN(v) || v < 1900 || v > 2200 || !Number.isInteger(v));
+    const badCost = (v) => v !== null && (Number.isNaN(v) || v < 0);
+    if (badYear(py) || badYear(ry)) { notify({ kind: "error", title: "Check the years", text: "Purchase and replacement year should be a whole year like 2018." }); return null; }
+    if (badCost(pc) || badCost(rc)) { notify({ kind: "error", title: "Check the costs", text: "Costs should be a number — leave blank if you don't have it." }); return null; }
+    return { purchase_year: py, purchase_cost: pc, replace_year: ry, replace_cost: rc };
+  }
+  const fmtMoney = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
   const [editMode, setEditMode] = useState(false);   // false = clean cards; true = reveal Add + per-rig Edit/Remove. Service/Start-Check stay at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingRigId(null); setAdding(false); } return !v; }); }
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const loadRigs = () => {
     supabase.from("apparatus")
-      .select("id, name, type, status, note, last_check_at, checked_by, in_service")
+      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, replace_year, replace_cost")
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
         if (error || !data) return;
         setRigs(data.map((r) => ({
           id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false,
+          purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null, replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
           lastCheck: r.last_check_at ? new Date(r.last_check_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
           by: r.checked_by ? (nameById.get(r.checked_by) || "A member") : "—",
         })));
@@ -6546,10 +6731,12 @@ function Apparatus({ S, role, members, meId, notify }) {
   const ready = inServiceRigs.filter((r) => r.status === "Pass").length;
   const flagged = inServiceRigs.filter((r) => r.status !== "Pass").length;   // computed directly on in-service rigs, NOT total − ready
   const outOfServiceCount = rigs.length - inServiceRigs.length;
-  function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper" }); }
+  function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper", purchaseYear: r.purchaseYear ?? "", purchaseCost: r.purchaseCost ?? "", replaceYear: r.replaceYear ?? "", replaceCost: r.replaceCost ?? "" }); }
   async function saveEditRig(id) {
     if (!rigBuf.name.trim()) return;
-    const { data, error } = await supabase.from("apparatus").update({ name: rigBuf.name.trim(), type: rigBuf.type }).eq("id", id).select();
+    const capital = capPayload(rigBuf);
+    if (!capital) return;   // validation already notified — don't half-save
+    const { data, error } = await supabase.from("apparatus").update({ name: rigBuf.name.trim(), type: rigBuf.type, ...capital }).eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the apparatus", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS block fails loudly
     setEditingRigId(null); loadRigs();
   }
@@ -6559,13 +6746,15 @@ function Apparatus({ S, role, members, meId, notify }) {
     if (outOfService && !svcReason.trim()) { notify({ kind: "error", title: "A reason is required", text: "Say why it's being added out of service (e.g. at the shop)." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    const { data: created, error } = await supabase.from("apparatus").insert({ department_id: deptId, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null }).select("id").single();
+    const capital = capPayload(cap);
+    if (!capital) return;   // validation already notified
+    const { data: created, error } = await supabase.from("apparatus").insert({ department_id: deptId, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null, ...capital }).select("id").single();
     if (error || !created) { notify({ kind: "error", title: "Couldn't add the apparatus", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
     if (outOfService) {   // reuse the RPC so an open service period is recorded (no separate insert path)
       const { error: svcErr } = await supabase.rpc("take_apparatus_out_of_service", { p_apparatus_id: created.id, p_reason: svcReason.trim() });
       if (svcErr) { notify({ kind: "error", title: "Added, but couldn't mark out of service", text: "The rig was added in service — take it out of service from its card.", details: svcErr.message }); }
     }
-    setNm(""); setTp("Pumper"); setRd("Ready"); setSvc("In service"); setSvcReason(""); setAdding(false); loadRigs();
+    setNm(""); setTp("Pumper"); setRd("Ready"); setSvc("In service"); setSvcReason(""); setCap({ purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" }); setAdding(false); loadRigs();
   }
   async function removeRig(id, name) {
     if (!window.confirm(`Take "${name}" out of the station? This removes it from the apparatus list.`)) return;
@@ -6600,8 +6789,9 @@ function Apparatus({ S, role, members, meId, notify }) {
           <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span><select style={FS.input} value={rd} onChange={(e) => setRd(e.target.value)}><option>Ready</option><option>Needs attention</option></select></label>
           <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Service</span><select style={FS.input} value={svc} onChange={(e) => setSvc(e.target.value)}><option>In service</option><option>Out of service</option></select></label>
           {svc === "Out of service" && <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Reason (required)</span><input style={FS.input} value={svcReason} placeholder="e.g. at the shop" onChange={(e) => setSvcReason(e.target.value)} /></label>}
+          <CapitalFields S={S} v={cap} set={(k, val) => setCap((c) => ({ ...c, [k]: val }))} />
           <button style={FS.btnPrimary} onClick={addRig}><Plus size={15} /> Add to station</button>
-          <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); }}>Cancel</button>
+          <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); setCap({ purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" }); }}>Cancel</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
       {rigs.length === 0 ? (
@@ -6649,6 +6839,7 @@ function Apparatus({ S, role, members, meId, notify }) {
                 <div style={{ ...FS.card, padding: 14, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={rigBuf.name} onChange={(e) => setRigBuf((b) => ({ ...b, name: e.target.value }))} /></label>
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={rigBuf.type} onChange={(e) => setRigBuf((b) => ({ ...b, type: e.target.value }))}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
+                  <CapitalFields S={S} v={rigBuf} set={(k, val) => setRigBuf((b) => ({ ...b, [k]: val }))} />
                   <button style={FS.btnPrimary} onClick={() => saveEditRig(r.id)}><CheckCircle2 size={15} /> Save</button>
                   <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
                 </div>
