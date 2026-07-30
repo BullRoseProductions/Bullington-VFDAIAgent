@@ -5001,6 +5001,28 @@ function certStatus(exp) {
 }
 // FIRE cert-status colors for crisp dark badges — additive sibling to certStatus's light `color`; does NOT mutate it.
 const CERT_FIRE = { EXPIRED: FIRE.redText, EXPIRING: FIRE.amberText, CURRENT: FIRE.green, "NO DATE": FIRE.textMuted };
+// Gear service life: retirement = manufacture_date + service_life_years. Same vocabulary, ranks, colors,
+// and 3-month window as certStatus so one badge language reads across the app — but deliberately its OWN
+// date math. A cert's `exp` is a YYYY-MM string; manufacture_date is a real date, and collapsing the two
+// would shift a retirement by up to a month. Parsed field-by-field, not via Date(string): "2016-05-01"
+// through the string parser is UTC midnight, which is April 30 in every US timezone.
+function gearStatus(manufactureDate, serviceLifeYears) {
+  const yrs = Number(serviceLifeYears);
+  const NOT_TRACKED = { label: "NOT TRACKED", color: "#6A7178", fire: FIRE.textMuted, rank: 3, tracked: false, retire: null };
+  // Missing EITHER half means we don't know — never let an absent value read as an expired one.
+  if (!manufactureDate || !Number.isFinite(yrs) || yrs <= 0) return NOT_TRACKED;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(manufactureDate));
+  if (!m) return NOT_TRACKED;
+  const [, Y, M, D] = m.map(Number);
+  const retire = new Date(Y + yrs, M - 1, D);
+  if (isNaN(retire.getTime())) return NOT_TRACKED;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const soon = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate());   // same ≤3-month window as certStatus
+  if (retire <= today) return { label: "RETIRE", color: "#B11E2A", fire: FIRE.redText, rank: 0, tracked: true, retire };
+  if (retire <= soon)  return { label: "EXPIRING", color: "#9A6B12", fire: FIRE.amberText, rank: 1, tracked: true, retire };
+  return { label: "CURRENT", color: "#2E7D52", fire: FIRE.green, rank: 2, tracked: true, retire };
+}
 const CLASSES = [
   { name: "EMT-B Refresher", date: "Jul 12", covers: ["EMT-B", "Paramedic"] },
   { name: "CPR / BLS Recert", date: "Jun 28", covers: ["EMT-B", "Paramedic"] },
@@ -8703,7 +8725,15 @@ function Equipment({ S, role, members, meId, notify }) {
   const [editingId, setEditingId] = useState(null);
   const [buf, setBuf] = useState({ serial_number: "", asset_number: "", condition: "Serviceable" });
   const [addingType, setAddingType] = useState(false);
-  const [tName, setTName] = useState(""); const [tCatSel, setTCatSel] = useState("__new__"); const [tCatNew, setTCatNew] = useState(""); const [tReturnable, setTReturnable] = useState(true);
+  const [tName, setTName] = useState(""); const [tCatSel, setTCatSel] = useState("__new__"); const [tCatNew, setTCatNew] = useState(""); const [tReturnable, setTReturnable] = useState(true); const [tLife, setTLife] = useState("");
+  // Service life: blank → null (not tracked), whole positive years only. Returns undefined for garbage so
+  // the caller can refuse the save rather than quietly writing null over a real value.
+  const lifeNum = (v) => {
+    const s = String(v ?? "").trim();
+    if (s === "") return null;
+    const n = Number(s);
+    return (Number.isInteger(n) && n > 0 && n <= 100) ? n : undefined;
+  };
   const [editingTypeId, setEditingTypeId] = useState(null);
   const [tb, setTb] = useState({ name: "", catSel: "__new__", catNew: "", returnable: true });
   const [managers, setManagers] = useState([]);   // active equipment_manager rows for the dept (members-read)
@@ -8826,26 +8856,30 @@ function Equipment({ S, role, members, meId, notify }) {
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the unit", text: "Something went wrong removing that. Please try again.", details: error?.message }); return; }
     loadEquipment();
   }
-  const resetAddType = () => { setTName(""); setTCatSel(categories[0] || "__new__"); setTCatNew(""); setTReturnable(true); setAddingType(false); };
+  const resetAddType = () => { setTName(""); setTCatSel(categories[0] || "__new__"); setTCatNew(""); setTReturnable(true); setTLife(""); setAddingType(false); };
   function catOf(sel, txt) { return (sel === "__new__" ? txt.trim() : sel).trim(); }
   async function addType() {
     const name = tName.trim();
     if (!name) { notify({ kind: "error", title: "Name required", text: "Give the type a name (e.g. Structure Helmet)." }); return; }
     const category = catOf(tCatSel, tCatNew);
     if (!category) { notify({ kind: "error", title: "Category required", text: "Pick a category or add a new one." }); return; }
+    const life = lifeNum(tLife);
+    if (life === undefined) { notify({ kind: "error", title: "Check the service life", text: "Enter a whole number of years (e.g. 10), or leave it blank." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    const { data, error } = await supabase.from("equipment_type").insert({ department_id: deptId, name, category, returnable: tReturnable, sort_order: 999, active: true }).select("id");   // 999 → lands at the end of its category
+    const { data, error } = await supabase.from("equipment_type").insert({ department_id: deptId, name, category, returnable: tReturnable, service_life_years: life, sort_order: 999, active: true }).select("id");   // 999 → lands at the end of its category
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the type", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
     resetAddType(); loadEquipment();
   }
-  function startEditType(t) { setEditingTypeId(t.id); setTb({ name: t.name || "", catSel: t.category || "__new__", catNew: "", returnable: t.returnable !== false }); }
+  function startEditType(t) { setEditingTypeId(t.id); setTb({ name: t.name || "", catSel: t.category || "__new__", catNew: "", returnable: t.returnable !== false, life: t.serviceLifeYears ?? "" }); }
   async function saveEditType(id) {
     const name = tb.name.trim();
     if (!name) { notify({ kind: "error", title: "Name required", text: "Give the type a name." }); return; }
     const category = catOf(tb.catSel, tb.catNew);
     if (!category) { notify({ kind: "error", title: "Category required", text: "Pick a category or add a new one." }); return; }
-    const { data, error } = await supabase.from("equipment_type").update({ name, category, returnable: tb.returnable }).eq("id", id).select();
+    const life = lifeNum(tb.life);
+    if (life === undefined) { notify({ kind: "error", title: "Check the service life", text: "Enter a whole number of years (e.g. 10), or leave it blank." }); return; }
+    const { data, error } = await supabase.from("equipment_type").update({ name, category, returnable: tb.returnable, service_life_years: life }).eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the type", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard
     setEditingTypeId(null); loadEquipment();
   }
@@ -8945,6 +8979,7 @@ function Equipment({ S, role, members, meId, notify }) {
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={tCatSel} onChange={(e) => setTCatSel(e.target.value)}>{categories.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">New category…</option></select></label>
           {tCatSel === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category</span><input style={FS.input} value={tCatNew} placeholder="e.g. Wildland gear" onChange={(e) => setTCatNew(e.target.value)} /></label>}
           <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Returnable</span><select style={FS.input} value={tReturnable ? "yes" : "no"} onChange={(e) => setTReturnable(e.target.value === "yes")}><option value="yes">Returnable</option><option value="no">Consumable</option></select></label>
+          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Service life (years)</span><input style={FS.input} value={tLife} placeholder="optional — e.g. 10" inputMode="numeric" onChange={(e) => setTLife(e.target.value)} /></label>
           <button style={FS.btnPrimary} onClick={addType}><Plus size={15} /> Add type</button>
           <button style={FS.btn} onClick={resetAddType}>Cancel</button>
         </div>
@@ -8979,6 +9014,7 @@ function Equipment({ S, role, members, meId, notify }) {
                         <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={tb.catSel} onChange={(e) => setTb((b) => ({ ...b, catSel: e.target.value }))}>{categories.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">New category…</option></select></label>
                         {tb.catSel === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category</span><input style={FS.input} value={tb.catNew} onChange={(e) => setTb((b) => ({ ...b, catNew: e.target.value }))} /></label>}
                         <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Returnable</span><select style={FS.input} value={tb.returnable ? "yes" : "no"} onChange={(e) => setTb((b) => ({ ...b, returnable: e.target.value === "yes" }))}><option value="yes">Returnable</option><option value="no">Consumable</option></select></label>
+                        <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Service life (years)</span><input style={FS.input} value={tb.life ?? ""} placeholder="optional — e.g. 10" inputMode="numeric" onChange={(e) => setTb((b) => ({ ...b, life: e.target.value }))} /></label>
                         <button style={FS.btnPrimary} onClick={() => saveEditType(t.id)}><CheckCircle2 size={15} /> Save</button>
                         <button style={FS.btn} onClick={() => setEditingTypeId(null)}>Cancel</button>
                       </div>
@@ -8994,13 +9030,16 @@ function Equipment({ S, role, members, meId, notify }) {
                                   : u.status === "lost"        ? { label: "Lost",           color: FIRE.redBright }
                                   : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright };
                       const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
+                      const gear = gearStatus(u.manufactureDate, t.serviceLifeYears);   // this unit's date + its TYPE's service life
                       return (
                         <div key={u.id}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
                               {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
+                              {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                             </div>
+                            {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
                             <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>
                             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
                             {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
