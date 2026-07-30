@@ -241,3 +241,143 @@ export function buildReportDoc(data) {
     + `-Report-${MONTHS[now.getMonth()].slice(0, 3)}-${now.getFullYear()}.pdf`;
   return { doc, slug };
 }
+
+/* ---------------- Capital Replacement Plan ----------------
+   The artifact a chief hands the selectboard: what the fleet cost, when each rig is planned for
+   replacement, and what that costs by year. Same banner/table styling as the department report.
+   `data` = { deptName, station, groups: [{ year, rows, subtotal }], unplanned: [rows], grandTotal }
+   where each row is { name, type, purchaseYear, purchaseCost, replaceYear, replaceCost }. */
+export function downloadCapitalPlan(data) {
+  const { doc, slug } = buildCapitalPlanDoc(data);
+  doc.save(slug);
+}
+
+export function buildCapitalPlanDoc(data) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
+  const M = 44, CW = PW - 2 * M;
+  const BOTTOM = PH - 50;
+  let y = M;
+
+  const now = new Date();
+  const prepared = `Prepared ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+  const fullName = data.deptName || "Department";
+  const station = data.station || "";
+  const money = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
+
+  // ---------- banner ----------
+  const BH = 92;
+  doc.setFillColor(...RED); doc.rect(M, y, CW, BH, "F");
+  doc.setFillColor(...RED_DK); doc.rect(M, y, 6, BH, "F");
+  const cx = M + 30, cy = y + BH / 2;
+  doc.setDrawColor(255); doc.setLineWidth(1.5); doc.circle(cx, cy, 16, "S");
+  doc.setFillColor(255);
+  doc.rect(cx - 2.4, cy - 9.5, 4.8, 19, "F");
+  doc.rect(cx - 9.5, cy - 2.4, 19, 4.8, "F");
+  doc.setTextColor(255); doc.setFont("helvetica", "bold");
+  let fs = 15.5;
+  doc.setFontSize(fs);
+  const avail = CW - 60 - 100;
+  while (doc.getTextWidth(fullName) > avail && fs > 10) { fs -= 0.5; doc.setFontSize(fs); }
+  doc.text(fullName, M + 56, y + 36);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...PINK);
+  doc.text(`${station ? station + " · " : ""}Capital Replacement Plan`, M + 56, y + 54);
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+  doc.text(String(now.getFullYear()), M + CW - 14, y + 34, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...PINK);
+  doc.text(prepared, M + CW - 14, y + 48, { align: "right" });
+  y += BH + 16;
+
+  function ensure(h) { if (y + h > BOTTOM) { doc.addPage(); y = M; } }
+  function header(title) {
+    ensure(26);
+    doc.setFillColor(...RED); doc.rect(M, y, 4, 13, "F");
+    doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(12.5);
+    doc.text(title, M + 10, y + 10.5);
+    y += 21;
+  }
+  function para(text, color = SLATE, size = 9.3) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(size); doc.setTextColor(...color);
+    doc.splitTextToSize(text, CW).forEach((ln) => { ensure(13); doc.text(ln, M, y + 9); y += 13; });
+  }
+  function table(head, body, opts = {}) {
+    ensure(40);
+    doc.autoTable({
+      startY: y,
+      head: [head],
+      body,
+      margin: { left: M, right: M },
+      styles: { font: "helvetica", fontSize: 8.6, textColor: SLATE, cellPadding: 4.5, lineColor: LINE, lineWidth: 0.3, valign: "middle" },
+      headStyles: { fillColor: SLATE, textColor: 255, fontStyle: "bold", fontSize: 8.4 },
+      alternateRowStyles: { fillColor: PANEL },
+      columnStyles: opts.columnStyles || {},
+    });
+    y = doc.lastAutoTable.finalY + 14;
+  }
+
+  const groups = data.groups || [];
+  const unplanned = data.unplanned || [];
+
+  // ---------- forecast summary ----------
+  header("Replacement Forecast");
+  if (groups.length === 0) {
+    para("No apparatus has a planned replacement year on record yet.", GRAY);
+  } else {
+    table(["Replacement year", "Apparatus", "Estimated cost"],
+      groups.map((g) => [String(g.year), String(g.rows.length), money(g.subtotal)]),
+      { columnStyles: { 1: { halign: "center" }, 2: { halign: "right" } } });
+    doc.setFillColor(...PANEL); ensure(30);
+    doc.rect(M, y, CW, 26, "F");
+    doc.setFillColor(...RED); doc.rect(M, y, 3, 26, "F");
+    doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text("Total planned replacement cost", M + 12, y + 17);
+    doc.text(money(data.grandTotal), M + CW - 12, y + 17, { align: "right" });
+    y += 26 + 16;
+  }
+
+  // ---------- detail by year ----------
+  groups.forEach((g) => {
+    header(`${g.year} — ${money(g.subtotal)}`);
+    table(["Apparatus", "Type", "Purchased", "Purchase cost", "Est. replacement"],
+      g.rows.map((r) => [r.name, r.type || "—", r.purchaseYear == null ? "—" : String(r.purchaseYear), money(r.purchaseCost), money(r.replaceCost)]),
+      { columnStyles: { 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" } } });
+  });
+
+  // ---------- not yet planned ----------
+  if (unplanned.length) {
+    header("Not Yet Planned");
+    para("These units have no planned replacement year on record.", GRAY);
+    table(["Apparatus", "Type", "Purchased", "Purchase cost"],
+      unplanned.map((r) => [r.name, r.type || "—", r.purchaseYear == null ? "—" : String(r.purchaseYear), money(r.purchaseCost)]),
+      { columnStyles: { 2: { halign: "center" }, 3: { halign: "right" } } });
+  }
+
+  // ---------- provenance ----------
+  ensure(50);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 44, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  const prov = doc.splitTextToSize(
+    "Figures are the department’s own recorded purchase and replacement estimates, not appraisals or bids. "
+    + "Estimated replacement costs are planning figures entered by department leadership and should be "
+    + "re-validated against current pricing before any funding request.", CW - 24);
+  let py = y + 13;
+  prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
+  y += 44 + 10;
+
+  // ---------- footers ----------
+  const n = doc.getNumberOfPages();
+  const shortName = (station ? `${fullName} · ${station}` : fullName);
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.5); doc.line(M, PH - 38, PW - M, PH - 38);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.2); doc.setTextColor(...GRAY);
+    doc.text(`${shortName} · Capital Replacement Plan`, M, PH - 26);
+    doc.text(`Page ${i} of ${n}`, PW - M, PH - 26, { align: "right" });
+  }
+
+  const slug = fullName.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "")
+    + (station ? "-" + station.replace(/\s+/g, "") : "")
+    + `-Capital-Plan-${now.getFullYear()}.pdf`;
+  return { doc, slug };
+}
