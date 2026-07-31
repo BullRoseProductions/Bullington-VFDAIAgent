@@ -6265,23 +6265,30 @@ function StationHoursReport({ S, dept, back }) {
   }
   useEffect(() => { load(rangeKey); setShowAll(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
   // ---- client rollup from raw shift rows ----
+  // VERIFIED-ONLY CREDIT: hours only count toward the official number (ISO/LOSAP/stipend) when the
+  // check-in was location-verified at the station. Unverified time is still recorded and shown — it is
+  // never deleted or hidden — but it is accumulated in a SEPARATE bucket so it cannot inflate a figure
+  // a chief reports to an outside body. standby/training/total below are verified-only by construction.
   const byMember = {};
   for (const s of shifts) {
-    const m = (byMember[s.member_id] ||= { name: s.member_name, standby: 0, training: 0, vTrue: 0, n: 0 });
-    if (s.kind === "training") m.training += Number(s.hours) || 0;
-    else m.standby += Number(s.hours) || 0;      // standby is the only other surfaced kind
+    const m = (byMember[s.member_id] ||= { name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0 });
+    const hrs = Number(s.hours) || 0;
+    if (!s.verified) m.unverified += hrs;                        // recorded, not credited
+    else if (s.kind === "training") m.training += hrs;
+    else m.standby += hrs;                                       // standby is the only other surfaced kind
     if (s.verified) m.vTrue += 1;
     m.n += 1;
   }
   const rows = Object.values(byMember)
     .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
-    .sort((x, y) => y.total - x.total);
-  const dept_standby  = rows.reduce((a, r) => a + r.standby, 0);
-  const dept_training = rows.reduce((a, r) => a + r.training, 0);
-  const dept_total    = dept_standby + dept_training;
-  const dept_n        = rows.reduce((a, r) => a + r.n, 0);
-  const dept_vtrue    = rows.reduce((a, r) => a + r.vTrue, 0);
-  const dept_vpct     = dept_n ? Math.round(100 * dept_vtrue / dept_n) : 0;
+    .sort((x, y) => y.total - x.total);   // ranked by CREDITED hours — padding unverified time can't climb this list
+  const dept_standby    = rows.reduce((a, r) => a + r.standby, 0);
+  const dept_training   = rows.reduce((a, r) => a + r.training, 0);
+  const dept_total      = dept_standby + dept_training;          // the credited figure
+  const dept_unverified = rows.reduce((a, r) => a + r.unverified, 0);
+  const dept_n          = rows.reduce((a, r) => a + r.n, 0);
+  const dept_vtrue      = rows.reduce((a, r) => a + r.vTrue, 0);
+  const dept_vpct       = dept_n ? Math.round(100 * dept_vtrue / dept_n) : 0;
   if (first) return null;   // first paint only — after that the chrome stays put and the figures swap under it
   // ---- render ----
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -6323,13 +6330,15 @@ function StationHoursReport({ S, dept, back }) {
           return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
         })}
       </div>
-      {/* summary */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 14 }}>
-        <Stat S={S} dark n={h1(dept_total)} label="Total station hours" />
+      {/* summary — the credited figures lead; unverified is shown beside them, never inside them */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 10 }}>
+        <Stat S={S} dark n={h1(dept_total)} label="Verified hours (credited)" />
         <Stat S={S} dark n={h1(dept_standby)} label="Standby / duty" />
         <Stat S={S} dark n={h1(dept_training)} label="Training" />
+        <Stat S={S} dark n={h1(dept_unverified)} label="Unverified — not credited" warn={dept_unverified > 0} />
         <Stat S={S} dark n={`${dept_vpct}%`} label="Verified at station" pct={dept_vpct} />
       </div>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 14 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
       {/* on station right now */}
       <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
         <div style={FS.kicker}>ON STATION RIGHT NOW</div>
@@ -6362,7 +6371,9 @@ function StationHoursReport({ S, dept, back }) {
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
         ) : (
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
-            <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Total</th><th style={{ ...TH, textAlign: "right" }}>Verified</th></tr></thead>
+            {/* Standby / Training / Total are VERIFIED-ONLY. Unverified sits in its own muted column so a
+                member's uncredited time is visible without ever being added into a credited figure. */}
+            <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Credited</th><th style={{ ...TH, textAlign: "right", color: FIRE.textMuted2 }}>Unverified</th><th style={{ ...TH, textAlign: "right" }}>Verified</th></tr></thead>
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
@@ -6370,6 +6381,7 @@ function StationHoursReport({ S, dept, back }) {
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(r.total)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: r.unverified > 0 ? FIRE.amberText : FIRE.textMuted2 }}>{r.unverified > 0 ? h1(r.unverified) : "—"}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: vColor(r.vpct), fontWeight: 700 }}>{r.vpct}%</td>
                 </tr>
               ))}
@@ -6378,6 +6390,7 @@ function StationHoursReport({ S, dept, back }) {
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_standby)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_training)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_total)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: dept_unverified > 0 ? FIRE.amberText : FIRE.textMuted2 }}>{dept_unverified > 0 ? h1(dept_unverified) : "—"}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: vColor(dept_vpct) }}>{dept_vpct}%</td>
               </tr>
             </tbody>
@@ -6394,7 +6407,7 @@ function StationHoursReport({ S, dept, back }) {
             <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th><th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
             <tbody>
               {log.map((s, i) => (
-                <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}`, opacity: s.verified ? 1 : 0.62 }}>   {/* muted = recorded but not credited */}
                   <td style={TD}>{fmtDate(s.checked_in_at)}</td>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{s.member_name || "—"}</td>
                   <td style={TD}>{fmtHm(s.checked_in_at)}</td>
@@ -8703,10 +8716,14 @@ function StationHours({ S, dept, notify }) {
     notify({ kind: "success", title: "Clocked out", text: row?.checked_in_at ? `You were on the clock for ${spanText(row.checked_in_at, row.checked_out_at)}.` : "Your shift is closed." });
   }
   const stationSet = dept?.station_lat != null && dept?.station_lng != null;
-  // rollup (same math as the leadership report, just the caller's rows)
-  const myStandby  = myShifts.filter((s) => s.kind !== "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
-  const myTraining = myShifts.filter((s) => s.kind === "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  // rollup (same math as the leadership report, just the caller's rows) — VERIFIED-ONLY is the credited
+  // number. An unverified punch is still recorded and shown below, but it earns nothing official, and the
+  // member should see that plainly rather than counting on hours that won't be credited.
+  const vShifts    = myShifts.filter((s) => s.verified);
+  const myStandby  = vShifts.filter((s) => s.kind !== "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  const myTraining = vShifts.filter((s) => s.kind === "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
   const myTotal    = myStandby + myTraining;
+  const myUnverified = myShifts.filter((s) => !s.verified).reduce((a, s) => a + (Number(s.hours) || 0), 0);
   const h1n = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);   // hours, 1 decimal — matches the report
   const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   const fmtHm2 = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
@@ -8773,13 +8790,15 @@ function StationHours({ S, dept, notify }) {
               <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "baseline" }}>
                 <div>
                   <div style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, letterSpacing: "-0.01em", ...FS.num }}>{h1n(myTotal)}</div>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginTop: 1 }}>Total hours</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginTop: 1 }}>Verified hours</div>
                 </div>
                 <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
                   <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myStandby)}</span> standby / duty</div>
                   <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myTraining)}</span> training</div>
+                  {myUnverified > 0 && <div style={{ color: FIRE.amberText }}><span style={{ ...FS.num, fontWeight: 600 }}>{h1n(myUnverified)}</span> unverified — not counted</div>}
                 </div>
               </div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.45 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
               {myShifts.length === 0 ? (
                 <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12 }}>No shifts in this range.</div>
               ) : (
