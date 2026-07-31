@@ -8415,11 +8415,16 @@ function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
   );
 }
 // My Equipment — the member-facing counterpart to the manager ledger. Shows the member's OWN open
-// custody periods (what they're currently signed for). Read-only this pass; transfer/return actions
-// arrive with their RPCs in steps 4–5. Reads straight off the append-only custody snapshot — no join:
-// equipment_name / opened_at / condition_at_open were all frozen at issue, so history survives a later
-// rename or condition change. condition_at_open is intentional: the condition they SIGNED FOR, not the
-// item's current state.
+// custody periods (what they're currently signed for).
+// The custody row is still an append-only snapshot: equipment_name / opened_at / condition_at_open are
+// frozen at issue, so history survives a later rename or condition change.
+// CHANGED from snapshot-only: the badge now shows the item's LIVE condition (and its service-life status)
+// via an embed of equipment → equipment_type. Rendering only condition_at_open meant a holder kept seeing
+// SERVICEABLE forever after a manager marked the item Out of service — a safety claim about gear they're
+// about to wear, made from a value frozen months earlier. Safety wins the badge.
+// The snapshot is NOT dropped, because "the condition I signed for" is the member's accountability
+// record: when the two differ, condition_at_open renders as a muted "signed for as …" line beneath.
+// So the row now answers both questions — what it is today, and what they accepted.
 // Giver's "Start transfer" screen. create_equipment_handoff mints a hashed, single-use, 60s code and
 // returns the RAW code once (for the QR) — it moves NO custody. The receiver scanning + accept_equipment_handoff
 // is what moves it. `items` = [{ equipment_id, equipment_name }] the giver picked from My Equipment.
@@ -8513,7 +8518,10 @@ function MyEquipment({ S, meId, notify }) {
   const load = () => {
     if (!meId) return;
     supabase.from("equipment_custody")
-      .select("id, equipment_id, equipment_name, opened_at, condition_at_open, open_action, opened_by_name, return_requested_at")
+      // The embed walks equipment_custody → equipment → equipment_type so the holder sees the item's LIVE
+      // condition and its service life, not just what was true the day it was issued. Members can SELECT
+      // both embedded tables dept-scoped, so no RPC is needed.
+      .select("id, equipment_id, equipment_name, opened_at, condition_at_open, open_action, opened_by_name, return_requested_at, equipment(manufacture_date, condition, equipment_type(service_life_years))")
       .eq("holder_member_id", meId).is("closed_at", null)   // .eq is REQUIRED: a manager's "read all custody" RLS would otherwise return the whole dept — scope to self
       .order("opened_at", { ascending: false })
       .then(({ data, error }) => { if (!error && data) setRows(data); setLoaded(true); });
@@ -8561,6 +8569,19 @@ function MyEquipment({ S, meId, notify }) {
           {rows.map((r, i) => {
             const pending = !!r.return_requested_at;
             const busy = busyId === r.equipment_id;
+            // LIVE condition, falling back to the issue-time snapshot only when the unit row is missing
+            // (orphaned period). Without this a holder kept seeing SERVICEABLE forever after a manager
+            // flipped the item Out of service — condition_at_open is frozen at issue.
+            const cond = r.equipment?.condition || r.condition_at_open;
+            const gear = gearStatus(r.equipment?.manufacture_date, r.equipment?.equipment_type?.service_life_years);   // null args → NOT TRACKED, never a false expired
+            // Same rule as the manager registry: past service life is not serviceable for duty regardless
+            // of recorded condition, so RETIRE stands alone rather than beside a green pill.
+            const hideServiceable = gear.rank === 0 && cond === "Serviceable";
+            // Accountability line: only when the item has drifted from what they signed for. Suppressed
+            // when they match, so a normal row stays quiet. Compared against the LIVE value directly, not
+            // against `cond` — with no live condition the pill is already showing the snapshot, and
+            // deriving this from `cond` would make correctness depend on that fallback staying in place.
+            const signedFor = (r.equipment?.condition && r.equipment.condition !== r.condition_at_open) ? r.condition_at_open : null;
             return (
               <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
                 {selMode && (
@@ -8570,10 +8591,13 @@ function MyEquipment({ S, meId, notify }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
+                  {gear.tracked && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Made {r.equipment.manufacture_date.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
+                  {signedFor && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Signed for as {signedFor}</div>}
                   {pending && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Return pending — a manager will confirm receipt.</div>}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                  <Pill S={S} color={condColor(r.condition_at_open)}>{(r.condition_at_open || "—").toUpperCase()}</Pill>
+                  {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
+                  {!hideServiceable && <Pill S={S} color={condColor(cond)}>{(cond || "—").toUpperCase()}</Pill>}
                   {pending
                     ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
                     : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
