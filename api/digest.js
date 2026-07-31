@@ -365,6 +365,10 @@ export default async function handler(req, res) {
   for (const c of certs) bucket(c.department_id).certs.push(c);
   for (const g of gear) bucket(g.department_id).gear.push(g);
   for (const m of maint) bucket(m.department_id).maint.push(m);
+  // byDept is built FROM flagged items, so a department with nothing flagged never appears here at all.
+  // When every department must be considered anyway (a manual test send, or a broadcast configured to go
+  // out on a quiet week), seed an empty bucket for each one — otherwise the send loop has nothing to walk.
+  if (isTestSend || SEND_WHEN_NOTHING_FLAGGED) for (const d of depts) bucket(d.id);
 
   const year = today.getFullYear();
   const monthStart = new Date(year, today.getMonth(), 1);
