@@ -21,6 +21,20 @@ const MAINT_CADENCE_DAYS = { Weekly: 7, Monthly: 30, Quarterly: 90, Annual: 365 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_MS = 86400000;
 
+// A department with nothing flagged sends no email at all (slice 2 rule). Metrics alone don't trigger a send.
+// Flip to true if the summary is worth mailing on a quiet week.
+const SEND_WHEN_NOTHING_FLAGGED = false;
+
+/* STATS_EXCLUDED_IDS — MUST stay in sync with App.jsx:1152. These three accounts (owner, test, demo)
+   plus anyone holding Project Admin are excluded from every denominator on screen. If the digest
+   counted them, its percentages would silently disagree with the dashboard the chief is looking at. */
+const STATS_EXCLUDED_IDS = new Set([
+  "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // Ashlea (owner)
+  "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
+  "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com)
+]);
+const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !(Array.isArray(m.access) && m.access.includes("Project Admin"));
+
 /* ---------------- date helpers ----------------
    Dates are parsed FIELD-BY-FIELD, never new Date(str): "2016-05-01" through the string parser is
    UTC midnight, which is the previous day in every US timezone. Same reasoning as gearStatus in App.jsx. */
@@ -115,6 +129,70 @@ async function detectMaintenance(sb, today) {
   });
 }
 
+/* ---------------- metrics ----------------
+   Every metric returns null when the department has no data to compute it from — null renders as "—".
+   A zero would be a claim ("0% of certs are current"); "—" is the truth ("nothing to measure yet"). */
+
+// Cert rank, mirroring certStatus in App.jsx: 0 expired, 1 expiring (≤3 months), 2 current.
+// A missing/garbled exp returns null and is excluded from the denominator — same as the app's "NO DATE".
+function certRank(exp, today) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(exp || ""));
+  if (!m) return null;
+  const diff = (Number(m[1]) * 12 + Number(m[2])) - (today.getFullYear() * 12 + today.getMonth() + 1);
+  return diff < 0 ? 0 : diff <= 3 ? 1 : 2;
+}
+function certsCurrentPct(certRows, countedIds, today) {
+  const ranks = certRows.filter((c) => countedIds.has(c.member_id)).map((c) => certRank(c.exp, today)).filter((r) => r !== null);
+  if (!ranks.length) return null;                                   // no dated certs on counted members → "—"
+  return Math.round(100 * ranks.filter((r) => r === 2).length / ranks.length);
+}
+
+// Training compliance, mirroring deptAttendance (App.jsx:1162) for the current calendar year.
+// Eligible sessions: done, inside the year, at least one attendance row, and counting toward the rate
+// (restricted leadership/board events and optional sessions are excluded — countsTowardRate, App.jsx:106).
+// The department figure is the MEAN OF PER-MEMBER PERCENTAGES, not a pooled ratio — the app's definition.
+function trainingCompliancePct(sessions, attendance, countedMembers, year) {
+  const attendedBy = new Map();                                     // session_id → Set(member_id)
+  for (const a of attendance) {
+    if (!attendedBy.has(a.session_id)) attendedBy.set(a.session_id, new Set());
+    attendedBy.get(a.session_id).add(a.member_id);
+  }
+  const eligible = sessions.filter((s) => {
+    if (!s.done) return false;
+    if (String(s.date || "").slice(0, 4) !== String(year)) return false;
+    if (s.audience === "leadership" || s.audience === "board") return false;
+    if (s.counts_toward_attendance === false) return false;
+    return (attendedBy.get(s.id)?.size || 0) > 0;                   // a session with no roll taken is not a denominator
+  });
+  if (!eligible.length || !countedMembers.length) return null;      // nothing held (or nobody counted) → "—"
+  const pcts = countedMembers.map((m) => 100 * eligible.filter((s) => attendedBy.get(s.id)?.has(m.id)).length / eligible.length);
+  return Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
+}
+
+// Station presence for one department over a window, via the service-role-only RPC.
+// VERIFIED-ONLY CREDIT, mirroring App.jsx:6299 — unverified time is reported in its own bucket and is
+// NEVER folded into the credited figure, because that figure is what gets reported to ISO/LOSAP.
+async function stationMetrics(sb, deptId, from, to, countedIds) {
+  const { data, error } = await sb.rpc("dept_station_shifts_for", {
+    p_department_id: deptId,
+    p_from: from.toISOString(),
+    p_to: to.toISOString(),
+  });
+  if (error) return { error: error.message, credited: null, unverified: null, verifiedPct: null };
+  const rows = (data || []).filter((s) => countedIds.has(s.member_id));
+  if (!rows.length) return { credited: null, unverified: null, verifiedPct: null };
+  let credited = 0, unverified = 0, vTrue = 0;
+  for (const s of rows) {
+    const hrs = Number(s.hours) || 0;
+    if (s.verified) { credited += hrs; vTrue += 1; } else { unverified += hrs; }
+  }
+  return {
+    credited: Math.round(credited * 10) / 10,
+    unverified: Math.round(unverified * 10) / 10,
+    verifiedPct: Math.round(100 * vTrue / rows.length),             // % of check-in EVENTS verified, not of hours
+  };
+}
+
 /* ---------------- compose ---------------- */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const byWorstFirst = (a, b) => a.sort - b.sort;
@@ -129,12 +207,31 @@ function section(title, items, lineFor) {
     <ul style="margin:0;padding-left:18px;font-size:14px;color:#333">${rows}</ul>`;
 }
 
-function compose(deptName, groups) {
+// "—" for anything with no data behind it. A 0% would assert something false; a dash says "not measured yet".
+const dash = (v, suffix = "") => (v === null || v === undefined ? "&mdash;" : `${esc(v)}${suffix}`);
+function metricsBlock(m) {
+  const cells = [
+    ["Training compliance", dash(m.trainingPct, "%")],
+    ["Certs current", dash(m.certsPct, "%")],
+    ["Station hours credited", dash(m.station.credited, " h")],
+    ["Verified presence", dash(m.station.verifiedPct, "%")],
+    ["Apparatus in service", m.apparatus.total === null ? "&mdash;" : `${esc(m.apparatus.inService)} of ${esc(m.apparatus.total)}`],
+  ];
+  const tds = cells.map(([label, value]) => `<td style="padding:8px 10px 8px 0;vertical-align:top">
+      <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#6A7178">${esc(label)}</div>
+      <div style="font-size:18px;font-weight:700;color:#111;margin-top:2px">${value}</div></td>`).join("");
+  // Unverified hours sit OUTSIDE the credited figure — shown, never added in.
+  const note = m.station.unverified ? `<p style="margin:6px 0 0;font-size:12px;color:#9A6B12">${esc(m.station.unverified)} h unverified &mdash; recorded, not credited toward ISO/LOSAP.</p>` : "";
+  return `<table style="width:100%;border-collapse:collapse;margin:14px 0 4px"><tr>${tds}</tr></table>${note}`;
+}
+
+function compose(deptName, groups, metrics) {
   const total = groups.certs.length + groups.gear.length + groups.maint.length;
   const subject = `B4C — ${deptName}: ${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
   const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px 20px">
     <h1 style="font-size:18px;margin:0 0 4px;color:#111">${esc(deptName)}</h1>
     <p style="margin:0 0 4px;font-size:14px;color:#6A7178">${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention.</p>
+    ${metricsBlock(metrics)}
     ${section("Certifications", groups.certs, (it) => `${esc(it.member)} &middot; ${esc(it.cert)} &middot;`)}
     ${section("Gear retirement", groups.gear, (it) => `${esc(it.item)} &middot;`)}
     ${section("Maintenance", groups.maint, (it) => `${esc(it.apparatus)} &middot; ${esc(it.task)} &middot;`)}
@@ -249,21 +346,58 @@ export default async function handler(req, res) {
   for (const g of gear) bucket(g.department_id).gear.push(g);
   for (const m of maint) bucket(m.department_id).maint.push(m);
 
+  // Metric inputs — deliberately NON-FATAL, unlike the detection reads above. If this block fails the
+  // summary degrades to "—" and the digest still goes out; it never blocks the items that need attention.
+  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], error: null };
+  try {
+    const rs = await Promise.all([
+      sb.from("members").select("id, department_id, access"),
+      sb.from("training_sessions").select("id, department_id, date, done, audience, counts_toward_attendance"),
+      sb.from("session_attendance").select("session_id, member_id"),
+      sb.from("certs").select("department_id, member_id, exp"),
+      sb.from("apparatus").select("department_id, in_service"),
+    ]);
+    const bad = rs.find((r) => r.error);
+    if (bad) throw new Error(bad.error.message);
+    const [m, s, a, c, ap] = rs.map((r) => r.data || []);
+    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, error: null };
+  } catch (e) {
+    mi.error = String(e?.message || e);   // surfaced in the response so a silent all-"—" digest is diagnosable
+  }
+
+  const year = today.getFullYear();
+  const monthStart = new Date(year, today.getMonth(), 1);
+  const monthEnd = new Date(year, today.getMonth() + 1, 1);       // [first of month, first of next) — the whole month
+
   const results = [];
   let total = 0;
   for (const [deptId, groups] of byDept) {
     const counts = { certs: groups.certs.length, gear: groups.gear.length, maintenance: groups.maint.length };
     const n = counts.certs + counts.gear + counts.maintenance;
-    if (n === 0) continue;                                   // skip departments with nothing to report
+    if (n === 0 && !SEND_WHEN_NOTHING_FLAGGED) continue;      // skip departments with nothing to report
     total += n;
     const name = nameById.get(deptId) || "Unknown department";
-    const { subject, html } = compose(name, groups);
+
+    // Per-department metrics. countsInStats mirrors App.jsx so these percentages match the dashboard.
+    const counted = mi.members.filter((m) => m.department_id === deptId && countsInStats(m));
+    const countedIds = new Set(counted.map((m) => m.id));
+    const deptApparatus = mi.apparatus.filter((a) => a.department_id === deptId);
+    const metrics = {
+      trainingPct: trainingCompliancePct(mi.sessions.filter((s) => s.department_id === deptId), mi.attendance, counted, year),
+      certsPct: certsCurrentPct(mi.certRows.filter((c) => c.department_id === deptId), countedIds, today),
+      station: await stationMetrics(sb, deptId, monthStart, monthEnd, countedIds),
+      apparatus: {
+        total: deptApparatus.length || null,                  // no apparatus on file → "—", not "0 of 0"
+        inService: deptApparatus.filter((a) => a.in_service !== false).length,   // null counts as in service, matching App.jsx:6789
+      },
+    };
+    const { subject, html } = compose(name, groups, metrics);
     try {
       const id = await sendEmail(resendKey, to, subject, html);   // sequential — one Resend call at a time
-      results.push({ name, counts, sentTo: to, id });
+      results.push({ name, counts, metrics, sentTo: to, id });
     } catch (e) {
-      results.push({ name, counts, sentTo: null, error: String(e?.message || e) });   // one bad send never hides the rest
+      results.push({ name, counts, metrics, sentTo: null, error: String(e?.message || e) });   // one bad send never hides the rest
     }
   }
-  return res.status(200).json({ departments: results, total });
+  return res.status(200).json({ departments: results, total, ...(mi.error ? { metricsError: mi.error } : {}) });
 }
