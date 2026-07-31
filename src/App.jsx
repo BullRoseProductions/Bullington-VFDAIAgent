@@ -8816,7 +8816,9 @@ function StationHours({ S, dept, notify }) {
 }
 function Equipment({ S, role, members, meId, notify }) {
   const [types, setTypes] = useState([]);
-  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops DB RLS
+  // NOTE: canManage is defined further down, right after isManager — it now depends on it. Registry
+  // writes are DA/PA + assigned equipment manager (officers OUT), matching the RLS on equipment,
+  // equipment_type, equipment_photos and the station-documents upload policy.
   const isDA = isDeptAdmin(role);   // Department Admin (or PA) — the only one who assigns/removes managers
   const [expanded, setExpanded] = useState(null);   // type id currently expanded
   const [editMode, setEditMode] = useState(false);  // reveal per-unit Edit/Remove (calm by default)
@@ -8915,6 +8917,13 @@ function Equipment({ S, role, members, meId, notify }) {
   const flagged = allUnits.filter((u) => u.condition !== "Serviceable").length;
   const categories = [...new Set(types.map((t) => t.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const isManager = managers.some((m) => m.memberId === meId);
+  // Registry write gate — same pair the custody RPCs use (is_dept_admin() OR is_equipment_manager()),
+  // now mirrored by the RLS on equipment / equipment_type / equipment_photos. Was CANMANAGE_OPS_ROLES
+  // (DA/Officer); an Officer who isn't a manager no longer gets registry writes. Declared HERE rather
+  // than at the top of the component because it reads isManager, which needs the loaded managers list.
+  // Deliberately NOT reused by MaintenancePanel — that's a separate component with its own DA/Officer
+  // canManage on apparatus_maintenance, and this change must not widen it.
+  const canManage = isDA || isManager;
   const eligibleForMgr = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !managers.some((mg) => mg.memberId === m.id));
   const availableUnits = types.flatMap((t) => t.units.filter((u) => u.status === "in_inventory")
     .map((u) => ({ id: u.id, typeName: t.name, category: t.category, serial: u.serial, asset: u.asset, condition: u.condition })));
