@@ -6875,7 +6875,7 @@ function Apparatus({ S, role, members, meId, notify }) {
         })}
       </div>
       )}
-      <MaintenancePanel S={S} role={role} rigs={rigs} notify={notify} />
+      <MaintenancePanel S={S} role={role} rigs={rigs} meId={meId} members={members} notify={notify} />
       {checkingRig && <CheckRunModal S={S} rig={checkingRig} meId={meId} notify={notify} canManage={canManage} onClose={() => setCheckingRig(null)} onFinalized={() => { loadRigs(); setHistoryKey((k) => k + 1); }} />}
     </div>
   );
@@ -7849,8 +7849,20 @@ function maintStatus(cadence, lastDoneAt) {
 }
 const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
-function MaintenancePanel({ S, role, rigs, notify }) {
+function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops INSERT/DELETE RLS on apparatus_maintenance
+  const meName = (members || []).find((m) => m.id === meId)?.name || "Unknown";
+  const [doneFor, setDoneFor] = useState(null);      // item id whose mark-done confirm is open
+  const [doneNotes, setDoneNotes] = useState(""); const [doneCost, setDoneCost] = useState("");
+  const [doneBusy, setDoneBusy] = useState(false);
+  const [histFor, setHistFor] = useState(null);      // item id whose history is expanded
+  const [hist, setHist] = useState({});              // { [maintenance_id]: rows }
+  const [histBusy, setHistBusy] = useState(null);
+  const [histErr, setHistErr] = useState("");
+  // Blank → null; strips "$1,250" formatting; undefined for garbage so the caller refuses rather than writing null.
+  const costNum = (v) => { const s = String(v ?? "").replace(/[$,\s]/g, "").trim(); if (s === "") return null; const n = Number(s); return (Number.isFinite(n) && n >= 0) ? n : undefined; };
+  const money = (n) => (n == null ? null : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
+  const fmtLogAt = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
   const [items, setItems] = useState([]);
   const [adding, setAdding] = useState(false);
   const [u, setU] = useState(rigs[0]?.name || "All units"); const [t, setT] = useState(""); const [cad, setCad] = useState("Monthly");
@@ -7879,11 +7891,45 @@ function MaintenancePanel({ S, role, rigs, notify }) {
   const order = { Overdue: 0, "Due soon": 1, Current: 2 };
   const sorted = [...items].sort((a, b) => order[a.status] - order[b.status]);
   const due = items.filter((i) => i.status !== "Current").length;
-  async function markDone(id) {
-    const { data, error } = await supabase.from("apparatus_maintenance").update({ last_done_at: new Date().toISOString() }).eq("id", id).select();
-    if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS block fails loudly
-    loadMaint();
+  function openDone(i) { setDoneFor(i.id); setDoneNotes(""); setDoneCost(""); }
+  function closeDone() { setDoneFor(null); setDoneNotes(""); setDoneCost(""); }
+  // LOG FIRST, then advance the clock. The log is append-only and the due status is derived from
+  // last_done_at, so this order makes the only possible partial state "logged but not reset" — visible
+  // and re-doable. The reverse order could reset the clock with no record of who did the work.
+  async function submitDone(i) {
+    const cost = costNum(doneCost);
+    if (cost === undefined) { notify({ kind: "error", title: "Check the cost", text: "Enter a number (e.g. 240), or leave it blank." }); return; }
+    setDoneBusy(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");   // same dept-id source as addItem
+    if (deptErr || !deptId) { setDoneBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const nowIso = new Date().toISOString();
+    const { data: logged, error: logErr } = await supabase.from("apparatus_maintenance_log")
+      .insert({ department_id: deptId, maintenance_id: i.id, apparatus_id: i.rigId, task: i.task, done_at: nowIso, done_by: meId, done_by_name: meName, notes: doneNotes.trim() || null, cost })
+      .select("id");
+    if (logErr || !logged || logged.length === 0) { setDoneBusy(false); notify({ kind: "error", title: "Couldn't record the completion", text: "Nothing was changed — please try again.", details: logErr?.message }); return; }   // 0 rows = RLS blocked
+    const { data, error } = await supabase.from("apparatus_maintenance").update({ last_done_at: nowIso }).eq("id", i.id).select();
+    setDoneBusy(false);
+    if (error || !data || data.length === 0) {   // the log entry stands — say so plainly rather than implying nothing happened
+      notify({ kind: "error", title: "Recorded, but the due date didn't reset", text: "The completion is in the history. Try Mark done again to clear the due status.", details: error?.message });
+      closeDone(); loadMaint(); if (histFor === i.id) loadHistory(i.id);
+      return;
+    }
+    notify({ kind: "success", title: "Marked done", text: `${i.task} recorded${cost != null ? ` · ${money(cost)}` : ""}.` });
+    closeDone(); loadMaint(); if (histFor === i.id) loadHistory(i.id);
   }
+  function loadHistory(id) {
+    setHistBusy(id); setHistErr("");
+    supabase.from("apparatus_maintenance_log")
+      .select("id, done_at, done_by_name, notes, cost")
+      .eq("maintenance_id", id)
+      .order("done_at", { ascending: false })
+      .then(({ data, error }) => {
+        setHistBusy(null);
+        if (error) { setHistErr(error.message || "Please try again."); return; }   // keep any previously loaded rows — a failed read is not "no history"
+        setHist((h) => ({ ...h, [id]: data || [] }));
+      });
+  }
+  function toggleHistory(id) { if (histFor === id) { setHistFor(null); return; } setHistFor(id); loadHistory(id); }   // reload on each open so a new completion shows
   function startEditMaint(i) { setEditingMaintId(i.id); setMaintBuf({ task: i.task || "", cadence: i.cadence || "Monthly" }); }
   async function saveEditMaint(id) {
     if (!maintBuf.task.trim()) return;
@@ -7943,9 +7989,45 @@ function MaintenancePanel({ S, role, rigs, notify }) {
               <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{i.cadence} · last done {i.last}</div>
             </div>
             <Pill S={S} color={MAINT_FIRE[i.status]}>{i.status.toUpperCase()}</Pill>
-            <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => markDone(i.id)}><ClipboardCheck size={14} /> Mark done</button>
+            {/* DA/Officer only — the INSERT/UPDATE RLS rejects anyone else, so an ungated button was a dead click */}
+            {canManage && <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDone(i)}><ClipboardCheck size={14} /> Mark done</button>}
+            <button title="Completion history" style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => toggleHistory(i.id)}><List size={14} color={FIRE.btnIcon} /> History{histFor === i.id ? " ▾" : ""}</button>
             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
             {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+            {doneFor === i.id && (
+              <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <div style={{ flexBasis: "100%", fontSize: 12.5, color: FIRE.textSecondary }}>Recording <strong style={{ color: FIRE.textPrimary }}>{i.task}</strong> as done today — notes and cost are optional.</div>
+                <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Notes (optional)</span><input style={FS.input} value={doneNotes} placeholder="e.g. replaced filter, topped off fluids" onChange={(e) => setDoneNotes(e.target.value)} /></label>
+                <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cost (optional)</span><input style={FS.input} value={doneCost} placeholder="e.g. 240" inputMode="numeric" onChange={(e) => setDoneCost(e.target.value)} /></label>
+                <button style={{ ...FS.btnPrimary, opacity: doneBusy ? 0.7 : 1 }} disabled={doneBusy} onClick={() => submitDone(i)}>{doneBusy ? <><Loader2 size={15} className="spin" /> Recording…</> : <><CheckCircle2 size={15} /> Record it</>}</button>
+                <button style={FS.btn} disabled={doneBusy} onClick={closeDone}>Cancel</button>
+              </div>
+            )}
+            {histFor === i.id && (
+              <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%" }}>
+                <div style={{ ...FS.kicker, marginBottom: 6 }}>COMPLETION HISTORY</div>
+                {histBusy === i.id && !(hist[i.id] || []).length ? (
+                  <div style={{ fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><Loader2 size={14} className="spin" /> Loading…</div>
+                ) : histErr ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 150, fontSize: 12.5, color: FIRE.textMuted }}>Couldn't load the history.</span>
+                    <button onClick={() => loadHistory(i.id)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><RefreshCw size={13} color={FIRE.btnIcon} /> Try again</button>
+                  </div>
+                ) : (hist[i.id] || []).length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No completions recorded yet.</div>
+                ) : (
+                  (hist[i.id] || []).map((h, hi, arr) => (
+                    <div key={h.id} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline", padding: "7px 0", borderBottom: hi === arr.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, minWidth: 96 }}>{fmtLogAt(h.done_at)}</span>
+                      <span style={{ fontSize: 12.5, color: FIRE.textSecondary, minWidth: 110 }}>{h.done_by_name || "Unknown"}</span>
+                      {h.notes && <span style={{ flex: 1, minWidth: 150, fontSize: 12.5, color: FIRE.textMuted }}>{h.notes}</span>}
+                      {h.cost != null && <span style={{ marginLeft: "auto", fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, ...FS.num }}>{money(h.cost)}</span>}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
             {editingMaintId === i.id && (
               <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={maintBuf.task} onChange={(e) => setMaintBuf((b) => ({ ...b, task: e.target.value }))} /></label>
