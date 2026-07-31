@@ -180,6 +180,36 @@ export default async function handler(req, res) {
       urlPrefix: (supabaseUrl || "").slice(0, 24),
     });
   }
+  // ?debug=2 — why a run came back empty. Reads only, sends nothing, returns COUNTS not rows (no names, no PII).
+  // Separates the three causes of {"total":0}: rows invisible (key not bypassing RLS), rows present but
+  // department_id null (detectors skip those), or rows present and simply nothing inside the date windows.
+  if (req.query?.debug === "2" && supabaseUrl && serviceKey) {
+    const sb2 = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+    const countOf = async (table, filter) => {
+      let q = sb2.from(table).select("*", { count: "exact", head: true });
+      if (filter) q = filter(q);
+      const { count, error } = await q;
+      return error ? `ERROR: ${error.message}` : count;
+    };
+    const notNull = (col) => (q) => q.not(col, "is", null);
+    const out = {};
+    for (const t of ["departments", "members", "certs", "equipment", "equipment_type", "apparatus_maintenance"]) {
+      out[t] = { rows: await countOf(t) };
+    }
+    out.certs.withDept = await countOf("certs", notNull("department_id"));
+    out.certs.withExp = await countOf("certs", notNull("exp"));
+    out.equipment.withDept = await countOf("equipment", notNull("department_id"));
+    out.equipment.withMfgDate = await countOf("equipment", notNull("manufacture_date"));
+    out.equipment_type.withServiceLife = await countOf("equipment_type", notNull("service_life_years"));
+    out.apparatus_maintenance.withDept = await countOf("apparatus_maintenance", notNull("department_id"));
+    out.apparatus_maintenance.neverDone = await countOf("apparatus_maintenance", (q) => q.is("last_done_at", null));
+    const today = startOfToday();
+    const flagged = {};
+    for (const [k, fn] of [["certs", detectCerts], ["gear", detectGear], ["maintenance", detectMaintenance]]) {
+      try { flagged[k] = (await fn(sb2, today)).length; } catch (e) { flagged[k] = `ERROR: ${e.message}`; }
+    }
+    return res.status(200).json({ today: today.toISOString().slice(0, 10), tables: out, flagged });
+  }
   const missing = [
     !resendKey && "RESEND_API_KEY",
     !supabaseUrl && "SUPABASE_URL",
