@@ -790,14 +790,14 @@ export default function App() {
   useEffect(() => {
     Promise.all([
       supabase.from("members_view").select("*"),
-      supabase.from("certs").select("id, member_id, name, exp"),
+      supabase.from("certs").select("id, member_id, name, exp, proof_path"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
     ]).then(([membersRes, certsRes]) => {
       // Group certs by member_id into a lookup of { id, name, exp } arrays.
       const certsByMember = new Map();
       if (!certsRes.error && certsRes.data) {
         for (const c of certsRes.data) {
           if (!certsByMember.has(c.member_id)) certsByMember.set(c.member_id, []);
-          certsByMember.get(c.member_id).push({ id: c.id, name: c.name, exp: c.exp });
+          certsByMember.get(c.member_id).push({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null });
         }
       }
       const { data, error } = membersRes;
@@ -868,12 +868,12 @@ export default function App() {
     let cancelled = false;
     Promise.all([
       supabase.from("members").select("*").eq("id", myMemberId).single(),
-      supabase.from("certs").select("id, member_id, name, exp").eq("member_id", myMemberId),
+      supabase.from("certs").select("id, member_id, name, exp, proof_path").eq("member_id", myMemberId),
     ]).then(([selfRes, certsRes]) => {
       if (cancelled) return;
       const s = selfRes.data;
       if (selfRes.error || !s) return;
-      const certs = (certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp }));
+      const certs = (certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null }));
       const selfRow = {
         id: s.id, department_id: s.department_id, name: s.name, role: s.role, access: s.access,
         status: s.status, phone: s.phone, email: s.email, joined: s.joined,
@@ -1202,6 +1202,7 @@ const rolling90 = () => { const to = new Date(); const from = new Date(); from.s
 // Shared personal cards (My Certifications / Assigned Duties / Upcoming Training) — self-contained (owns its personal-duties load + plan viewer).
 // Rendered in the Dept Admin dashboard; MemberDashboard keeps its own inline copy for now (switch is a later dedicated change).
 function PersonalView({ S, me, meId, sessions, notify, go }) {
+  const { openProof, proofMount } = useProofViewer(notify);   // "View proof" on the member's own approved certs
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
   const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length, certsTotal = certsAll.length;
@@ -1236,6 +1237,8 @@ function PersonalView({ S, me, meId, sessions, notify, go }) {
                   <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
                 </div>
                 <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
+                {c.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
               </div>
             ))}
           </div>
@@ -1304,6 +1307,7 @@ function PersonalView({ S, me, meId, sessions, notify, go }) {
         </div>
       </div>
       {mounts}
+      {proofMount}
     </>
   );
 }
@@ -2245,6 +2249,7 @@ function StationClockCard({ S, dept, go }) {
   );
 }
 function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
+  const { openProof, proofMount } = useProofViewer(notify);   // a plain Member reaches their certs here, not via PersonalView
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
   const sess = sessions || [];
@@ -2418,6 +2423,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
       </div>
 
       {mounts}
+      {proofMount}
       {/* 3 — cards (3-up): My Certifications | Assigned Duties | Upcoming Training */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
         {/* My Certifications — count/status header (merged from old Certs-current stat) + list */}
@@ -2437,6 +2443,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
                   <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
                 </div>
                 <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                {/* only when a proof is on file — a leader-entered cert legitimately has none */}
+                {c.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
               </div>
             ))}
           </div>
@@ -5265,6 +5273,7 @@ function fmtLongDate(iso) {
   return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1]} ${d}, ${y}`;
 }
 function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members, meId }) {
+  const { openProof, proofMount } = useProofViewer(notify);   // inspector-facing: open the proof on file for an approved cert
   const assign = hasAny(role, DEPT_ADMIN_ROLES);
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
@@ -5456,6 +5465,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               </>) : (<>
                 <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
                 <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                {/* only when a proof is on file — a leader-entered cert legitimately has none */}
+                {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
                 {assign && (<>
                   <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
                   <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
@@ -5508,6 +5519,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
         {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to department admins only — never to the member.</div>}
       </div>
       </>)}
+      {proofMount}
     </div>
   );
 }
@@ -5565,9 +5577,26 @@ function ProposeCert({ S, role, member, notify }) {
   );
 }
 
+// Shared "View proof" opener for an APPROVED cert. Same signed-URL + DocViewer path RosterPending uses
+// for pending submissions — approve_cert_submission copies proof_path onto the cert, so the file the
+// leader reviewed stays reachable afterwards instead of vanishing with the submission. The storage read
+// policy (station_docs_read_own_dept) already covers dept members, so no storage change is needed.
+// notify is optional: not every cert surface has it in scope.
+function useProofViewer(notify) {
+  const [proof, setProof] = useState(null);
+  async function openProof(path) {
+    if (!path) return;
+    const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(path, 3600);
+    if (error || !data?.signedUrl) { notify?.({ kind: "error", title: "Couldn't open the proof", text: "Please try again.", details: error?.message }); return; }
+    setProof({ url: data.signedUrl, name: (path || "").split("/").pop() });   // inline image (most proofs) or PDF
+  }
+  const proofMount = proof ? <DocViewer url={proof.url} name={proof.name} onClose={() => setProof(null)} /> : null;
+  return { openProof, proofMount };
+}
 function RosterCerts({ S, members }) {
+  const { openProof, proofMount } = useProofViewer();
   const rows = [];
-  members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, st: certStatus(c.exp) })));
+  members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, proofPath: c.proofPath || null, st: certStatus(c.exp) })));
   rows.sort((a, b) => a.st.rank - b.st.rank);
   const n = (r) => rows.filter((x) => x.st.rank === r).length;
   const nextClassFor = (cert) => CLASSES.find((cl) => cl.covers.includes(cert));
@@ -5615,10 +5644,13 @@ function RosterCerts({ S, members }) {
                 {cl && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
               </div>
               <Pill S={S} color={CERT_FIRE[r.st.label]}>{r.st.label}</Pill>
+              {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
+              {r.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(r.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
             </div>
           );
         })}
       </div>
+      {proofMount}
     </div>
   );
 }
