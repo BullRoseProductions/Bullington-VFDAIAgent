@@ -332,6 +332,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: `Missing ${missing.join(", ")}` });
   }
 
+  // An explicit ?to= is a MANUAL TEST SEND: it always renders, even for a department with nothing flagged,
+  // so the layout and the "—" fallbacks can be eyeballed on a quiet week. Without ?to= (how Cron will call
+  // it) SEND_WHEN_NOTHING_FLAGGED governs, so a real broadcast still stays silent when there's nothing to say.
+  const isTestSend = !!req.query?.to;
   const to = req.query?.to || DEFAULT_TO;
   const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });   // no session server-side → no authFetch refresh wrapper
   const today = startOfToday();
@@ -396,7 +400,7 @@ export default async function handler(req, res) {
   for (const [deptId, groups] of byDept) {
     const counts = { certs: groups.certs.length, gear: groups.gear.length, maintenance: groups.maint.length };
     const n = counts.certs + counts.gear + counts.maintenance;
-    if (n === 0 && !SEND_WHEN_NOTHING_FLAGGED) continue;      // skip departments with nothing to report
+    if (n === 0 && !SEND_WHEN_NOTHING_FLAGGED && !isTestSend) continue;   // nothing to report → silent, unless this is a test send
     total += n;
     const name = nameById.get(deptId) || "Unknown department";
 
