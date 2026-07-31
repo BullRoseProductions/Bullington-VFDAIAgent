@@ -9113,6 +9113,14 @@ function Equipment({ S, role, members, meId, notify }) {
                                   : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright };
                       const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
                       const gear = gearStatus(u.manufactureDate, t.serviceLifeYears);   // this unit's date + its TYPE's service life
+                      // NFPA retirement is mandatory by AGE regardless of condition, so a past-life unit is not
+                      // serviceable for duty. A green "Serviceable" pill beside RETIRE tells a firefighter to grab
+                      // something that has to come off the truck — suppress it so RETIRE stands alone. Only the
+                      // green/positive condition is hidden: "Needs attention" and "Out of service" AGREE with
+                      // RETIRE and still render. DISPLAY ONLY — the stored condition value is never changed, since
+                      // someone may have legitimately recorded the item as physically sound for the record.
+                      const isConditionBadge = !["held", "maintenance", "retired", "lost"].includes(u.status);   // otherwise the pill is a custody/status word, not a condition claim
+                      const hideServiceable = gear.rank === 0 && isConditionBadge && u.condition === "Serviceable";
                       return (
                         <div key={u.id}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
@@ -9122,7 +9130,7 @@ function Equipment({ S, role, members, meId, notify }) {
                               {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                             </div>
                             {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
-                            <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>
+                            {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
                             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
                             {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
                             {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
