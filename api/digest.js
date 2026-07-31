@@ -169,6 +169,17 @@ export default async function handler(req, res) {
   const resendKey = process.env.RESEND_API_KEY;
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // ?debug=1 — reports WHICH key shape Vercel is holding without touching Supabase or sending anything.
+  // Prefix only, never the key itself: 10 chars distinguishes `sb_secret_` from a legacy `eyJhbGciOi` JWT and reveals nothing usable.
+  // Sits after the CRON_SECRET gate but before the missing-vars check, so it can still answer when a var is absent.
+  if (req.query?.debug === "1") {
+    return res.status(200).json({
+      keyPrefix: (serviceKey || "").slice(0, 10) || "MISSING",
+      keyLen: (serviceKey || "").length,
+      urlPresent: !!supabaseUrl,
+      urlPrefix: (supabaseUrl || "").slice(0, 24),
+    });
+  }
   const missing = [
     !resendKey && "RESEND_API_KEY",
     !supabaseUrl && "SUPABASE_URL",
