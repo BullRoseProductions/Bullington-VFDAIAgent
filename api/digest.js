@@ -169,27 +169,43 @@ function trainingCompliancePct(sessions, attendance, countedMembers, year) {
   return Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
 }
 
-// Station presence for one department over a window, via the service-role-only RPC.
-// VERIFIED-ONLY CREDIT, mirroring App.jsx:6299 — unverified time is reported in its own bucket and is
-// NEVER folded into the credited figure, because that figure is what gets reported to ISO/LOSAP.
-async function stationMetrics(sb, deptId, from, to, countedIds) {
-  const { data, error } = await sb.rpc("dept_station_shifts_for", {
-    p_department_id: deptId,
-    p_from: from.toISOString(),
-    p_to: to.toISOString(),
-  });
-  if (error) return { error: error.message, credited: null, unverified: null, verifiedPct: null };
-  const rows = (data || []).filter((s) => countedIds.has(s.member_id));
-  if (!rows.length) return { credited: null, unverified: null, verifiedPct: null };
-  let credited = 0, unverified = 0, vTrue = 0;
-  for (const s of rows) {
-    const hrs = Number(s.hours) || 0;
-    if (s.verified) { credited += hrs; vTrue += 1; } else { unverified += hrs; }
+// Shift duration from the two timestamps — station_presence stores no hours column.
+// Date.parse IS correct here (unlike the date-only fields above): these are timestamptz values carrying an
+// explicit offset, so there is no local-vs-UTC midnight ambiguity to get wrong.
+// A shift that can't be parsed, or that ends before it starts, is DROPPED rather than credited — bad data
+// must not quietly move a figure that gets reported to an outside body.
+function shiftHours(s) {
+  const a = Date.parse(s.checked_in_at), b = Date.parse(s.checked_out_at);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+  return (b - a) / 3600000;
+}
+// Station presence rollup — mirrors the app's own derivation at App.jsx:6304-6323 exactly:
+//   • only CLOSED shifts count (an open one has no duration to credit)
+//   • VERIFIED-ONLY CREDIT: unverified time lands in its own bucket and is never folded into the credited
+//     figure, because that figure is what gets reported to ISO/LOSAP
+//   • kind splits credited time into training vs standby ("standby is the only other surfaced kind")
+//   • verifiedPct is the share of check-in EVENTS verified, not of hours
+// Totals are summed raw and rounded once at the end, matching h1() (App.jsx:6327) — rounding per row would drift.
+const h1 = (n) => Math.round(n * 10) / 10;
+function stationMetrics(rows, countedIds) {
+  const mine = rows.filter((s) => countedIds.has(s.member_id));
+  let standby = 0, training = 0, unverified = 0, vTrue = 0, n = 0;
+  for (const s of mine) {
+    const hrs = shiftHours(s);
+    if (hrs === null) continue;
+    n += 1;
+    if (!s.verified) unverified += hrs;                             // recorded, not credited
+    else if (s.kind === "training") training += hrs;
+    else standby += hrs;
+    if (s.verified) vTrue += 1;
   }
+  if (!n) return { credited: null, standby: null, training: null, unverified: null, verifiedPct: null };
   return {
-    credited: Math.round(credited * 10) / 10,
-    unverified: Math.round(unverified * 10) / 10,
-    verifiedPct: Math.round(100 * vTrue / rows.length),             // % of check-in EVENTS verified, not of hours
+    credited: h1(standby + training),
+    standby: h1(standby),
+    training: h1(training),
+    unverified: h1(unverified),
+    verifiedPct: Math.round(100 * vTrue / n),
   };
 }
 
@@ -346,9 +362,15 @@ export default async function handler(req, res) {
   for (const g of gear) bucket(g.department_id).gear.push(g);
   for (const m of maint) bucket(m.department_id).maint.push(m);
 
+  const year = today.getFullYear();
+  const monthStart = new Date(year, today.getMonth(), 1);
+  const monthEnd = new Date(year, today.getMonth() + 1, 1);       // [first of month, first of next) — the whole month
+
   // Metric inputs — deliberately NON-FATAL, unlike the detection reads above. If this block fails the
   // summary degrades to "—" and the digest still goes out; it never blocks the items that need attention.
-  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], error: null };
+  // station_presence is read DIRECTLY: the service-role key already bypasses RLS, so no RPC is needed —
+  // the app's RPCs exist only because a browser client has to be walled off by my_department_id().
+  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], error: null };
   try {
     const rs = await Promise.all([
       sb.from("members").select("id, department_id, access"),
@@ -356,18 +378,18 @@ export default async function handler(req, res) {
       sb.from("session_attendance").select("session_id, member_id"),
       sb.from("certs").select("department_id, member_id, exp"),
       sb.from("apparatus").select("department_id, in_service"),
+      sb.from("station_presence").select("department_id, member_id, checked_in_at, checked_out_at, verified, kind")
+        .not("checked_out_at", "is", null)                        // closed shifts only — an open one has no duration
+        .gte("checked_in_at", monthStart.toISOString())
+        .lt("checked_in_at", monthEnd.toISOString()),
     ]);
     const bad = rs.find((r) => r.error);
     if (bad) throw new Error(bad.error.message);
-    const [m, s, a, c, ap] = rs.map((r) => r.data || []);
-    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, error: null };
+    const [m, s, a, c, ap, sp] = rs.map((r) => r.data || []);
+    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, shifts: sp, error: null };
   } catch (e) {
     mi.error = String(e?.message || e);   // surfaced in the response so a silent all-"—" digest is diagnosable
   }
-
-  const year = today.getFullYear();
-  const monthStart = new Date(year, today.getMonth(), 1);
-  const monthEnd = new Date(year, today.getMonth() + 1, 1);       // [first of month, first of next) — the whole month
 
   const results = [];
   let total = 0;
@@ -385,7 +407,7 @@ export default async function handler(req, res) {
     const metrics = {
       trainingPct: trainingCompliancePct(mi.sessions.filter((s) => s.department_id === deptId), mi.attendance, counted, year),
       certsPct: certsCurrentPct(mi.certRows.filter((c) => c.department_id === deptId), countedIds, today),
-      station: await stationMetrics(sb, deptId, monthStart, monthEnd, countedIds),
+      station: stationMetrics(mi.shifts.filter((s) => s.department_id === deptId), countedIds),
       apparatus: {
         total: deptApparatus.length || null,                  // no apparatus on file → "—", not "0 of 0"
         inService: deptApparatus.filter((a) => a.in_service !== false).length,   // null counts as in service, matching App.jsx:6789
