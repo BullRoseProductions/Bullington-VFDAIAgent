@@ -1,6 +1,8 @@
 // Vercel serverless function — keeps your Anthropic API key on the server.
 // Set ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables.
+import { cors } from "./_cors.js";
 export default async function handler(req, res) {
+  if (cors(req, res)) return;   // preflight answered; also sets ACAO on the real request
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }

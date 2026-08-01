@@ -4,7 +4,9 @@
 //      (an OpenAI key works with the default provider below).
 //   2. Redeploy. Each generated image costs money on the provider's side.
 // Returns a base64 data URL so the browser can use it without CORS/taint issues.
+import { cors } from "./_cors.js";
 export default async function handler(req, res) {
+  if (cors(req, res)) return;   // preflight answered; also sets ACAO on the real request
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
