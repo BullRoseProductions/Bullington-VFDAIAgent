@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">B4C — Before the Call</string>
+    <string name="title_activity_main">B4C — Before the Call</string>
+    <string name="package_name">com.bigbulltech.b4c</string>
+    <string name="custom_url_scheme">com.bigbulltech.b4c</string>
+</resources>
