@@ -1,36 +1,63 @@
 import UIKit
 import Capacitor
+import FirebaseCore
+import FirebaseMessaging
 
+// FCM WIRING (iOS)
+//
+// By default @capacitor/push-notifications posts the raw APNs device token to Capacitor, and the JS
+// `registration` event hands back a 64-char hex APNs token. Our server sends via FCM, which needs the
+// FCM token instead — a different, longer string.
+//
+// The plugin's handler (PushNotificationsPlugin.swift:184-199) accepts EITHER a Data object (which it
+// hex-encodes into the APNs token) OR a String (which it forwards verbatim). So the wiring is:
+//   1. hand the APNs token to FirebaseMessaging instead of posting it,
+//   2. let Firebase mint the FCM token,
+//   3. post THAT string — the plugin forwards it, and src/push.js files it via register_device.
+//
+// Token refresh fires the same delegate again, which re-posts and re-upserts. That is intended:
+// FCM rotates tokens, and a stale one is a silently undelivered notification.
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // FirebaseApp.configure() hard-crashes if GoogleService-Info.plist isn't in the bundle. The plist
+        // is added to the target as a separate Xcode step, so guard rather than trap: a build made before
+        // that step still launches, just without push.
+        if Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
+            FirebaseApp.configure()
+            Messaging.messaging().delegate = self
+        } else {
+            print("[B4C] GoogleService-Info.plist not in the app bundle — Firebase not configured, push disabled.")
+        }
         return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
+    }
+
+    // APNs handed us a device token. Give it to Firebase and deliberately DO NOT post it onward —
+    // posting the Data here is exactly what makes JS receive an APNs token instead of the FCM one.
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Messaging.messaging().apnsToken = deviceToken
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
     func application(_ application: UIApplication,
@@ -40,5 +67,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                                           sessionRole: connectingSceneSession.role)
         config.delegateClass = SceneDelegate.self
         return config
+    }
+}
+
+extension AppDelegate: MessagingDelegate {
+    // Fires once the FCM token exists, and again on every refresh. This is the token the server sends to.
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        guard let fcmToken = fcmToken else {
+            NotificationCenter.default.post(
+                name: .capacitorDidFailToRegisterForRemoteNotifications,
+                object: NSError(domain: "B4C", code: -1,
+                                userInfo: [NSLocalizedDescriptionKey: "Firebase returned no FCM token."])
+            )
+            return
+        }
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: fcmToken)
     }
 }
