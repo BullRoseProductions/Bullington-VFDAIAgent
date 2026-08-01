@@ -20,7 +20,7 @@ const DEFAULT_TO = "ashlea@bullroseproductions.com";
 const FROM = "B4C <notifications@b4thecall.com>";
 // Gmail strips data: URIs, so the logo MUST be an absolute https URL to a public asset.
 // public/b4c-email-logo.png ships with the app and is served at the site root.
-const APP_URL = process.env.VITE_APP_URL || process.env.APP_URL || "https://bullington-vfdai-agent.vercel.app";
+const APP_URL = process.env.VITE_APP_URL || process.env.APP_URL || "https://app.b4thecall.com";
 const LOGO_URL = `${APP_URL}/b4c-email-logo.png`;
 // Brand tokens lifted from FIRE in App.jsx:30 so the email reads as the same product as the screen.
 const C = {
