@@ -15,6 +15,8 @@ import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { apiUrl } from "./apiBase";
+import NotificationCenter, { NotificationBell } from "./Notifications";
+import { initPush } from "./push";
 import { supabase, APP_URL, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -1040,6 +1042,10 @@ export default function App() {
   const S = baseStyles();
 
   function go(k, arg) { setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null); }
+  // Native push registration — once we know which member is signed in, so the device token is filed
+  // against the right person. No-op on web and while VITE_PUSH_ENABLED is off. Tapping a push opens
+  // the inbox rather than deep-linking to the subject: the inbox is the one destination we control.
+  useEffect(() => { if (!myMemberId) return; initPush({ onOpen: () => go("notifications") }); }, [myMemberId]);
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
   // Trim to the oversight+support surface ONLY when the ACTIVE role is exactly Project Admin
   // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —
@@ -1091,6 +1097,7 @@ export default function App() {
         <header style={S.topbar}>
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={{ flex: 1 }} />
+          <NotificationBell meId={myMemberId} onOpen={() => go("notifications")} />
           <div style={S.viewAs}>
             {isLeader(realRole) && realRole.length > 1 && (
               <>
@@ -1106,6 +1113,7 @@ export default function App() {
 
         <main style={S.content}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
+          {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "study" && <StudySession S={S} />}
