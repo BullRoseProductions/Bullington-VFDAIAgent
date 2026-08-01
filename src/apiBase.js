@@ -13,11 +13,11 @@ import { Capacitor } from "@capacitor/core";
 // The base comes from VITE_APP_URL (already the production origin used for auth-email links) so a
 // domain change updates this and the auth redirects together, rather than silently breaking one of them.
 // The literal is only a fallback for a native build made without that var set.
-const API_BASE = import.meta.env.VITE_APP_URL || "https://bullington-vfdai-agent.vercel.app";
+const API_BASE = import.meta.env.VITE_APP_URL || "https://app.b4thecall.com";
 
 export const isNative = () => Capacitor.isNativePlatform();
 
-// apiUrl("/api/claude") → "/api/claude" on web, "https://…vercel.app/api/claude" on device.
+// apiUrl("/api/claude") → "/api/claude" on web, "https://app.b4thecall.com/api/claude" on device.
 export function apiUrl(path) {
   if (!isNative()) return path;                       // web: unchanged, exactly as it behaves today
   return `${API_BASE.replace(/\/$/, "")}${path}`;     // tolerate a trailing slash on the env var
