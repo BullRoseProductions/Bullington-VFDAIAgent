@@ -78,6 +78,32 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") { checkForUpdate(false); refreshAuthIfStale(); }
 });
 
+/* Password rules — ONE source of truth, used by both the live checklist and the Save gate, so the
+   hints can never show all-green while save() still refuses (or the reverse).
+   The symbol class is the explicit set Supabase's own policy uses rather than "any non-alphanumeric":
+   a lone space would pass a /[^A-Za-z0-9]/ test here and still be rejected server-side, which is
+   exactly the contradiction this screen exists to avoid. */
+const PASSWORD_RULES = [
+  { id: "len",    label: "At least 8 characters",        test: (p) => p.length >= 8 },
+  { id: "upper",  label: "One uppercase letter (A–Z)",   test: (p) => /[A-Z]/.test(p) },
+  { id: "lower",  label: "One lowercase letter (a–z)",   test: (p) => /[a-z]/.test(p) },
+  { id: "digit",  label: "One number (0–9)",             test: (p) => /[0-9]/.test(p) },
+  { id: "symbol", label: "One symbol (! ? # $ …)",       test: (p) => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(p) },
+];
+const unmetRules = (p) => PASSWORD_RULES.filter((r) => !r.test(p || ""));
+
+// Supabase can still refuse a password our checklist accepts — notably `pwned`, a breach-list hit we
+// cannot test client-side. Turn every one of those into plain language; never surface the raw string.
+function friendlyPasswordError(error) {
+  const reasons = Array.isArray(error?.reasons) ? error.reasons : [];
+  const weak = error?.code === "weak_password" || reasons.length > 0;
+  if (!weak) return error?.message || "Something went wrong saving your password. Please try again.";
+  if (reasons.includes("pwned")) return "That password has shown up in a known data breach, so it isn't safe to use. Please pick a different one.";
+  if (reasons.includes("length")) return "That password is too short. Use at least 8 characters.";
+  if (reasons.includes("characters")) return "That password needs a wider mix — check the list above and add what's missing.";
+  return "That password isn't strong enough yet. Check the list above and add what's missing.";
+}
+
 // Set-new-password screen. Only shown after a reset link lands and Supabase fires
 // PASSWORD_RECOVERY (see Root). Built for the lowest common denominator: ONE field
 // plus a Show-password toggle — no confirm field, because a confirm-mismatch is the
@@ -96,14 +122,21 @@ function SetNewPassword({ hasSession, onDone }) {
   // beats an error our audience would have to decode and retry.
   const ready = hasSession && !loading;
 
+  const missing = unmetRules(password);
+
   async function save() {
     setErr("");
     if (!ready) return;
-    if (!password || password.length < 6) { setErr("Pick a password with at least 6 characters."); return; }
+    // Save stays CLICKABLE even when the rules aren't met — a dead button with no explanation is the
+    // same dead-end this screen was built to avoid. Clicking names what's missing instead.
+    if (missing.length) {
+      setErr(password ? "Your password still needs: " + missing.map((r) => r.label.toLowerCase()).join(", ") + "." : "Pick a password that meets the list below.");
+      return;
+    }
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password });
     setLoading(false);
-    if (error) { setErr(error.message); return; }
+    if (error) { setErr(friendlyPasswordError(error)); return; }
     onDone(); // recovery session is already live → straight into the app, signed in
   }
 
@@ -131,6 +164,22 @@ function SetNewPassword({ hasSession, onDone }) {
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "#8FA3C4", cursor: "pointer", marginBottom: 14, userSelect: "none" }}>
             <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Show password
           </label>
+
+          {/* Live requirements — every rule visible from the start (never a surprise on submit) and
+              ticking green as it's satisfied. aria-live so a screen reader announces each one passing. */}
+          <div aria-live="polite" style={{ margin: "0 0 14px", padding: "11px 12px", background: "rgba(90,130,200,.06)", border: "1px solid rgba(90,130,200,.14)", borderRadius: 10 }}>
+            <div style={{ fontSize: 12, color: "#8FA3C4", fontWeight: 600, marginBottom: 7 }}>Your password needs:</div>
+            {PASSWORD_RULES.map((r) => {
+              const met = r.test(password);
+              return (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, lineHeight: 1.7, color: met ? "#76C98D" : "#8FA3C4" }}>
+                  <span aria-hidden="true" style={{ width: 14, textAlign: "center", fontWeight: 700 }}>{met ? "✓" : "○"}</span>
+                  <span>{r.label}</span>
+                  <span style={{ position: "absolute", left: -9999 }}>{met ? " — met" : " — not yet met"}</span>
+                </div>
+              );
+            })}
+          </div>
 
           {err && <div style={{ fontSize: 13, color: "#E58A90", marginBottom: 12 }}>{err}</div>}
 
