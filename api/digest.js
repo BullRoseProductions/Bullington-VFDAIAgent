@@ -1,5 +1,9 @@
 // Vercel serverless function — email digest: detect what needs attention, compose, send.
-// Slice 2 is TEST MODE: every department's email goes to the test recipient, never to real admins.
+//
+// Runs weekly from Vercel Cron (see vercel.json), which calls this path with
+// `Authorization: Bearer ${CRON_SECRET}` — the same gate a browser satisfies with ?secret=.
+// A real run mails each department's own Department Admins. Adding ?to= makes it a TEST SEND:
+// one address, never the real admins, and it renders even when nothing is flagged.
 //
 // Env (Vercel → Settings → Environment Variables):
 //   CRON_SECRET               — request gate (Bearer header from Cron, or ?secret= in a browser)
@@ -14,6 +18,16 @@ import { createClient } from "@supabase/supabase-js";
 
 const DEFAULT_TO = "ashlea@bullroseproductions.com";
 const FROM = "B4C <notifications@b4thecall.com>";
+// Gmail strips data: URIs, so the logo MUST be an absolute https URL to a public asset.
+// public/b4c-email-logo.png ships with the app and is served at the site root.
+const APP_URL = process.env.VITE_APP_URL || process.env.APP_URL || "https://bullington-vfdai-agent.vercel.app";
+const LOGO_URL = `${APP_URL}/b4c-email-logo.png`;
+// Brand tokens lifted from FIRE in App.jsx:30 so the email reads as the same product as the screen.
+const C = {
+  shell: "#0A0C0F", card: "#13161B", hairline: "rgba(255,255,255,.08)",
+  text: "#F7F8FA", secondary: "#B6BDC8", muted: "#7E8794",
+  red: "#C8323A", redText: "#E58A90", amber: "#D6A95E", green: "#76C98D",
+};
 const CERT_WINDOW_DAYS = 60;
 const GEAR_WINDOW_DAYS = 90;
 const MAINT_WINDOW_DAYS = 14;
@@ -209,60 +223,110 @@ function stationMetrics(rows, countedIds) {
   };
 }
 
-/* ---------------- compose ---------------- */
+/* ---------------- compose ----------------
+   Table-based, inline-styled, 600px — the shape every email client renders predictably.
+   Flex/grid and <style> blocks are deliberately avoided: Outlook drops them. */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const byWorstFirst = (a, b) => a.sort - b.sort;
 
 function section(title, items, lineFor) {
   if (!items.length) return "";                                        // omit empty sections entirely
   const rows = [...items].sort(byWorstFirst).map((it) => {
-    const color = it.urgent ? "#B11E2A" : "#9A6B12";                   // same red/amber vocabulary as the app's badges
-    return `<li style="margin:0 0 6px;line-height:1.45">${lineFor(it)} <span style="color:${color};font-weight:600">${esc(it.state)}</span></li>`;
+    const color = it.urgent ? C.redText : C.amber;                     // same red/amber vocabulary as the app's badges
+    return `<tr><td style="padding:7px 0;border-top:1px solid ${C.hairline};font-size:14px;color:${C.secondary};line-height:1.45">
+      ${lineFor(it)} <span style="color:${color};font-weight:700">${esc(it.state)}</span></td></tr>`;
   }).join("");
-  return `<h2 style="font-size:15px;margin:22px 0 8px;color:#111">${esc(title)} <span style="color:#6A7178;font-weight:400">(${items.length})</span></h2>
-    <ul style="margin:0;padding-left:18px;font-size:14px;color:#333">${rows}</ul>`;
+  return `<tr><td style="padding:22px 24px 0">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:${C.red};font-weight:700">${esc(title)}
+        <span style="color:${C.muted};font-weight:400">(${items.length})</span></div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px">${rows}</table>
+    </td></tr>`;
 }
 
 // "—" for anything with no data behind it. A 0% would assert something false; a dash says "not measured yet".
 const dash = (v, suffix = "") => (v === null || v === undefined ? "&mdash;" : `${esc(v)}${suffix}`);
 function metricsBlock(m) {
-  const cells = [
-    ["Training compliance", dash(m.trainingPct, "%")],
+  const tiles = [
+    ["Training", dash(m.trainingPct, "%")],
     ["Certs current", dash(m.certsPct, "%")],
-    ["Station hours credited", dash(m.station.credited, " h")],
-    ["Verified presence", dash(m.station.verifiedPct, "%")],
-    ["Apparatus in service", m.apparatus.total === null ? "&mdash;" : `${esc(m.apparatus.inService)} of ${esc(m.apparatus.total)}`],
+    ["Station hrs", dash(m.station.credited)],
+    ["Verified", dash(m.station.verifiedPct, "%")],
+    ["Apparatus", m.apparatus.total === null ? "&mdash;" : `${esc(m.apparatus.inService)}/${esc(m.apparatus.total)}`],
   ];
-  const tds = cells.map(([label, value]) => `<td style="padding:8px 10px 8px 0;vertical-align:top">
-      <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#6A7178">${esc(label)}</div>
-      <div style="font-size:18px;font-weight:700;color:#111;margin-top:2px">${value}</div></td>`).join("");
+  const tds = tiles.map(([label, value]) => `<td width="20%" align="center" style="padding:12px 4px;background:${C.card};border:1px solid ${C.hairline};border-radius:10px">
+      <div style="font-size:19px;font-weight:700;color:${C.text};line-height:1.1">${value}</div>
+      <div style="font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:${C.muted};margin-top:4px">${esc(label)}</div>
+    </td>`).join(`<td width="6"></td>`);
   // Unverified hours sit OUTSIDE the credited figure — shown, never added in.
-  const note = m.station.unverified ? `<p style="margin:6px 0 0;font-size:12px;color:#9A6B12">${esc(m.station.unverified)} h unverified &mdash; recorded, not credited toward ISO/LOSAP.</p>` : "";
-  return `<table style="width:100%;border-collapse:collapse;margin:14px 0 4px"><tr>${tds}</tr></table>${note}`;
+  const note = m.station.unverified
+    ? `<div style="font-size:11.5px;color:${C.amber};margin-top:8px">${esc(m.station.unverified)} h unverified &mdash; recorded, not credited toward ISO/LOSAP.</div>` : "";
+  return `<tr><td style="padding:20px 24px 0">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:${C.muted};font-weight:700;margin-bottom:8px">Readiness at a glance</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${tds}</tr></table>${note}
+    </td></tr>`;
 }
 
-function compose(deptName, groups, metrics) {
+function compose(deptName, groups, metrics, { testMode } = {}) {
   const total = groups.certs.length + groups.gear.length + groups.maint.length;
   const subject = `B4C — ${deptName}: ${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
-  const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px 20px">
-    <h1 style="font-size:18px;margin:0 0 4px;color:#111">${esc(deptName)}</h1>
-    <p style="margin:0 0 4px;font-size:14px;color:#6A7178">${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention.</p>
-    ${metricsBlock(metrics)}
-    ${section("Certifications", groups.certs, (it) => `${esc(it.member)} &middot; ${esc(it.cert)} &middot;`)}
-    ${section("Gear retirement", groups.gear, (it) => `${esc(it.item)} &middot;`)}
-    ${section("Maintenance", groups.maint, (it) => `${esc(it.apparatus)} &middot; ${esc(it.task)} &middot;`)}
-    <p style="margin:26px 0 0;padding-top:12px;border-top:1px solid #E5E7EB;font-size:12px;color:#6A7178">
-      TEST MODE — this went to the test address, not to ${esc(deptName)}'s admins.</p>
-  </div>`;
+  const headline = `${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
+  const testBanner = testMode
+    ? `<tr><td style="padding:12px 24px 0"><div style="background:rgba(214,169,94,.12);border:1px solid ${C.amber};border-radius:8px;padding:9px 12px;font-size:12px;color:${C.amber}">
+        TEST MODE &mdash; preview sent to the test address, not to ${esc(deptName)}'s admins.</div></td></tr>` : "";
+  const html = `<div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(headline)} &mdash; ${esc(deptName)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.shell};margin:0;padding:0">
+  <tr><td align="center" style="padding:24px 12px">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:${C.shell};border:1px solid ${C.hairline};border-radius:14px;overflow:hidden;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif">
+      <tr><td style="padding:22px 24px 18px;border-bottom:1px solid ${C.hairline}">
+        <img src="${LOGO_URL}" width="132" alt="B4C — Before the Call" style="display:block;border:0;outline:none;text-decoration:none;height:auto">
+      </td></tr>
+      <tr><td style="padding:20px 24px 0">
+        <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:${C.red};font-weight:700">Weekly digest</div>
+        <div style="font-size:19px;font-weight:700;color:${C.text};margin-top:5px;line-height:1.3">${esc(deptName)}</div>
+        <div style="font-size:14px;color:${C.secondary};margin-top:3px">${esc(headline)}.</div>
+      </td></tr>
+      ${testBanner}
+      ${metricsBlock(metrics)}
+      ${section("Certifications", groups.certs, (it) => `${esc(it.member)} &middot; ${esc(it.cert)} &middot;`)}
+      ${section("Gear retirement", groups.gear, (it) => `${esc(it.item)} &middot;`)}
+      ${section("Maintenance", groups.maint, (it) => `${esc(it.apparatus)} &middot; ${esc(it.task)} &middot;`)}
+      <tr><td style="padding:24px 24px 4px">
+        <a href="${APP_URL}" style="display:inline-block;background:${C.red};color:#fff;font-size:14px;font-weight:700;text-decoration:none;padding:11px 20px;border-radius:8px">Open B4C &rarr;</a>
+      </td></tr>
+      <tr><td style="padding:20px 24px 24px">
+        <div style="border-top:1px solid ${C.hairline};padding-top:14px;font-size:11.5px;color:${C.muted};line-height:1.6">
+          Before the Call &middot; &copy; 2026 Big Bull Technologies, LLC. All rights reserved.<br>
+          You're receiving this because you're a Department Admin for ${esc(deptName)}.
+        </div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>`;
   return { subject, html };
 }
 
 /* ---------------- send ---------------- */
-async function sendEmail(key, to, subject, html) {
+// Recipients for a REAL send: active Department Admins of that one department, same exclusions as the
+// stats, deduped by lowercased email. Scoping by department_id is what keeps one department's roster out
+// of another's inbox now that service-role has removed RLS from the picture.
+function deptAdminEmails(members, deptId) {
+  const out = new Set();
+  for (const m of members) {
+    if (m.department_id !== deptId) continue;
+    if (m.status !== "Active") continue;                              // inactive admins don't get mail
+    if (!countsInStats(m)) continue;                                  // owner/test/demo + Project Admin
+    if (!Array.isArray(m.access) || !m.access.includes("Department Admin")) continue;
+    const e = String(m.email || "").trim().toLowerCase();
+    if (e) out.add(e);
+  }
+  return [...out];
+}
+
+async function sendEmail(key, recipients, subject, html) {
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ from: FROM, to: [to], subject, html }),
+    body: JSON.stringify({ from: FROM, to: recipients, subject, html }),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(typeof data === "object" ? JSON.stringify(data) : String(data));
@@ -282,47 +346,6 @@ export default async function handler(req, res) {
   const resendKey = process.env.RESEND_API_KEY;
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  // ?debug=1 — reports WHICH key shape Vercel is holding without touching Supabase or sending anything.
-  // Prefix only, never the key itself: 10 chars distinguishes `sb_secret_` from a legacy `eyJhbGciOi` JWT and reveals nothing usable.
-  // Sits after the CRON_SECRET gate but before the missing-vars check, so it can still answer when a var is absent.
-  if (req.query?.debug === "1") {
-    return res.status(200).json({
-      keyPrefix: (serviceKey || "").slice(0, 10) || "MISSING",
-      keyLen: (serviceKey || "").length,
-      urlPresent: !!supabaseUrl,
-      urlPrefix: (supabaseUrl || "").slice(0, 24),
-    });
-  }
-  // ?debug=2 — why a run came back empty. Reads only, sends nothing, returns COUNTS not rows (no names, no PII).
-  // Separates the three causes of {"total":0}: rows invisible (key not bypassing RLS), rows present but
-  // department_id null (detectors skip those), or rows present and simply nothing inside the date windows.
-  if (req.query?.debug === "2" && supabaseUrl && serviceKey) {
-    const sb2 = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-    const countOf = async (table, filter) => {
-      let q = sb2.from(table).select("*", { count: "exact", head: true });
-      if (filter) q = filter(q);
-      const { count, error } = await q;
-      return error ? `ERROR: ${error.message}` : count;
-    };
-    const notNull = (col) => (q) => q.not(col, "is", null);
-    const out = {};
-    for (const t of ["departments", "members", "certs", "equipment", "equipment_type", "apparatus_maintenance"]) {
-      out[t] = { rows: await countOf(t) };
-    }
-    out.certs.withDept = await countOf("certs", notNull("department_id"));
-    out.certs.withExp = await countOf("certs", notNull("exp"));
-    out.equipment.withDept = await countOf("equipment", notNull("department_id"));
-    out.equipment.withMfgDate = await countOf("equipment", notNull("manufacture_date"));
-    out.equipment_type.withServiceLife = await countOf("equipment_type", notNull("service_life_years"));
-    out.apparatus_maintenance.withDept = await countOf("apparatus_maintenance", notNull("department_id"));
-    out.apparatus_maintenance.neverDone = await countOf("apparatus_maintenance", (q) => q.is("last_done_at", null));
-    const today = startOfToday();
-    const flagged = {};
-    for (const [k, fn] of [["certs", detectCerts], ["gear", detectGear], ["maintenance", detectMaintenance]]) {
-      try { flagged[k] = (await fn(sb2, today)).length; } catch (e) { flagged[k] = `ERROR: ${e.message}`; }
-    }
-    return res.status(200).json({ today: today.toISOString().slice(0, 10), tables: out, flagged });
-  }
   const missing = [
     !resendKey && "RESEND_API_KEY",
     !supabaseUrl && "SUPABASE_URL",
@@ -381,7 +404,7 @@ export default async function handler(req, res) {
   let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], error: null };
   try {
     const rs = await Promise.all([
-      sb.from("members").select("id, department_id, access"),
+      sb.from("members").select("id, department_id, access, email, status"),
       sb.from("training_sessions").select("id, department_id, date, done, audience, counts_toward_attendance"),
       sb.from("session_attendance").select("session_id, member_id"),
       sb.from("certs").select("department_id, member_id, exp"),
@@ -400,6 +423,7 @@ export default async function handler(req, res) {
   }
 
   const results = [];
+  const skipped = [];                                        // departments deliberately not mailed, with the reason — never silent
   let total = 0;
   for (const [deptId, groups] of byDept) {
     const counts = { certs: groups.certs.length, gear: groups.gear.length, maintenance: groups.maint.length };
@@ -421,13 +445,24 @@ export default async function handler(req, res) {
         inService: deptApparatus.filter((a) => a.in_service !== false).length,   // null counts as in service, matching App.jsx:6789
       },
     };
-    const { subject, html } = compose(name, groups, metrics);
+    // TEST MODE goes to the one test address and NEVER to real admins; a real run resolves that
+    // department's own Department Admins. A department with none is skipped and reported, not crashed on.
+    const recipients = isTestSend ? [to] : deptAdminEmails(mi.members, deptId);
+    if (!recipients.length) {
+      skipped.push({ name, reason: mi.error ? `member read failed: ${mi.error}` : "no active Department Admin with an email address" });
+      continue;
+    }
+    const { subject, html } = compose(name, groups, metrics, { testMode: isTestSend });
     try {
-      const id = await sendEmail(resendKey, to, subject, html);   // sequential — one Resend call at a time
-      results.push({ name, counts, metrics, sentTo: to, id });
+      const id = await sendEmail(resendKey, recipients, subject, html);   // sequential — one Resend call at a time
+      results.push({ name, counts, metrics, sentTo: recipients, id });
     } catch (e) {
       results.push({ name, counts, metrics, sentTo: null, error: String(e?.message || e) });   // one bad send never hides the rest
     }
   }
-  return res.status(200).json({ departments: results, total, ...(mi.error ? { metricsError: mi.error } : {}) });
+  return res.status(200).json({
+    departments: results, total,
+    ...(skipped.length ? { skipped } : {}),
+    ...(mi.error ? { metricsError: mi.error } : {}),
+  });
 }
