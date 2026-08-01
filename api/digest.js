@@ -15,6 +15,7 @@
 // Service role means NO RLS. Department scoping is this file's job: every row is grouped by its own
 // department_id and composed into that department's email. Nothing crosses departments.
 import { createClient } from "@supabase/supabase-js";
+import { buildNotifications, insertNotifications, sendPush } from "./_push.js";
 
 const DEFAULT_TO = "ashlea@bullroseproductions.com";
 const FROM = "B4C <notifications@b4thecall.com>";
@@ -38,6 +39,25 @@ const DAY_MS = 86400000;
 // A department with nothing flagged sends no email at all (slice 2 rule). Metrics alone don't trigger a send.
 // Flip to true if the summary is worth mailing on a quiet week.
 const SEND_WHEN_NOTHING_FLAGGED = false;
+
+// Notification rows + push stay OFF until a device test confirms delivery. Set PUSH_ENABLED=1 in
+// Vercel to turn them on; the email digest is completely unaffected either way.
+const PUSH_ENABLED = process.env.PUSH_ENABLED === "1";
+// Who gets ops notifications (gear, maintenance) — mirrors CANMANAGE_OPS_ROLES in App.jsx:88:
+// Department Admin + Officer. Board Member is governance-only and is deliberately NOT buzzed
+// about a pump test; Project Admin is excluded by countsInStats anyway.
+const OPS_LEADER_ROLES = ["Department Admin", "Officer"];
+
+// Notification copy. Addressed to the RECIPIENT: a cert row goes to the member who holds it,
+// so it reads in second person; ops rows go to leaders and name the asset instead.
+function notifTextFor(it) {
+  if (it.kind === "cert_expired")  return { title: "Certification expired",  body: `Your ${it.cert} ${it.state}.` };
+  if (it.kind === "cert_expiring") return { title: "Certification expiring", body: `Your ${it.cert} ${it.state}.` };
+  if (it.kind === "gear_retire")   return { title: "Gear past service life", body: `${it.item} — retire it.` };
+  if (it.kind === "gear_retiring") return { title: "Gear nearing retirement", body: `${it.item} ${it.state}.` };
+  if (it.kind === "maint_overdue") return { title: "Maintenance overdue",    body: `${it.apparatus} · ${it.task} is overdue.` };
+  return { title: "Maintenance due", body: `${it.apparatus} · ${it.task} — ${it.state}.` };
+}
 
 /* STATS_EXCLUDED_IDS — MUST stay in sync with App.jsx:1152. These three accounts (owner, test, demo)
    plus anyone holding Project Admin are excluded from every denominator on screen. If the digest
@@ -83,7 +103,7 @@ function parseDateOnly(value) {
 /* ---------------- detection ----------------
    Each loader returns a flat array of flagged items carrying their own department_id; grouping happens once, after. */
 async function detectCerts(sb, today) {
-  const { data, error } = await sb.from("certs").select("department_id, name, exp, members(name)");
+  const { data, error } = await sb.from("certs").select("id, department_id, member_id, name, exp, members(name)");
   if (error) throw new Error(`certs read failed: ${error.message}`);
   const cutoff = addDays(today, CERT_WINDOW_DAYS);
   return (data || []).flatMap((r) => {
@@ -92,6 +112,9 @@ async function detectCerts(sb, today) {
     const expired = end < today;
     return [{
       department_id: r.department_id,
+      subject_ref: r.id,                                    // stable identity for notification de-dupe
+      member_id: r.member_id,                               // the person who has to renew it
+      kind: expired ? "cert_expired" : "cert_expiring",
       sort: end.getTime(),
       member: r.members?.name || "Unknown member",
       cert: r.name || "Unnamed cert",
@@ -102,7 +125,7 @@ async function detectCerts(sb, today) {
 }
 async function detectGear(sb, today) {
   const { data, error } = await sb.from("equipment")
-    .select("department_id, serial_number, manufacture_date, equipment_type(name, service_life_years)");
+    .select("id, department_id, serial_number, manufacture_date, equipment_type(name, service_life_years)");
   if (error) throw new Error(`equipment read failed: ${error.message}`);
   const cutoff = addDays(today, GEAR_WINDOW_DAYS);
   return (data || []).flatMap((r) => {
@@ -112,6 +135,8 @@ async function detectGear(sb, today) {
     const type = r.equipment_type?.name || "Equipment";
     return [{
       department_id: r.department_id,
+      subject_ref: r.id,
+      kind: past ? "gear_retire" : "gear_retiring",
       sort: retire.getTime(),
       item: r.serial_number ? `${type} #${r.serial_number}` : type,
       state: past ? "RETIRE" : `retires ${fmtMonYear(retire)}`,
@@ -121,7 +146,7 @@ async function detectGear(sb, today) {
 }
 async function detectMaintenance(sb, today) {
   const { data, error } = await sb.from("apparatus_maintenance")
-    .select("department_id, task, cadence, last_done_at, apparatus(name)");
+    .select("id, department_id, task, cadence, last_done_at, apparatus(name)");
   if (error) throw new Error(`apparatus_maintenance read failed: ${error.message}`);
   return (data || []).flatMap((r) => {
     if (!r.department_id) return [];
@@ -134,6 +159,8 @@ async function detectMaintenance(sb, today) {
     }
     return [{
       department_id: r.department_id,
+      subject_ref: r.id,
+      kind: overdue ? "maint_overdue" : "maint_due",
       sort: overdue ? -1 : daysBetween(today, nextDue),
       apparatus: r.apparatus?.name || "All units",           // rig_id is nullable — a task can apply to every unit
       task: r.task || "Maintenance task",
@@ -447,6 +474,39 @@ export default async function handler(req, res) {
     };
     // TEST MODE goes to the one test address and NEVER to real admins; a real run resolves that
     // department's own Department Admins. A department with none is skipped and reported, not crashed on.
+    // ---- notification rows + push ----
+    // Runs BEFORE the email-recipient check on purpose: a department with no admin email address
+    // still has members who need their unread badge. Email and notifications fail independently.
+    // Never in test mode — a preview send must not write rows or buzz real members' phones.
+    let notified = null;
+    if (PUSH_ENABLED && !isTestSend) {
+      try {
+        const leaderIds = mi.members
+          .filter((m) => m.department_id === deptId && m.status === "Active" && countsInStats(m)
+            && Array.isArray(m.access) && m.access.some((r) => OPS_LEADER_ROLES.includes(r)))
+          .map((m) => m.id);
+        const items = [...groups.certs, ...groups.gear, ...groups.maint].map((it) => ({ ...it, ...notifTextFor(it) }));
+        const rows = buildNotifications(items, deptId, leaderIds, countedIds);
+        const { inserted, rows: fresh } = await insertNotifications(sb, rows);
+        // Push ONLY the genuinely new rows — upsert returns nothing for a de-duped repeat, so a
+        // persisting item can't buzz the same phone every single run.
+        let push = { sent: 0, failed: 0 };
+        if (fresh.length) {
+          const { data: devices } = await sb.from("member_devices")
+            .select("member_id, token").in("member_id", [...new Set(fresh.map((r) => r.member_id))]);
+          const tokensByMember = new Map();
+          for (const d of devices || []) {
+            if (!tokensByMember.has(d.member_id)) tokensByMember.set(d.member_id, []);
+            tokensByMember.get(d.member_id).push(d.token);
+          }
+          push = await sendPush(sb, fresh, tokensByMember);
+        }
+        notified = { candidates: rows.length, inserted, push };
+      } catch (e) {
+        notified = { error: String(e?.message || e) };   // never blocks the email
+      }
+    }
+
     const recipients = isTestSend ? [to] : deptAdminEmails(mi.members, deptId);
     if (!recipients.length) {
       skipped.push({ name, reason: mi.error ? `member read failed: ${mi.error}` : "no active Department Admin with an email address" });
@@ -455,9 +515,9 @@ export default async function handler(req, res) {
     const { subject, html } = compose(name, groups, metrics, { testMode: isTestSend });
     try {
       const id = await sendEmail(resendKey, recipients, subject, html);   // sequential — one Resend call at a time
-      results.push({ name, counts, metrics, sentTo: recipients, id });
+      results.push({ name, counts, metrics, sentTo: recipients, id, ...(notified ? { notified } : {}) });
     } catch (e) {
-      results.push({ name, counts, metrics, sentTo: null, error: String(e?.message || e) });   // one bad send never hides the rest
+      results.push({ name, counts, metrics, sentTo: null, error: String(e?.message || e), ...(notified ? { notified } : {}) });   // one bad send never hides the rest
     }
   }
   return res.status(200).json({
