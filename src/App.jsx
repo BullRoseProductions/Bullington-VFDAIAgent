@@ -337,8 +337,15 @@ function YourSix({ S, role, meId, members, notify }) {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(YS_BLANK_FORM);
   const [formKind, setFormKind] = useState("resource");   // 'resource' | 'business' — drives which fields the form shows
-  function load() { supabase.from("resources").select("*").then(({ data }) => setResources(data || [])); }   // dept-scoped by RLS
+  const [loadErr, setLoadErr] = useState(false);
+  function load() {   // a failed READ is not "no resources" — keep last-known, flag it, recover on reconnect
+    supabase.from("resources").select("*").then(({ data, error }) => {
+      if (error || !data) { setLoadErr(true); return; }
+      setLoadErr(false); setResources(data);
+    });
+  }   // dept-scoped by RLS
   useEffect(() => { load(); }, []);
+  useReconnect(() => { if (loadErr) load(); });
   const [reachOpen, setReachOpen] = useState(false);
   const [reachPersonId, setReachPersonId] = useState(null);   // this member's chosen reach_out person (self-read)
   useEffect(() => { if (!meId) return; let off = false; supabase.from("members").select("reach_out_member_id").eq("id", meId).single().then(({ data }) => { if (!off) setReachPersonId(data?.reach_out_member_id || null); }); return () => { off = true; }; }, [meId]);
@@ -1238,8 +1245,14 @@ function PersonalView({ S, me, meId, sessions, notify, go }) {
   const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length, expired = certsAll.filter((c) => c.st.rank === 0).length;
   const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
   const [mine, setMine] = useState([]);
-  function loadMine() { if (!meId) return; supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId).then(({ data }) => setMine(data || [])); }
+  const [loadErr, setLoadErr] = useState(false);
+  function loadMine() {
+    if (!meId) return;
+    supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId)
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setMine(data); });
+  }
   useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  useReconnect(() => { if (loadErr) loadMine(); });
   const mineOpen = mine.filter((d) => !d.done), mineDone = mine.filter((d) => d.done);
   async function markMineDone(id) {
     const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });
@@ -1376,7 +1389,11 @@ function Announcements({ role, members, meId, notify, style }) {
   }
   useEffect(() => { load(); }, []);
   useReconnect(() => { if (loadErr) load(); });   // network back / app resumed → recover without a restart
-  useEffect(() => { supabase.from("celebrations").select("*").then(({ data }) => setCelebrations(data || [])); }, []);   // read-tolerant: view missing/empty → []
+  const [celErr, setCelErr] = useState(false);
+  const loadCelebrations = () => supabase.from("celebrations").select("*")
+    .then(({ data, error }) => { if (error || !data) { setCelErr(true); return; } setCelErr(false); setCelebrations(data); });   // view missing/empty → [] is fine; a READ FAILURE is not
+  useEffect(() => { loadCelebrations(); }, []);
+  useReconnect(() => { if (celErr) loadCelebrations(); });
 
   async function post() {
     const b = body.trim();
@@ -1521,8 +1538,13 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const drillsHeld = doneThisYear.length;
   const [duties, setDuties] = useState([]);
   const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
+  const [loadErr, setLoadErr] = useState(false);
+  const loadBoard = () => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setDuties(data); });   // dept-scoped by RLS
+  };
   useEffect(() => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));   // dept-scoped by RLS
+    loadBoard();
     const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
   }, []);
   // Governance data (read-only; ai_outputs + action_items are leader-readable, Board included) — reuses the Minutes/Agenda/DeptAdmin patterns.
@@ -1531,10 +1553,15 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   useEffect(() => {
     const cols = "id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by, source";
     const newest = (rows) => (rows || []).slice().sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))[0] || null;   // coalesce(edited_at, created_at) desc
-    supabase.from("ai_outputs").select(cols).eq("feature", "minutes").is("deleted_at", null).then(({ data }) => setMinutesRow(newest(data)));
+    supabase.from("ai_outputs").select(cols).eq("feature", "minutes").is("deleted_at", null)
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setMinutesRow(newest(data)); });
     supabase.from("action_items").select("*").eq("status", "open")   // full rows (text + due_date) — dept-scoped by RLS
-      .then(({ data }) => setOpenItems((data || []).slice().sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"))));   // soonest due first
+      .then(({ data, error }) => {
+        if (error || !data) { setLoadErr(true); return; }
+        setOpenItems(data.slice().sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99")));   // soonest due first
+      });
   }, []);
+  useReconnect(() => { if (loadErr) loadBoard(); });
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
   const dutyDone = duties.filter((d) => d.done).length;
@@ -1671,12 +1698,20 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
   const [attnOpen, setAttnOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible; default expanded
   const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
+  const [loadErr, setLoadErr] = useState(false);
+  const loadPanels = () => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });                 // dept-scoped by RLS
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
+    supabase.from("action_items").select("*").eq("status", "open")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setOpenItems(data); setOpenActions(data.length); });   // count for the stat + rows for insights
+  };
   useEffect(() => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
-    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
-    supabase.from("action_items").select("*").eq("status", "open").then(({ data }) => { setOpenItems(data || []); setOpenActions((data || []).length); });   // full rows: count for the stat + rows for insights; dept-scoped by RLS
+    loadPanels();
     const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
   }, []);
+  useReconnect(() => { if (loadErr) { setLoadErr(false); loadPanels(); } });
   const openDuties = duties.filter((d) => !d.done);
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
   const flagged = [];
@@ -1836,17 +1871,23 @@ function computeInsights({ sessions, members, openItems, openFailures, todayISO 
 // Feeds computeInsights and refetches after a resolve so the card drops off.
 function useApparatusFailures() {
   const [failures, setFailures] = useState([]);
+  const [loadErr, setLoadErr] = useState(false);
   const reloadFailures = () => {
     supabase.from("apparatus_check_results")
       .select("id, item_label, note, marked_by_name, marked_at, apparatus_checks!inner(apparatus_name, apparatus_id, state)")
       .eq("result", "fail").is("resolved_at", null).eq("apparatus_checks.state", "finalized")
       .order("marked_at", { ascending: false })
-      .then(({ data }) => setFailures((data || []).map((r) => ({
-        id: r.id, item_label: r.item_label, note: r.note, marked_by_name: r.marked_by_name, marked_at: r.marked_at,
-        apparatus_name: r.apparatus_checks?.apparatus_name || null, apparatus_id: r.apparatus_checks?.apparatus_id || null,
-      }))));
+      .then(({ data, error }) => {
+        if (error || !data) { setLoadErr(true); return; }   // a failed READ is not "no open failures"
+        setLoadErr(false);
+        setFailures(data.map((r) => ({
+          id: r.id, item_label: r.item_label, note: r.note, marked_by_name: r.marked_by_name, marked_at: r.marked_at,
+          apparatus_name: r.apparatus_checks?.apparatus_name || null, apparatus_id: r.apparatus_checks?.apparatus_id || null,
+        })));
+      });
   };
   useEffect(() => { reloadFailures(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useReconnect(() => { if (loadErr) reloadFailures(); });
   return { failures, reloadFailures };
 }
 // Draft state + AI actions (approve-before-send); one draft open at a time. Owned by InsightCards.
@@ -2098,14 +2139,17 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
 // No complete button — completion stays leader-only (complete_action_item is is_canmanage()-gated).
 function MyActionItems({ meId }) {
   const [items, setItems] = useState([]);
-  useEffect(() => {
+  const [loadErr, setLoadErr] = useState(false);
+  const load = () => {
     if (!meId) return;
     supabase.from("action_items")
       .select("id, text, due_date, status")
       .eq("assigned_to", meId).eq("status", "open")
       .order("due_date", { ascending: true })   // soonest first; no-due-date last (Postgres ASC → nulls last)
-      .then(({ data }) => setItems(data || []));
-  }, [meId]);
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setItems(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  useReconnect(() => { if (loadErr) load(); });
   if (!items.length) return null;   // empty state: render nothing (keeps every dashboard clean)
   const fmtDue = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
   return (
@@ -2345,12 +2389,14 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
   // ---- "Assigned to me" duties (self-contained; no App threading; existing read RLS) ----
   const [mine, setMine] = useState([]);
+  const [loadErr, setLoadErr] = useState(false);
   function loadMine() {
     if (!meId) return;
     supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId)
-      .then(({ data }) => setMine(data || []));   // open + completed (done filter dropped); partitioned below
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setMine(data); });   // open + completed; partitioned below
   }
   useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  useReconnect(() => { if (loadErr) loadMine(); });
   const mineOpen = mine.filter((d) => !d.done);
   const mineDone = mine.filter((d) => d.done);
   async function markMineDone(id) {
@@ -3676,6 +3722,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
   const [draftOpen, setDraftOpen] = useState(true);   // Draft a New Document — expanded by default
   const [docsLoading, setDocsLoading] = useState(true);
   const [uploadType, setUploadType] = useState("SOP / SOG");
+  const [loadErr, setLoadErr] = useState(false);
   function loadDocs() {
     return supabase
       .from("documents")
@@ -3684,12 +3731,14 @@ function Documents({ S, role, notify, uploaderName, members }) {
       .is("archived_at", null)                           // hide superseded (older) versions — only current versions show
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
-        if (error || !data) { setDocsLoading(false); return; }   // leave existing docs in place on a flaky read
+        if (error || !data) { setDocsLoading(false); setLoadErr(true); return; }   // leave existing docs in place on a flaky read
+        setLoadErr(false);
         setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path, supersedes: r.supersedes })));
         setDocsLoading(false);
       });
   }
   useEffect(() => { loadDocs(); }, []);
+  useReconnect(() => { if (loadErr) loadDocs(); });
   function loadTrashed() {
     setTrashLoading(true);
     return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
@@ -4689,16 +4738,19 @@ function Funding({ S, role, notify, dept, meId, members }) {
   const totalRaised = log.reduce((s, e) => s + (e.amount || 0), 0);
   const recentFor = (idea) => log.find((e) => e.name.toLowerCase().includes(idea.key) || idea.title.toLowerCase().includes(e.name.toLowerCase().split(" ")[0]));
   function planThis(idea) { setMode("Plan a fundraiser"); setDetail(`A ${idea.title.toLowerCase()} to raise money for the department.`); setOut(""); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); }
+  const [loadErr, setLoadErr] = useState(false);
   const loadFundraiserLog = () => {
     supabase.from("fundraiser_log")
       .select("id, name, event_when, amount, created_by")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
-        if (error || !data) return;
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false);
         setLog(data.map((e) => ({ id: e.id, name: e.name, date: e.event_when, amount: Number(e.amount) })));
       });
   };
   useEffect(() => { loadFundraiserLog(); }, []);
+  useReconnect(() => { if (loadErr) loadFundraiserLog(); });
   async function addLog() {
     if (!ln.trim()) return;
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
@@ -5884,17 +5936,25 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   // Live dept context — the same real sources the agenda builder gathers (dept-scoped by RLS).
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
-  useEffect(() => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));
-    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));
-  }, []);
+  const [loadErr, setLoadErr] = useState(false);
+  const loadContext = () => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });
+  };
+  useEffect(() => { loadContext(); }, []);
   // Period facts from the append-only / server-stamped LOCKED records (duty_log, action_items) — fetched once, counted by range.
   const [dutyLog, setDutyLog] = useState([]);
   const [resolvedActions, setResolvedActions] = useState([]);
-  useEffect(() => {
-    supabase.from("duty_log").select("done_at").then(({ data }) => setDutyLog(data || []));
-    supabase.from("action_items").select("completed_at, cancelled_at, status").in("status", ["done", "cancelled"]).then(({ data }) => setResolvedActions(data || []));
-  }, []);
+  const loadFacts = () => {
+    supabase.from("duty_log").select("done_at")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDutyLog(data); });
+    supabase.from("action_items").select("completed_at, cancelled_at, status").in("status", ["done", "cancelled"])
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setResolvedActions(data); });
+  };
+  useEffect(() => { loadFacts(); }, []);
+  useReconnect(() => { if (loadErr) { setLoadErr(false); loadContext(); loadFacts(); } });
   const inRange = (ts) => { if (!ts) return false; const iso = toISODate(new Date(ts)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); };
   const dutiesDone = dutyLog.filter((d) => inRange(d.done_at)).length;                                                     // period
   const actionsResolved = resolvedActions.filter((a) => inRange(a.completed_at) || inRange(a.cancelled_at)).length;        // period
@@ -6668,9 +6728,11 @@ function ActionItemsReport({ S, members, back }) {
   const [presetKey, setPresetKey] = useState("year");
   const [range, setRange] = useState(() => presetRange("year"));
   const [items, setItems] = useState(null);   // null = loading
-  useEffect(() => {
-    supabase.from("action_items").select("*").then(({ data }) => setItems(data || []));   // dept-scoped by RLS
-  }, []);
+  const [loadErr, setLoadErr] = useState(false);
+  const load = () => supabase.from("action_items").select("*")
+    .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setItems(data); });   // dept-scoped by RLS
+  useEffect(() => { load(); }, []);
+  useReconnect(() => { if (loadErr) load(); });
 
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const todayISO = toISODate(new Date());
@@ -6850,12 +6912,14 @@ function Apparatus({ S, role, members, meId, notify }) {
   const [editMode, setEditMode] = useState(false);   // false = clean cards; true = reveal Add + per-rig Edit/Remove. Service/Start-Check stay at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingRigId(null); setAdding(false); } return !v; }); }
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const [loadErr, setLoadErr] = useState(false);
   const loadRigs = () => {
     supabase.from("apparatus")
       .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, replace_year, replace_cost")
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
-        if (error || !data) return;
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false);
         setRigs(data.map((r) => ({
           id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false,
           purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null, replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
@@ -6865,6 +6929,7 @@ function Apparatus({ S, role, members, meId, notify }) {
       });
   };
   useEffect(() => { loadRigs(); }, [members]);   // reload once members resolves so checked_by → name populates
+  useReconnect(() => { if (loadErr) loadRigs(); });
   const inServiceRigs = rigs.filter((r) => r.inService);   // out-of-service rigs excluded from readiness stats
   const ready = inServiceRigs.filter((r) => r.status === "Pass").length;
   const flagged = inServiceRigs.filter((r) => r.status !== "Pass").length;   // computed directly on in-service rigs, NOT total − ready
@@ -8982,12 +9047,14 @@ function Equipment({ S, role, members, meId, notify }) {
     notify({ kind: "success", title: "Marked lost", text: `${idLabel} is recorded as lost.` });
     loadEquipment(); loadPending();
   }
+  const [loadErr, setLoadErr] = useState(false);
   const loadEquipment = async () => {
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
       supabase.from("equipment").select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, current_holder_name, notes, created_at").order("created_at", { ascending: true }),
     ]);
-    if (tErr || !tData) return;   // keep last-known on a flaky read (mirrors loadRigs)
+    if (tErr || !tData) { setLoadErr(true); return; }   // keep last-known on a flaky read (mirrors loadRigs)
+    setLoadErr(false);
     const units = (uErr || !uData) ? [] : uData;
     const byType = {};
     units.forEach((u) => { (byType[u.equipment_type_id] = byType[u.equipment_type_id] || []).push(u); });
@@ -9033,6 +9100,7 @@ function Equipment({ S, role, members, meId, notify }) {
     loadManagers();
   }
   useEffect(() => { loadEquipment(); loadManagers(); loadPending(); }, [members]);
+  useReconnect(() => { if (loadErr) { loadEquipment(); loadManagers(); loadPending(); } });
   const allUnits = types.flatMap((t) => t.units);
   const totalUnits = allUnits.length;
   const available = allUnits.filter((u) => u.status === "in_inventory").length;
@@ -9846,10 +9914,15 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
-  useEffect(() => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to").then(({ data }) => setDuties(data || []));                 // dept-scoped by RLS
-    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending").then(({ data }) => setPendingCerts(data || []));   // dept-scoped by RLS
-  }, []);
+  const [loadErr, setLoadErr] = useState(false);
+  const loadAgendaContext = () => {
+    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });                 // dept-scoped by RLS
+    supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
+  };
+  useEffect(() => { loadAgendaContext(); }, []);
+  useReconnect(() => { if (loadErr) { setLoadErr(false); loadAgendaContext(); } });
   const todayISO = toISODate(new Date());
   const openDuties = duties.filter((d) => !d.done);
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date is YYYY-MM-DD → string compare
@@ -10051,12 +10124,17 @@ function Onboarding({ S, members, setMembers, notify, role }) {
   const doneCount = (items || []).filter((it) => (it.is_mentor ? !!person?.mentorId : !!checks[it.id])).length;   // mentor item = real mentor_id
   const pct = (items && items.length) ? Math.round((doneCount / items.length) * 100) : 0;
   const categories = [...new Set((items || []).map((it) => it.category))];
-  useEffect(() => { supabase.rpc("my_department_id").then(({ data }) => setDeptId(data || null)); }, []);
+  const [loadErr, setLoadErr] = useState(false);
+  const loadDeptId = () => supabase.rpc("my_department_id")
+    .then(({ data, error }) => { if (error) { setLoadErr(true); return; } setDeptId(data || null); });
+  useEffect(() => { loadDeptId(); }, []);
   async function loadItems() {   // RLS scopes to my_department_id(); re-fetched after every edit
-    const { data } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true });
-    setItems(data || []);
+    const { data, error } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true });
+    if (error || !data) { setLoadErr(true); return; }   // a failed READ is not "no checklist"
+    setLoadErr(false); setItems(data);
   }
   useEffect(() => { loadItems(); }, []);
+  useReconnect(() => { if (loadErr) { setLoadErr(false); loadDeptId(); loadItems(); } });
   useEffect(() => {   // load this member's saved progress
     if (!selId) { setChecks({}); return; }
     let alive = true;
@@ -11751,9 +11829,11 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [view, setView] = useState("checklist");                // "checklist" | "history"
   const [logEntries, setLogEntries] = useState([]);
   const [weekOffset, setWeekOffset] = useState(0);              // 0 = most recent week with entries
+  const [loadErr, setLoadErr] = useState(false);
   function loadDuties() {
     supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids, assigned_to, due_date").then(({ data, error }) => {
-      if (error || !data) return;
+      if (error || !data) { setLoadErr(true); return; }
+      setLoadErr(false);
       setDuties(data.map((d) => ({
         id: d.id,
         duty: d.duty,
@@ -11774,11 +11854,13 @@ function StationDuties({ S, role, members, meId, notify }) {
       .select("id, what, done_by, done_at, created_by")
       .order("done_at", { ascending: false })
       .then(({ data, error }) => {
-        if (error || !data) return;
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false);
         setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, when: fmtDoneAt(e.done_at), createdBy: e.created_by })));
       });
   };
   useEffect(() => { loadStationLog(); }, []);
+  useReconnect(() => { if (loadErr) { setLoadErr(false); loadDuties(); loadStationLog(); } });
   useEffect(() => {
     if (!canManage) return;
     supabase.from("duty_log")
