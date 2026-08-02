@@ -11876,11 +11876,15 @@ function StationDuties({ S, role, members, meId, notify }) {
       .then(({ data, error }) => {
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false);
-        setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, when: fmtDoneAt(e.done_at), createdBy: e.created_by })));
+        setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, when: fmtDoneAt(e.done_at), doneAt: e.done_at, createdBy: e.created_by })));   // doneAt kept raw: the formatted string can't be bucketed by week
       });
   };
   useEffect(() => { loadStationLog(); }, []);
-  useReconnect(() => { if (loadErr) { setLoadErr(false); loadDuties(); loadStationLog(); } });
+  const [resumeTick, setResumeTick] = useState(0);   // bumping this re-renders → the week boundary is recomputed
+  useReconnect(() => {
+    setResumeTick((t) => t + 1);                     // app resumed / network back: re-slice the current week (no timer)
+    if (loadErr) { setLoadErr(false); loadDuties(); loadStationLog(); }
+  });
   useEffect(() => {
     if (!canManage) return;
     supabase.from("duty_log")
@@ -11906,13 +11910,45 @@ function StationDuties({ S, role, members, meId, notify }) {
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingDutyId(null); setAddingA(false); } return !v; }); }
   const [editBuf, setEditBuf] = useState({ title: "", category: "Cleanup", catNew: "", recurrence: "Weekly", assignee: "", due: "" });
   const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
-  const [weekStartDay, setWeekStartDay] = useState(1); // Monday by default
+  // Department-level setting (departments.week_start_day, see sql/week_start_day.sql). 1 = Monday is
+  // both the DB default and the fallback used when the column doesn't exist yet or the read fails,
+  // so this works before AND after the migration.
+  const [weekStartDay, setWeekStartDay] = useState(1);
   const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
   const [weekLabel, setWeekLabel] = useState(() => isoWeek(1));
   const weekRef = useRef(weekLabel);
   const monthRef = useRef(monthKey());
   const quarterRef = useRef(quarterKey());
-  function setStartDay(day) { setWeekStartDay(Number(day)); const w = isoWeek(day); weekRef.current = w; setWeekLabel(w); }
+  // Apply WITHOUT saving. Also re-baselines weekRef/weekLabel: the rollover tick compares the current
+  // week key against weekRef, so loading a persisted value that differs from the Monday default would
+  // otherwise look like a week boundary and spuriously un-tick every weekly duty.
+  function applyStartDay(day) {
+    const d = Number(day);
+    setWeekStartDay(d);
+    const w = isoWeek(d); weekRef.current = w; setWeekLabel(w);
+  }
+  const loadWeekStart = async () => {
+    const { data: deptId } = await supabase.rpc("my_department_id");
+    if (!deptId) return;
+    const { data, error } = await supabase.from("departments").select("week_start_day").eq("id", deptId).single();
+    if (error || !data) return;   // column not migrated yet, or a flaky read → keep the Monday fallback
+    applyStartDay(data.week_start_day ?? 1);
+  };
+  useEffect(() => { loadWeekStart(); }, []);
+  // Saving is Department Admin only (RLS). .select() + 0-row guard so an unauthorised change reports
+  // failure and resyncs, instead of silently showing a value the server never accepted.
+  async function setStartDay(day) {
+    const prev = weekStartDay;
+    applyStartDay(day);                                   // optimistic
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { applyStartDay(prev); notify({ kind: "error", title: "Couldn't save the week start", text: "Please try again.", details: deptErr?.message }); return; }
+    const { data, error } = await supabase.from("departments").update({ week_start_day: Number(day) }).eq("id", deptId).select();
+    if (error || !data || data.length === 0) {
+      applyStartDay(prev);
+      notify({ kind: "error", title: "Couldn't save the week start", text: "Only a Department Admin can change this — your change wasn't saved.", details: error?.message });
+      loadWeekStart();                                    // resync from the server, never leave a phantom value
+    }
+  }
   useEffect(() => {
     const tick = () => {
       const cw = isoWeek(weekStartDay), cm = monthKey(), cq = quarterKey();
@@ -11993,26 +12029,46 @@ function StationDuties({ S, role, members, meId, notify }) {
   }
   const doneCount = duties.filter((d) => d.done).length;
   // History: group duty_log completions by the station's week setting (newest first)
+  // Current week boundary, recomputed every render — no timer. A tab left open across the rollover
+  // re-slices on the next render; useReconnect below forces one on app resume.
+  const weekStartISO = toISO(weekStartOf(new Date(), weekStartDay));
+  const inCurrentWeek = (iso) => !!iso && toISO(weekStartOf(new Date(iso), weekStartDay)) === weekStartISO;
+  const currentOtherWork = log.filter((e) => inCurrentWeek(e.doneAt));   // section shows THIS week only; nothing is deleted
+  /* History buckets BOTH sources by the same week key: checklist completions (duty_log) and other work
+     (station_log). `kind` keeps them separable for rendering and CSV. Past weeks only — the current
+     week is the live section above, so it isn't duplicated here. */
   const historyWeeks = (() => {
     const byWeek = new Map();
-    for (const e of logEntries) {
-      if (!e.doneAt) continue;
-      const wk = toISO(weekStartOf(new Date(e.doneAt), weekStartDay));
+    const put = (iso, entry) => {
+      if (!iso) return;
+      const wk = toISO(weekStartOf(new Date(iso), weekStartDay));
+      if (wk === weekStartISO) return;                       // current week lives in the section above
       if (!byWeek.has(wk)) byWeek.set(wk, []);
-      byWeek.get(wk).push(e);
-    }
-    return [...byWeek.keys()].sort((a, b) => (a < b ? 1 : -1)).map((wk) => ({ wk, entries: byWeek.get(wk) }));
+      byWeek.get(wk).push(entry);
+    };
+    for (const e of logEntries) put(e.doneAt, { ...e, kind: "duty" });
+    for (const e of log) put(e.doneAt, { ...e, kind: "other" });
+    return [...byWeek.keys()].sort((a, b) => (a < b ? 1 : -1)).map((wk) => ({
+      wk,
+      entries: byWeek.get(wk),
+      duties: byWeek.get(wk).filter((x) => x.kind === "duty"),
+      other: byWeek.get(wk).filter((x) => x.kind === "other"),
+    }));
   })();
   const currentWeek = historyWeeks.length ? historyWeeks[Math.min(weekOffset, historyWeeks.length - 1)] : null;
   const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   function exportCsv() {
     if (!currentWeek) return;
-    const header = ["Duty", "Completed by", "Date & time"];
+    const header = ["Type", "Duty", "Completed by", "Date & time"];
     const rows = currentWeek.entries.map((e) => {
-      const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
+      // Other-work rows carry done_by as a NAME string (station_log has no member_id), so it is used
+      // verbatim; checklist rows resolve member uuids through nameById.
+      const who = e.kind === "other"
+        ? (e.who || "")
+        : [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
       const d = e.doneAt ? new Date(e.doneAt) : null;
       const when = d && !isNaN(d.getTime()) ? d.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
-      return [e.dutyName, names, when];
+      return [e.kind === "other" ? "Other work" : "Duty", e.kind === "other" ? e.what : e.dutyName, who, when];
     });
     const csv = [header, ...rows].map((r) => r.map(csvField).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -12056,7 +12112,7 @@ function StationDuties({ S, role, members, meId, notify }) {
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
           <RefreshCw size={13} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
           <span>Recurring duties roll over on their own — weekly, monthly, or quarterly. One-time duties stay until done.</span>
-          {canManage
+          {isDeptAdmin(role)
             ? <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, color: FIRE.textSecondary }}>Week starts on
                 <select style={{ ...FS.input, width: "auto", padding: "5px 8px" }} value={weekStartDay} onChange={(e) => setStartDay(e.target.value)}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select>
               </label>
@@ -12174,7 +12230,10 @@ function StationDuties({ S, role, members, meId, notify }) {
         <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
       </div>
       <div>
-        {log.map((e) => (
+        {currentOtherWork.length === 0 && (
+          <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>Nothing logged this week yet. Earlier entries are in History.</div>
+        )}
+        {currentOtherWork.map((e) => (
           <div key={e.id} style={FS.row}>
             <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -12199,18 +12258,34 @@ function StationDuties({ S, role, members, meId, notify }) {
               {currentWeek && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>}
             </div>
             <div>
-              {currentWeek.entries.map((e) => {
-                const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
-                return (
+              {currentWeek.duties.length > 0 && (<>
+                <div style={{ ...FS.kicker, marginBottom: 6 }}>CHECKLIST COMPLETED</div>
+                {currentWeek.duties.map((e) => {
+                  const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
+                  return (
+                    <div key={e.id} style={FS.row}>
+                      <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.dutyName}</span>
+                        <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{names || "A member"} · <span style={FS.num}>{fmtDoneAt(e.doneAt)}</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>)}
+              {currentWeek.other.length > 0 && (<>
+                {/* station_log.done_by is a typed NAME, not a member id — shown verbatim, no nameById lookup */}
+                <div style={{ ...FS.kicker, marginTop: currentWeek.duties.length ? 16 : 0, marginBottom: 6 }}>OTHER WORK LOGGED</div>
+                {currentWeek.other.map((e) => (
                   <div key={e.id} style={FS.row}>
                     <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.dutyName}</span>
-                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{names || "A member"} · <span style={FS.num}>{fmtDoneAt(e.doneAt)}</span></div>
+                      <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.who || "A member"} · <span style={FS.num}>{fmtDoneAt(e.doneAt)}</span></div>
                     </div>
                   </div>
-                );
-              })}
+                ))}
+              </>)}
             </div>
           </>
         )
