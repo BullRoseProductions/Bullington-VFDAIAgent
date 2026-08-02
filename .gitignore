@@ -13,3 +13,7 @@ B4C_Equipment_Slice6_UI_Brief.md
 B4C_Training_RunSheet_Brief.md
 B4C_Training_RunSheet_Step3_Brief.md
 B4C_RunSheet_Bullets_Brief.md
+
+# Capacitor / IDE local state (generated, machine-specific)
+android/.idea/
+ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/

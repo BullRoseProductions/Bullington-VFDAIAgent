@@ -1,4 +1,5 @@
 import { Capacitor } from "@capacitor/core";
+import { supabase } from "./supabaseClient";
 
 // WHERE THE SERVERLESS FUNCTIONS LIVE, depending on where the app is running.
 //
@@ -21,4 +22,18 @@ export const isNative = () => Capacitor.isNativePlatform();
 export function apiUrl(path) {
   if (!isNative()) return path;                       // web: unchanged, exactly as it behaves today
   return `${API_BASE.replace(/\/$/, "")}${path}`;     // tolerate a trailing slash on the env var
+}
+
+/* The ONE way the app calls /api/*. Attaches the caller's Supabase access token, which the endpoints
+   now require — CORS alone never stopped a script from draining credits, only a browser.
+   Identical on web and native: same fetch, same header, and the token comes from the same Supabase
+   session either way (the native build signs in through the same client).
+   No session → we don't call at all, rather than burning a round-trip on a guaranteed 401. */
+export async function authedFetch(path, init = {}) {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error("You're signed out. Sign back in to use AI features.");
+  const headers = new Headers(init.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(apiUrl(path), { ...init, headers });
 }

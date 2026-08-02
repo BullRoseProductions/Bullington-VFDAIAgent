@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "351026657283",
+    "project_id": "b4c-fire",
+    "storage_bucket": "b4c-fire.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:351026657283:android:3f41a372d1ea2ac05fb636",
+        "android_client_info": {
+          "package_name": "com.bigbulltech.b4c"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA2g2oCi6jaJow43uw1j4QFWTYqh7tkRqs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
