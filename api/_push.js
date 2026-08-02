@@ -79,11 +79,27 @@ export function buildNotifications(items, deptId, leaderIds, countedIds) {
 // the daily cycle re-derives everything from scratch, so this is what stops it restacking.
 export async function insertNotifications(sb, rows) {
   if (!rows.length) return { inserted: 0, rows: [] };
-  const { data, error } = await sb.from("notifications")
-    .upsert(rows, { onConflict: "member_id,type,subject_ref", ignoreDuplicates: true })
-    .select("id, member_id, title, body");
+
+  // Stamp BEFORE the write. `ignoreDuplicates: true` makes PostgREST use ON CONFLICT DO NOTHING, and in
+  // that mode it returns NO representation — .select() comes back empty even when rows WERE inserted.
+  // Chaining .select() here (the original bug) therefore reported inserted:0 every time and, because the
+  // caller only pushes `fresh` rows, meant a push could never fire for anyone. Read the new rows back
+  // by created_at instead of trusting the upsert's return.
+  const since = new Date(Date.now() - 2000).toISOString();   // 2s slack for clock skew between app and DB
+  const { error } = await sb.from("notifications")
+    .upsert(rows, { onConflict: "member_id,type,subject_ref", ignoreDuplicates: true });
   if (error) throw new Error(`notifications insert failed: ${error.message}`);
-  return { inserted: (data || []).length, rows: data || [] };   // only genuinely NEW rows come back
+
+  const memberIds = [...new Set(rows.map((r) => r.member_id))];
+  const refs = rows.map((r) => r.subject_ref).filter(Boolean);
+  let q = sb.from("notifications")
+    .select("id, member_id, title, body")
+    .in("member_id", memberIds)
+    .gte("created_at", since);
+  if (refs.length) q = q.in("subject_ref", refs);   // narrow to THIS run's subjects; skipped if all null
+  const { data, error: readErr } = await q;
+  if (readErr) throw new Error(`notifications read-back failed: ${readErr.message}`);
+  return { inserted: (data || []).length, rows: data || [] };   // genuinely new — created since `since`
 }
 
 /* ---------------- push ---------------- */
