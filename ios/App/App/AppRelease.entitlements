@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- RELEASE / App Store. The APNs environment must be `production` for any build signed with a
+	     distribution profile — TestFlight and App Store included. App/App.entitlements keeps
+	     `development` for Debug device builds, so both work without editing a shared file each time. -->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>

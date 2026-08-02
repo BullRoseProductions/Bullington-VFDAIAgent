@@ -17,3 +17,9 @@ B4C_RunSheet_Bullets_Brief.md
 # Capacitor / IDE local state (generated, machine-specific)
 android/.idea/
 ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# Android signing material — NEVER commit. Losing the upload key means you can't ship updates;
+# leaking it means someone else can sign as you.
+*.jks
+*.keystore
+keystore.properties
