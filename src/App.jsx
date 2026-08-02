@@ -1462,7 +1462,7 @@ function Announcements({ role, members, meId, notify, style }) {
         ))}
       </div>
 
-      {loadErr && <OfflineNotice S={S} onRetry={load} what="announcements" />}
+      {loadErr && <OfflineNotice onRetry={load} what="announcements" />}
 
       {/* Compose — posters only (ANNOUNCE_ROLES = DA/PA/TO); the DB enforces the real gate */}
       {canPost && (composing ? (
@@ -2191,7 +2191,7 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
 
 /* Shared offline/failed-load state. Replaces the silent blank: says what happened, that data is safe,
    and that it will recover on its own — plus a manual Retry for the impatient. */
-function OfflineNotice({ S, onRetry, what }) {
+function OfflineNotice({ onRetry, what }) {
   return (
     <div style={{ margin: "10px 0", padding: "11px 13px", background: "rgba(214,169,94,.10)", border: `1px solid ${FIRE.amberText}55`, borderRadius: 10 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
@@ -3913,7 +3913,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice S={S} onRetry={loadDocs} what="documents" />}
+      {loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>STATION DOCUMENTS</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your SOPs and guidelines, in one place</h1>
@@ -4508,7 +4508,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
 
   return (
     <div>
-      {loadErr && <OfflineNotice S={S} onRetry={loadAll} what="the calendar" />}
+      {loadErr && <OfflineNotice onRetry={loadAll} what="the calendar" />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ ...FS.kicker, marginBottom: 0 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
         {withImportanceMode && (
@@ -4913,7 +4913,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice S={S} onRetry={loadFundraiserLog} what="funding" />}
+      {loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>FUNDING</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
@@ -7024,7 +7024,7 @@ function Apparatus({ S, role, members, meId, notify }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice S={S} onRetry={loadRigs} what="apparatus" />}
+      {loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>APPARATUS & EQUIPMENT</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Know your rigs are ready</h1>
@@ -9270,7 +9270,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));   // types already ordered sort_order,name → preserved within each group
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice S={S} onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />}
+      {loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>EQUIPMENT REGISTRY</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Know what you've got</h1>
@@ -12127,7 +12127,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice S={S} onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />}
+      {loadErr && <OfflineNotice onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />}
       {/* header (inline FS — shared PageHead not mutated) */}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>STATION DUTIES</div>
