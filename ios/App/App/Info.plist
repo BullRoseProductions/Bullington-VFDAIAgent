@@ -4,6 +4,14 @@
 <dict>
   <key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
+	<!-- Camera + photo library. iOS TERMINATES the app on first access if these are absent — no
+	     dialog, no catchable error. Required even though capture goes through an HTML
+	     <input type="file" capture>, because WKWebView invokes the same system pickers.
+	     Copy is specific about what is accessed and why; App Review rejects vague strings. -->
+	<key>NSCameraUsageDescription</key>
+	<string>B4C uses the camera so you can attach photos of equipment and gear to your department's records.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>B4C uses your photo library so you can attach existing photos to equipment and gear records.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
