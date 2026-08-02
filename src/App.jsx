@@ -5735,6 +5735,23 @@ function RosterCerts({ S, members }) {
   const n = (r) => rows.filter((x) => x.st.rank === r).length;
   const nextClassFor = (cert) => CLASSES.find((cl) => cl.covers.includes(cert));
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  /* Client-side narrowing over the already-loaded rows — no queries, no schema change.
+     statusFilter holds a certStatus RANK (0 expired / 1 expiring / 2 current) or null for "all",
+     so the filter uses the exact buckets the tile counts use and the two can never disagree. */
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [q, setQ] = useState("");
+  const toggleStatus = (rank) => setStatusFilter((cur) => (cur === rank ? null : rank));   // tapping the active tile clears
+  const needle = q.trim().toLowerCase();
+  const visible = rows.filter((r) =>
+    (statusFilter === null || r.st.rank === statusFilter) &&
+    (!needle || r.member.toLowerCase().includes(needle) || (r.cert || "").toLowerCase().includes(needle))
+  );
+  const filtering = statusFilter !== null || needle !== "";
+  const clearAll = () => { setStatusFilter(null); setQ(""); };
+  // Active tile styling: the bucket's own status colour, so the highlight matches the rows it reveals.
+  const tileWrap = (rank, node) => (
+    <div style={{ flex: 1, minWidth: 0, borderRadius: 12, outline: statusFilter === rank ? `2px solid ${CERT_FIRE[["EXPIRED","EXPIRING","CURRENT"][rank]]}` : "none", outlineOffset: 2 }}>{node}</div>
+  );
   async function draftReminders() {
     const flagged = rows.filter((r) => r.st.rank < 2);
     if (!flagged.length) { setOut(""); setErr("Nothing expiring — no reminders needed right now."); return; }
@@ -5750,10 +5767,34 @@ function RosterCerts({ S, members }) {
   return (
     <div>
       <div style={S.statRow}>
-        <Stat S={S} dark n={String(n(2))} label="Certs current" />
-        <Stat S={S} dark n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} />
-        <Stat S={S} dark n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} />
+        {tileWrap(2, <Stat S={S} dark n={String(n(2))} label="Certs current" onClick={() => toggleStatus(2)} />)}
+        {tileWrap(1, <Stat S={S} dark n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} onClick={() => toggleStatus(1)} />)}
+        {tileWrap(0, <Stat S={S} dark n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} onClick={() => toggleStatus(0)} />)}
       </div>
+      {/* Search + active-filter summary. Counts on the tiles stay ABSOLUTE (computed from every row) —
+          showing filtered counts would change the number you just tapped. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "10px 0 2px" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
+          <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+          <input
+            style={{ ...FS.input, paddingLeft: 30 }}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search a member or certification…"
+            aria-label="Search certifications by member or certification name"
+          />
+        </div>
+        {filtering && (
+          <button style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5 }} onClick={clearAll}>
+            <X size={13} color={FIRE.btnIcon} /> Clear
+          </button>
+        )}
+      </div>
+      {filtering && (
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 6 }}>
+          Showing {visible.length} of {rows.length}
+        </div>
+      )}
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</div>
@@ -5767,7 +5808,12 @@ function RosterCerts({ S, members }) {
         </div>
       </div>
       <div style={{ marginTop: 4 }}>
-        {rows.map((r, i) => {
+        {visible.length === 0 && (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "14px 0" }}>
+            {rows.length === 0 ? "No certifications on file yet." : "No certifications match that filter."}
+          </div>
+        )}
+        {visible.map((r, i) => {
           const cl = r.st.rank < 2 ? nextClassFor(r.cert) : null;
           return (
             <div key={i} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
