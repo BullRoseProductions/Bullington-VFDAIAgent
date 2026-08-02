@@ -764,7 +764,7 @@ function Notification({ S, kind, title, text, details, action, onClose }) {
   const accent = isErr ? "#B11E2A" : "#2E7D52";                 // ENGINE red / success green — app palette
   const Icon = isErr ? AlertTriangle : CheckCircle2;
   return (
-    <div style={{ position: "fixed", top: 18, right: 18, zIndex: 60, width: "min(380px, calc(100vw - 36px))", background: "#fff", border: `1px solid ${accent}44`, borderLeft: `4px solid ${accent}`, borderRadius: 10, boxShadow: "0 8px 26px rgba(20,16,24,.16)", padding: "13px 14px", display: "flex", gap: 10, alignItems: "flex-start", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
+    <div style={{ position: "fixed", top: "calc(18px + env(safe-area-inset-top))", right: "calc(18px + env(safe-area-inset-right))", zIndex: 60, width: "min(380px, calc(100vw - 36px))", background: "#fff", border: `1px solid ${accent}44`, borderLeft: `4px solid ${accent}`, borderRadius: 10, boxShadow: "0 8px 26px rgba(20,16,24,.16)", padding: "13px 14px", display: "flex", gap: 10, alignItems: "flex-start", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
       <Icon size={18} color={accent} style={{ flexShrink: 0, marginTop: 1 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         {isErr ? (<>
@@ -12751,7 +12751,20 @@ function baseStyles() {
     deptName: { fontFamily: display, fontWeight: 600, fontSize: 16, marginTop: 4 },
     deptMeta: { fontSize: 12, color: "#9AA1A9", marginTop: 2 },
     main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100dvh", overflowY: "auto" },
-    topbar: { height: "calc(60px + env(safe-area-inset-top))", background: FIRE.sidebar, borderBottom: `1px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 14, padding: "env(safe-area-inset-top) 18px 0", position: "sticky", top: 0, zIndex: 20 },
+    /* FIXED TOP CHROME. box-sizing + minHeight rather than a bare `height`: with content-box the inset
+       padding stacked ON TOP of the declared height, so the row could still ride up under the status bar
+       on a Dynamic Island device. Explicit sides also pick up the landscape left/right insets. */
+    topbar: {
+      boxSizing: "border-box",
+      minHeight: "calc(60px + env(safe-area-inset-top))",
+      background: FIRE.sidebar, borderBottom: `1px solid ${FIRE.hairline}`,
+      display: "flex", alignItems: "center", gap: 14,
+      paddingTop: "env(safe-area-inset-top)",
+      paddingLeft: "calc(18px + env(safe-area-inset-left))",
+      paddingRight: "calc(18px + env(safe-area-inset-right))",
+      paddingBottom: 0,
+      position: "sticky", top: 0, zIndex: 20,
+    },
     menuBtn: { display: "none", alignItems: "center", justifyContent: "center", width: 38, height: 38, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: INK },
     chevronBand: { flex: 1, height: 8, borderRadius: 2, background: chevron, opacity: .9 },
     viewAs: { display: "flex", alignItems: "center", gap: 8 },

@@ -65,7 +65,7 @@ export default function Login() {
   const busy = loading || cooldown > 0;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20 }}>
+    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20, paddingTop: "calc(20px + env(safe-area-inset-top))", paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
       <style>{`
         .b4c-input { transition: border-color .15s ease, box-shadow .15s ease; }
         .b4c-input:focus { outline: none; border-color: #2E6FC7; box-shadow: 0 0 0 3px rgba(46,111,199,.25); }
