@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { authedFetch } from "./apiBase";
+import { useReconnect, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush } from "./push";
 import { supabase, APP_URL, setOnSessionExpired } from "./supabaseClient";
@@ -790,7 +791,8 @@ export default function App() {
   const [feedback, setFeedback] = useState([]);
   const [members, setMembers] = useState(MEMBERS);
   const [toast, setToast] = useState(null);
-  useEffect(() => {
+  const [rosterErr, setRosterErr] = useState(false);
+  const loadMembers = () => {
     Promise.all([
       supabase.from("members_view").select("*"),
       supabase.from("certs").select("id, member_id, name, exp, proof_path"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
@@ -822,9 +824,13 @@ export default function App() {
             notes: [],
           }))
         );
+        setRosterErr(false);
+      } else if (error || !data) {
+        setRosterErr(true);   // keep last-known roster; the dashboards derive their stats from it
       }
     });
-  }, []);
+  };
+  useEffect(() => { loadMembers(); }, []);
   // Self-contained auth tracking (main.jsx still gates the session; this only reads it).
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -910,6 +916,7 @@ export default function App() {
   }, [authEmail]);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
   const [trainingPlan, setTrainingPlan] = useState([]);
+  const [plansErr, setPlansErr] = useState(false);
   const loadPlans = () => {
     supabase.from("training_plans")
       .select("id, name, cadence, last_iso, color")
@@ -917,13 +924,16 @@ export default function App() {
         if (error || !data) {   // a failed READ is not "zero categories" — keep last-known, log, offer retry (never blank on error)
           console.error("[loadPlans] training_plans read failed — keeping last-known categories:", error);
           notify({ kind: "error", title: "Couldn't load training categories", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: error?.message, action: { label: "Retry", onClick: loadPlans } });
+          setPlansErr(true);
           return;
         }
+        setPlansErr(false);
         setTrainingPlan(data.map((r) => ({ id: r.id, name: r.name, cadence: r.cadence, lastISO: r.last_iso, color: r.color })));
       });
   };
   useEffect(() => { loadPlans(); }, []);
   const [trainingSessions, setTrainingSessions] = useState([]);
+  const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
       supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience, counts_toward_attendance"),
@@ -937,8 +947,10 @@ export default function App() {
     if (sErr || !srows) {
       console.error("[loadSessions] sessions read failed — keeping last-known sessions:", sErr);
       notify({ kind: "error", title: "Couldn't load trainings", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: sErr?.message, action: { label: "Retry", onClick: loadSessions } });
+      setSessionsErr(true);
       return;
     }
+    setSessionsErr(false);
     const byS = {};
     (arows || []).forEach((a) => {
       const e = byS[a.session_id] || (byS[a.session_id] = { attendance: [], times: {} });
@@ -963,6 +975,14 @@ export default function App() {
     );
   };
   useEffect(() => { loadSessions(); }, []);
+  /* THE FIX for "blank until the app is killed". These three root loads feed every dashboard, so
+     recovering them repopulates the home screen. Only the ones that actually FAILED are re-run, so a
+     routine app-resume while healthy doesn't restampede every query. */
+  useReconnect(() => {
+    if (rosterErr) loadMembers();
+    if (sessionsErr) loadSessions();
+    if (plansErr) loadPlans();
+  });
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
   const [handoffResult, setHandoffResult] = useState(null);
@@ -1340,13 +1360,22 @@ function Announcements({ role, members, meId, notify, style }) {
   const canDelete = (it) => it.author_id === meId || isDeptAdmin(role);
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
 
+  const [loadErr, setLoadErr] = useState(false);
   function load() {
+    setLoadErr(false);
     supabase.from("announcements")
       .select("id, author_id, title, body, audience, created_at")
       .order("created_at", { ascending: false })   // newest first; dept + audience filtered by RLS
-      .then(({ data }) => { setItems(data || []); setLoading(false); });
+      .then(({ data, error }) => {
+        setLoading(false);
+        // A failed READ is not "no announcements". Keep whatever we already have and say so —
+        // `data || []` here is what blanked the feed offline and never recovered.
+        if (error || !data) { setLoadErr(true); return; }
+        setItems(data);
+      });
   }
   useEffect(() => { load(); }, []);
+  useReconnect(() => { if (loadErr) load(); });   // network back / app resumed → recover without a restart
   useEffect(() => { supabase.from("celebrations").select("*").then(({ data }) => setCelebrations(data || [])); }, []);   // read-tolerant: view missing/empty → []
 
   async function post() {
@@ -1406,6 +1435,8 @@ function Announcements({ role, members, meId, notify, style }) {
           </div>
         ))}
       </div>
+
+      {loadErr && <OfflineNotice S={S} onRetry={load} what="announcements" />}
 
       {/* Compose — posters only (ANNOUNCE_ROLES = DA/PA/TO); the DB enforces the real gate */}
       {canPost && (composing ? (
@@ -2103,6 +2134,29 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
   if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isBoard(role) && !hasAny(role, ['Officer'])) return <BoardDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   return <OfficerDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
+}
+
+/* Shared offline/failed-load state. Replaces the silent blank: says what happened, that data is safe,
+   and that it will recover on its own — plus a manual Retry for the impatient. */
+function OfflineNotice({ S, onRetry, what }) {
+  return (
+    <div style={{ margin: "10px 0", padding: "11px 13px", background: "rgba(214,169,94,.10)", border: `1px solid ${FIRE.amberText}55`, borderRadius: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+        <AlertTriangle size={15} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, color: FIRE.textPrimary, fontWeight: 600 }}>
+            {looksOffline() ? "You're offline" : `Couldn't load ${what}`}
+          </div>
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 2 }}>
+            This will refresh by itself when you reconnect. Nothing has been lost.
+          </div>
+        </div>
+        <button onClick={onRetry} style={{ ...FS.btn, padding: "5px 11px", fontSize: 12.5, flexShrink: 0 }}>
+          <RefreshCw size={13} color={FIRE.btnIcon} /> Retry
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /* ---------------- Quick access (home page doorways) ---------------- */
@@ -4341,6 +4395,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
   const [view, setView] = useState("grid");   // "grid" | "importance" (only surfaced when withImportanceMode)
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const [detailEvent, setDetailEvent] = useState(null);   // event clicked on the calendar → detail modal
+  const [loadErr, setLoadErr] = useState(false);
   const loadAll = () => {
     Promise.all([
       supabase.from("content_calendar").select("id, date, caption"),
@@ -4349,6 +4404,11 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
       supabase.from("funding_events").select("id, date, title"),
       supabase.from("action_items").select("id, text, due_date, status"),                      // 5th source (RLS: leaders only → members get [])
     ]).then(([social, training, recruit, funding, actions]) => {
+      // A failed READ is not "nothing scheduled". If any source errored, keep the last-known items and
+      // surface it — `res.data || []` silently rendered an empty month when offline, with no recovery.
+      const failed = [social, training, recruit, funding].some((r) => r?.error || !r?.data);
+      if (failed) { setLoadErr(true); return; }
+      setLoadErr(false);
       const mapRows = (res, source, labelOf, extraOf) =>
         (res.data || []).filter((r) => r.date).map((r) => {        // null data (source error) → []
           const [yy, mm, dd] = r.date.split("-").map(Number);
@@ -4374,6 +4434,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
     });
   };
   useEffect(() => { loadAll(); }, []);
+  useReconnect(() => { if (loadErr) loadAll(); });   // network back / app resumed → recover without a restart
   const monthItems = items
     .filter((it) => it.y === cur.y && it.m === cur.m && (filter === "all" || it.source === filter))
     .sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source]);   // training→funding→recruit→social; stable within source
@@ -4388,6 +4449,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
 
   return (
     <div>
+      {loadErr && <OfflineNotice S={S} onRetry={loadAll} what="the calendar" />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ ...FS.kicker, marginBottom: 0 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
         {withImportanceMode && (
