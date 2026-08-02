@@ -14,7 +14,7 @@ import { downloadDepartmentReport, downloadCapitalPlan } from "./report.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { apiUrl } from "./apiBase";
+import { authedFetch } from "./apiBase";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush } from "./push";
 import { supabase, APP_URL, setOnSessionExpired } from "./supabaseClient";
@@ -2644,7 +2644,7 @@ function Packet({ S, packet, back }) {
 
 /* ---------------- shared Claude call (via /api/claude) ---------------- */
 async function callClaude(system, user) {
-  const res = await fetch(apiUrl("/api/claude"), {
+  const res = await authedFetch("/api/claude", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, user }),
   });
@@ -2658,7 +2658,7 @@ async function callClaude(system, user) {
 // Multi-turn variant — posts a full conversation array. messages = [{ role: 'user'|'assistant', content }, …].
 // Backward-compatible with callClaude: same endpoint, same return; the proxy branches on `messages`.
 async function callClaudeChat(system, messages) {
-  const res = await fetch(apiUrl("/api/claude"), {
+  const res = await authedFetch("/api/claude", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, messages }),
   });
@@ -11569,7 +11569,7 @@ function GraphicStudio({ S, brand }) {
   async function genAI() {
     setAiLoading(true); setAiErr("");
     try {
-      const res = await fetch(apiUrl("/api/image"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt }) });
+      const res = await authedFetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt }) });
       const data = await res.json();
       if (!res.ok || data.error) setAiErr(data.error || "AI image isn't available right now.");
       else if (data.image) { setBg(data.image); setUseBg(true); }

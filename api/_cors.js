@@ -35,7 +35,9 @@ export function cors(req, res) {
       return true;
     }
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    // Authorization is REQUIRED here: these endpoints now demand a Bearer token, and a preflight that
+    // doesn't advertise the header makes the browser block the real request — signed-in users included.
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Max-Age", "86400");   // cache the preflight for a day
     res.status(204).end();
     return true;
