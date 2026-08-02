@@ -201,15 +201,24 @@ const SEED = [
 // (no trailing punctuation) so each caller appends its own guidance — a DA can type coordinates in by
 // hand, a member clocking in cannot. A denied prompt is an ordinary outcome, not a bug: never log it,
 // never block on it.
+// Hard ceiling on the location request. The `timeout` option below is WebKit's own, and it is NOT
+// dependable in a native WKWebView: if the location request can't start (missing usage-description key,
+// Location Services off at the OS level), neither callback fires and WebKit's timer never arms — the
+// promise hangs forever and takes the clock-in button's spinner with it. This wrapper guarantees a
+// settle, so a punch can always proceed as UNVERIFIED rather than spinning.
+const GEO_TIMEOUT_MS = 12000;
 function getPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) { reject(new Error("This browser can't share a location")); return; }
+  const ask = new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error("This device can't share a location")); return; }
     navigator.geolocation.getCurrentPosition(
       (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
       (e) => reject(new Error(e.code === 1 ? "Location permission denied" : "Couldn't get your location")),
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: GEO_TIMEOUT_MS }
     );
   });
+  const bail = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Location took too long")), GEO_TIMEOUT_MS + 1000));
+  return Promise.race([ask, bail]);   // whichever settles first — one of them always does
 }
 
 /* ---------------- Settings & Support hub (card → sub-screen, mirrors Reports) ---------------- */
@@ -3904,6 +3913,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {loadErr && <OfflineNotice S={S} onRetry={loadDocs} what="documents" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>STATION DOCUMENTS</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your SOPs and guidelines, in one place</h1>
@@ -4903,6 +4913,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {loadErr && <OfflineNotice S={S} onRetry={loadFundraiserLog} what="funding" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>FUNDING</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
@@ -6967,6 +6978,7 @@ function Apparatus({ S, role, members, meId, notify }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {loadErr && <OfflineNotice S={S} onRetry={loadRigs} what="apparatus" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>APPARATUS & EQUIPMENT</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Know your rigs are ready</h1>
@@ -8863,9 +8875,16 @@ function StationHours({ S, dept, notify }) {
   async function clockIn() {
     setBusy("in"); setGeoNote("");
     let pos = null;
-    try { pos = await getPosition(); }   // best-effort BY DESIGN: refusing the prompt doesn't block the punch, it just lands unverified
+    // Best-effort BY DESIGN: a denied prompt, a timeout, or no Location Services at all doesn't block
+    // the punch — it just lands UNVERIFIED. The catch is what keeps our lenient policy honest.
+    try { pos = await getPosition(); }
     catch (e) { setGeoNote(`${e.message} — you can still clock in, but the shift won't be verified.`); }
-    const { data, error } = await supabase.rpc("station_check_in", { p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null, p_accuracy: pos?.accuracy ?? null });
+    let data, error;
+    try {
+      ({ data, error } = await supabase.rpc("station_check_in", { p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null, p_accuracy: pos?.accuracy ?? null }));
+    } catch (e) {
+      error = { message: e?.message || "Please try again." };   // a thrown network error must still clear the spinner
+    }
     setBusy("");
     if (error) { notify({ kind: "error", title: "Couldn't clock in", text: error.message || "Please try again." }); return; }
     const row = one(data);   // already clocked in? check-in hands back the existing open row, so this stays correct
@@ -9205,6 +9224,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));   // types already ordered sort_order,name → preserved within each group
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {loadErr && <OfflineNotice S={S} onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>EQUIPMENT REGISTRY</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Know what you've got</h1>
@@ -12005,6 +12025,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {loadErr && <OfflineNotice S={S} onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />}
       {/* header (inline FS — shared PageHead not mutated) */}
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>STATION DUTIES</div>
@@ -12737,7 +12758,17 @@ function baseStyles() {
     viewAsLabel: { fontSize: 11, color: MUTED, fontFamily: mono, letterSpacing: ".5px" },
     select: { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: body, background: "#fff", color: INK },
     logout: { width: 36, height: 36, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: SLATE, display: "grid", placeItems: "center" },
-    content: { padding: "26px clamp(18px, 4vw, 40px)", maxWidth: 1080, width: "100%", margin: "0 auto" },
+    /* SAFE AREA (app-shell level — individual screens stay untouched). topbar/sidebar already pad the
+       TOP inset; this covers the other three edges, which is what bleeds on a notched iPhone: content
+       running under the home indicator, and past the rounded corners in landscape. The shorthand stays
+       first so the explicit sides override it. */
+    content: {
+      padding: "26px clamp(18px, 4vw, 40px)",
+      paddingLeft: "calc(clamp(18px, 4vw, 40px) + env(safe-area-inset-left))",
+      paddingRight: "calc(clamp(18px, 4vw, 40px) + env(safe-area-inset-right))",
+      paddingBottom: "calc(26px + env(safe-area-inset-bottom))",
+      maxWidth: 1080, width: "100%", margin: "0 auto",
+    },
     pageHead: { marginBottom: 22 },
     cardEyebrow: { fontFamily: mono, fontSize: 11, letterSpacing: "1.2px", color: ENGINE, fontWeight: 600, marginBottom: 8 },
     pageTitle: { fontFamily: display, fontWeight: 700, fontSize: "clamp(26px, 4vw, 34px)", margin: 0, lineHeight: 1.05, letterSpacing: ".3px" },

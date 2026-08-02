@@ -12,6 +12,11 @@
 	<string>B4C uses the camera so you can attach photos of equipment and gear to your department's records.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>B4C uses your photo library so you can attach existing photos to equipment and gear records.</string>
+	<!-- Location, when-in-use only. Without this key WKWebView's geolocation call never invokes EITHER
+	     callback, so the clock-in promise never settles and the button spins forever. Only the
+	     when-in-use variant: check-in is foreground-only and nothing tracks in the background. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>B4C uses your location only at check-in to confirm you're at the station and mark the shift verified. Your location is never stored.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
