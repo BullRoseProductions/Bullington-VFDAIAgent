@@ -2367,6 +2367,13 @@ function StationClockCard({ S, dept, go }) {
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: 12, fontWeight: 600, color: open.verified ? FIRE.greenText : FIRE.amberText }}>
             {open.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{open.verified ? "Verified" : "Not verified"}
           </div>
+          {/* Same standing reminder as the Station Hours page, trimmed: "On the clock since …" is
+              directly above, so repeating "You're on the clock" here would just be noise. This card is
+              display-only — the button routes to the page that owns the punch. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(214,169,94,.12)", border: "1px solid rgba(214,169,94,.35)" }}>
+            <Clock size={12} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 11.5, color: FIRE.amberText, lineHeight: 1.4 }}>Remember to clock out before you leave.</span>
+          </div>
         </>
       ) : (
         <div style={{ fontSize: 14, color: FIRE.textMuted, marginTop: 9 }}>Not on the clock</div>
@@ -9095,7 +9102,15 @@ function StationHours({ S, dept, notify }) {
               </div>
               <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: FIRE.textPrimary, margin: "10px 0 2px", letterSpacing: "-0.01em" }}>{spanText(open.checked_in_at, open.checked_out_at)}</div>
               <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Since {fmtAt(open.checked_in_at)}</div>
-              <button disabled={busy === "out"} onClick={clockOut} style={{ ...FS.btnPrimary, marginTop: 16, opacity: busy === "out" ? 0.7 : 1 }}>{busy === "out" ? <><Loader2 size={16} className="spin" /> Clocking out…</> : <><Clock size={16} /> Clock out</>}</button>
+              {/* STANDING reminder, not a one-shot toast at check-in. It is rendered inside the `open`
+                  branch, so it appears the moment station_check_in lands and disappears only when the
+                  shift closes — which is exactly the window in which someone can forget. Sits directly
+                  above the Clock out button so the prompt and the fix are one glance apart. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, padding: "9px 11px", borderRadius: 10, background: "rgba(214,169,94,.12)", border: "1px solid rgba(214,169,94,.35)" }}>
+                <Clock size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, color: FIRE.amberText, lineHeight: 1.45 }}>You&rsquo;re on the clock — remember to clock out before you leave.</span>
+              </div>
+              <button disabled={busy === "out"} onClick={clockOut} style={{ ...FS.btnPrimary, marginTop: 12, opacity: busy === "out" ? 0.7 : 1 }}>{busy === "out" ? <><Loader2 size={16} className="spin" /> Clocking out…</> : <><Clock size={16} /> Clock out</>}</button>
             </div>
           ) : (
             <div style={{ ...FS.card, padding: "20px 18px" }}>
