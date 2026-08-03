@@ -6509,12 +6509,20 @@ function StationHoursReport({ S, dept, back }) {
   for (const s of shifts) {
     const m = (byMember[s.member_id] ||= { name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0 });
     const hrs = Number(s.hours) || 0;
-    if (!s.verified) m.unverified += hrs;                        // recorded, not credited
+    // AUTO-CLOSED FIRST, ahead of the verified check: the stop time was guessed by the safety-net job,
+    // not observed, so the DURATION is fiction even when the check-in itself was properly geo-verified.
+    // It lands in the same uncredited bucket as unverified time — visible, never added to a credited
+    // figure — until a human confirms the real out-time.
+    if (s.auto_closed) m.unverified += hrs;
+    else if (!s.verified) m.unverified += hrs;                   // recorded, not credited
     else if (s.kind === "training") m.training += hrs;
     else m.standby += hrs;                                       // standby is the only other surfaced kind
     if (s.verified) m.vTrue += 1;
     m.n += 1;
   }
+  // "N shifts auto-closed — needs review". Counted across the raw rows, not the rollup, because the
+  // number a leader needs is how many SHIFTS to go fix, not how many members are affected.
+  const autoClosedCount = shifts.filter((s) => s.auto_closed).length;
   const rows = Object.values(byMember)
     .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
     .sort((x, y) => y.total - x.total);   // ranked by CREDITED hours — padding unverified time can't climb this list
@@ -6572,6 +6580,18 @@ function StationHoursReport({ S, dept, back }) {
             <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{err} — the figures below may be out of date.</div>
           </div>
           <button onClick={() => load(rangeKey)} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+        </div>
+      )}
+      {/* Auto-closed review banner. Amber, not red — nothing is broken, a stop time is just unknown.
+          Sits above the figures because it changes how they should be read: those hours are missing
+          from Credited on purpose. */}
+      {autoClosedCount > 0 && (
+        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+          <AlertTriangle size={18} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{autoClosedCount} shift{autoClosedCount === 1 ? "" : "s"} auto-closed — needs review</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.5 }}>Someone stayed clocked in past the department&rsquo;s maximum shift length, so the clock was stopped automatically at the cap. The real out-time is unknown, so these hours are <b style={{ color: FIRE.textSecondary }}>not credited</b> — look for them in the shift log below.</div>
+          </div>
         </div>
       )}
       {/* range chips */}
@@ -6706,11 +6726,17 @@ function StationHoursReport({ S, dept, back }) {
             <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th><th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
             <tbody>
               {log.map((s, i) => (
-                <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}`, opacity: s.verified ? 1 : 0.62 }}>   {/* muted = recorded but not credited */}
+                <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}`, opacity: (s.verified && !s.auto_closed) ? 1 : 0.62 }}>   {/* muted = recorded but not credited */}
                   <td style={TD}>{fmtDate(s.checked_in_at)}</td>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{s.member_name || "—"}</td>
                   <td style={TD}>{fmtHm(s.checked_in_at)}</td>
-                  <td style={TD}>{s.checked_out_at ? fmtHm(s.checked_out_at) : <span style={{ color: FIRE.greenText, fontWeight: 600 }}>Open</span>}</td>
+                  {/* The out-time is the FICTION in an auto-closed row — flag it there, where a leader is
+                      already looking to work out what actually happened, not in the verified column. */}
+                  <td style={TD}>{s.checked_out_at
+                    ? (s.auto_closed
+                        ? <span title="Stopped automatically at the department's maximum shift length — the real out-time is unknown, so this shift is not credited." style={{ color: FIRE.amberText, fontWeight: 600 }}>{fmtHm(s.checked_out_at)} · auto</span>
+                        : fmtHm(s.checked_out_at))
+                    : <span style={{ color: FIRE.greenText, fontWeight: 600 }}>Open</span>}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(s.hours)}</td>
                   <td style={TD}>{s.kind === "training" ? "Training" : "Standby"}</td>
                   <td style={{ ...TD, color: s.verified ? FIRE.greenText : FIRE.amberText, fontWeight: 600 }}>{s.verified ? "✓" : "⚠"}</td>
