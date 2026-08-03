@@ -6231,7 +6231,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
   if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
-  if (view === "stationhours") return <StationHoursReport S={S} dept={dept} back={() => setView(null)} />;
+  if (view === "stationhours") return <StationHoursReport S={S} dept={dept} notify={notify} back={() => setView(null)} />;   // notify: the needs-review panel writes, so it reports failures the same way every other leadership mutation does
   if (view === "capital") return <CapitalPlanReport S={S} dept={dept} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -6476,7 +6476,7 @@ const RANGES = {
 // Two reads in parallel; the per-member rollup is done here rather than in SQL so the shift log and the
 // summary are guaranteed to be the same rows. Still no coordinates anywhere — a shift carries only
 // verified true/false, and no distance is ever computed or shown.
-function StationHoursReport({ S, dept, back }) {
+function StationHoursReport({ S, dept, notify, back }) {
   const [rangeKey, setRangeKey] = useState("month");
   const [shifts, setShifts] = useState([]);
   const [onNow, setOnNow] = useState([]);
@@ -6507,6 +6507,56 @@ function StationHoursReport({ S, dept, back }) {
     });
   }
   useEffect(() => { load(rangeKey); setShowAll(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
+  // ---- needs-review queue ----
+  // DELIBERATELY OUTSIDE load(): dept_shifts_needing_review() is UNWINDOWED, so it must not be
+  // re-fetched per range chip and must not be filtered by one. A shift flagged two weeks ago is still
+  // wrong while you're looking at "This month"; a review queue that can hide items is not a queue.
+  const [review, setReview] = useState([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewErr, setReviewErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [outAt, setOutAt] = useState({});        // shift_id -> datetime-local string, uncommitted
+  function loadReview() {
+    supabase.rpc("dept_shifts_needing_review").then(({ data, error }) => {
+      if (error) { setReviewErr(error.message || "Please try again."); return; }   // keep the last-known queue; a failed read is not "nothing to review"
+      setReviewErr(""); setReview(Array.isArray(data) ? data : []);
+    });
+  }
+  useEffect(() => { loadReview(); }, []);
+  // <input type="datetime-local"> speaks local wall-clock with no zone. Format for min/max the same
+  // way the browser will hand the value back, so the native picker constrains to a sane window.
+  const localInput = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  // Both handlers follow the house leadership-mutation shape: busy id, rpc, notify on failure with
+  // details, reload on success. RELOADS BOTH: the queue (so the row leaves) and the windowed figures
+  // (so the corrected hours land in Credited and ISO immediately).
+  async function confirmOut(r) {
+    const raw = outAt[r.shift_id];
+    const when = raw ? new Date(raw) : null;   // datetime-local parses as LOCAL time — correct here
+    if (!raw || !when || isNaN(when.getTime())) { notify?.({ kind: "error", title: "Enter the out-time", text: "Set when the member actually left before confirming." }); return; }
+    setBusyId(r.shift_id);
+    const { error } = await supabase.rpc("resolve_auto_closed_shift", { p_shift_id: r.shift_id, p_checked_out_at: when.toISOString() });
+    setBusyId(null);
+    // The RPC raises rather than no-opping, so error.message is a sentence a leader can act on
+    // ("The out-time must be after the member checked in.") — surface it, don't swallow it.
+    if (error) { notify?.({ kind: "error", title: "Couldn't save that out-time", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: `Shift updated for ${r.member_name || "that member"}.` });
+    setOutAt((o) => { const n = { ...o }; delete n[r.shift_id]; return n; });
+    loadReview(); load(rangeKey);
+  }
+  async function voidShift(r) {
+    if (!window.confirm(`Void ${r.member_name || "this member"}'s shift from ${new Date(r.checked_in_at).toLocaleString()}?\n\nThe record is kept but credits zero hours.`)) return;
+    setBusyId(r.shift_id);
+    const { error } = await supabase.rpc("void_auto_closed_shift", { p_shift_id: r.shift_id });
+    setBusyId(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't void that shift", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: "Shift voided — kept on record, credits nothing." });
+    loadReview(); load(rangeKey);
+  }
   // ---- client rollup from raw shift rows ----
   // VERIFIED-ONLY CREDIT: hours only count toward the official number (ISO/LOSAP/stipend) when the
   // check-in was location-verified at the station. Unverified time is still recorded and shown — it is
@@ -6527,9 +6577,9 @@ function StationHoursReport({ S, dept, back }) {
     if (s.verified) m.vTrue += 1;
     m.n += 1;
   }
-  // "N shifts auto-closed — needs review". Counted across the raw rows, not the rollup, because the
-  // number a leader needs is how many SHIFTS to go fix, not how many members are affected.
-  const autoClosedCount = shifts.filter((s) => s.auto_closed).length;
+  // NOTE: the banner count comes from the UNWINDOWED review queue (review.length), not from `shifts`.
+  // Counting auto-closed rows inside the current range would hide a shift flagged last month while
+  // you're viewing "This month" — the exact case the queue exists to prevent.
   const rows = Object.values(byMember)
     .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
     .sort((x, y) => y.total - x.total);   // ranked by CREDITED hours — padding unverified time can't climb this list
@@ -6592,13 +6642,59 @@ function StationHoursReport({ S, dept, back }) {
       {/* Auto-closed review banner. Amber, not red — nothing is broken, a stop time is just unknown.
           Sits above the figures because it changes how they should be read: those hours are missing
           from Credited on purpose. */}
-      {autoClosedCount > 0 && (
-        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+      {review.length > 0 && (
+        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
           <AlertTriangle size={18} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{autoClosedCount} shift{autoClosedCount === 1 ? "" : "s"} auto-closed — needs review</div>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.5 }}>Someone stayed clocked in past the department&rsquo;s maximum shift length, so the clock was stopped automatically at the cap. The real out-time is unknown, so these hours are <b style={{ color: FIRE.textSecondary }}>not credited</b> — look for them in the shift log below.</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{review.length} shift{review.length === 1 ? "" : "s"} auto-closed — needs review</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.5 }}>Someone stayed clocked in past the department&rsquo;s maximum shift length, so the clock was stopped automatically at the cap. The real out-time is unknown, so these hours are <b style={{ color: FIRE.textSecondary }}>not credited</b> until someone sets it.</div>
           </div>
+          <button style={FS.btn} onClick={() => setReviewOpen((v) => !v)}>{reviewOpen ? <><ChevronUp size={14} color={FIRE.btnIcon} /> Hide</> : <><ClipboardCheck size={14} color={FIRE.btnIcon} /> Review now</>}</button>
+        </div>
+      )}
+      {/* NEEDS-REVIEW PANEL — the only sanctioned path to clear auto_closed. Both actions go through
+          the dedicated RPCs, which raise rather than no-op, so a rejected correction is always visible
+          to the leader rather than silently discarded. */}
+      {reviewOpen && review.length > 0 && (
+        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 12 }}>
+          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFTS NEEDING REVIEW</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
+            Oldest first, and not limited to the selected period — a shift flagged weeks ago still shows here. Set when the member actually left, or void the shift if it shouldn&rsquo;t count at all.
+          </div>
+          {reviewErr && <div style={{ fontSize: 12, color: FIRE.redText, padding: "0 12px 10px" }}>Couldn&rsquo;t refresh the list: {reviewErr}</div>}
+          {review.map((r) => {
+            const busy = busyId === r.shift_id;
+            return (
+              <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{r.kind === "training" ? "Training" : "Standby"}</span>
+                </div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.5 }}>
+                  In {fmtDate(r.checked_in_at)} at {fmtHm(r.checked_in_at)} · auto-stopped {fmtHm(r.checked_out_at)} (<b style={{ color: FIRE.amberText }}>{h1(r.capped_hours)} hrs</b>, guessed)
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
+                  {/* Left EMPTY on purpose — prefilling with the machine's guess would invite confirming
+                      it unread, which is the one thing this screen exists to prevent. min/max bound the
+                      native picker to [check-in, now], the same window the RPC enforces. */}
+                  <label style={{ ...S.field, minWidth: 210 }}>
+                    <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Actual out-time</span>
+                    <input type="datetime-local" style={FS.input}
+                      value={outAt[r.shift_id] || ""}
+                      min={localInput(r.checked_in_at)}
+                      max={localInput(new Date().toISOString())}
+                      onChange={(e) => setOutAt((o) => ({ ...o, [r.shift_id]: e.target.value }))} />
+                  </label>
+                  <button disabled={busy} style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={() => confirmOut(r)}>
+                    {busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> Confirm</>}
+                  </button>
+                  <button disabled={busy} style={{ ...FS.btn, opacity: busy ? 0.7 : 1 }} onClick={() => voidShift(r)}>
+                    <X size={14} color="#C8606A" /> Void — didn&rsquo;t count
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
       {/* range chips */}
