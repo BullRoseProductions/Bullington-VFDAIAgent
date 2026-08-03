@@ -6473,6 +6473,7 @@ function StationHoursReport({ S, dept, back }) {
   const [rangeKey, setRangeKey] = useState("month");
   const [shifts, setShifts] = useState([]);
   const [onNow, setOnNow] = useState([]);
+  const [iso, setIso] = useState([]);        // dept_iso_hours rollup — de-overlapped, already per-member and pre-sorted by the RPC
   const [loaded, setLoaded] = useState(false);
   const [first, setFirst] = useState(true);  // ONLY the first load blanks the screen; a range switch keeps the chrome and swaps the numbers
   const [err, setErr] = useState("");        // a failed read is not "zero hours" — never report an empty department as fact
@@ -6486,12 +6487,16 @@ function StationHoursReport({ S, dept, back }) {
     Promise.all([
       supabase.rpc("dept_station_shifts", { p_from: r.from.toISOString(), p_to: r.to.toISOString() }),
       supabase.rpc("dept_on_station_now"),
-    ]).then(([a, b]) => {
+      // Same r.from/r.to as the shift read above, so the ISO figure and the Credited figure can never
+      // describe different periods — the one way the two numbers could disagree for a boring reason.
+      supabase.rpc("dept_iso_hours", { p_from: r.from.toISOString(), p_to: r.to.toISOString() }),
+    ]).then(([a, b, c]) => {
       if (my !== reqRef.current) return;   // superseded by a newer range click — drop it, or the table would show the wrong period
       setLoaded(true); setFirst(false);
-      if (a.error || b.error) { setErr((a.error || b.error).message || "Please try again."); return; }   // keep the last-known rows behind the banner
+      if (a.error || b.error || c.error) { setErr((a.error || b.error || c.error).message || "Please try again."); return; }   // keep the last-known rows behind the banner
       setShifts(Array.isArray(a.data) ? a.data : []);
       setOnNow(Array.isArray(b.data) ? b.data : []);
+      setIso(Array.isArray(c.data) ? c.data : []);
     });
   }
   useEffect(() => { load(rangeKey); setShowAll(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
@@ -6520,6 +6525,15 @@ function StationHoursReport({ S, dept, back }) {
   const dept_n          = rows.reduce((a, r) => a + r.n, 0);
   const dept_vtrue      = rows.reduce((a, r) => a + r.vTrue, 0);
   const dept_vpct       = dept_n ? Math.round(100 * dept_vtrue / dept_n) : 0;
+  // ---- ISO rollup ----
+  // Straight sums of what dept_iso_hours already de-overlapped per member. Deliberately NOT recomputed
+  // here: the union has to happen in SQL, over intervals, and any client-side arithmetic on these
+  // totals would just be adding numbers that are already correct.
+  const iso_num       = (v) => Number(v) || 0;
+  const iso_training  = iso.reduce((a, r) => a + iso_num(r.training_hours), 0);
+  const iso_standby   = iso.reduce((a, r) => a + iso_num(r.standby_hours), 0);
+  const iso_total     = iso.reduce((a, r) => a + iso_num(r.iso_total_hours), 0);
+  const iso_removed   = dept_total - iso_total;   // what the raw Credited column double-counts (plus any boundary clipping)
   if (first) return null;   // first paint only — after that the chrome stays put and the figures swap under it
   // ---- render ----
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -6626,6 +6640,53 @@ function StationHoursReport({ S, dept, back }) {
               </tr>
             </tbody>
           </table>
+        )}
+      </div>
+      {/* ISO hours — the reportable number */}
+      {/* This table is NOT a second opinion on "Hours by member" above; it is the same time counted
+          correctly. dept_iso_hours unions each member's verified, CLOSED intervals so a minute that is
+          both training and standby is credited once, to training. It therefore reads LOWER than the
+          Credited column whenever anyone was clocked in for standby during a drill they attended.
+          That gap is the point of the section, not a bug — the explainer says so in plain words,
+          because a chief who spots it without an explanation will assume the report is broken. */}
+      <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS — NO DOUBLE-COUNTING</div>
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
+          Every minute counted once. Time that is both training and standby is credited to training only, so this total reads lower than <b style={{ color: FIRE.textSecondary }}>Credited</b> above by design.
+          {iso_removed > 0.05 && <> For this period that&rsquo;s <b style={{ color: FIRE.textSecondary }}>{h1(iso_removed)}</b> hrs of overlap removed.</>}
+        </div>
+        {iso.length === 0 ? (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "0 12px 12px" }}>
+            No ISO hours in this range yet. A shift counts only once it is <b style={{ color: FIRE.textSecondary }}>verified at the station</b> and <b style={{ color: FIRE.textSecondary }}>closed</b> — an open shift has no duration yet, so it is not zero hours, it is not yet countable.
+          </div>
+        ) : (
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>ISO total</th></tr></thead>
+            <tbody>
+              {/* order comes from the RPC (credited time desc, ties by name) — not re-sorted here */}
+              {iso.map((r) => (
+                <tr key={r.member_id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training_hours)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby_hours)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(r.iso_total_hours)}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+                <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_training)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_standby)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_total)}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+        {/* Zero training with non-zero standby is the EXPECTED live state today, not a fault — say so,
+            or it reads as a broken join. Only shown when there is data but no training in it. */}
+        {iso.length > 0 && iso_training === 0 && (
+          <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "10px 12px 4px", lineHeight: 1.5 }}>
+            No training hours yet. A drill counts here once a member scans the QR <b style={{ color: FIRE.textSecondary }}>on site</b> (an off-site or location-denied scan still signs them in, but earns no clock) and an officer finalizes the session.
+          </div>
         )}
       </div>
       {/* shift log */}
