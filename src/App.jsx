@@ -6533,7 +6533,13 @@ function StationHoursReport({ S, dept, back }) {
   const iso_training  = iso.reduce((a, r) => a + iso_num(r.training_hours), 0);
   const iso_standby   = iso.reduce((a, r) => a + iso_num(r.standby_hours), 0);
   const iso_total     = iso.reduce((a, r) => a + iso_num(r.iso_total_hours), 0);
-  const iso_removed   = dept_total - iso_total;   // what the raw Credited column double-counts (plus any boundary clipping)
+  // NOT "overlap removed" — it is two effects at once, and it can go either way.
+  // dept_station_shifts (pulled live) filters on checked_in_at alone (>= p_from AND < p_to) and counts
+  // each qualifying shift WHOLE; dept_iso_hours filters on overlap and CLIPS to the window. So a shift
+  // straddling p_from is counted whole by Credited and clipped by ISO (delta positive), while one
+  // straddling p_to is EXCLUDED by Credited entirely but partly counted by ISO (delta negative).
+  // Overlap de-duplication only ever pushes it positive. Label it neutrally.
+  const iso_delta     = dept_total - iso_total;
   if (first) return null;   // first paint only — after that the chrome stays put and the figures swap under it
   // ---- render ----
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -6645,15 +6651,16 @@ function StationHoursReport({ S, dept, back }) {
       {/* ISO hours — the reportable number */}
       {/* This table is NOT a second opinion on "Hours by member" above; it is the same time counted
           correctly. dept_iso_hours unions each member's verified, CLOSED intervals so a minute that is
-          both training and standby is credited once, to training. It therefore reads LOWER than the
-          Credited column whenever anyone was clocked in for standby during a drill they attended.
-          That gap is the point of the section, not a bug — the explainer says so in plain words,
-          because a chief who spots it without an explanation will assume the report is broken. */}
+          both training and standby is credited once, to training, and clips each interval to the
+          reporting period. TWO differences from Credited, therefore, not one — see iso_delta above.
+          The explainer names both in plain words and labels the number neutrally, because a chief who
+          spots a gap without an explanation will assume the report is broken, and a gap that was
+          labelled "overlap" when it is partly boundary clipping is worse than no label at all. */}
       <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
         <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS — NO DOUBLE-COUNTING</div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
-          Every minute counted once. Time that is both training and standby is credited to training only, so this total reads lower than <b style={{ color: FIRE.textSecondary }}>Credited</b> above by design.
-          {iso_removed > 0.05 && <> For this period that&rsquo;s <b style={{ color: FIRE.textSecondary }}>{h1(iso_removed)}</b> hrs of overlap removed.</>}
+          Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This total is reconciled against <b style={{ color: FIRE.textSecondary }}>Credited</b> above and may differ by design.
+          {Math.abs(iso_delta) > 0.05 && <> Difference from Credited this period: <b style={{ color: FIRE.textSecondary }}>{h1(Math.abs(iso_delta))}</b> hrs {iso_delta > 0 ? "lower" : "higher"}. With no shifts straddling the period boundary, that difference is simply the overlap removed.</>}
         </div>
         {iso.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "0 12px 12px" }}>
