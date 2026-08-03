@@ -1007,12 +1007,12 @@ export default function App() {
   async function doCheckIn(sessionId, token) {
     const title = trainingSessions.find((x) => String(x.id) === String(sessionId))?.title;
     // GPS at scan, via the SAME helper the station clock-in uses (getPosition owns its Promise.race
-    // bail, so it can never hang the sign-in). Best-effort BY DESIGN and deliberately silent: a denied
-    // prompt, a timeout, or no Location Services still signs the member in — the training presence row
-    // simply lands unverified, exactly as an unverified standby punch does. Attendance is never blocked
-    // by location; only the ISO credit is.
-    let pos = null;
-    try { pos = await getPosition(); } catch { /* unverified, never blocks */ }
+    // bail, so it can never hang the sign-in). Best-effort BY DESIGN: a denied prompt, a timeout, or no
+    // Location Services still signs the member in. Attendance is never blocked by location; only the
+    // hours credit is. geoFailed carries that one fact to CheckinConfirm so the caveat can be shown as
+    // a footnote on a SUCCESS — never as a failure, because the sign-in genuinely worked.
+    let pos = null, geoFailed = false;
+    try { pos = await getPosition(); } catch { geoFailed = true; }
     const { data, error } = await supabase.rpc("member_check_in", {
       p_session_id: sessionId,
       p_token: token,
@@ -1020,9 +1020,9 @@ export default function App() {
     });
     if (error) return { ok: false, reason: error.message || "We couldn't record your sign-in — please see your training officer.", title };
     loadSessions();   // refresh attendance counts / roster
-    if (data === "already") return { ok: true, already: true, title };
+    if (data === "already") return { ok: true, already: true, title, geoFailed };
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    return { ok: true, at: now, title };
+    return { ok: true, at: now, title, geoFailed };
   }
   // Receiver scans a handoff QR/deep-link → move custody to the signed-in member.
   async function doAcceptHandoff(handoffId, code) {
@@ -10503,6 +10503,16 @@ function CheckinConfirm({ S, result, members, meId, go }) {
             ? <>{me ? me.name : "You"} {result.already ? "were already signed in to" : "signed in to"} <b>{result.title}</b>{result.at ? ` at ${result.at}` : ""}.</>
             : (result?.reason || "Something went wrong.")}
         </p>
+        {/* Location caveat — a FOOTNOTE on a success, never a failure. The sign-in itself worked and the
+            member is on the roll; only the hours credit is affected, because member_check_in skips the
+            training presence row when it can't geo-verify. Amber, not red, and it sits below the
+            confirmation so the green check still reads first. */}
+        {ok && result?.geoFailed && (
+          <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 10, textAlign: "left", display: "flex", gap: 9, alignItems: "flex-start", background: "rgba(214,169,94,.14)", border: "1px solid rgba(214,169,94,.45)" }}>
+            <AlertTriangle size={16} color="#8A6410" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span style={{ fontSize: 13, color: "#6E540F", lineHeight: 1.45 }}>Signed in ✓ — couldn't confirm your location, so this won't count toward hours.</span>
+          </div>
+        )}
         <button style={{ ...S.primaryBtn, marginTop: 18 }} onClick={() => go("training")}><GraduationCap size={16} /> Go to my training</button>
       </div>
     </div>
