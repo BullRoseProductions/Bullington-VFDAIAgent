@@ -1006,7 +1006,18 @@ export default function App() {
   // Self-serve check-in: the DB RPC enforces identity (my_member_id), department, not-done, and token match.
   async function doCheckIn(sessionId, token) {
     const title = trainingSessions.find((x) => String(x.id) === String(sessionId))?.title;
-    const { data, error } = await supabase.rpc("member_check_in", { p_session_id: sessionId, p_token: token });
+    // GPS at scan, via the SAME helper the station clock-in uses (getPosition owns its Promise.race
+    // bail, so it can never hang the sign-in). Best-effort BY DESIGN and deliberately silent: a denied
+    // prompt, a timeout, or no Location Services still signs the member in — the training presence row
+    // simply lands unverified, exactly as an unverified standby punch does. Attendance is never blocked
+    // by location; only the ISO credit is.
+    let pos = null;
+    try { pos = await getPosition(); } catch { /* unverified, never blocks */ }
+    const { data, error } = await supabase.rpc("member_check_in", {
+      p_session_id: sessionId,
+      p_token: token,
+      p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null, p_accuracy: pos?.accuracy ?? null,
+    });
     if (error) return { ok: false, reason: error.message || "We couldn't record your sign-in — please see your training officer.", title };
     loadSessions();   // refresh attendance counts / roster
     if (data === "already") return { ok: true, already: true, title };
