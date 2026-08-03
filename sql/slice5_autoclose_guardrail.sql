@@ -8,12 +8,17 @@
 -- confirms the real out-time. A guardrail that silently invented hours would be
 -- worse than the bug.
 --
--- THIS FILE DOES NOT SCHEDULE ANYTHING. The mechanism is a separate decision;
--- see sql/slice5_autoclose_schedule.sql. Applying this file alone is safe and
--- inert: the function exists but nothing calls it.
+-- THIS FILE DOES NOT SCHEDULE ANYTHING. Applying it alone is safe and inert:
+-- the function exists but nothing calls it. The scheduler lives in
+-- sql/slice5_autoclose_schedule.sql.
+--
+-- STATUS (2026-08-03): BOTH FILES ARE APPLIED. pg_cron 1.6.4 was enabled and
+-- job 'auto-close-stale-shifts' scheduled '*/20 * * * *', active. The sweep is
+-- armed and running — confirmed from cron.job, which is the source of truth.
 --
 -- VERIFIED LIVE BEFORE WRITING (2026-08-03):
---   • pg_cron NOT installed; available 1.6.4. No `cron` schema, no cron.job.
+--   • pg_cron NOT installed at the time this file was authored; available
+--     1.6.4. Superseded — see STATUS above; it was enabled shortly after.
 --   • departments.station_radius_m = integer NOT NULL DEFAULT 150
 --     departments.week_start_day  = smallint NOT NULL DEFAULT 1   <- pattern copied
 --   • departments has ZERO check constraints today (contype='c' returns nothing),
