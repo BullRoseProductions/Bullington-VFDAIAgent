@@ -952,7 +952,7 @@ export default function App() {
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience, counts_toward_attendance"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience, counts_toward_attendance, location_lat, location_lng, location_radius_m, location_label"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -986,7 +986,9 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
+          // off-site location: null lat/lng = at the station (every existing drill, and the default)
+          locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
     );
   };
@@ -10909,6 +10911,40 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     loadSessions();   // refresh signin_open
   }
   const rotateSI = openSI;   // open_signin rotates on every call
+  // ---- off-site drill location ----
+  // Deliberately SEPARATE from openSI: open_signin rotates the token on every call, and rotateSI is
+  // literally openSI, so folding the location into it would mean every "Rotate code" tap had to
+  // re-send the location or silently wipe it mid-drill. Two calls, no coupling.
+  const [locBusy, setLocBusy] = useState(null);     // session id currently capturing/saving
+  const [locLabelDraft, setLocLabelDraft] = useState({});   // sessionId -> label text, uncommitted
+  async function setOffsiteHere(s) {
+    setLocBusy(s.id);
+    let pos = null;
+    try { pos = await getPosition(); } catch { /* fall through to the error below */ }
+    if (!pos) {
+      setLocBusy(null);
+      notify({ kind: "error", title: "Couldn't get your location", text: "Allow location access and try again, or leave the drill at the station." });
+      return;
+    }
+    const { error } = await supabase.rpc("set_session_location", {
+      p_session_id: s.id, p_lat: pos.lat, p_lng: pos.lng,
+      p_radius_m: null,                                   // DB picks the dept's station radius, then 400
+      p_label: (locLabelDraft[s.id] || "").trim() || null,
+    });
+    setLocBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't set the drill location", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: "Off-site location set — members verify here, not at the station." });
+    loadSessions();
+  }
+  async function clearOffsite(s) {
+    setLocBusy(s.id);
+    const { error } = await supabase.rpc("set_session_location", { p_session_id: s.id });   // all-null args = clear
+    setLocBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't clear the location", text: error.message || "Please try again." }); return; }
+    setLocLabelDraft((d) => { const n = { ...d }; delete n[s.id]; return n; });
+    notify({ kind: "success", text: "Back to the station — members verify at the station again." });
+    loadSessions();
+  }
   async function closeSI(s) {
     const { error } = await supabase.rpc("close_signin", { p_session_id: s.id });
     if (error) { notify({ kind: "error", title: "Couldn't close sign-in", text: error.message || "Please try again.", details: error.message }); return; }
@@ -11622,6 +11658,30 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     const liveToken = signinTokens[s.id];
                     return (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
+                      {/* WHERE THIS DRILL VERIFIES. Rendered in both branches (before opening AND while
+                          the QR is live) so it can be corrected without closing the sign-in. Setting it
+                          is a separate RPC from open_signin precisely so rotating the code never
+                          disturbs it. Members who scan verify against THIS point instead of the
+                          station; the strict rule is unchanged either way — an unverified scan still
+                          signs them in and still earns no clock. */}
+                      <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "0.5px solid rgba(255,255,255,.08)" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#9AA1AC", letterSpacing: ".08em", marginBottom: 6 }}>WHERE THIS DRILL VERIFIES</div>
+                        {s.locLat != null && s.locLng != null ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <MapPin size={14} color="#D6A95E" style={{ flexShrink: 0 }} />
+                            <span style={{ fontSize: 13, color: "#F0F2F5" }}>Off-site{s.locLabel ? <> · <b>{s.locLabel}</b></> : ""}<span style={{ color: "#7E8794" }}> · within {s.locRadius || 400}m of the set point</span></span>
+                            <button disabled={locBusy === s.id} style={{ ...Lbtn, marginLeft: "auto" }} onClick={() => clearOffsite(s)}>{locBusy === s.id ? <Loader2 size={13} className="spin" /> : <X size={13} color="#C8606A" />} Back to station</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 13, color: "#B6BDC8" }}>At the station.</span>
+                            <input value={locLabelDraft[s.id] || ""} placeholder="Where? (optional, e.g. Memorial Day parade)"
+                              onChange={(e) => setLocLabelDraft((d) => ({ ...d, [s.id]: e.target.value }))}
+                              style={{ ...Linput, flex: 1, minWidth: 170, fontSize: 12.5, padding: "6px 8px" }} />
+                            <button disabled={locBusy === s.id} style={Lbtn} onClick={() => setOffsiteHere(s)}>{locBusy === s.id ? <><Loader2 size={13} className="spin" /> Getting location…</> : <><MapPin size={13} color={LbtnIcon} /> This drill is off-site — use my location</>}</button>
+                          </div>
+                        )}
+                      </div>
                       {!liveToken ? (
                         <div>
                           <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Show the code to display the QR (this generates a fresh code).</> : <>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
