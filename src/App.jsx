@@ -1322,7 +1322,10 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
 // personal strip. Plain members get it in their top three-up stat row instead — during the pilot the
 // clock is the first thing a member needs, so it stays above the fold for them and MemberDashboard
 // passes false. Defaulting to true means the leader dashboards need no change to keep it.
-function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard = true }) {
+// showUpcomingTraining: same pattern. Leaders already reach drills from their operations view (the
+// Training card / NEXT DEPT EVENT tile, plus the dashboard calendar), so the list here is redundant
+// for them. A plain member has no operations view — this is their ONLY copy, so it stays by default.
+function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard = true, showUpcomingTraining = true }) {
   const { openProof, proofMount } = useProofViewer(notify);   // "View proof" on the member's own approved certs
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
@@ -1424,6 +1427,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
             </>)}
           </div>
         </div>
+        {showUpcomingTraining && (
         <div style={{ ...FS.card, padding: 18 }}>
           <div style={FS.kicker}>UPCOMING TRAINING</div>
           <div style={{ marginTop: 10 }}>
@@ -1440,6 +1444,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
           </div>
           {go && <button onClick={() => go("training")} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, marginTop: 10 }}>View Training</button>}
         </div>
+        )}
       </div>
       {/* Self-serve cert add/renew with proof. Takes only {S, notify} — it resolves my_member_id() and
           my_department_id() itself, which is what makes it droppable on every dashboard unchanged.
@@ -1914,7 +1919,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} />
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
       <MyActionItems meId={meId} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
       <div style={S.quickGrid}>
@@ -2210,7 +2215,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
           their own certs, hours and drills, and had no route to them from this dashboard before.
           Placed between "your items" and "the department you run", matching the DeptAdmin ordering. */}
-      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} />
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
         {cards.map((c) => (
