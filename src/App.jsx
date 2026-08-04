@@ -1318,7 +1318,11 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
 // personal-duties load, the plan/proof viewers, and every child's own identity resolution.
 // ONE SOURCE OF TRUTH for the personal view — rendered by MemberDashboard, DeptAdminDashboard and
 // OfficerDashboard alike, so a leader sees exactly what a member sees of their own record.
-function PersonalView({ S, me, meId, sessions, notify, go, dept }) {
+// showClockCard: the station clock renders in exactly ONE place per role. Leaders get it here, in the
+// personal strip. Plain members get it in their top three-up stat row instead — during the pilot the
+// clock is the first thing a member needs, so it stays above the fold for them and MemberDashboard
+// passes false. Defaulting to true means the leader dashboards need no change to keep it.
+function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard = true }) {
   const { openProof, proofMount } = useProofViewer(notify);   // "View proof" on the member's own approved certs
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
@@ -1353,7 +1357,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept }) {
             hours is pilot/interim and gets switched off per-station once geofence ships, so this gate
             is load-bearing, not decoration. Display-only by design: "Clock out →" routes to the page
             that owns the punch, so there is never a second live copy of shift state to disagree. */}
-        {moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
+        {showClockCard && moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
         <div style={{ ...FS.card, padding: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={FS.kicker}>MY CERTIFICATIONS</div>
@@ -2609,13 +2613,18 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
             </div>
           )}
         </div>
+        {/* third stat box — station clock status, back in its original above-the-fold spot. During the
+            pilot this is the first thing a member needs, so it stays here rather than in the personal
+            strip below; PersonalView is passed showClockCard={false} so it renders in exactly one
+            place. Same module gate as the nav: a department with station hours off sees nothing. */}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
       </div>
       {mounts}
       {/* 3 — the shared personal view: needs-attention, station clock, certs, duties, upcoming
           training, and the self-serve cert proposer. Previously duplicated inline here; PersonalView
           is now the single source of truth, rendered identically for members, Dept Admins and
           Officers. It renders its own "YOUR PERSONAL VIEW" kicker and module gate. */}
-      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} />
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showClockCard={false} />
       {/* 5 — announcements feed + station calendar, two-column (matches DeptAdmin: feed narrower & bounded/internal-scroll, calendar wider; wraps on narrow) */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
