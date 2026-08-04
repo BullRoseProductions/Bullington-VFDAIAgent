@@ -1255,9 +1255,70 @@ function boardAttendance(members, sessions, year, range) {
 // Rolling 90-day window for live participation (roster + member file) — feeds the SAME
 // deptAttendance calc as Reports, so a finalized drill moves these numbers immediately.
 const rolling90 = () => { const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 90); return { from: toISODate(from), to: toISODate(to) }; };
-// Shared personal cards (My Certifications / Assigned Duties / Upcoming Training) — self-contained (owns its personal-duties load + plan viewer).
-// Rendered in the Dept Admin dashboard; MemberDashboard keeps its own inline copy for now (switch is a later dedicated change).
-function PersonalView({ S, me, meId, sessions, notify, go }) {
+// "Needs your attention" — the member's own two open loops: certs at/near expiry, and drills whose roll
+// is STILL OPEN that they are not on. Modelled on MyActionItems: self-contained, and renders NOTHING
+// when there is nothing, so it never becomes a permanent empty box.
+//
+// NO `role` PROP, ON PURPOSE. Audience scoping goes through rollFor(s, me), which reads me.access —
+// the member's ACTUAL roles — so a leader flipping the "View as" selector can never move their own
+// personal numbers. Same asymmetry MemberDashboard's attendance ring already depends on.
+//
+// Derived from the `me` / `sessions` App already loaded rather than re-fetched: this card sits inches
+// from UPCOMING TRAINING and MY CERTIFICATIONS, and a second read could render the two disagreeing.
+function NeedsAttention({ S, me, meId, sessions, go }) {
+  // rank 0 = EXPIRED, 1 = EXPIRING (<=3mo). rank 2 CURRENT and rank 3 NO DATE are both fine — a cert
+  // with no expiry date is not an open loop, it just has nothing to count down.
+  const certs = (me?.certs || [])
+    .map((c) => ({ ...c, st: certStatus(c.exp) }))
+    .filter((c) => c.st.rank <= 1)
+    .sort((a, b) => a.st.rank - b.st.rank);
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  // Drills that have already come around and are NOT yet finalized — the roll is still open, so signing
+  // in is still possible (scan the QR / see the training officer). A `done` session is locked and there
+  // is nothing left to act on, so it is deliberately excluded: this is a to-do list, not a scolding.
+  const unsigned = (sessions || [])
+    .filter((s) => !s.done && sessDate(s) <= t0 && rollFor(s, me) && !(s.attendance || []).includes(meId))
+    .sort(sessSort);
+  if (certs.length === 0 && unsigned.length === 0) return null;
+  return (
+    <div style={{ ...FS.card, padding: 18, borderLeft: `3px solid ${FIRE.amberText}`, marginBottom: 12 }}>
+      <div style={FS.kicker}>NEEDS YOUR ATTENTION</div>
+      <div style={{ marginTop: 10 }}>
+        {certs.map((c, i) => (
+          <div key={c.id ?? `c${i}`} style={{ ...FS.row, padding: "9px 0" }}>
+            <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
+            </div>
+            <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+          </div>
+        ))}
+        {unsigned.map((s) => (
+          <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
+            <CalendarCheck size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)} · you&rsquo;re not signed in</div>
+            </div>
+            <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => go("training")}>Open</button>
+          </div>
+        ))}
+      </div>
+      {unsigned.length > 0 && (
+        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.45 }}>
+          Sign in by scanning the QR code at the drill. If it&rsquo;s already over, ask your training officer to add you.
+        </div>
+      )}
+    </div>
+  );
+}
+// Shared personal cards — My Certifications / Assigned Duties / Upcoming Training, plus the station
+// clock card, the self-serve cert proposer, and the needs-attention list. Self-contained: owns its
+// personal-duties load, the plan/proof viewers, and every child's own identity resolution.
+// ONE SOURCE OF TRUTH for the personal view — rendered by MemberDashboard, DeptAdminDashboard and
+// OfficerDashboard alike, so a leader sees exactly what a member sees of their own record.
+function PersonalView({ S, me, meId, sessions, notify, go, dept }) {
   const { openProof, proofMount } = useProofViewer(notify);   // "View proof" on the member's own approved certs
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
@@ -1284,7 +1345,15 @@ function PersonalView({ S, me, meId, sessions, notify, go }) {
   return (
     <>
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>
+      {/* Open loops first — it self-hides when there are none, so it costs nothing on a clean record. */}
+      <NeedsAttention S={S} me={me} meId={meId} sessions={sessions} go={go} />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
+        {/* Station clock — behind the SAME module gate as the nav entry and the old member-dashboard
+            mount, so a department that has turned station hours off sees no dead control. PWA station
+            hours is pilot/interim and gets switched off per-station once geofence ships, so this gate
+            is load-bearing, not decoration. Display-only by design: "Clock out →" routes to the page
+            that owns the punch, so there is never a second live copy of shift state to disagree. */}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
         <div style={{ ...FS.card, padding: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={FS.kicker}>MY CERTIFICATIONS</div>
@@ -1368,6 +1437,10 @@ function PersonalView({ S, me, meId, sessions, notify, go }) {
           {go && <button onClick={() => go("training")} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, marginTop: 10 }}>View Training</button>}
         </div>
       </div>
+      {/* Self-serve cert add/renew with proof. Takes only {S, notify} — it resolves my_member_id() and
+          my_department_id() itself, which is what makes it droppable on every dashboard unchanged.
+          This is what turns the card above from "see my certs" into "record and renew them". */}
+      <CertProposals S={S} notify={notify} />
       {mounts}
       {proofMount}
     </>
@@ -1837,7 +1910,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} />
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} />
       <MyActionItems meId={meId} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
       <div style={S.quickGrid}>
@@ -2130,6 +2203,10 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       </div>
       <div style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
       <MyActionItems meId={meId} />
+      {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
+          their own certs, hours and drills, and had no route to them from this dashboard before.
+          Placed between "your items" and "the department you run", matching the DeptAdmin ordering. */}
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
         {cards.map((c) => (
@@ -2383,7 +2460,7 @@ function StationClockCard({ S, dept, go }) {
   );
 }
 function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
-  const { openProof, proofMount } = useProofViewer(notify);   // a plain Member reaches their certs here, not via PersonalView
+  // NOTE: no useProofViewer here any more — PersonalView owns the certs card and its own proof viewer.
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
   const sess = sessions || [];
@@ -2407,34 +2484,12 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   const trend = (thisMonth && lastMonth) ? thisMonth.pct - lastMonth.pct : null;    // only when BOTH months have data
   const RING_R = 34, RING_C = 2 * Math.PI * RING_R;                                 // ring geometry (circumference for stroke-dash)
   const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
-  const upcoming = sess.filter((s) => !s.done && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
-  const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
-  const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length;
-  const certsTotal = certsAll.length;
-  const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length;
-  const expired = certsAll.filter((c) => c.st.rank === 0).length;
-  const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
-  // ---- "Assigned to me" duties (self-contained; no App threading; existing read RLS) ----
-  const [mine, setMine] = useState([]);
-  const [loadErr, setLoadErr] = useState(false);
-  function loadMine() {
-    if (!meId) return;
-    supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId)
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setMine(data); });   // open + completed; partitioned below
-  }
-  useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
-  useReconnect(() => { if (loadErr) loadMine(); });
-  const mineOpen = mine.filter((d) => !d.done);
-  const mineDone = mine.filter((d) => d.done);
-  async function markMineDone(id) {
-    const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });   // assignee allowed by the RPC rule
-    if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
-    loadMine();   // refetch — the duty moves from mineOpen → mineDone (loader now returns both)
-  }
+  // certs, duties and upcoming-training derivations all moved to PersonalView with the cards that
+  // used them — MemberDashboard now renders that component instead of its own copy.
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
   const [upcomingAll, setUpcomingAll] = useState([]);   // all sorted upcoming across the 4 calendar sources; nextEvent derived at render (audience-aware)
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
-  const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);
+  const { openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);   // openSessionPlans left to PersonalView, which owns UPCOMING TRAINING
   const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
@@ -2554,112 +2609,13 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
             </div>
           )}
         </div>
-        {/* third stat box — station clock status; hidden entirely for a department that's toggled the module off, matching the nav */}
-        {moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
       </div>
-
       {mounts}
-      {proofMount}
-      {/* 3 — cards (3-up): My Certifications | Assigned Duties | Upcoming Training */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
-        {/* My Certifications — count/status header (merged from old Certs-current stat) + list */}
-        <div style={{ ...FS.card, padding: 18 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <div style={FS.kicker}>MY CERTIFICATIONS</div>
-            <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color, ...FS.num }}>{certsCurrent}/{certsTotal} · {certAlert.text}</span>
-          </div>
-          <div style={{ marginTop: 10 }}>
-            {certsAll.length === 0 ? (
-              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No certifications on file yet.</div>
-            ) : certsAll.map((c, i) => (
-              <div key={c.id ?? i} style={{ ...FS.row, padding: "9px 0" }}>
-                <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
-                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
-                </div>
-                <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
-                {/* only when a proof is on file — a leader-entered cert legitimately has none */}
-                {c.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Assigned Duties — open (interactive) + completed (struck-through via done_at); always shown */}
-        <div style={{ ...FS.card, padding: 18 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <div style={FS.kicker}>ASSIGNED DUTIES</div>
-            {(mineOpen.length + mineDone.length) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted2, ...FS.num }}>{mineDone.length} of {mineOpen.length + mineDone.length} done</span>}
-          </div>
-          <div style={{ marginTop: 10 }}>
-            {(mineOpen.length + mineDone.length) === 0 ? (
-              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No duties assigned to you.</div>
-            ) : (
-              <>
-                {mineOpen.map((d) => {
-                  let badge = null;
-                  if (d.due_date) {
-                    const dd = new Date(d.due_date + "T00:00:00");
-                    const tn = new Date(); tn.setHours(0, 0, 0, 0);
-                    const days = Math.round((dd - tn) / 86400000);
-                    const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;
-                    const dl = dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                    badge = <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, ...FS.num }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
-                  }
-                  return (
-                    <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
-                      <ClipboardCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
-                        {badge && <div style={{ marginTop: 2 }}>{badge}</div>}
-                      </div>
-                      <button onClick={() => markMineDone(d.id)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}><CheckCircle2 size={13} color={FIRE.btnIcon} /> Mark done</button>
-                    </div>
-                  );
-                })}
-                {mineDone.length > 0 && (
-                  <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `0.5px solid ${FIRE.hairline}` : "none" }}>
-                    {mineDone.map((d) => {
-                      const dl = d.done_at ? new Date(d.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
-                      return (
-                        <div key={d.id} style={{ ...FS.row, padding: "9px 0" }}>
-                          <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textMuted2, textDecoration: "line-through" }}>{d.duty}</div>
-                            {dl && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, ...FS.num }}>Done {dl}</div>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-        <MyActionItems meId={meId} />
-        {/* Upcoming Training — unchanged */}
-        <div style={{ ...FS.card, padding: 18 }}>
-          <div style={FS.kicker}>UPCOMING TRAINING</div>
-          <div style={{ marginTop: 10 }}>
-            {upcoming.length === 0 ? (
-              <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>
-            ) : upcoming.map((s) => (
-              <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
-                <CalendarCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
-                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
-                </div>
-                {s.plan && <button onClick={() => openSessionPlans(s)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 4b — member self-propose a cert + proof + status */}
-      <CertProposals S={S} notify={notify} />
+      {/* 3 — the shared personal view: needs-attention, station clock, certs, duties, upcoming
+          training, and the self-serve cert proposer. Previously duplicated inline here; PersonalView
+          is now the single source of truth, rendered identically for members, Dept Admins and
+          Officers. It renders its own "YOUR PERSONAL VIEW" kicker and module gate. */}
+      <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} />
       {/* 5 — announcements feed + station calendar, two-column (matches DeptAdmin: feed narrower & bounded/internal-scroll, calendar wider; wraps on narrow) */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
