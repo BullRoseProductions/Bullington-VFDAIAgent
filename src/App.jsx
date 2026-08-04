@@ -7256,14 +7256,20 @@ function Apparatus({ S, role, members, meId, notify }) {
               </div>
               {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
               {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
-              <div style={{ display: "flex", alignItems: "center", marginTop: 11, fontSize: 12, color: FIRE.textMuted, flexWrap: "wrap", gap: 8 }}>
-                <span>Last check: {r.lastCheck} · {r.by}</span>
-                <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
-                  {canManage && (outOfService
-                    ? <button disabled={serviceBusy === r.id} title="Return to service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5 }} onClick={() => returnToService(r.id, r.name)}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} color={FIRE.green} />} Return to service</button>
-                    : <button title="Take out of service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5 }} onClick={() => { setServiceFor(r.id); setServiceReason(""); }}><Wrench size={13} color={FIRE.textSecondary} /> Take out of service</button>)}
-                  {canCheck && <button disabled={outOfService} title={outOfService ? "Return to service to run a check" : "Start a check"} style={{ ...FS.btnPrimary, padding: "7px 12px", fontSize: 12.5, opacity: outOfService ? 0.5 : 1 }} onClick={() => { if (!outOfService) setCheckingRig(r); }}><ClipboardCheck size={14} /> Start Check</button>}
-                </div>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 11 }}>Last check: {r.lastCheck} · {r.by}</div>
+              {/* ACTION ROW. Start Check leads and is allowed to take the full width on a narrow card.
+                  It previously sat LAST inside a nested flex row that had no flexWrap, pinned right with
+                  marginLeft:auto — so on a phone-width apparatus card "Take out of service" consumed the
+                  line and the primary action was pushed past the card edge. The whole point of the
+                  screen is running a check; it must never be the thing that gets squeezed out.
+                  Gate is unchanged (canCheck), and it still renders DISABLED rather than hidden when the
+                  rig is out of service, so the reason stays visible via the tooltip. The empty-checklist
+                  case is still handled inside CheckRunModal, which explains how to add items. */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 10 }}>
+                {canCheck && <button disabled={outOfService} title={outOfService ? "Return to service to run a check" : "Start a check"} style={{ ...FS.btnPrimary, padding: "9px 14px", fontSize: 13, flex: "1 1 auto", minWidth: 150, opacity: outOfService ? 0.5 : 1 }} onClick={() => { if (!outOfService) setCheckingRig(r); }}><ClipboardCheck size={15} /> Start Check</button>}
+                {canManage && (outOfService
+                  ? <button disabled={serviceBusy === r.id} title="Return to service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0 }} onClick={() => returnToService(r.id, r.name)}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} color={FIRE.green} />} Return to service</button>
+                  : <button title="Take out of service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0 }} onClick={() => { setServiceFor(r.id); setServiceReason(""); }}><Wrench size={13} color={FIRE.textSecondary} /> Take out of service</button>)}
               </div>
               {canManage && serviceFor === r.id && !outOfService && (
                 <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
