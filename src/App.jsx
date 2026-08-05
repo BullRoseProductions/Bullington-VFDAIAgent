@@ -952,7 +952,7 @@ export default function App() {
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience, counts_toward_attendance, location_lat, location_lng, location_radius_m, location_label"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -988,7 +988,7 @@ export default function App() {
         const plans = plansByS[r.id] || [];
         return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
           // off-site location: null lat/lng = at the station (every existing drill, and the default)
-          locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
+          isOffsite: !!r.is_offsite, locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
     );
   };
@@ -3146,6 +3146,8 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const [newDate, setNewDate] = useState(""); const [newTime, setNewTime] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
   const [newCounts, setNewCounts] = useState(true);   // AI schedule-on-a-date "counts toward attendance rate"; default ON
+  const [newOffsite, setNewOffsite] = useState(false);   // off-site is chosen at PLANNING; the location is captured later, at open-sign-in
+  const [newOffLabel, setNewOffLabel] = useState("");
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null); setView("full");
@@ -3178,7 +3180,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const title = newTitle.trim() || `${form.topic} — AI drill plan`;
     // a) create the session on the picked date (reuses addSession's insert shape; the type=date value is already YYYY-MM-DD)
-    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, start_time: newTime || null, done: false, audience: newAudience, counts_toward_attendance: newCounts }).select().single();
+    const { data: sess, error: e1 } = await supabase.from("training_sessions").insert({ department_id: deptId, plan_id: newCat || null, title, date: newDate, start_time: newTime || null, done: false, audience: newAudience, counts_toward_attendance: newCounts, is_offsite: newOffsite, location_label: newOffsite ? (newOffLabel.trim() || null) : null }).select().single();
     if (e1 || !sess) { setSaving(false); notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong creating that session. Please try again.", details: e1?.message }); return; }
     // b) attach the plan to the new session (reuses saveToSession's attach). Non-atomic — recoverable if this fails.
     const { error: e2 } = await supabase.from("session_plans").insert({ department_id: deptId, session_id: sess.id, title, source: "ai", ai_text: serializeDrillPlan(plan, form.topic), created_by: me?.name || "Unknown" });
@@ -3274,6 +3276,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                       })}
                     </div></label>
                   <CountsAttendanceCheckbox checked={newCounts} onChange={setNewCounts} fieldStyle={S.field} labelStyle={{ ...S.fieldLabel, color: FIRE.textSecondary }} />
+                  <OffsiteCheckbox checked={newOffsite} onChange={setNewOffsite} label={newOffLabel} onLabelChange={setNewOffLabel} fieldStyle={S.field} labelStyle={{ ...S.fieldLabel, color: FIRE.textSecondary }} inputStyle={FS.input} />
                   <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={scheduleOnDate} disabled={!newDate || saving}>{saving ? <><Loader2 size={16} className="spin" /> Scheduling…</> : <><Plus size={16} /> Schedule on date</>}</button>
                 </div>
               )}
@@ -10882,6 +10885,13 @@ function EventAudienceTag({ audience }) {   // "Board" (blue) or "Leadership" (a
 }
 // Neutral grey "Optional" pill: an off-hours/one-off session kept OUT of the attendance rate
 // (still recorded + visible). Independent of audience — a session can be Everyone AND Optional.
+function EventOffsiteTag({ session }) {   // "Off-site" pill; amber when the location still isn't set
+  if (!session?.isOffsite) return null;
+  const set = session.locLat != null && session.locLng != null;
+  const label = session.locLabel ? `Off-site · ${session.locLabel}` : "Off-site";
+  return <span title={set ? "Verifies against a set point, not the station" : "Off-site, but nobody has set the location yet — open sign-in on site to capture it"}
+    style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: set ? FIRE.textMuted : FIRE.amberText, border: `0.5px solid ${set ? FIRE.textMuted : FIRE.amberText}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>{set ? label : `${label} — no location`}</span>;
+}
 function EventOptionalTag({ session, optional }) {
   if (!(optional ?? isOptionalEvent(session))) return null;
   return <span title="Attendance is recorded, but this session isn't counted toward the attendance rate" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textMuted, border: `0.5px solid ${FIRE.textMuted}`, borderRadius: 5, padding: "1px 5px", marginLeft: 7, flexShrink: 0, whiteSpace: "nowrap" }}>Optional</span>;
@@ -10889,6 +10899,29 @@ function EventOptionalTag({ session, optional }) {
 // "Counts toward attendance rate" checkbox — ON by default in every session form (create, AI-schedule,
 // edit). Officers only uncheck the unusual off-hours/one-off. Wording is deliberately plain so an
 // officer instantly knows unchecking means "recorded, but doesn't lower anyone's rate."
+// "Off-site?" — decided at PLANNING, before anyone is standing anywhere, which is why it is a flag
+// and not "did someone set coordinates". The location itself is captured later, when an officer opens
+// sign-in, because that happens on site. Modelled on CountsAttendanceCheckbox so the two read as
+// siblings in the same form.
+function OffsiteCheckbox({ checked, onChange, label, onLabelChange, fieldStyle, labelStyle, inputStyle }) {
+  return (
+    <label style={{ ...fieldStyle, minWidth: 250, cursor: "pointer" }}>
+      <span style={labelStyle}>Location</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
+        <span style={{ fontSize: 12.5, color: "#C7CDD6" }}>This drill is off-site</span>
+      </span>
+      {checked ? (
+        <input value={label || ""} placeholder="Where? (optional, e.g. county burn field)"
+          onChange={(e) => onLabelChange(e.target.value)}
+          onClick={(e) => e.preventDefault()}
+          style={{ ...inputStyle, fontSize: 12.5, padding: "6px 8px", maxWidth: 240 }} />
+      ) : (
+        <span style={{ fontSize: 10.5, color: "#8A929E", lineHeight: 1.3, maxWidth: 240 }}>Leave off for a drill at the station. Turn on for a burn field, a parade, another department&rsquo;s hall — you&rsquo;ll set the exact spot when you open sign-in there.</span>
+      )}
+    </label>
+  );
+}
 function CountsAttendanceCheckbox({ checked, onChange, fieldStyle, labelStyle }) {
   return (
     <label style={{ ...fieldStyle, minWidth: 250, cursor: "pointer" }}>
@@ -11000,20 +11033,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { error } = await supabase.rpc("set_session_location", {
       p_session_id: s.id, p_lat: pos.lat, p_lng: pos.lng,
       p_radius_m: null,                                   // DB picks the dept's station radius, then 400
-      p_label: (locLabelDraft[s.id] || "").trim() || null,
+      p_label: ((locLabelDraft[s.id] ?? s.locLabel ?? "").trim()) || null,   // keep the planning label if untouched
     });
     setLocBusy(null);
     if (error) { notify({ kind: "error", title: "Couldn't set the drill location", text: error.message || "Please try again." }); return; }
     notify({ kind: "success", text: "Off-site location set — members verify here, not at the station." });
-    loadSessions();
-  }
-  async function clearOffsite(s) {
-    setLocBusy(s.id);
-    const { error } = await supabase.rpc("set_session_location", { p_session_id: s.id });   // all-null args = clear
-    setLocBusy(null);
-    if (error) { notify({ kind: "error", title: "Couldn't clear the location", text: error.message || "Please try again." }); return; }
-    setLocLabelDraft((d) => { const n = { ...d }; delete n[s.id]; return n; });
-    notify({ kind: "success", text: "Back to the station — members verify at the station again." });
     loadSessions();
   }
   async function closeSI(s) {
@@ -11067,6 +11091,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
   const [sCounts, setSCounts] = useState(true);   // create-session "counts toward attendance rate"; default ON, feeds addSession + scheduleRecurring
+  const [sOffsite, setSOffsite] = useState(false);   // off-site flag; feeds BOTH addSession + scheduleRecurring
+  const [sOffLabel, setSOffLabel] = useState("");
   const [rPattern, setRPattern] = useState("biweekly");     // "weekly" | "biweekly" | "monthly"
   const [rDow, setRDow] = useState(new Date().getDay());    // day-of-week 0..6 (Sun..Sat)
   const [rOrd, setROrd] = useState(1);                      // monthly ordinal: 1..4 or "last"
@@ -11148,6 +11174,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       done: false,
       audience: sAudience,
       counts_toward_attendance: sCounts,
+      is_offsite: sOffsite,
+      location_label: sOffsite ? (sOffLabel.trim() || null) : null,   // coordinates come later, at open-sign-in
     });
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setShowSess(false); setStitle(""); setSTime(""); loadSessions();
@@ -11190,7 +11218,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
-    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts }));
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem && dates.length) await supabase.from("training_plans").update({ starts_on: dates[0] }).eq("id", pItem.id);
@@ -11247,14 +11275,22 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   function startEditSession(s) {
     setEditingSessionId(s.id);
-    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false });
+    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isOffsite: !!s.isOffsite, offLabel: s.locLabel || "" });
   }
   async function saveEditSession(id) {
     if (!sessEdit.date) { notify({ kind: "error", title: "Pick a date", text: "Choose a date for this training." }); return; }
     const pItem = plan.find((p) => String(p.id) === String(sessEdit.planId));
     const title = sessEdit.title.trim() || pItem?.name || "Training session";
     const { data, error } = await supabase.from("training_sessions")
-      .update({ title, date: sessEdit.date, start_time: sessEdit.startTime || null, plan_id: sessEdit.planId || null, audience: sessEdit.audience, counts_toward_attendance: sessEdit.countsAttendance })
+      // Turning the toggle OFF must clear the coordinates in the SAME statement — C1's
+      // training_sessions_coords_require_offsite CHECK rejects "not off-site with coordinates", so a
+      // two-step (flip flag, then clear) would fail on the first step. Turning it ON leaves any
+      // existing coordinates alone.
+      .update({ title, date: sessEdit.date, start_time: sessEdit.startTime || null, plan_id: sessEdit.planId || null, audience: sessEdit.audience, counts_toward_attendance: sessEdit.countsAttendance,
+        is_offsite: !!sessEdit.isOffsite,
+        ...(sessEdit.isOffsite
+          ? { location_label: (sessEdit.offLabel || "").trim() || null }
+          : { location_lat: null, location_lng: null, location_radius_m: null, location_label: null }) })
       .eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't save the training", text: "Something went wrong updating that — please try again.", details: error?.message }); return; }   // .select() + 0-row guard: silent RLS/lock block fails loudly
     setEditingSessionId(null); loadSessions();
@@ -11585,6 +11621,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               })}
             </div></label>
           <CountsAttendanceCheckbox checked={sCounts} onChange={setSCounts} fieldStyle={Lfield} labelStyle={LfieldLabel} />
+          <OffsiteCheckbox checked={sOffsite} onChange={setSOffsite} label={sOffLabel} onLabelChange={setSOffLabel} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
             <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? "#F0F2F5" : "#9AA1AC" }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
           {repeat && <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Pattern</span>
@@ -11651,7 +11688,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   <div style={Lrow}>
                     <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
                     <div style={FS.rowTitle}>
-                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></span>
+                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} /></span>
                       <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
@@ -11684,6 +11721,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           })}
                         </div></label>
                       <CountsAttendanceCheckbox checked={sessEdit.countsAttendance} onChange={(v) => setSessEdit((b) => ({ ...b, countsAttendance: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />
+                      <OffsiteCheckbox checked={!!sessEdit.isOffsite} onChange={(v) => setSessEdit((b) => ({ ...b, isOffsite: v }))} label={sessEdit.offLabel} onLabelChange={(v) => setSessEdit((b) => ({ ...b, offLabel: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
                       <button style={LprimaryBtn} onClick={() => saveEditSession(s.id)}><CheckCircle2 size={15} /> Save</button>
                       <button style={Lbtn} onClick={() => setEditingSessionId(null)}>Cancel</button>
                     </div>
@@ -11727,36 +11765,49 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   )}
                   {canRunSignin && !s.done && openSignin === s.id && (() => {
                     const liveToken = signinTokens[s.id];
+                    const needsLoc = s.isOffsite && (s.locLat == null || s.locLng == null);   // off-site with nowhere to verify against
                     return (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
-                      {/* WHERE THIS DRILL VERIFIES. Rendered in both branches (before opening AND while
-                          the QR is live) so it can be corrected without closing the sign-in. Setting it
-                          is a separate RPC from open_signin precisely so rotating the code never
-                          disturbs it. Members who scan verify against THIS point instead of the
-                          station; the strict rule is unchanged either way — an unverified scan still
-                          signs them in and still earns no clock. */}
+                      {/* WHERE THIS DRILL VERIFIES — shown ONLY for a drill flagged off-site at
+                          planning. A station drill needs no strip: "At the station" on every card was
+                          noise on the 100% case. Rendered in both branches (before opening AND while
+                          the QR is live) so it can be corrected without closing the sign-in, and
+                          setting it stays a separate RPC from open_signin so rotating the code never
+                          disturbs it. The strict rule is unchanged either way — an unverified scan
+                          still signs the member in and still earns no clock. */}
+                      {s.isOffsite && (
                       <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "0.5px solid rgba(255,255,255,.08)" }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#9AA1AC", letterSpacing: ".08em", marginBottom: 6 }}>WHERE THIS DRILL VERIFIES</div>
                         {s.locLat != null && s.locLng != null ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                             <MapPin size={14} color="#D6A95E" style={{ flexShrink: 0 }} />
                             <span style={{ fontSize: 13, color: "#F0F2F5" }}>Off-site{s.locLabel ? <> · <b>{s.locLabel}</b></> : ""}<span style={{ color: "#7E8794" }}> · within {s.locRadius || 400}m of the set point</span></span>
-                            <button disabled={locBusy === s.id} style={{ ...Lbtn, marginLeft: "auto" }} onClick={() => clearOffsite(s)}>{locBusy === s.id ? <Loader2 size={13} className="spin" /> : <X size={13} color="#C8606A" />} Back to station</button>
+                            <button disabled={locBusy === s.id} title="Capture the spot again from where you're standing now" style={{ ...Lbtn, marginLeft: "auto" }} onClick={() => setOffsiteHere(s)}>{locBusy === s.id ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} color={LbtnIcon} />} Re-set here</button>
                           </div>
                         ) : (
+                          /* Off-site, location not captured yet. Members who scan now get attendance and
+                             NO clock (C3 fails closed rather than falling back to the station), and
+                             open_signin refuses outright — so say so before it becomes an error. */
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                            <span style={{ fontSize: 13, color: "#B6BDC8" }}>At the station.</span>
-                            <input value={locLabelDraft[s.id] || ""} placeholder="Where? (optional, e.g. Memorial Day parade)"
+                            <AlertTriangle size={14} color="#D6A95E" style={{ flexShrink: 0 }} />
+                            <span style={{ fontSize: 13, color: "#D6A95E" }}>Location not set — do this standing at the drill site.</span>
+                            <input value={locLabelDraft[s.id] ?? (s.locLabel || "")} placeholder="Where? (optional)"
                               onChange={(e) => setLocLabelDraft((d) => ({ ...d, [s.id]: e.target.value }))}
-                              style={{ ...Linput, flex: 1, minWidth: 170, fontSize: 12.5, padding: "6px 8px" }} />
-                            <button disabled={locBusy === s.id} style={Lbtn} onClick={() => setOffsiteHere(s)}>{locBusy === s.id ? <><Loader2 size={13} className="spin" /> Getting location…</> : <><MapPin size={13} color={LbtnIcon} /> This drill is off-site — use my location</>}</button>
+                              style={{ ...Linput, flex: 1, minWidth: 150, fontSize: 12.5, padding: "6px 8px" }} />
+                            <button disabled={locBusy === s.id} style={LprimaryBtn} onClick={() => setOffsiteHere(s)}>{locBusy === s.id ? <><Loader2 size={13} className="spin" /> Getting location…</> : <><MapPin size={13} /> Use my location</>}</button>
                           </div>
                         )}
                       </div>
+                      )}
                       {!liveToken ? (
                         <div>
                           <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Show the code to display the QR (this generates a fresh code).</> : <>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
-                          <button style={LprimaryBtn} onClick={() => openSI(s)}><QrCode size={15} /> {s.signinOpen ? "Show / refresh code" : "Open sign-in"}</button>
+                          {/* C3's open_signin RAISES for an off-site drill with no location. Disable
+                              here so the officer sees why before it becomes a server error; the RPC
+                              guard is still the real wall against a crafted call. */}
+                          <button disabled={needsLoc} title={needsLoc ? "Set the drill's location first — you have to be on site" : undefined}
+                            style={{ ...LprimaryBtn, opacity: needsLoc ? 0.5 : 1, cursor: needsLoc ? "not-allowed" : "pointer" }}
+                            onClick={() => { if (!needsLoc) openSI(s); }}><QrCode size={15} /> {s.signinOpen ? "Show / refresh code" : "Open sign-in"}</button>
                           {s.signinOpen && <button style={{ ...Lbtn, marginLeft: 8 }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>}
                         </div>
                       ) : (
