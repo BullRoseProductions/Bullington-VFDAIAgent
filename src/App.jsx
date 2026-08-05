@@ -913,7 +913,7 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m").eq("id", id).single().then(({ data }) => {
+      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day").eq("id", id).single().then(({ data }) => {
         if (!data) return;
         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
@@ -1338,12 +1338,13 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
   const [loadErr, setLoadErr] = useState(false);
   function loadMine() {
     if (!meId) return;
-    supabase.from("duties").select("id, duty, due_date, done, done_at, assigned_to").eq("assigned_to", meId)
+    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to").eq("assigned_to", meId)
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setMine(data); });
   }
   useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
   useReconnect(() => { if (loadErr) loadMine(); });
-  const mineOpen = mine.filter((d) => !d.done), mineDone = mine.filter((d) => d.done);
+  // Period-relative, not raw `done` — a rolled-over weekly duty must show as open again.
+  const mineOpen = mine.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1))), mineDone = mine.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   async function markMineDone(id) {
     const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });
     if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
@@ -1644,7 +1645,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   const [loadErr, setLoadErr] = useState(false);
   const loadBoard = () => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setDuties(data); });   // dept-scoped by RLS
   };
   useEffect(() => {
@@ -1668,7 +1669,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   useReconnect(() => { if (loadErr) loadBoard(); });
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
-  const dutyDone = duties.filter((d) => d.done).length;
+  const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;   // no duties = nothing outstanding = 100
   const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);        // 40% certs · 40% attendance · 20% duty completion
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
@@ -1804,7 +1805,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   const [loadErr, setLoadErr] = useState(false);
   const loadPanels = () => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
@@ -1816,13 +1817,13 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
   }, []);
   useReconnect(() => { if (loadErr) { setLoadErr(false); loadPanels(); } });
-  const openDuties = duties.filter((d) => !d.done);
+  const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
   const flagged = [];
   cm.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
   flagged.sort((a, b) => a.rank - b.rank);   // expired (0) before expiring (1)
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
-  const dutyDone = duties.filter((d) => d.done).length;
+  const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;   // done/total; no duties = nothing outstanding = 100
   const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);        // 40% certs · 40% attendance · 20% duty completion
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
@@ -2148,7 +2149,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   useEffect(() => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
     Promise.all([
-      supabase.from("duties").select("id, done"),
+      supabase.from("duties").select("id, done, done_at, recurrence"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("content_calendar").select("id, date, caption"),
       supabase.from("funding_events").select("id, date, title"),
@@ -2165,7 +2166,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
     const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const dutyDone = duties.filter((d) => d.done).length;
+  const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : 100;
   const readiness = Math.round(certPct * 0.40 + avgPart * 0.40 + dutyCompletion * 0.20);   // same formula as DA/Board
   const ringColor = readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
@@ -5988,7 +5989,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   const [pendingCerts, setPendingCerts] = useState([]);
   const [loadErr, setLoadErr] = useState(false);
   const loadContext = () => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });
@@ -6012,7 +6013,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   const periodLabel = `${fmtRD(range.from)} – ${fmtRD(range.to)}`;
   const todayLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const todayISO = toISODate(new Date());
-  const openDuties = duties.filter((d) => !d.done);
+  const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
   const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
   const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
@@ -10250,7 +10251,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const [pendingCerts, setPendingCerts] = useState([]);
   const [loadErr, setLoadErr] = useState(false);
   const loadAgendaContext = () => {
-    supabase.from("duties").select("id, duty, due_date, done, assigned_to")
+    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
@@ -10258,7 +10259,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   useEffect(() => { loadAgendaContext(); }, []);
   useReconnect(() => { if (loadErr) { setLoadErr(false); loadAgendaContext(); } });
   const todayISO = toISODate(new Date());
-  const openDuties = duties.filter((d) => !d.done);
+  const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date is YYYY-MM-DD → string compare
   const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
   const expired = certContext?.expired || [];
@@ -12242,8 +12243,41 @@ const DUTY_CATEGORIES = ["Cleanup", "Station", "Equipment", "Apparatus", "EMS", 
 const RECUR = ["Weekly", "Monthly", "Quarterly", "One-time"];
 const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 function weekStartOf(date, startDay) { const d = new Date(date); d.setHours(0, 0, 0, 0); const diff = (d.getDay() - startDay + 7) % 7; d.setDate(d.getDate() - diff); return d; }
-const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()}`; };
-const quarterKey = () => { const d = new Date(); return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3)}`; };
+const monthKey = (date) => { const d = date ? new Date(date) : new Date(); return `${d.getFullYear()}-${d.getMonth()}`; };
+const quarterKey = (date) => { const d = date ? new Date(date) : new Date(); return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3)}`; };
+// ---------------------------------------------------------------------------
+// THE duty-completion rule. A duty is done FOR THE CURRENT PERIOD iff done_at
+// falls inside the current period for its recurrence. Read-time and derived —
+// there is no scheduled sweep and nothing ever clears `done` on a rollover, so
+// a weekly duty completed last week simply stops satisfying this and shows due
+// again. duties.done/done_at are written ONLY by complete_duty/uncomplete_duty.
+//
+// Gates on `done` FIRST, not on done_at alone: a legacy row with done=true and
+// done_at=null then stays done if One-off, and reads as due if recurring —
+// the safe direction both ways. (0 such rows today; the guard is free.)
+//
+// BOUNDARY — pa_department_radar deliberately does NOT use this rule. Its
+// overdue_duties_count means "has a past due_date and was never completed",
+// a different and self-consistent definition. The two surfaces disagreeing
+// about outstanding duties is EXPECTED. Do not teach the radar this rule (it
+// would live in two languages and have to stay in lockstep — the
+// certStatus/dept_cert_readiness trap), and do not bend this rule to match it.
+//
+// Callers must select recurrence and done_at, not just done.
+// ---------------------------------------------------------------------------
+function isDoneThisPeriod(duty, weekStartDay) {
+  if (!duty?.done) return false;
+  const rec = duty.recurrence || "One-off";
+  if (rec === "One-off") return true;                  // never resets
+  const at = duty.doneAt ?? duty.done_at;
+  if (!at) return false;                               // recurring with no timestamp -> treat as due
+  const d = new Date(at);
+  if (isNaN(d.getTime())) return false;
+  if (rec === "Weekly")    return toISO(weekStartOf(d, weekStartDay)) === toISO(weekStartOf(new Date(), weekStartDay));
+  if (rec === "Monthly")   return monthKey(d) === monthKey();
+  if (rec === "Quarterly") return quarterKey(d) === quarterKey();
+  return true;   // unknown recurrence: behave like One-off rather than silently reopening
+}
 const DUTY_SEED = [
   { id: 1, duty: "Sweep & mop the apparatus bay", category: "Cleanup", recurrence: "Weekly", done: true, doneBy: "Sam Whitfield", doneAt: "Mon 6:30 PM" },
   { id: 2, duty: "Kitchen & dayroom wipe-down", category: "Cleanup", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
@@ -12347,10 +12381,11 @@ function StationDuties({ S, role, members, meId, notify }) {
   const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
   const [weekLabel, setWeekLabel] = useState(() => isoWeek(1));
   const weekRef = useRef(weekLabel);
-  const monthRef = useRef(monthKey());
-  const quarterRef = useRef(quarterKey());
-  // Apply WITHOUT saving. Also re-baselines weekRef/weekLabel: the rollover tick compares the current
-  // week key against weekRef, so loading a persisted value that differs from the Monday default would
+  // monthRef/quarterRef went with the rollover tick — nothing compares period keys any more, because
+  // isDoneThisPeriod() derives the answer from done_at at read time. weekRef survives only to keep the
+  // "Week of ..." heading in step with the chosen start day.
+  // Apply WITHOUT saving. Also re-baselines weekRef/weekLabel so the heading follows the chosen day;
+  // loading a persisted value that differs from the Monday default would otherwise
   // otherwise look like a week boundary and spuriously un-tick every weekly duty.
   function applyStartDay(day) {
     const d = Number(day);
@@ -12379,18 +12414,10 @@ function StationDuties({ S, role, members, meId, notify }) {
       loadWeekStart();                                    // resync from the server, never leave a phantom value
     }
   }
-  useEffect(() => {
-    const tick = () => {
-      const cw = isoWeek(weekStartDay), cm = monthKey(), cq = quarterKey();
-      const kinds = [];
-      if (cw !== weekRef.current) { weekRef.current = cw; setWeekLabel(cw); kinds.push("Weekly"); }
-      if (cm !== monthRef.current) { monthRef.current = cm; kinds.push("Monthly"); }
-      if (cq !== quarterRef.current) { quarterRef.current = cq; kinds.push("Quarterly"); }
-      if (kinds.length) setDuties((ds) => ds.map((x) => kinds.includes(x.recurrence) ? { ...x, done: false, doneBy: null, doneAt: null } : x));
-    };
-    const id = setInterval(tick, 60000); return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStartDay]);
+  // The 60-second rollover tick was removed with the computed reset. It mutated React state only —
+  // duties.done was never cleared server-side, so a "reset" duty came back checked on the next load.
+  // isDoneThisPeriod() derives the answer at read time instead, so a rollover needs no timer, no
+  // sweep, and survives a reload.
   const fmtWeek = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const categories = [...DUTY_CATEGORIES.filter((c) => duties.some((d) => d.category === c)), ...[...new Set(duties.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
   const allCats = [...new Set([...DUTY_CATEGORIES, ...duties.map((d) => d.category)])];
@@ -12417,7 +12444,27 @@ function StationDuties({ S, role, members, meId, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't undo that", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
     setDuties((ds) => ds.map((x) => (x.id === id ? { ...x, done: false, doneBy: null, doneAt: null, helperIds: [] } : x)));
   }
-  function resetWeek() { if (!window.confirm("Clear every checkmark and start fresh? Your duties stay on the list.")) return; setDuties((ds) => ds.map((x) => ({ ...x, done: false, doneBy: null, doneAt: null }))); }
+  // "Clear all checkmarks now" — a CORRECTION tool, not the weekly rollover (the period handles that
+  // by itself). It PERSISTS: uncomplete_duty per currently-done duty, so the clear survives a reload.
+  // The old version only mutated React state, which is why a "reset" duty came back checked.
+  const [clearingAll, setClearingAll] = useState(false);
+  async function clearAllCheckmarks() {
+    const targets = duties.filter((d) => isDoneThisPeriod(d, weekStartDay));
+    if (!targets.length) { notify({ kind: "error", title: "Nothing to clear", text: "No duties are checked off right now." }); return; }
+    if (!window.confirm(`Clear ${targets.length} checkmark${targets.length === 1 ? "" : "s"}? The duties stay on the list, and past completions stay in the log.`)) return;
+    setClearingAll(true);
+    // One call per duty — uncomplete_duty is the only write primitive and it is per-duty. Fine at this
+    // scale; if a station ever runs dozens of duties this wants a bulk RPC rather than N round-trips.
+    const failed = [];
+    for (const d of targets) {
+      const { error } = await supabase.rpc("uncomplete_duty", { p_duty_id: d.id });
+      if (error) failed.push(d.duty);
+    }
+    setClearingAll(false);
+    loadDuties();   // re-read rather than patch locally: partial failure must not leave a lying UI
+    if (failed.length) notify({ kind: "error", title: "Some checkmarks couldn't be cleared", text: `Still checked: ${failed.join(", ")}.` });
+    else notify({ kind: "success", text: "Checkmarks cleared." });
+  }
   async function addDuty() {
     if (!ad.trim()) return;
     const cat = acat === "__new__" ? (acatNew.trim() || "Cleanup") : acat;
@@ -12457,7 +12504,11 @@ function StationDuties({ S, role, members, meId, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadStationLog();   // refetch — UI matches true DB state (covers the silent zero-rows case)
   }
-  const doneCount = duties.filter((d) => d.done).length;
+  // ONE conversion point for the whole screen: `done` here means "done FOR THE CURRENT PERIOD".
+  // Everything that renders or counts reads periodDuties; `duties` stays the raw store the mutations
+  // act on, so a stale `done` from the table can never reach the UI.
+  const periodDuties = duties.map((d) => ({ ...d, done: isDoneThisPeriod(d, weekStartDay) }));
+  const doneCount = periodDuties.filter((d) => d.done).length;
   // History: group duty_log completions by the station's week setting (newest first)
   // Current week boundary, recomputed every render — no timer. A tab left open across the rollover
   // re-slices on the next render; useReconnect below forces one on app resume.
@@ -12535,7 +12586,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 4, ...FS.num }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: FIRE.textPrimary }}>{doneCount}</b> of {duties.length} done</span></div>
             <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color={FIRE.green} track={FIRE.track} />
           </div>
-          {canManage && <button style={FS.btn} onClick={resetWeek}><RefreshCw size={14} color={FIRE.btnIcon} /> Reset now</button>}
+          {canManage && <button disabled={clearingAll} style={{ ...FS.btn, opacity: clearingAll ? 0.6 : 1 }} onClick={clearAllCheckmarks}>{clearingAll ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} color={FIRE.btnIcon} />} Clear all checkmarks now</button>}
           {(canManage || canCreate) && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
           {canCreate && (editMode || duties.length === 0) && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
@@ -12565,7 +12616,7 @@ function StationDuties({ S, role, members, meId, notify }) {
       {canCreate && <p style={{ ...S.helpP, marginTop: -2, color: FIRE.textMuted }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
       {categories.map((cat) => {
-        const items = duties.filter((d) => d.category === cat);
+        const items = periodDuties.filter((d) => d.category === cat);
         if (!items.length) return null;
         const dn = items.filter((d) => d.done).length;
         return (
