@@ -6520,6 +6520,36 @@ function StationHoursReport({ S, dept, notify, back }) {
     setOutAt((o) => { const n = { ...o }; delete n[r.shift_id]; return n; });
     loadReview(); load(rangeKey);
   }
+  // ---- off-site approval (B4) ----
+  // Separate handlers from confirmOut/voidShift because they are a different decision, not a
+  // different label on the same one. Resolving an auto-closed shift fixes a GUESSED STOP TIME;
+  // approving off-site time decides whether work away from the station COUNTS AT ALL. Same queue,
+  // same shape, different RPCs and different consequences.
+  async function approveOffsite(r) {
+    const raw = outAt[r.shift_id];
+    const when = raw ? new Date(raw) : null;              // optional correction; blank = as recorded
+    if (raw && (!when || isNaN(when.getTime()))) { notify?.({ kind: "error", title: "Check the time", text: "That out-time couldn't be read." }); return; }
+    setBusyId(r.shift_id);
+    const { error } = await supabase.rpc("approve_offsite", {
+      p_shift_id: r.shift_id,
+      p_checked_in_at: null,
+      p_checked_out_at: when ? when.toISOString() : null,   // local wall-clock -> instant, as in confirmOut
+    });
+    setBusyId(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't approve that time", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: `Approved — ${r.member_name || "that member"}'s off-site time now counts.` });
+    setOutAt((o) => { const n = { ...o }; delete n[r.shift_id]; return n; });
+    loadReview(); load(rangeKey);
+  }
+  async function rejectOffsite(r) {
+    if (!window.confirm(`Reject ${r.member_name || "this member"}'s off-site time for "${r.offsite_label || "this work"}"?\n\nThe record is kept but credits zero hours.`)) return;
+    setBusyId(r.shift_id);
+    const { error } = await supabase.rpc("reject_offsite", { p_shift_id: r.shift_id });
+    setBusyId(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't reject that", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: "Rejected — kept on record, credits nothing." });
+    loadReview(); load(rangeKey);
+  }
   async function voidShift(r) {
     if (!window.confirm(`Void ${r.member_name || "this member"}'s shift from ${new Date(r.checked_in_at).toLocaleString()}?\n\nThe record is kept but credits zero hours.`)) return;
     setBusyId(r.shift_id);
@@ -6631,38 +6661,65 @@ function StationHoursReport({ S, dept, notify, back }) {
         <div style={{ ...FS.card, padding: "8px 0", marginBottom: 12 }}>
           <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFTS NEEDING REVIEW</div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
-            Oldest first, and not limited to the selected period — a shift flagged weeks ago still shows here. Set when the member actually left, or void the shift if it shouldn&rsquo;t count at all.
+            Oldest first, and not limited to the selected period — a shift flagged weeks ago still shows here.
           </div>
           {reviewErr && <div style={{ fontSize: 12, color: FIRE.redText, padding: "0 12px 10px" }}>Couldn&rsquo;t refresh the list: {reviewErr}</div>}
           {review.map((r) => {
             const busy = busyId === r.shift_id;
+            // Two different decisions share this queue. An AUTO-CLOSED row has a guessed stop time and
+            // needs it corrected. An OFF-SITE row is work away from the station that needs deciding
+            // whether it counts at all. 'both' is a real combination — an off-site shift that also ran
+            // past the cap — and it takes the off-site branch, because approve_offsite fixes the time
+            // AND approves in one action, which is exactly what that row needs.
+            const isOffsite = r.reason === "offsite_pending" || r.reason === "both";
             return (
               <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{r.kind === "training" ? "Training" : "Standby"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: isOffsite ? FIRE.amberText : FIRE.textMuted2 }}>
+                    {isOffsite ? "Off-site" : r.kind === "training" ? "Training" : "Standby"}
+                  </span>
+                  {isOffsite && r.offsite_label && <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>· {r.offsite_label}</span>}
                 </div>
                 <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.5 }}>
-                  In {fmtDate(r.checked_in_at)} at {fmtHm(r.checked_in_at)} · auto-stopped {fmtHm(r.checked_out_at)} (<b style={{ color: FIRE.amberText }}>{h1(r.capped_hours)} hrs</b>, guessed)
+                  In {fmtDate(r.checked_in_at)} at {fmtHm(r.checked_in_at)} · {r.reason === "offsite_pending" ? "out" : "auto-stopped"} {fmtHm(r.checked_out_at)}
+                  {" "}(<b style={{ color: r.reason === "offsite_pending" ? FIRE.textSecondary : FIRE.amberText }}>{h1(r.capped_hours)} hrs</b>{r.reason === "offsite_pending" ? "" : ", guessed"})
+                  {/* The location fact the officer is being asked to weigh. Absence of a fix is not a
+                      rejection — it is a thing to know before deciding. */}
+                  {isOffsite && (r.location_confirmed === false
+                    ? <span style={{ color: FIRE.amberText }}> · location was NOT confirmed</span>
+                    : <span> · location confirmed</span>)}
+                  {r.reason === "both" && <span style={{ color: FIRE.amberText }}> · also ran past the shift cap, so the end time is a guess</span>}
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
                   {/* Left EMPTY on purpose — prefilling with the machine's guess would invite confirming
                       it unread, which is the one thing this screen exists to prevent. min/max bound the
-                      native picker to [check-in, now], the same window the RPC enforces. */}
+                      native picker to [check-in, now], the same window the RPC enforces.
+                      For a plain off-site row the recorded time is real, so correcting it is OPTIONAL
+                      and the label says so; leaving it blank approves the times as recorded. */}
                   <label style={{ ...S.field, minWidth: 210 }}>
-                    <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Actual out-time</span>
+                    <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{r.reason === "offsite_pending" ? "Correct the out-time (optional)" : "Actual out-time"}</span>
                     <input type="datetime-local" style={FS.input}
                       value={outAt[r.shift_id] || ""}
                       min={localInput(r.checked_in_at)}
                       max={localInput(new Date().toISOString())}
                       onChange={(e) => setOutAt((o) => ({ ...o, [r.shift_id]: e.target.value }))} />
                   </label>
-                  <button disabled={busy} style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={() => confirmOut(r)}>
-                    {busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> Confirm</>}
-                  </button>
-                  <button disabled={busy} style={{ ...FS.btn, opacity: busy ? 0.7 : 1 }} onClick={() => voidShift(r)}>
-                    <X size={14} color="#C8606A" /> Void — didn&rsquo;t count
-                  </button>
+                  {isOffsite ? (<>
+                    <button disabled={busy} style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={() => approveOffsite(r)}>
+                      {busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> Approve — counts</>}
+                    </button>
+                    <button disabled={busy} style={{ ...FS.btn, opacity: busy ? 0.7 : 1 }} onClick={() => rejectOffsite(r)}>
+                      <X size={14} color="#C8606A" /> Reject
+                    </button>
+                  </>) : (<>
+                    <button disabled={busy} style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={() => confirmOut(r)}>
+                      {busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> Confirm</>}
+                    </button>
+                    <button disabled={busy} style={{ ...FS.btn, opacity: busy ? 0.7 : 1 }} onClick={() => voidShift(r)}>
+                      <X size={14} color="#C8606A" /> Void — didn&rsquo;t count
+                    </button>
+                  </>)}
                 </div>
               </div>
             );
@@ -9124,6 +9181,39 @@ function StationHours({ S, dept, notify }) {
     loadHours(rangeKey);   // a punch changes the shift set — refetch so the list below can't disagree with the clock above
     notify({ kind: "success", title: "Clocked in", text: row?.verified ? "You're on the clock at the station." : "You're on the clock — this shift isn't location-verified." });
   }
+  // Off-site check-in — a PR event, parade, or any dept work away from the station.
+  // Deliberately a different action from Clock in, not a toggle on it: this shift is not at the
+  // station, is not geo-verified against anything, and earns NO ISO credit until an officer approves
+  // it. Conflating the two buttons would hide all three of those differences.
+  // No matching Clock-out button: station_check_out closes an off-site row too (B2), so the existing
+  // one already works and a second would be a second way to do one thing.
+  const [offLabel, setOffLabel] = useState("");
+  const [offOpen, setOffOpen] = useState(false);   // the label field is collapsed until asked for
+  async function offsiteCheckIn() {
+    const label = offLabel.trim();
+    if (!label) { notify({ kind: "error", title: "Say what the work is", text: "For example, “Memorial Day parade”." }); return; }
+    setBusy("off"); setGeoNote("");
+    let pos = null;
+    // Same lenient policy as clockIn, and the same reason: a denied prompt must not stop someone
+    // recording real work. The difference is recorded (location_confirmed=false) rather than silently
+    // dropped, so the approving officer can weigh it.
+    try { pos = await getPosition(); }
+    catch (e) { setGeoNote(`${e.message} — you can still check in, but your officer will see the location wasn't confirmed.`); }
+    let data, error;
+    try {
+      ({ data, error } = await supabase.rpc("offsite_check_in", {
+        p_label: label, p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null, p_accuracy: pos?.accuracy ?? null,
+      }));
+    } catch (e) {
+      error = { message: e?.message || "Please try again." };
+    }
+    setBusy("");
+    if (error) { notify({ kind: "error", title: "Couldn't check in", text: error.message || "Please try again." }); return; }
+    const row = one(data);
+    setOpen(row); setErr(""); setReady(true); setOffLabel(""); setOffOpen(false);
+    loadHours(rangeKey);
+    notify({ kind: "success", title: "Checked in off-site", text: "Your officer reviews off-site time before it counts toward hours." });
+  }
   async function clockOut() {
     setBusy("out");
     const { data, error } = await supabase.rpc("station_check_out");
@@ -9174,6 +9264,17 @@ function StationHours({ S, dept, notify }) {
                   ? <span style={{ ...BADGE, color: FIRE.greenText, border: `1px solid ${FIRE.greenText}55` }}>Verified ✓</span>
                   : <span style={{ ...BADGE, color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55` }}>Not verified</span>}
               </div>
+              {/* An off-site row is never `verified` — there is no station to verify it against — so the
+                  badge above would read "Not verified" and imply something went wrong. Say what is
+                  actually true instead: it's recorded, it's awaiting the officer, and the location
+                  either was or wasn't confirmed. */}
+              {open.kind === "offsite" && (
+                <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
+                  <MapPin size={13} color={FIRE.amberText} style={{ verticalAlign: "-2px", marginRight: 5 }} />
+                  Off-site{open.offsite_label ? <> · <b style={{ color: FIRE.textPrimary }}>{open.offsite_label}</b></> : ""}
+                  <span style={{ color: FIRE.textMuted }}>{open.location_confirmed === false ? " · location not confirmed" : ""} · awaiting officer review</span>
+                </div>
+              )}
               <div style={{ fontFamily: DISPLAY, fontSize: 34, fontWeight: 700, color: FIRE.textPrimary, margin: "10px 0 2px", letterSpacing: "-0.01em" }}>{spanText(open.checked_in_at, open.checked_out_at)}</div>
               <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Since {fmtAt(open.checked_in_at)}</div>
               {/* STANDING reminder, not a one-shot toast at check-in. It is rendered inside the `open`
@@ -9193,7 +9294,30 @@ function StationHours({ S, dept, notify }) {
                 <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>Not on the clock</div>
               </div>
               <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 6 }}>Clock in when you arrive at the station.</div>
-              <button disabled={busy === "in"} onClick={clockIn} style={{ ...FS.btnPrimary, marginTop: 16, opacity: busy === "in" ? 0.7 : 1 }}>{busy === "in" ? <><Loader2 size={16} className="spin" /> Clocking in…</> : <><Clock size={16} /> Clock in</>}</button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 16 }}>
+                <button disabled={busy === "in"} onClick={clockIn} style={{ ...FS.btnPrimary, opacity: busy === "in" ? 0.7 : 1 }}>{busy === "in" ? <><Loader2 size={16} className="spin" /> Clocking in…</> : <><Clock size={16} /> Clock in</>}</button>
+                {/* Secondary by design. Station standby is the common case and stays the primary
+                    action; off-site is the exception and reads as one. */}
+                {!offOpen && <button style={FS.btn} onClick={() => setOffOpen(true)}><MapPin size={15} color={FIRE.btnIcon} /> Working off-site?</button>}
+              </div>
+              {offOpen && (
+                <div style={{ marginTop: 12, padding: "12px 13px", borderRadius: 10, background: "rgba(214,169,94,.10)", border: "1px solid rgba(214,169,94,.30)" }}>
+                  <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 9 }}>
+                    For dept work away from the station — a parade, a PR event, a fundraiser. Your officer reviews off-site time before it counts toward hours.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <input autoFocus value={offLabel} placeholder="What's the work? (e.g. Memorial Day parade)"
+                      onChange={(e) => setOffLabel(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && offLabel.trim()) offsiteCheckIn(); if (e.key === "Escape") { setOffOpen(false); setOffLabel(""); } }}
+                      style={{ ...FS.input, flex: 1, minWidth: 190 }} />
+                    <button disabled={busy === "off" || !offLabel.trim()} onClick={offsiteCheckIn}
+                      style={{ ...FS.btnPrimary, opacity: (busy === "off" || !offLabel.trim()) ? 0.5 : 1 }}>
+                      {busy === "off" ? <><Loader2 size={16} className="spin" /> Checking in…</> : <><MapPin size={16} /> Check in here</>}
+                    </button>
+                    <button style={FS.btn} onClick={() => { setOffOpen(false); setOffLabel(""); }}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           {geoNote && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 12, lineHeight: 1.45 }}>{geoNote}</div>}
