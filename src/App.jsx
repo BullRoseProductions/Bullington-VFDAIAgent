@@ -12335,12 +12335,12 @@ function StationDuties({ S, role, members, meId, notify }) {
   useEffect(() => { loadDuties(); }, []);
   const loadStationLog = () => {
     supabase.from("station_log")
-      .select("id, what, done_by, done_at, created_by")
+      .select("id, what, done_by, done_by_member_id, done_at, created_by")
       .order("done_at", { ascending: false })
       .then(({ data, error }) => {
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false);
-        setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, when: fmtDoneAt(e.done_at), doneAt: e.done_at, createdBy: e.created_by })));   // doneAt kept raw: the formatted string can't be bucketed by week
+        setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, whoId: e.done_by_member_id ?? null, when: fmtDoneAt(e.done_at), doneAt: e.done_at, createdBy: e.created_by })));   // doneAt kept raw: the formatted string can't be bucketed by week
       });
   };
   useEffect(() => { loadStationLog(); }, []);
@@ -12373,7 +12373,16 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [editMode, setEditMode] = useState(false);   // false = clean checklist text; true = reveal Add + per-duty Edit/Remove. The done-check + Reset stay at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingDutyId(null); setAddingA(false); } return !v; }); }
   const [editBuf, setEditBuf] = useState({ title: "", category: "Cleanup", catNew: "", recurrence: "Weekly", assignee: "", due: "" });
-  const [lw, setLw] = useState(""); const [lwho, setLwho] = useState(me?.name || "");
+  // Other-work attribution: the member id is authoritative when set (survives a rename, joins for
+  // rollups), the snapshotted text is the fallback for anyone with no member record — or for a row
+  // whose member was later deleted, since the FK is ON DELETE SET NULL.
+  const otherWho = (e) => (e.whoId && nameById.get(e.whoId)) || e.who || "A member";
+  const [lw, setLw] = useState("");
+  // Attribution is a PICKER first, free text second. lwhoId is a member id, or "__other__" when the
+  // work was done by someone with no member record — a visitor, a spouse, a whole mutual-aid crew.
+  // Defaults to the signed-in member when they are pickable, which is the overwhelmingly common case.
+  const [lwhoId, setLwhoId] = useState(() => (me && isAssignable(me) ? me.id : "__other__"));
+  const [lwho, setLwho] = useState(me?.name || "");
   // Department-level setting (departments.week_start_day, see sql/week_start_day.sql). 1 = Monday is
   // both the DB default and the fallback used when the column doesn't exist yet or the read fails,
   // so this works before AND after the migration.
@@ -12495,7 +12504,12 @@ function StationDuties({ S, role, members, meId, notify }) {
     if (!lw.trim()) return;
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    const { error } = await supabase.from("station_log").insert({ what: lw.trim(), done_by: lwho.trim() || (me?.name || "A member"), department_id: deptId, created_by: meId, done_at: new Date().toISOString() });
+    // The NAME is written either way, even when a member is picked. The FK is ON DELETE SET NULL, so
+    // the uuid can vanish if that member is ever removed — the text snapshot keeps the history
+    // readable, exactly as duty_log snapshots duty_name. The uuid is what rollups key on.
+    const picked = lwhoId !== "__other__" ? members.find((m) => m.id === lwhoId) : null;
+    const whoName = picked ? picked.name : (lwho.trim() || me?.name || "A member");
+    const { error } = await supabase.from("station_log").insert({ what: lw.trim(), done_by: whoName, done_by_member_id: picked ? picked.id : null, department_id: deptId, created_by: meId, done_at: new Date().toISOString() });
     if (error) { notify({ kind: "error", title: "Couldn't log that", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setLw(""); loadStationLog();
   }
@@ -12542,10 +12556,10 @@ function StationDuties({ S, role, members, meId, notify }) {
     if (!currentWeek) return;
     const header = ["Type", "Duty", "Completed by", "Date & time"];
     const rows = currentWeek.entries.map((e) => {
-      // Other-work rows carry done_by as a NAME string (station_log has no member_id), so it is used
-      // verbatim; checklist rows resolve member uuids through nameById.
+      // Other-work rows resolve done_by_member_id when it is set and fall back to the snapshotted
+      // name; checklist rows resolve member uuids through nameById.
       const who = e.kind === "other"
-        ? (e.who || "")
+        ? otherWho(e)
         : [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
       const d = e.doneAt ? new Date(e.doneAt) : null;
       const when = d && !isNaN(d.getTime()) ? d.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
@@ -12707,7 +12721,17 @@ function StationDuties({ S, role, members, meId, notify }) {
       <p style={{ ...S.helpP, color: FIRE.textMuted }}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
       <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What got done</span><input style={FS.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
-        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span><input style={FS.input} value={lwho} onChange={(e) => setLwho(e.target.value)} list="dutymembers2" /><datalist id="dutymembers2">{members.filter(isAssignable).map((m) => <option key={m.id} value={m.name} />)}</datalist></label>
+        <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span>
+          <select style={FS.input} value={lwhoId} onChange={(e) => setLwhoId(e.target.value)}>
+            {members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            <option value="__other__">Someone else / a crew…</option>
+          </select>
+        </label>
+        {/* Free text only when nobody on the roster did it — kept so a visitor or a whole crew can
+            still be recorded rather than forced onto one member. */}
+        {lwhoId === "__other__" && (
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input autoFocus style={FS.input} value={lwho} placeholder="e.g. Ladies Auxiliary" onChange={(e) => setLwho(e.target.value)} /></label>
+        )}
         <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
       </div>
       <div>
@@ -12719,7 +12743,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
-              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.who} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span></div>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{otherWho(e)} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span></div>
             </div>
             {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
@@ -12755,14 +12779,14 @@ function StationDuties({ S, role, members, meId, notify }) {
                 })}
               </>)}
               {currentWeek.other.length > 0 && (<>
-                {/* station_log.done_by is a typed NAME, not a member id — shown verbatim, no nameById lookup */}
+                {/* done_by_member_id when set (authoritative, survives renames), else the snapshotted name */}
                 <div style={{ ...FS.kicker, marginTop: currentWeek.duties.length ? 16 : 0, marginBottom: 6 }}>OTHER WORK LOGGED</div>
                 {currentWeek.other.map((e) => (
                   <div key={e.id} style={FS.row}>
                     <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
-                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.who || "A member"} · <span style={FS.num}>{fmtDoneAt(e.doneAt)}</span></div>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{otherWho(e)} · <span style={FS.num}>{fmtDoneAt(e.doneAt)}</span></div>
                     </div>
                   </div>
                 ))}
