@@ -4,6 +4,11 @@
 // `Authorization: Bearer ${CRON_SECRET}` — the same gate a browser satisfies with ?secret=.
 // A real run mails each department's own Department Admins. Adding ?to= makes it a TEST SEND:
 // one address, never the real admins, and it renders even when nothing is flagged.
+// Adding ?dry=1 makes it a DRY RUN: everything is read, grouped, measured and RENDERED, but the two
+// outbound effects — the email and the push/notification write — are skipped, and the composed
+// { subject, html } comes back in the JSON instead. Without it there is no way to see what a REAL
+// broadcast contains, because ?to= both changes the render (testMode) and actually sends.
+// The two compose: ?dry=1 alone previews the real broadcast; ?to=x&dry=1 previews the test render.
 //
 // Env (Vercel → Settings → Environment Variables):
 //   CRON_SECRET               — request gate (Bearer header from Cron, or ?secret= in a browser)
@@ -386,6 +391,9 @@ export default async function handler(req, res) {
   // so the layout and the "—" fallbacks can be eyeballed on a quiet week. Without ?to= (how Cron will call
   // it) SEND_WHEN_NOTHING_FLAGGED governs, so a real broadcast still stays silent when there's nothing to say.
   const isTestSend = !!req.query?.to;
+  // Explicit allow-list rather than !!req.query.dry, so ?dry=0 does NOT silently enable a dry run —
+  // the failure mode of a truthy "0" here is someone believing they previewed when they broadcast.
+  const isDry = ["1", "true", "yes", "on"].includes(String(req.query?.dry ?? "").toLowerCase());
   const to = req.query?.to || DEFAULT_TO;
   const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });   // no session server-side → no authFetch refresh wrapper
   const today = startOfToday();
@@ -479,7 +487,7 @@ export default async function handler(req, res) {
     // still has members who need their unread badge. Email and notifications fail independently.
     // Never in test mode — a preview send must not write rows or buzz real members' phones.
     let notified = null;
-    if (PUSH_ENABLED && !isTestSend) {
+    if (PUSH_ENABLED && !isTestSend && !isDry) {
       try {
         const leaderIds = mi.members
           .filter((m) => m.department_id === deptId && m.status === "Active" && countsInStats(m)
@@ -513,6 +521,14 @@ export default async function handler(req, res) {
       continue;
     }
     const { subject, html } = compose(name, groups, metrics, { testMode: isTestSend });
+    // DRY RUN stops here. Everything above ran for real — the same reads, the same grouping, the same
+    // n===0 skip, the same recipient resolution, the same render. Only sendEmail is skipped (push was
+    // skipped above). `wouldSendTo` is the genuine recipient list a real run would have used, which is
+    // half the value of the preview: seeing WHO as well as WHAT.
+    if (isDry) {
+      results.push({ name, counts, metrics, sentTo: null, wouldSendTo: recipients, subject, html, dryRun: true, ...(notified ? { notified } : {}) });
+      continue;
+    }
     try {
       const id = await sendEmail(resendKey, recipients, subject, html);   // sequential — one Resend call at a time
       results.push({ name, counts, metrics, sentTo: recipients, id, ...(notified ? { notified } : {}) });
@@ -521,6 +537,7 @@ export default async function handler(req, res) {
     }
   }
   return res.status(200).json({
+    ...(isDry ? { dryRun: true, note: "Nothing was emailed and no notifications were written." } : {}),
     departments: results, total,
     ...(skipped.length ? { skipped } : {}),
     ...(mi.error ? { metricsError: mi.error } : {}),
