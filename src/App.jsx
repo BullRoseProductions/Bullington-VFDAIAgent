@@ -1734,14 +1734,14 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       {/* DEPARTMENT HEALTH strip — readiness ring (reused from DeptAdminDashboard) + oversight stats */}
       <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH · OVERSIGHT</div>
       <div style={{ ...FS.card, padding: "18px 20px", display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
-          <svg width="84" height="84" viewBox="0 0 84 84">
+        <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
+          <svg width="100%" height="100%" viewBox="0 0 84 84">
             <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
             <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
           </svg>
-          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
-            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
+          <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: "1.5rem", fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
+            <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 220, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "14px 20px" }}>
@@ -1847,14 +1847,14 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </button>
       </div>
       <div style={{ ...FS.card, padding: "18px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
-          <svg width="84" height="84" viewBox="0 0 84 84">
+        <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
+          <svg width="100%" height="100%" viewBox="0 0 84 84">
             <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
             <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
           </svg>
-          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
-            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
+          <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: "1.5rem", fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
+            <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 180 }}>
@@ -2191,14 +2191,14 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         </div>
       </div>
       <div style={{ ...FS.card, padding: "18px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
-          <svg width="84" height="84" viewBox="0 0 84 84">
+        <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
+          <svg width="100%" height="100%" viewBox="0 0 84 84">
             <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
             <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
           </svg>
-          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
-            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
+          <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: "1.5rem", fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{readiness}%</div>
+            <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 180 }}>
@@ -2549,8 +2549,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
         <div style={{ ...FS.card, padding: "14px 16px" }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>ATTENDANCE</div>
           <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center" }}>
-            <div style={{ position: "relative", width: 84, height: 84, flexShrink: 0 }}>
-              <svg width="84" height="84" viewBox="0 0 84 84">
+            <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
+              <svg width="100%" height="100%" viewBox="0 0 84 84">
                 <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
                 {hasThisMonth && (
                   <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.redBright} strokeWidth="7" strokeLinecap="round"
@@ -2558,14 +2558,14 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
                     transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
                 )}
               </svg>
-              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                 {hasThisMonth ? (
                   <>
-                    <div style={{ fontSize: 21, fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{ringPct}%</div>
-                    <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>this month</div>
+                    <div style={{ fontSize: "1.3125rem", fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{ringPct}%</div>
+                    <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>this month</div>
                   </>
                 ) : (
-                  <div style={{ fontSize: 10.5, fontWeight: 600, color: FIRE.textMuted, textAlign: "center", lineHeight: 1.2, padding: "0 8px" }}>No drills yet</div>
+                  <div style={{ fontSize: "0.65625rem", fontWeight: 600, color: FIRE.textMuted, textAlign: "center", lineHeight: 1.2, padding: "0 8px" }}>No drills yet</div>
                 )}
               </div>
             </div>
@@ -5769,9 +5769,9 @@ function RosterCerts({ S, members }) {
           showing filtered counts would change the number you just tapped. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "10px 0 2px" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
-          <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+          <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: "0.625rem", top: "50%", transform: "translateY(-50%)" }} />
           <input
-            style={{ ...FS.input, paddingLeft: 30 }}
+            style={{ ...FS.input, paddingLeft: "1.875rem" }}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search a member or certification…"
@@ -13298,7 +13298,7 @@ function Fonts() {
       .stat-cta:hover { filter: brightness(1.08); }
       .stat-cta:active { transform: translateY(1px); }
       @media (max-width: 900px) {
-        .dr-side { position: fixed; left: -290px; transition: left .22s ease; z-index: 40; height: 100dvh; }
+        .dr-side { position: fixed; left: -110%; transition: left .22s ease; z-index: 40; height: 100dvh; }
         .dr-side.open { left: 0; }
         .dr-menu { display: inline-flex !important; }
         /* Officer dashboard: stack to one column, calendar on top, announcements below.
@@ -13318,7 +13318,7 @@ function baseStyles() {
   return {
     app: { display: "flex", height: "100dvh", background: FIRE.pageBg, fontFamily: body, color: INK },
     scrim: { position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 35 },
-    sidebar: { width: 262, background: FIRE.sidebar, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, paddingTop: "calc(18px + env(safe-area-inset-top))", paddingBottom: "calc(18px + env(safe-area-inset-bottom))", flexShrink: 0, height: "100dvh", overflow: "hidden" },
+    sidebar: { width: "min(16.375rem, 85vw)", background: FIRE.sidebar, color: "#E8E9EB", display: "flex", flexDirection: "column", padding: 18, paddingTop: "calc(18px + env(safe-area-inset-top))", paddingBottom: "calc(18px + env(safe-area-inset-bottom))", flexShrink: 0, height: "100dvh", overflow: "hidden" },
     brandRow: { display: "flex", alignItems: "center", gap: 11, paddingBottom: 18, borderBottom: "1px solid #2A2F35" },
     brandName: { fontFamily: display, fontWeight: 700, fontSize: 19, letterSpacing: ".5px", lineHeight: 1 },
     brandSub: { fontSize: 10, color: "#8A929B", letterSpacing: ".9px", marginTop: 3, fontFamily: mono },
@@ -13518,7 +13518,7 @@ function baseStyles() {
     richList: { margin: "2px 0 8px", paddingLeft: 20, fontSize: 14, color: SLATE, lineHeight: 1.7 },
     opGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: 12 },
     opCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 11, padding: "15px 16px" },
-    avatar: { width: 38, height: 38, borderRadius: "50%", background: "#262B31", color: "#fff", display: "grid", placeItems: "center", fontFamily: display, fontWeight: 600, fontSize: 14, flexShrink: 0 },
+    avatar: { width: "2.375rem", height: "2.375rem", borderRadius: "50%", background: "#262B31", color: "#fff", display: "grid", placeItems: "center", overflow: "hidden", fontFamily: display, fontWeight: 600, fontSize: "0.875rem", flexShrink: 0 },
     personName: { fontFamily: display, fontWeight: 600, fontSize: 15.5, color: INK, lineHeight: 1.2 },
     personMeta: { fontSize: 12.5, color: MUTED, marginTop: 2 },
     opChip: { fontFamily: mono, fontSize: 9.5, fontWeight: 600, letterSpacing: ".5px", padding: "3px 9px", borderRadius: 999, border: "1px solid", flexShrink: 0 },
