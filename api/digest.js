@@ -603,6 +603,13 @@ export default async function handler(req, res) {
   }
   // Member names for attribution. nameById above maps DEPARTMENT ids; this is a separate map.
   const memberNameById = new Map((mi.members || []).map((m) => [m.id, m.name]));
+  // D4d: a department can now earn a send on duty activity ALONE. byDept is built from FLAGGED items,
+  // so such a department would never enter the send loop and the gate below could never fire for the
+  // case it exists to serve. Seed generously here on RAW rows and let the gate decide precisely — it
+  // judges on credits, which are countsInStats-filtered, so a week whose only activity was the test
+  // account gets bucketed here and then correctly skipped there. Bucketing is cheap; the gate is the
+  // single decision point.
+  for (const r of [...du.dutyLog, ...du.stationLog]) if (r.department_id) bucket(r.department_id);
 
   const results = [];
   const skipped = [];                                        // departments deliberately not mailed, with the reason — never silent
@@ -610,19 +617,24 @@ export default async function handler(req, res) {
   for (const [deptId, groups] of byDept) {
     const counts = { certs: groups.certs.length, gear: groups.gear.length, maintenance: groups.maint.length };
     const n = counts.certs + counts.gear + counts.maintenance;
-    if (n === 0 && !SEND_WHEN_NOTHING_FLAGGED && !isTestSend) continue;   // nothing to report → silent, unless this is a test send
-    total += n;
     const name = nameById.get(deptId) || "Unknown department";
 
     // Per-department metrics. countsInStats mirrors App.jsx so these percentages match the dashboard.
     const counted = mi.members.filter((m) => m.department_id === deptId && countsInStats(m));
     const countedIds = new Set(counted.map((m) => m.id));
-    // D4b: JSON only. compose() is deliberately NOT given this yet — the rendered email must stay
-    // byte-identical this slice; the visible section is D4c.
     const dutiesWeek = rollupDuties(
       du.dutyLog.filter((r) => r.department_id === deptId),
       du.stationLog.filter((r) => r.department_id === deptId),
       countedIds, memberNameById);
+
+    // THE SEND GATE. Two independent reasons to write: something needs attention, or somebody did
+    // work worth naming. Duty activity is deliberately NOT folded into `n` — n means "problem items"
+    // and feeds `total` in the response, so a productive week must not read as a problem week.
+    // Computed on CREDITS (countsInStats-applied), so a week whose only activity was the test account
+    // does not manufacture a send.
+    const hasDutyActivity = dutiesWeek.total > 0;
+    if (n === 0 && !hasDutyActivity && !SEND_WHEN_NOTHING_FLAGGED && !isTestSend) continue;
+    total += n;
     const deptApparatus = mi.apparatus.filter((a) => a.department_id === deptId);
     const metrics = {
       trainingPct: trainingCompliancePct(mi.sessions.filter((s) => s.department_id === deptId), mi.attendance, counted, year),
