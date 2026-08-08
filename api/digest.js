@@ -74,6 +74,100 @@ const STATS_EXCLUDED_IDS = new Set([
 ]);
 const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !(Array.isArray(m.access) && m.access.includes("Project Admin"));
 
+/* ---------------- Station Duties week window ----------------
+   The digest reports the WEEK THAT JUST ENDED: [Monday 00:00, next Monday 00:00) in local time.
+
+   Anchored to the week boundary rather than "the last 168 hours" on purpose. Cron fires Monday 12:00
+   UTC, but a retry, a cold start or a manual re-run hours later would otherwise slide the window and
+   report a different set of rows for the same week.
+
+   TIMEZONE. Hardcoded Central, because both current departments are Central and the alternative is a
+   schema round-trip for a value nobody differs on yet. It matters: done_at is timestamptz, so a duty
+   completed Sunday 8pm Central is Monday 02:00 UTC — bucketing in UTC would push it into the NEXT
+   week and disagree with the in-app History screen, which buckets in the browser's local time.
+
+   TODO (second department): replace DIGEST_TZ with a per-department departments.timezone column.
+   Track alongside the existing week_start_day item — the Monday cron likewise ignores a department
+   that starts its week on another day. Both are "when a non-Central / non-Monday department joins". */
+const DIGEST_TZ = "America/Chicago";
+
+// Offset of `tz` from UTC at a given instant, in ms. Derived from Intl rather than hardcoded so DST
+// is handled by the platform's tz database instead of by us.
+function tzOffsetMs(instant, tz) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(instant).reduce((a, x) => (x.type === "literal" ? a : (a[x.type] = x.value, a)), {});
+  // hour can format as "24" for midnight in some ICU builds — normalise before arithmetic.
+  const asUTC = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second);
+  return asUTC - instant;
+}
+// The UTC instant of local midnight on a given calendar date in `tz`. Two passes because the offset
+// itself depends on the instant: the first guess picks the wrong side of a DST change twice a year.
+function zonedMidnightUtc(y, m, d, tz) {
+  const wall = Date.UTC(y, m - 1, d, 0, 0, 0);
+  let ts = wall - tzOffsetMs(wall, tz);
+  ts = wall - tzOffsetMs(ts, tz);
+  return new Date(ts);
+}
+function digestWeekWindow(now, tz = DIGEST_TZ) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(now).reduce((a, x) => (x.type === "literal" ? a : (a[x.type] = x.value, a)), {});
+  const y = +p.year, m = +p.month, d = +p.day;
+  // Pure calendar arithmetic on the LOCAL date — no instant involved, so no tz skew here.
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();       // 0 Sun … 6 Sat
+  const sinceMonday = (dow + 6) % 7;                              // Mon → 0, Sun → 6
+  const endCal   = new Date(Date.UTC(y, m - 1, d - sinceMonday));      // Monday of the run's week
+  const startCal = new Date(Date.UTC(y, m - 1, d - sinceMonday - 7));  // the Monday before that
+  const weekEnd   = zonedMidnightUtc(endCal.getUTCFullYear(), endCal.getUTCMonth() + 1, endCal.getUTCDate(), tz);
+  const weekStart = zonedMidnightUtc(startCal.getUTCFullYear(), startCal.getUTCMonth() + 1, startCal.getUTCDate(), tz);
+  return { weekStart, weekEnd, tz };
+}
+
+/* ---------------- Station Duties rollup ----------------
+   CREDITS, not rows. One duty completed by three people is three credits, because the point of the
+   section is recognising who turned up.
+
+   Checklist  → the primary done_by AND every member in helper_ids.
+   Other work → done_by_member_id when set, else the free-text done_by label (same precedence the app
+                uses: the uuid is authoritative, the snapshotted text is the fallback and the only
+                attribution a visitor or a whole crew can have).
+
+   countsInStats is applied to BOTH the people list and the total, so the list always sums to the
+   total — consistent with every other figure in this digest. A credit whose member is excluded is
+   dropped entirely rather than folded into an "other" bucket, which would make the sum lie.
+   `rowsRead` is reported separately so an excluded-heavy week is diagnosable rather than mysterious. */
+function rollupDuties(dutyRows, otherRows, countedIds, memberNameById) {
+  const tally = new Map();   // key → { name, memberId, duties, other, total }
+  const credit = (key, name, memberId, kind) => {
+    if (!tally.has(key)) tally.set(key, { name, memberId, duties: 0, other: 0, total: 0 });
+    const t = tally.get(key);
+    t[kind] += 1; t.total += 1;
+  };
+  for (const r of dutyRows) {
+    for (const id of [r.done_by, ...(Array.isArray(r.helper_ids) ? r.helper_ids : [])]) {
+      if (!id || !countedIds.has(id)) continue;
+      credit(`m:${id}`, memberNameById.get(id) || "Unknown member", id, "duties");
+    }
+  }
+  for (const r of otherRows) {
+    if (r.done_by_member_id) {
+      if (!countedIds.has(r.done_by_member_id)) continue;                       // excluded member → drop
+      credit(`m:${r.done_by_member_id}`, memberNameById.get(r.done_by_member_id) || "Unknown member", r.done_by_member_id, "other");
+    } else {
+      const label = (r.done_by || "").trim() || "A member";                     // no member record: text is all there is
+      credit(`t:${label.toLowerCase()}`, label, null, "other");
+    }
+  }
+  const people = [...tally.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  return {
+    rowsRead: { duties: dutyRows.length, other: otherRows.length },
+    credits: { duties: people.reduce((n, p) => n + p.duties, 0), other: people.reduce((n, p) => n + p.other, 0) },
+    total: people.reduce((n, p) => n + p.total, 0),
+    people,
+  };
+}
+
 /* ---------------- date helpers ----------------
    Dates are parsed FIELD-BY-FIELD, never new Date(str): "2016-05-01" through the string parser is
    UTC midnight, which is the previous day in every US timezone. Same reasoning as gearStatus in App.jsx. */
@@ -397,6 +491,7 @@ export default async function handler(req, res) {
   const to = req.query?.to || DEFAULT_TO;
   const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });   // no session server-side → no authFetch refresh wrapper
   const today = startOfToday();
+  const week = digestWeekWindow(new Date());   // the week that just ended, [Mon 00:00, Mon 00:00) Central
 
   let certs, gear, maint, depts;
   try {
@@ -457,6 +552,29 @@ export default async function handler(req, res) {
     mi.error = String(e?.message || e);   // surfaced in the response so a silent all-"—" digest is diagnosable
   }
 
+  // Station Duties activity for the reported week. NON-FATAL, like metrics and unlike the detection
+  // reads: a duty_log hiccup must never stop a digest that has real expiries to report. On failure
+  // both arrays stay empty and du.error surfaces in the response, so a silent empty section is
+  // diagnosable rather than mysterious.
+  let du = { dutyLog: [], stationLog: [], error: null };
+  try {
+    const rs = await Promise.all([
+      sb.from("duty_log")
+        .select("department_id, duty_name, done_by, helper_ids, done_at")
+        .gte("done_at", week.weekStart.toISOString()).lt("done_at", week.weekEnd.toISOString()),
+      sb.from("station_log")
+        .select("department_id, what, done_by, done_by_member_id, done_at")
+        .gte("done_at", week.weekStart.toISOString()).lt("done_at", week.weekEnd.toISOString()),
+    ]);
+    const bad = rs.find((r) => r.error);
+    if (bad) throw new Error(bad.error.message);
+    du = { dutyLog: rs[0].data || [], stationLog: rs[1].data || [], error: null };
+  } catch (e) {
+    du.error = String(e?.message || e);
+  }
+  // Member names for attribution. nameById above maps DEPARTMENT ids; this is a separate map.
+  const memberNameById = new Map((mi.members || []).map((m) => [m.id, m.name]));
+
   const results = [];
   const skipped = [];                                        // departments deliberately not mailed, with the reason — never silent
   let total = 0;
@@ -470,6 +588,12 @@ export default async function handler(req, res) {
     // Per-department metrics. countsInStats mirrors App.jsx so these percentages match the dashboard.
     const counted = mi.members.filter((m) => m.department_id === deptId && countsInStats(m));
     const countedIds = new Set(counted.map((m) => m.id));
+    // D4b: JSON only. compose() is deliberately NOT given this yet — the rendered email must stay
+    // byte-identical this slice; the visible section is D4c.
+    const dutiesWeek = rollupDuties(
+      du.dutyLog.filter((r) => r.department_id === deptId),
+      du.stationLog.filter((r) => r.department_id === deptId),
+      countedIds, memberNameById);
     const deptApparatus = mi.apparatus.filter((a) => a.department_id === deptId);
     const metrics = {
       trainingPct: trainingCompliancePct(mi.sessions.filter((s) => s.department_id === deptId), mi.attendance, counted, year),
@@ -526,19 +650,21 @@ export default async function handler(req, res) {
     // skipped above). `wouldSendTo` is the genuine recipient list a real run would have used, which is
     // half the value of the preview: seeing WHO as well as WHAT.
     if (isDry) {
-      results.push({ name, counts, metrics, sentTo: null, wouldSendTo: recipients, subject, html, dryRun: true, ...(notified ? { notified } : {}) });
+      results.push({ name, counts, metrics, dutiesWeek, sentTo: null, wouldSendTo: recipients, subject, html, dryRun: true, ...(notified ? { notified } : {}) });
       continue;
     }
     try {
       const id = await sendEmail(resendKey, recipients, subject, html);   // sequential — one Resend call at a time
-      results.push({ name, counts, metrics, sentTo: recipients, id, ...(notified ? { notified } : {}) });
+      results.push({ name, counts, metrics, dutiesWeek, sentTo: recipients, id, ...(notified ? { notified } : {}) });
     } catch (e) {
-      results.push({ name, counts, metrics, sentTo: null, error: String(e?.message || e), ...(notified ? { notified } : {}) });   // one bad send never hides the rest
+      results.push({ name, counts, metrics, dutiesWeek, sentTo: null, error: String(e?.message || e), ...(notified ? { notified } : {}) });   // one bad send never hides the rest
     }
   }
   return res.status(200).json({
     ...(isDry ? { dryRun: true, note: "Nothing was emailed and no notifications were written." } : {}),
+    week: { start: week.weekStart.toISOString(), end: week.weekEnd.toISOString(), tz: week.tz },
     departments: results, total,
+    ...(du.error ? { dutiesError: du.error } : {}),
     ...(skipped.length ? { skipped } : {}),
     ...(mi.error ? { metricsError: mi.error } : {}),
   });
