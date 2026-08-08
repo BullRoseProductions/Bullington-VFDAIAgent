@@ -369,6 +369,34 @@ function section(title, items, lineFor) {
     </td></tr>`;
 }
 
+/* Station Duties — the week that just ended. Purely a RENDERER: every number comes from the
+   dutiesWeek rollup, nothing is recomputed here, so the email and the JSON can never disagree.
+
+   Omitted entirely when nothing happened. A header over a row of zeros reads as a reprimand, and a
+   quiet week on a volunteer department is usually just a quiet week.
+
+   Borrows section()'s header treatment (red kicker, count in muted) and metricsBlock()'s card for the
+   people list, so it sits in the existing vocabulary rather than introducing a third look. */
+function dutiesBlock(d) {
+  if (!d || !d.total) return "";
+  const { duties: dc, other: oc } = d.credits;
+  const bits = [];
+  if (dc) bits.push(`${dc} checklist ${dc === 1 ? "duty" : "duties"}`);
+  if (oc) bits.push(`${oc} other ${oc === 1 ? "job" : "jobs"}`);
+  const people = d.people.map((p) => {
+    const detail = [p.duties ? `${p.duties} ${p.duties === 1 ? "duty" : "duties"}` : "", p.other ? `${p.other} other` : ""].filter(Boolean).join(" &middot; ");
+    return `<tr><td style="padding:7px 0;border-top:1px solid ${C.hairline};font-size:14px;color:${C.secondary};line-height:1.45">
+      ${esc(p.name)} <span style="color:${C.muted}">&middot; ${detail}</span>
+      <span style="float:right;color:${C.text};font-weight:700">${esc(p.total)}</span></td></tr>`;
+  }).join("");
+  return `<tr><td style="padding:22px 24px 0">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:${C.red};font-weight:700">Station duties &mdash; last week
+        <span style="color:${C.muted};font-weight:400">(${esc(bits.join(", "))})</span></div>
+      <div style="font-size:12px;color:${C.muted};margin-top:5px">Everyone who pitched in, helpers included.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px">${people}</table>
+    </td></tr>`;
+}
+
 // "—" for anything with no data behind it. A 0% would assert something false; a dash says "not measured yet".
 const dash = (v, suffix = "") => (v === null || v === undefined ? "&mdash;" : `${esc(v)}${suffix}`);
 function metricsBlock(m) {
@@ -392,7 +420,7 @@ function metricsBlock(m) {
     </td></tr>`;
 }
 
-function compose(deptName, groups, metrics, { testMode } = {}) {
+function compose(deptName, groups, metrics, duties, { testMode } = {}) {
   const total = groups.certs.length + groups.gear.length + groups.maint.length;
   const subject = `B4C — ${deptName}: ${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
   const headline = `${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
@@ -416,6 +444,7 @@ function compose(deptName, groups, metrics, { testMode } = {}) {
       ${section("Certifications", groups.certs, (it) => `${esc(it.member)} &middot; ${esc(it.cert)} &middot;`)}
       ${section("Gear retirement", groups.gear, (it) => `${esc(it.item)} &middot;`)}
       ${section("Maintenance", groups.maint, (it) => `${esc(it.apparatus)} &middot; ${esc(it.task)} &middot;`)}
+      ${dutiesBlock(duties)}
       <tr><td style="padding:24px 24px 4px">
         <a href="${APP_URL}" style="display:inline-block;background:${C.red};color:#fff;font-size:14px;font-weight:700;text-decoration:none;padding:11px 20px;border-radius:8px">Open B4C &rarr;</a>
       </td></tr>
@@ -644,7 +673,7 @@ export default async function handler(req, res) {
       skipped.push({ name, reason: mi.error ? `member read failed: ${mi.error}` : "no active Department Admin with an email address" });
       continue;
     }
-    const { subject, html } = compose(name, groups, metrics, { testMode: isTestSend });
+    const { subject, html } = compose(name, groups, metrics, dutiesWeek, { testMode: isTestSend });
     // DRY RUN stops here. Everything above ran for real — the same reads, the same grouping, the same
     // n===0 skip, the same recipient resolution, the same render. Only sendEmail is skipped (push was
     // skipped above). `wouldSendTo` is the genuine recipient list a real run would have used, which is
