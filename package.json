@@ -17,6 +17,7 @@
     "@capacitor/ios": "^8.5.0",
     "@capacitor/push-notifications": "^8.1.2",
     "@supabase/supabase-js": "^2.108.2",
+    "@transistorsoft/capacitor-background-geolocation": "^9.3.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "lucide-react": "0.383.0",

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -38,4 +39,100 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      Geofencing (Phase 2) — declared, not yet used.
+
+      G4a installs the plugin and states what the app may ask for. NOTHING calls
+      the plugin yet: no geofence is registered, no permission is requested at
+      runtime, and no location is read. Declaring a permission is not the same as
+      holding it — on Android 6+ every one of these is granted by the member at
+      runtime, and until a later slice puts up the disclosure screen the app never
+      asks. Installing this build changes no behaviour.
+
+      COARSE alongside FINE because Android 12+ shows a single Precise/Approximate
+      dialog and refuses to grant FINE unless COARSE is declared with it.
+
+      BACKGROUND_LOCATION is the sensitive one, and the reason this feature needs a
+      prominent-disclosure screen before the OS prompt and a written justification
+      at store review. Android 11+ will not accept it in the same dialog as the
+      others: it has to be a separate, later request, after when-in-use is already
+      granted.
+
+      FOREGROUND_SERVICE_LOCATION is required from API 34; we target 36. Without it
+      the plugin's location service throws at startup on a modern device rather
+      than failing quietly, so its absence would surface as a crash, not a
+      degraded feature. The matching android:foregroundServiceType="location" is
+      declared by the plugin's own AAR and arrives through manifest merge — we do
+      not restate it here.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!--
+      REMOVED — permissions the geolocation AAR declares that we do not want.
+
+      The plugin's library manifest asks for more than we need because it is built
+      for continuous tracking. We run it in geofences-only mode (startGeofences):
+      discrete arrive/depart events at one known station, never a breadcrumb trail.
+      Manifest merge would hand us the tracking-mode permission surface anyway, so
+      these two are removed deliberately rather than shipped by inheritance.
+
+      ACTIVITY_RECOGNITION — "Physical Activity", a runtime permission with its own
+      OS prompt. The SDK uses it to toggle location tracking on and off from
+      detected motion, which is exactly the behaviour geofences-only mode does not
+      use. Two reasons to refuse it:
+        • Consent honesty. A member agreeing that the app notices they are at the
+          station has not agreed to hand over what their body is doing. A prompt
+          asking for physical activity is a different question than the one we
+          asked on the disclosure screen, and it would arrive without explanation.
+        • Play classification. Apps declaring ACTIVITY_RECOGNITION can be treated
+          as health/fitness apps, pulling in review obligations that have nothing
+          to do with a fire department roster.
+      Documented cost of removal is that motion-triggered tracking needs 200–1000 m
+      of movement to engage — a tracking-mode concern, not a geofence one.
+
+      SCHEDULE_EXACT_ALARM — Android 14 restricted exact alarms and Play requires a
+      justification for keeping them. The SDK uses them for stopTimeout,
+      motionTriggerDelay and schedule: all tracking-mode config we do not set.
+      Without it the SDK falls back to inexact alarms, which drift a few minutes.
+      Nothing we do is minute-critical — a shift is measured in hours, and the
+      server timestamps the row from the event, not from when the alarm woke up.
+
+      BINDING FOLLOW-UP for the config slice: the plugin must be started with
+        disableMotionActivityUpdates: true
+      Removing the permission alone is only half the change — left unset, the SDK
+      still tries to use a Motion API it no longer has rights to. The two belong
+      together.
+
+      ALSO NOTE for the handler slice: the one real consequence of dropping exact
+      alarms is that getCurrentPosition() can fail outright while backgrounded. Our
+      handlers must read coordinates from the geofence event itself and never call
+      getCurrentPosition() from a background handler. The RPCs already take lat/lng
+      as arguments for this reason.
+
+      These are ASSERTIONS, not proofs: the docs never say geofences-only requires
+      either permission, but they never say it works without them either. The field
+      test is what settles it.
+    -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" tools:node="remove" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
+
+    <!--
+      The same capability under two more namespaces. Removing only the AOSP name
+      looks complete and is not: the merged manifest carried all three.
+        • com.google.android.gms — what Play Services used before Android 10 made
+          ACTIVITY_RECOGNITION a first-class runtime permission. We ship minSdk 24,
+          so this is the one that would actually apply on an older handset, and
+          leaving it means the oldest devices we support keep the exact permission
+          we just decided not to ask for.
+        • com.huawei.hms — the Huawei Mobile Services equivalent, same capability.
+      Play reads declared permissions across namespaces when classifying an app, so
+      a stray gms declaration reintroduces the health/fitness signal on its own.
+    -->
+    <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" tools:node="remove" />
+    <uses-permission android:name="com.huawei.hms.permission.ACTIVITY_RECOGNITION" tools:node="remove" />
 </manifest>
