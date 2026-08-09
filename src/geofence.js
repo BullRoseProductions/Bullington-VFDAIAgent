@@ -352,9 +352,20 @@ let running = false;
    where the member was when the transition happened, not where they are now that we got
    around to asking.
 
-   Both RPCs are idempotent and take the event's own timestamp, so a replayed or
-   out-of-order delivery cannot double-open a session or credit hours to the wrong moment.
-   That is what makes the offline queue safe rather than merely tolerated. */
+   REPLAY SAFETY — true only once the Layer 1 migration is applied, and worth stating
+   precisely because the earlier version of this comment was wrong. It claimed replay
+   "cannot double-open a session" on the strength of arrive returning an existing OPEN
+   row. That guard never covered the case that actually matters: the SDK persists every
+   transition, this handler does not delete the record it just processed, and so the next
+   app open replays arrivals for shifts that have since CLOSED. A closed shift is invisible
+   to an open-row check, so the replay inserted a SECOND row and the replayed EXIT closed
+   it — every ordinary shift double-counted, not merely the terminated-app case.
+
+   What makes it safe now is that geofence_arrive is idempotent on ARRIVAL TIME, matching a
+   row within two minutes of the event timestamp whether that row is open or closed. A
+   replayed event carries the timestamp it fired with, so it lands on the row it already
+   created and returns it unchanged. Both RPCs still take p_at, so hours are credited to
+   when they happened rather than to when the phone got round to saying so. */
 async function handleGeofenceEvent(evt, { onEvent } = {}) {
   const action = evt?.action;
   const at = evt?.timestamp || null;    // ISO string; the RPCs bound and clamp it server-side

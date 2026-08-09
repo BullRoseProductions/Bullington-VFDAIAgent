@@ -30,7 +30,21 @@
 --   geofence_arrive  — drops the max_shift_hours age test. Keeps a generous
 --                      absurdity bound (30 days) and the existing clock-skew
 --                      handling, because a device we do not control can still send
---                      nonsense.
+--                      nonsense. ALSO becomes idempotent against an arrival already
+--                      recorded, open or closed — see below; without that, replay
+--                      duplicates ordinary completed shifts.
+--   geofence_depart  — takes over the cap, applied to the INTERVAL.
+--
+-- THE DUPLICATION BUG THIS ALSO FIXES. The SDK persists every transition, including
+-- ones the live handler already processed, and the live handler does not delete the
+-- record it handled. So the next app open replays arrivals belonging to shifts that
+-- have since closed. arrive's idempotency only recognised a still-OPEN session, so a
+-- completed shift was invisible to it: the replayed arrival inserted a second row and
+-- the replayed EXIT closed it. Every ordinary shift double-recorded on the next open —
+-- app backgrounded, shift completes live, member reopens later — which is the common
+-- path, not the terminated-app edge case, and it inflates the very hours ISO and LOSAP
+-- are counted from. arrive now matches on arrival TIME regardless of whether the row is
+-- open or closed, so a replayed event lands on the row it already created.
 --   geofence_depart  — takes over the cap, applied to the INTERVAL. A shift longer
 --                      than max_shift_hours closes at checked_in_at + cap and is
 --                      marked auto_closed, exactly as auto_close_stale_shifts
@@ -119,6 +133,42 @@ begin
      and checked_out_at is null
      and kind in ('standby','offsite')
    order by checked_in_at desc limit 1;
+  if found then return v_row; end if;
+
+  /* ALREADY RECORDED — OPEN OR CLOSED. Without this, replay duplicates every shift.
+
+     The check above only sees a session that is still open, which was sufficient while
+     the only caller was a live event. It is not sufficient now. The SDK persists every
+     transition, including ones the live handler already wrote, and the live handler does
+     not delete the record it processed — so the next app open replays arrivals for shifts
+     that have since COMPLETED. A completed shift is invisible to the open-row check, so
+     the replay fell through to the insert below and created a second row, which the
+     replayed EXIT then closed. Every ordinary shift double-recorded on the next open:
+     app backgrounded, shift runs and closes live, member reopens later. That is the
+     common path, not an edge case, and it inflates exactly the hours ISO and LOSAP are
+     counted from.
+
+     Matching on ARRIVAL TIME is what makes replay a no-op: a replayed event carries the
+     same event timestamp it did when it fired, so it lands on the row it already created.
+     Two minutes of tolerance because the same instant can be stored a beat apart, while
+     two genuinely distinct arrivals are always separated by far more — a member must
+     leave the fence, travel, and then dwell inside it again before another arrival can
+     ever be raised.
+
+     KNOWN RESIDUAL GAP, flagged rather than hidden: the clamp above rewrites a
+     future-dated arrival to now(). If a device's clock runs 2–5 minutes fast, the live
+     row is stored at now() while the later replay — no longer in the future — is stored
+     at the raw event time, and the two can differ by more than this tolerance and
+     duplicate anyway. Narrow, but real. Widening the tolerance closes it at the cost of
+     merging two genuine visits that are close together; that trade is a decision, not a
+     detail, so it is left as written. */
+  select * into v_row from public.station_presence
+   where member_id = v_member
+     and source = 'gps_geofence'                     -- only rows this function created
+     and kind in ('standby','offsite')
+     and checked_in_at between v_at - interval '2 minutes' and v_at + interval '2 minutes'
+   order by abs(extract(epoch from (checked_in_at - v_at)))   -- the closest match, not merely the newest
+   limit 1;
   if found then return v_row; end if;
 
   insert into public.station_presence
@@ -280,6 +330,40 @@ NOTIFY pgrst, 'reload schema';
 -- -- 5. Absurdity bound still refuses. Expect an exception.
 -- --   BEGIN;
 -- --     SELECT public.geofence_arrive(34.0, -84.0, 12, now() - interval '60 days');
+-- --   ROLLBACK;
+--
+-- -- 6. THE DUPLICATION FIX — replaying a COMPLETED shift must change nothing.
+-- --    This is the regression that was about to double-count every ordinary shift.
+-- --    Expect exactly ONE row after the replay, with its original times intact.
+-- --
+-- --   BEGIN;
+-- --     -- the shift, recorded live
+-- --     SELECT public.geofence_arrive(34.0, -84.0, 12, now() - interval '5 hours');
+-- --     SELECT public.geofence_depart(now() - interval '2 hours');
+-- --
+-- --     -- the SAME events replayed from the device queue on the next app open
+-- --     SELECT public.geofence_arrive(34.0, -84.0, 12, now() - interval '5 hours');
+-- --     SELECT public.geofence_depart(now() - interval '2 hours');
+-- --
+-- --     SELECT count(*) AS rows_expect_1,
+-- --            round(sum(extract(epoch from (checked_out_at - checked_in_at)))/3600.0, 2) AS hours_expect_3
+-- --       FROM public.station_presence
+-- --      WHERE member_id = public.my_member_id() AND source = 'gps_geofence'
+-- --        AND checked_in_at > now() - interval '6 hours';
+-- --   ROLLBACK;
+--
+-- -- 7. Two GENUINELY distinct arrivals must still be two rows — the tolerance must
+-- --    not merge real visits. 4 hours apart, well outside the 2-minute window.
+-- --    Expect 2 rows.
+-- --
+-- --   BEGIN;
+-- --     SELECT public.geofence_arrive(34.0, -84.0, 12, now() - interval '9 hours');
+-- --     SELECT public.geofence_depart(now() - interval '8 hours');
+-- --     SELECT public.geofence_arrive(34.0, -84.0, 12, now() - interval '5 hours');
+-- --     SELECT public.geofence_depart(now() - interval '4 hours');
+-- --     SELECT count(*) AS rows_expect_2 FROM public.station_presence
+-- --      WHERE member_id = public.my_member_id() AND source = 'gps_geofence'
+-- --        AND checked_in_at > now() - interval '10 hours';
 -- --   ROLLBACK;
 --
 -- -- 6. A manual row is still untouchable by the daemon. Expect NULL and the manual
