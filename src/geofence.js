@@ -183,10 +183,26 @@ export async function initGeofence({ rationale } = {}) {
 
       // Presence has to survive the things phones actually do: get swiped closed, run
       // out of battery, reboot in the night. A departure the app was not alive to notice
-      // is a shift that never closes. INERT UNTIL G4d — these govern how the plugin
-      // resumes once something has started it, and nothing has.
+      // is a shift that never closes.
       stopOnTerminate: false,
       startOnBoot: true,
+
+      /* THE REPLAY BUFFER. Capacitor has no JS headless task — a transition that fires
+         while the app is dead reaches no listener and is NOT re-delivered later. Without
+         this the event is simply gone.
+
+         PERSIST_MODE_GEOFENCE writes geofence transitions (and only those) to the SDK's
+         own SQLite queue. We configure no `url`, so nothing is ever uploaded from here;
+         the queue exists purely as our buffer, and drainGeofenceQueue() empties it on the
+         next app open. If the constant were ever missing the value falls back to the SDK
+         default, which persists MORE rather than less — a benign direction to fail in.
+
+         maxDaysToPersist is set explicitly because the SDK's default is short (1 day) and
+         would quietly discard the exact case this exists for: a member who works a shift
+         and doesn't open the app again for several days. Fourteen days is well past any
+         plausible gap while still bounding the queue. */
+      persistMode: bg.PERSIST_MODE_GEOFENCE,
+      maxDaysToPersist: 14,
 
       /* TEMP — REVERT BEFORE RELEASE.
          Release values are  debug: false  and  logLevel: bg.LOG_LEVEL_ERROR.
@@ -351,7 +367,7 @@ async function handleGeofenceEvent(evt, { onEvent } = {}) {
       const { error } = await supabase.rpc("geofence_depart", { p_at: at });
       if (error) throw error;
       onEvent?.({ action: "depart", at });
-      return;
+      return { ok: true, action: "depart" };
     }
 
     // DWELL is what we registered for. ENTER is handled identically and defensively: if the
@@ -361,7 +377,7 @@ async function handleGeofenceEvent(evt, { onEvent } = {}) {
       const c = evt?.location?.coords;
       if (!c || typeof c.latitude !== "number" || typeof c.longitude !== "number") {
         onEvent?.({ action: "error", reason: "event-without-coords" });
-        return;
+        return { ok: false, reason: "event-without-coords" };
       }
       const { error } = await supabase.rpc("geofence_arrive", {
         p_lat: c.latitude,
@@ -371,13 +387,95 @@ async function handleGeofenceEvent(evt, { onEvent } = {}) {
       });
       if (error) throw error;
       onEvent?.({ action: "arrive", at });
+      return { ok: true, action: "arrive" };
     }
+
+    // An action we don't act on (nothing today registers for it).
+    return { ok: false, reason: `unhandled-action-${action}` };
   } catch (e) {
     // A failed write must never take down the daemon. The member is still on shift; the
     // sweeper and the manual check-in both remain available, and the next transition gets
-    // its own attempt.
+    // its own attempt. The RESULT matters to the replay path: a record is only deleted
+    // from the queue once its write actually succeeded.
     onEvent?.({ action: "error", reason: String(e?.message || e) });
+    return { ok: false, reason: String(e?.message || e) };
   }
+}
+
+
+/* ── Catch-up on next open ─────────────────────────────────────────────────────
+   Capacitor has no JS headless task, so a transition that fires while the app is
+   terminated reaches nothing and is never re-delivered. This is what makes those
+   events recoverable: the SDK persisted them, and on the next open we replay them
+   through the SAME path a live event takes.
+
+   The hours come out RIGHT, just late. Each record carries its own coordinates and
+   its own timestamp, and both RPCs take p_at, so a shift that ended yesterday is
+   written with yesterday's times rather than with the moment we got around to it.
+
+   CHRONOLOGICAL ORDER IS LOAD-BEARING. Replaying an EXIT before its ENTER would
+   close nothing and then open a session that never closes. Sorted ascending.
+
+   DELETE ONLY WHAT LANDED. destroyLocation(uuid) per record, after its write
+   succeeded — never destroyLocations(), which would clear the whole queue including
+   anything that failed or arrived between the read and the delete. A record whose
+   write failed stays put and is retried on the next open; the RPCs' idempotency is
+   what makes that retry harmless. */
+let drained = false;
+
+function persistedToEvent(rec) {
+  const g = rec?.geofence || {};
+  // Prefer the geofence event's own location/timestamp; fall back to the containing
+  // record, whose shape differs slightly depending on how the SDK serialised it.
+  const coords = g?.location?.coords || rec?.coords || null;
+  return {
+    action: g?.action,
+    identifier: g?.identifier,
+    timestamp: g?.timestamp || rec?.timestamp || null,
+    location: coords ? { coords } : null,
+  };
+}
+
+export async function drainGeofenceQueue({ onEvent } = {}) {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  // Once per app open. Re-running on every effect re-fire would replay the queue
+  // repeatedly — harmless thanks to idempotency, but pointless work against the network.
+  if (drained) return { ok: true, reason: "already-drained" };
+  drained = true;
+
+  const bg = await loadPlugin();
+  if (!bg) return { ok: false, reason: "plugin-missing" };
+
+  let rows;
+  try {
+    rows = await bg.getLocations();
+  } catch (e) {
+    drained = false;                                   // a read that failed is not a drain
+    return { ok: false, reason: "read-failed", detail: String(e?.message || e) };
+  }
+
+  const pending = (Array.isArray(rows) ? rows : [])
+    .filter((r) => r?.geofence?.action)
+    .sort((a, b) => String(a?.geofence?.timestamp || a?.timestamp || "")
+      .localeCompare(String(b?.geofence?.timestamp || b?.timestamp || "")));
+
+  if (!pending.length) return { ok: true, reason: "nothing-queued", replayed: 0 };
+
+  let replayed = 0, failed = 0;
+  for (const rec of pending) {
+    // Sequential, not parallel: these are ordered state transitions on one member's
+    // shift, and firing them concurrently would race arrive against depart.
+    const res = await handleGeofenceEvent(persistedToEvent(rec), { onEvent });
+    if (res?.ok && rec?.uuid) {
+      await bg.destroyLocation(rec.uuid).catch(() => {});
+      replayed++;
+    } else {
+      failed++;                                        // left in the queue for next time
+    }
+  }
+  return { ok: true, reason: "drained", replayed, failed, total: pending.length };
 }
 
 /* Start geofence-only monitoring for this department's station.

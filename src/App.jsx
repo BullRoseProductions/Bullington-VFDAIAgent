@@ -18,7 +18,7 @@ import { authedFetch } from "./apiBase";
 import { useReconnect, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush } from "./push";
-import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent } from "./geofence";
+import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue } from "./geofence";
 import { supabase, APP_URL, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -1450,6 +1450,26 @@ export default function App() {
       if (!res.ok && !["web", "flag-off", "dept-not-enabled"].includes(res.reason)) {
         console.warn("[geofence] not monitoring:", res.reason, res.detail || "");
       }
+
+      /* CATCH-UP, after start settles and DELIBERATELY NOT conditional on it.
+
+         Queued events are hours somebody actually stood. If the fence failed to start
+         this launch — permission downgraded to when-in-use, the pin removed, Play
+         Services unhappy — those hours are still owed, and gating recovery on the thing
+         that just failed is how you lose them permanently.
+
+         Placed here rather than at the JS entrypoint because replaying requires an
+         authenticated Supabase session AND a resolved member: geofence_arrive is
+         SECURITY DEFINER off my_member_id(), so a drain at cold start would fire
+         before auth resolves and every RPC would refuse. This is the earliest point
+         where the write can actually succeed. It never blocks the UI — it's a detached
+         promise — and drainGeofenceQueue self-limits to once per app open. */
+      drainGeofenceQueue({
+        onEvent: (e) => { console.log("[geofence] replay:", e?.action, e?.at || e?.reason || ""); },   // TEMP — REVERT BEFORE RELEASE
+      }).then((d) => {
+        console.log("[geofence] drainGeofenceQueue →", d);   // TEMP — REVERT BEFORE RELEASE
+        if (d?.failed) console.warn("[geofence] replay left", d.failed, "event(s) queued for next open");
+      });
     });
     return () => { alive = false; };
   }, [myMemberId, dept?.geofence_enabled, dept?.station_lat, dept?.station_lng, dept?.station_radius_m, consentVersion]);
