@@ -695,11 +695,12 @@ const GEOFENCE_RATIONALE = {
   negativeAction: "Not now",
 };
 
-// Guard rail. The WORDING above is the owner's and matches APP-002 — what is still
-// outstanding is the attorney signing off on the assembled SCREEN, which is a different
-// thing from the paragraphs passing review in isolation. Stays TRUE until the owner
-// confirms that clearance; flipping it early is how unreviewed consent UI ships.
-const GEOFENCE_COPY_IS_DRAFT = true;
+// Guard rail, now cleared. The assembled screen has been signed off by counsel, so the
+// "awaiting legal sign-off" banner no longer renders. The mechanism stays in place: any
+// future change to the disclosure wording, or to what the app actually does with location,
+// puts this back to TRUE until the changed screen is reviewed again. Consent copy that
+// drifts from behaviour is the failure this exists to catch.
+const GEOFENCE_COPY_IS_DRAFT = false;
 
 /* `onDecision` / `onWithdraw` let the caller do the native work (ask the OS, stop the
    plugin) while this panel stays responsible only for the copy and the record. When they
