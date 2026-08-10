@@ -23,6 +23,99 @@ function badgeColors(text) {
   return [NEUT_BG, NEUT];
 }
 
+/* ---------------- shared page chrome ----------------
+   `ensure` and `header` were defined IDENTICALLY inside both builders. They are the only
+   two that were byte-for-byte the same, so they are the only two lifted here: `para` and
+   `table` genuinely differ between the reports (the department table badges a column, the
+   capital one does not), and folding those together would mean parameterising away a real
+   difference rather than removing a duplicate.
+
+   WHY A FACTORY AND NOT A PLAIN FUNCTION. Both helpers MUTATE the caller's cursor, and a
+   module-scope function cannot reassign a `let y` living in another scope. The builder
+   hands over a getter and a setter and keeps `y` as its own local, which leaves every
+   existing call site — `ensure(26)`, `header("Certifications")` — completely untouched.
+   That is what makes this diff reviewable as a no-op: the call sites do not move, only the
+   two duplicated bodies disappear. The builders' own `para`/`table` keep mutating `y`
+   directly and still work, because getY reads the same live binding. */
+function makeChrome(doc, { M, BOTTOM, getY, setY }) {
+  function ensure(h) { if (getY() + h > BOTTOM) { doc.addPage(); setY(M); } }
+  function header(title) {
+    ensure(26);
+    const y = getY();
+    doc.setFillColor(...RED); doc.rect(M, y, 4, 13, "F");
+    doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(12.5);
+    doc.text(title, M + 10, y + 10.5);
+    setY(y + 21);
+  }
+  return { ensure, header };
+}
+
+/* The red banner, identical in both builders except for two strings: the subtitle after the
+   station, and the value on the right (a month+year period for the department report, a
+   bare year for the capital plan). Both are passed in rather than derived, so neither
+   caller's wording is decided here.
+
+   `deptName` is passed already-resolved because the two builders disagree about the
+   fallback — the capital plan defaults to "Department", the department report does not —
+   and that difference is theirs to keep, not this helper's to unify.
+
+   Returns the cursor position below the banner. Assumes it draws at the top of a fresh
+   page, which is the only way either builder uses it. */
+function reportBanner(doc, { deptName, station, subtitle, period, prepared }) {
+  const PW = doc.internal.pageSize.getWidth();
+  const M = 44, CW = PW - 2 * M;
+  const y = M, BH = 92;
+  doc.setFillColor(...RED); doc.rect(M, y, CW, BH, "F");
+  doc.setFillColor(...RED_DK); doc.rect(M, y, 6, BH, "F");
+  // emblem
+  const cx = M + 30, cy = y + BH / 2;
+  doc.setDrawColor(255); doc.setLineWidth(1.5); doc.circle(cx, cy, 16, "S");
+  doc.setFillColor(255);
+  doc.rect(cx - 2.4, cy - 9.5, 4.8, 19, "F");
+  doc.rect(cx - 9.5, cy - 2.4, 19, 4.8, "F");
+  // dept name (auto-fit)
+  doc.setTextColor(255); doc.setFont("helvetica", "bold");
+  let fs = 15.5;
+  doc.setFontSize(fs);
+  const avail = CW - 60 - 100;
+  while (doc.getTextWidth(deptName) > avail && fs > 10) { fs -= 0.5; doc.setFontSize(fs); }
+  doc.text(deptName, M + 56, y + 36);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...PINK);
+  doc.text(`${station ? station + " \u00b7 " : ""}${subtitle}`, M + 56, y + 54);
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+  doc.text(period, M + CW - 14, y + 34, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...PINK);
+  doc.text(prepared, M + CW - 14, y + 48, { align: "right" });
+  return y + BH + 16;
+}
+
+/* Ruled sign-and-date lines. UNUSED IN THIS COMMIT — added here so the extraction lands in
+   one place, and consumed by the apparatus county report in the next slice.
+
+   A county form needs a wet signature: the PDF is evidence that a human inspected the rig,
+   and an unsigned printout is only a claim the software makes about itself. Each entry gets
+   a long rule for the name and a short one for the date, since a date written on the same
+   rule as a signature is what makes a scanned form ambiguous.
+
+   Returns the cursor position below the block. */
+function signatureBlock(doc, y, { lines = [] } = {}) {
+  if (!lines.length) return y;
+  const PW = doc.internal.pageSize.getWidth();
+  const M = 44, CW = PW - 2 * M;
+  const DATE_W = 120, GAP = 24, ROW = 46;
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  lines.forEach((label) => {
+    const ruleY = y + 22;
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.6);
+    doc.line(M, ruleY, M + CW - DATE_W - GAP, ruleY);          // signature
+    doc.line(M + CW - DATE_W, ruleY, M + CW, ruleY);           // date
+    doc.text(label, M, ruleY + 10);
+    doc.text("Date", M + CW - DATE_W, ruleY + 10);
+    y += ROW;
+  });
+  return y;
+}
+
 export function downloadDepartmentReport(data) {
   const { doc, slug } = buildReportDoc(data);
   doc.save(slug);
@@ -43,29 +136,7 @@ export function buildReportDoc(data) {
   const station = data.station || "";
 
   // ---------- banner ----------
-  const BH = 92;
-  doc.setFillColor(...RED); doc.rect(M, y, CW, BH, "F");
-  doc.setFillColor(...RED_DK); doc.rect(M, y, 6, BH, "F");
-  // emblem
-  const cx = M + 30, cy = y + BH / 2;
-  doc.setDrawColor(255); doc.setLineWidth(1.5); doc.circle(cx, cy, 16, "S");
-  doc.setFillColor(255);
-  doc.rect(cx - 2.4, cy - 9.5, 4.8, 19, "F");
-  doc.rect(cx - 9.5, cy - 2.4, 19, 4.8, "F");
-  // dept name (auto-fit)
-  doc.setTextColor(255); doc.setFont("helvetica", "bold");
-  let fs = 15.5;
-  doc.setFontSize(fs);
-  const avail = CW - 60 - 100;
-  while (doc.getTextWidth(fullName) > avail && fs > 10) { fs -= 0.5; doc.setFontSize(fs); }
-  doc.text(fullName, M + 56, y + 36);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...PINK);
-  doc.text(`${station ? station + " \u00b7 " : ""}Department Report`, M + 56, y + 54);
-  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-  doc.text(period, M + CW - 14, y + 34, { align: "right" });
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...PINK);
-  doc.text(prepared, M + CW - 14, y + 48, { align: "right" });
-  y += BH + 16;
+  y = reportBanner(doc, { deptName: fullName, station, subtitle: "Department Report", period, prepared });
 
   // ---------- KPI tiles ----------
   const k = data.kpis;
@@ -91,14 +162,7 @@ export function buildReportDoc(data) {
   y += KH + 18;
 
   // ---------- helpers ----------
-  function ensure(h) { if (y + h > BOTTOM) { doc.addPage(); y = M; } }
-  function header(title) {
-    ensure(26);
-    doc.setFillColor(...RED); doc.rect(M, y, 4, 13, "F");
-    doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(12.5);
-    doc.text(title, M + 10, y + 10.5);
-    y += 21;
-  }
+  const { ensure, header } = makeChrome(doc, { M, BOTTOM, getY: () => y, setY: (v) => { y = v; } });
   function para(text, color = SLATE, size = 9.3) {
     doc.setFont("helvetica", "normal"); doc.setFontSize(size); doc.setTextColor(...color);
     const lines = doc.splitTextToSize(text, CW);
@@ -267,36 +331,9 @@ export function buildCapitalPlanDoc(data) {
   const money = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
 
   // ---------- banner ----------
-  const BH = 92;
-  doc.setFillColor(...RED); doc.rect(M, y, CW, BH, "F");
-  doc.setFillColor(...RED_DK); doc.rect(M, y, 6, BH, "F");
-  const cx = M + 30, cy = y + BH / 2;
-  doc.setDrawColor(255); doc.setLineWidth(1.5); doc.circle(cx, cy, 16, "S");
-  doc.setFillColor(255);
-  doc.rect(cx - 2.4, cy - 9.5, 4.8, 19, "F");
-  doc.rect(cx - 9.5, cy - 2.4, 19, 4.8, "F");
-  doc.setTextColor(255); doc.setFont("helvetica", "bold");
-  let fs = 15.5;
-  doc.setFontSize(fs);
-  const avail = CW - 60 - 100;
-  while (doc.getTextWidth(fullName) > avail && fs > 10) { fs -= 0.5; doc.setFontSize(fs); }
-  doc.text(fullName, M + 56, y + 36);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...PINK);
-  doc.text(`${station ? station + " · " : ""}Capital Replacement Plan`, M + 56, y + 54);
-  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-  doc.text(String(now.getFullYear()), M + CW - 14, y + 34, { align: "right" });
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...PINK);
-  doc.text(prepared, M + CW - 14, y + 48, { align: "right" });
-  y += BH + 16;
+  y = reportBanner(doc, { deptName: fullName, station, subtitle: "Capital Replacement Plan", period: String(now.getFullYear()), prepared });
 
-  function ensure(h) { if (y + h > BOTTOM) { doc.addPage(); y = M; } }
-  function header(title) {
-    ensure(26);
-    doc.setFillColor(...RED); doc.rect(M, y, 4, 13, "F");
-    doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(12.5);
-    doc.text(title, M + 10, y + 10.5);
-    y += 21;
-  }
+  const { ensure, header } = makeChrome(doc, { M, BOTTOM, getY: () => y, setY: (v) => { y = v; } });
   function para(text, color = SLATE, size = 9.3) {
     doc.setFont("helvetica", "normal"); doc.setFontSize(size); doc.setTextColor(...color);
     doc.splitTextToSize(text, CW).forEach((ln) => { ensure(13); doc.text(ln, M, y + 9); y += 13; });
