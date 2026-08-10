@@ -25,6 +25,37 @@
 
         </activity>
 
+        <!--
+          Transistorsoft background-geolocation licence — RELEASE builds only.
+
+          The SDK is fully functional in DEBUG without a key, so this changes nothing about
+          the debug flow we have been testing against. It is what stops a RELEASE build
+          from refusing to run the location service.
+
+          MECHANISM VERIFIED, not assumed. v9 keys are a new JWT format and v8 keys do not
+          work with v9, so the registration method was worth checking rather than copying
+          from memory: the constant "com.transistorsoft.locationmanager.license" is present
+          in tslocationmanager-4.4.2.aar — the exact binary this build resolves — so the
+          meta-data name is unchanged from v8 even though the key format is not.
+
+          Not a secret. A licence key is bound to the application id and ships inside every
+          APK by design; anyone can read it out of the package. It belongs in version
+          control with the manifest it configures, and it is worthless against any other
+          app id.
+
+          Order 16956, product capacitor-background-geolocation, entitlement "core",
+          app_id com.bigbulltech.b4c — matches applicationId in build.gradle.
+
+          EXPIRY THAT BITES QUIETLY: max_build_stamp 20270828 with grace_builds 0. A
+          release BUILT after 28 Aug 2027 will not validate. Builds made before then keep
+          working indefinitely — this is a build-date limit, not a runtime kill switch —
+          but there is no grace, so a renewal has to be in hand before that date or release
+          builds simply stop.
+        -->
+        <meta-data
+            android:name="com.transistorsoft.locationmanager.license"
+            android:value="eyJhbGciOiJFZERTQSIsImtpZCI6ImVkMjU1MTktbWFpbi12MSJ9.eyJvcyI6ImFuZHJvaWQiLCJhcHBfaWQiOiJjb20uYmlnYnVsbHRlY2guYjRjIiwib3JkZXJfbnVtYmVyIjoxNjk1NiwicmVuZXdhbF91cmwiOiJodHRwczovL3Nob3AudHJhbnNpc3RvcnNvZnQuY29tL2NhcnQvMzkzNjcwNzEyMzYxOTk6MT9ub3RlPTExMjc2IiwiY3VzdG9tZXJfaWQiOjEwMjU4LCJwcm9kdWN0IjoiY2FwYWNpdG9yLWJhY2tncm91bmQtZ2VvbG9jYXRpb24iLCJrZXlfdmVyc2lvbiI6MSwiYWxsb3dlZF9zdWZmaXhlcyI6WyIuZGV2IiwiLmRldmVsb3BtZW50IiwiLnN0YWdpbmciLCIuc3RhZ2UiLCIucWEiLCIudWF0IiwiLnRlc3QiLCIuZGVidWciXSwibWF4X2J1aWxkX3N0YW1wIjoyMDI3MDgyOCwiZ3JhY2VfYnVpbGRzIjowLCJlbnRpdGxlbWVudHMiOlsiY29yZSJdLCJpYXQiOjE3ODYzMjQyMjJ9.fhDfUCU1s6UDEc2cuHg1z4rodqP67odjYkPsrFZ58VasGS0evsqCzMZlYBkKbbktcy--jqkQ4avh7-y63QrHCA" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
