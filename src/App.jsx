@@ -10,7 +10,7 @@ import {
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
 } from "lucide-react";
-import { downloadDepartmentReport, downloadCapitalPlan } from "./report.js";
+import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck } from "./report.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -1174,7 +1174,7 @@ export default function App() {
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
           {screen === "onboarding" && <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />}
-          {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
+          {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
           {screen === "equipment" && <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "myequipment" && <MyEquipment S={S} meId={myMemberId} notify={notify} />}
           {screen === "stationhours" && <StationHours S={S} dept={dept} notify={notify} />}
@@ -7154,7 +7154,10 @@ function CapitalFields({ S, v, set }) {
     </div>
   );
 }
-function Apparatus({ S, role, members, meId, notify }) {
+// `dept` is threaded through for ONE reason: the county PDF's banner needs the department
+// name and station, and this screen never needed them before. It is not read anywhere else
+// here, and the button that uses it is gated on it being present.
+function Apparatus({ S, role, members, meId, notify, dept }) {
   const [rigs, setRigs] = useState([]);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
   const me = members.find((m) => m.id === meId) || null;
@@ -7354,7 +7357,7 @@ function Apparatus({ S, role, members, meId, notify }) {
               )}
               {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
               {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
-              <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} />
+              <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
               <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
             </div>
           );
@@ -7792,7 +7795,7 @@ function ApparatusChecklist({ S, rig, notify }) {
 // Slice 2 — read-only check history per rig. Lazy-loads apparatus_checks on open,
 // then apparatus_check_results per run on expand. Read-only (SELECT only); RLS lets
 // all dept members read. Rows appear once Slice 4's perform-check flow (RPC) writes them.
-function ApparatusHistory({ S, rig, role, notify, onResolved }) {
+function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
   const [open, setOpen] = useState(false);
   const [checks, setChecks] = useState(null);          // null = not loaded yet
   const [loading, setLoading] = useState(false);
@@ -7868,6 +7871,28 @@ function ApparatusHistory({ S, rig, role, notify, onResolved }) {
                 </button>
                 {isOpen && (
                   <div style={{ marginTop: 8, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+                    {/* County report. INSIDE the expanded block and gated on resultsById[c.id]
+                        deliberately: the items are lazy-loaded on expand, so a button on the
+                        collapsed row would fire with items === undefined and hand the county a
+                        checklist with nothing on it — a wrong document rather than a failed one.
+                        canResolve is canManage(role), the same gate as Resolve above; every member
+                        can already READ this check, so this narrows who files paperwork, not who
+                        sees data. */}
+                    {canResolve && dept && resultsById[c.id] && (
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                        <button
+                          onClick={() => downloadApparatusCheck({
+                            deptName: dept?.name || "Department",
+                            station: dept?.station || "",
+                            rig: { name: rig.name, type: rig.type },
+                            check: c,
+                            items: resultsById[c.id] || [],
+                          })}
+                          style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}>
+                          <Download size={13} color={FIRE.btnIcon} /> Download county report
+                        </button>
+                      </div>
+                    )}
                     {c.general_note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8, fontStyle: "italic" }}>“{c.general_note}”</div>}
                     {resLoading === c.id ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={13} className="spin" /> Loading items…</div>

@@ -17,7 +17,11 @@ const MONTHS = ["January", "February", "March", "April", "May", "June",
 
 function badgeColors(text) {
   const t = String(text).toLowerCase();
-  if (/(out of service|lapsed|expired|flag|high|overdue)/.test(t)) return [REDX_BG, REDX];
+  // "fail" added for the apparatus check report. Without it a FAILED checklist item fell
+  // through to the neutral grey badge — a failure that reads as "no status" on a form a
+  // county inspector is looking at. Safe against the existing reports: none of their badge
+  // values (Lapsed, Expiring, Overdue, Open, Active, Probationary, Inactive) contain "fail".
+  if (/(out of service|lapsed|expired|flag|high|overdue|fail)/.test(t)) return [REDX_BG, REDX];
   if (/(expiring|watch|follow|needs|low|medium|probation)/.test(t)) return [AMBER_BG, AMBER];
   if (/(in service|current|healthy|active|ready|on target|pass)/.test(t)) return [GREEN_BG, GREEN];
   return [NEUT_BG, NEUT];
@@ -416,5 +420,186 @@ export function buildCapitalPlanDoc(data) {
   const slug = fullName.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "")
     + (station ? "-" + station.replace(/\s+/g, "") : "")
     + `-Capital-Plan-${now.getFullYear()}.pdf`;
+  return { doc, slug };
+}
+
+
+/* ---------------- Apparatus Check Report ----------------
+   The artifact a department hands the county: one completed truck check — who ran it, when,
+   what passed, what failed, and whether each failure was closed out. A pure function of what
+   the check-history screen already has in memory; it issues no query of its own.
+
+   APPARATUS IDENTIFIER GAP, stated rather than papered over. A county form usually wants a
+   unit number or VIN, and the apparatus table has no such column. This report therefore
+   identifies the rig by name and type only. Deriving something VIN-shaped from the name, or
+   printing a blank labelled "Unit #", would both be inventing an identifier the department
+   never recorded — on a document whose whole purpose is to be trusted by an outside body.
+   If the county rejects name+type, the fix is a real column and a form field, not a guess
+   made here.
+
+   data = { deptName, station,
+            rig:   { name, type },
+            check: { performed_by_name, performed_at, outcome, pass_count, fail_count, general_note },
+            items: [{ item_label, result, note, resolved_at, resolved_by_name, resolution_note }] } */
+export function downloadApparatusCheck(data) {
+  const { doc, slug } = buildApparatusCheckDoc(data);
+  doc.save(slug);
+}
+
+export function buildApparatusCheckDoc(data) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
+  const M = 44, CW = PW - 2 * M;
+  const BOTTOM = PH - 50;
+  let y = M;
+
+  const now = new Date();
+  const prepared = `Prepared ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+  const fullName = data.deptName || "Department";
+  const station = data.station || "";
+  const rig = data.rig || {};
+  const chk = data.check || {};
+  const items = data.items || [];
+
+  // Dates are formatted here rather than passed in pre-formatted, so the PDF cannot drift
+  // from the screen if the screen's formatting ever changes. A bad timestamp prints "—"
+  // instead of "Invalid Date", which is what an unguarded toLocaleString would put on a
+  // county form.
+  const when = (iso) => {
+    const d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d.getTime())) return "\u2014";
+    const hh = d.getHours(), mm = String(d.getMinutes()).padStart(2, "0");
+    const h12 = ((hh + 11) % 12) + 1, ap = hh < 12 ? "AM" : "PM";
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} at ${h12}:${mm} ${ap}`;
+  };
+  const pd = chk.performed_at ? new Date(chk.performed_at) : null;
+  const periodLabel = (pd && !isNaN(pd.getTime()))
+    ? `${MONTHS[pd.getMonth()].slice(0, 3).toUpperCase()} ${pd.getDate()}, ${pd.getFullYear()}`
+    : "";
+
+  // ---------- banner ----------
+  y = reportBanner(doc, { deptName: fullName, station, subtitle: "Apparatus Check Report", period: periodLabel, prepared });
+
+  // ---------- helpers ----------
+  const { ensure, header } = makeChrome(doc, { M, BOTTOM, getY: () => y, setY: (v) => { y = v; } });
+  function para(text, color = SLATE, size = 9.3) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(size); doc.setTextColor(...color);
+    doc.splitTextToSize(text, CW).forEach((ln) => { ensure(13); doc.text(ln, M, y + 9); y += 13; });
+  }
+  function table(head, body, opts = {}) {
+    ensure(40);
+    doc.autoTable({
+      startY: y,
+      head: [head],
+      body,
+      margin: { left: M, right: M },
+      styles: { font: "helvetica", fontSize: 8.6, textColor: SLATE, cellPadding: 4.5, lineColor: LINE, lineWidth: 0.3, valign: "middle" },
+      headStyles: { fillColor: SLATE, textColor: 255, fontStyle: "bold", fontSize: 8.4 },
+      alternateRowStyles: { fillColor: PANEL },
+      columnStyles: opts.columnStyles || {},
+      didParseCell: (hook) => {
+        if (hook.section === "body" && opts.badgeCol != null && hook.column.index === opts.badgeCol) {
+          const [bg, fg] = badgeColors(hook.cell.raw);
+          hook.cell.styles.fillColor = bg; hook.cell.styles.textColor = fg;
+          hook.cell.styles.fontStyle = "bold"; hook.cell.styles.halign = "center";
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 14;
+  }
+
+  // ---------- summary strip ----------
+  // The four facts a county reader checks first: which rig, who signed off on it, when, and
+  // did it pass. Everything else on the page is detail supporting these.
+  const failed = String(chk.outcome || "").toLowerCase() === "fail";
+  const SH = 78;
+  ensure(SH + 10);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, SH, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2.2, "F");
+  doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+  doc.text(rig.name || "Apparatus", M + 13, y + 28);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GRAY);
+  doc.text(rig.type || "\u2014", M + 13, y + 43);
+  doc.setFontSize(8.4);
+  doc.text(`Performed by ${chk.performed_by_name || "\u2014"}`, M + 13, y + 59);
+  doc.text(when(chk.performed_at), M + 13, y + 70);
+  const [obg, ofg] = badgeColors(failed ? "Fail" : "Pass");
+  const BW = 96, BBH = 26, bx = M + CW - 13 - BW;
+  doc.setFillColor(...obg); doc.rect(bx, y + 16, BW, BBH, "F");
+  doc.setTextColor(...ofg); doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+  doc.text(failed ? "FAIL" : "PASS", bx + BW / 2, y + 34, { align: "center" });
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(8.4);
+  doc.text(`${chk.pass_count ?? 0} passed \u00b7 ${chk.fail_count ?? 0} failed`, M + CW - 13, y + 59, { align: "right" });
+  doc.text(`${items.length} item${items.length === 1 ? "" : "s"} recorded`, M + CW - 13, y + 70, { align: "right" });
+  y += SH + 16;
+
+  // ---------- note ----------
+  if (chk.general_note) {
+    header("Note from the check");
+    para(`\u201c${chk.general_note}\u201d`);
+    y += 4;
+  }
+
+  // ---------- checklist ----------
+  header("Checklist");
+  if (items.length) {
+    table(["Item", "Result", "Notes & resolution"],
+      items.map((it) => {
+        const isFail = String(it.result || "").toLowerCase() === "fail";
+        const bits = [];
+        if (it.note) bits.push(it.note);
+        // An open failure has to be legible AS an open failure. A county reader should not
+        // have to notice the absence of a resolution line to work out that nothing was fixed.
+        if (isFail) {
+          bits.push(it.resolved_at
+            ? `Resolved by ${it.resolved_by_name || "\u2014"} on ${when(it.resolved_at)}${it.resolution_note ? ` \u2014 ${it.resolution_note}` : ""}`
+            : "UNRESOLVED as of this report");
+        }
+        return [it.item_label || "\u2014", isFail ? "Fail" : "Pass", bits.join("\n") || "\u2014"];
+      }),
+      { badgeCol: 1, columnStyles: { 0: { fontStyle: "bold" }, 1: { cellWidth: 54 } } });
+  } else {
+    para("No checklist items were recorded for this check.", GRAY);
+    y += 8;
+  }
+
+  // ---------- provenance ----------
+  ensure(46);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 40, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  const prov = doc.splitTextToSize(
+    "Generated from the department\u2019s own apparatus-check records. Item results, notes and "
+    + "resolutions are reproduced exactly as recorded by the member who performed the check and "
+    + "the officer who closed out each failure. Times are shown in the department\u2019s local time.", CW - 24);
+  let py = y + 13;
+  prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
+  y += 40 + 14;
+
+  // ---------- certification ----------
+  // The signatures are the point of the exercise: this page is evidence a human inspected a
+  // truck, and an unsigned printout is only a claim the software makes about itself.
+  ensure(120);
+  header("Certification");
+  y = signatureBlock(doc, y, { lines: ["Inspected by", "Reviewed by"] });
+
+  // ---------- footers ----------
+  const n = doc.getNumberOfPages();
+  const shortName = (station ? `${fullName} \u00b7 ${station}` : fullName);
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.5); doc.line(M, PH - 38, PW - M, PH - 38);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.2); doc.setTextColor(...GRAY);
+    doc.text(`${shortName} \u00b7 Apparatus Check Report`, M, PH - 26);
+    doc.text(`Page ${i} of ${n}`, PW - M, PH - 26, { align: "right" });
+  }
+
+  const clean = (v) => String(v || "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const stamp = (pd && !isNaN(pd.getTime()))
+    ? `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, "0")}-${String(pd.getDate()).padStart(2, "0")}`
+    : `${now.getFullYear()}`;
+  const slug = clean(fullName) + (station ? "-" + station.replace(/\s+/g, "") : "")
+    + `-${clean(rig.name) || "Apparatus"}-Check-${stamp}.pdf`;
   return { doc, slug };
 }
