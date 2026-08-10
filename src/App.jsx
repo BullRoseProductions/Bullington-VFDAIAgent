@@ -10,7 +10,7 @@ import {
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
 } from "lucide-react";
-import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck } from "./report.js";
+import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck } from "./report.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -6330,7 +6330,10 @@ function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
    column list would drift, and the first symptom would be a county PDF that quietly differs
    depending on which screen it was downloaded from — the kind of defect nobody reports,
    because each document looks fine on its own. One list, two readers. */
-const APPARATUS_CHECK_COLS  = "id, performed_by_name, performed_at, outcome, pass_count, fail_count, general_note";
+// apparatus_id is here for the fleet report, which has to group checks by truck. The single-check
+// path simply carries the extra field and ignores it — cheaper than a second column list, and it
+// keeps the "one definition" property that makes the two PDFs impossible to drift apart.
+const APPARATUS_CHECK_COLS  = "id, apparatus_id, performed_by_name, performed_at, outcome, pass_count, fail_count, general_note";
 /* The result rows that become the PDF's checklist, IN THE ORDER THEY APPEAR ON IT.
 
    Columns and ORDER BY live together in one builder because both have to match across
@@ -6338,11 +6341,35 @@ const APPARATUS_CHECK_COLS  = "id, performed_by_name, performed_at, outcome, pas
    would silently reorder the county's checklist without changing a single value — the same
    items, the same results, in a different sequence — the kind of mismatch that survives
    every spot-check, because both documents look correct in isolation. */
-const apparatusResultsQuery = (checkId) =>
-  supabase.from("apparatus_check_results")
-    .select("id, item_label, result, note, resolved_at, resolved_by_name, resolution_note")
-    .eq("check_id", checkId)
+const apparatusResultsQuery = (checkIdOrIds) => {
+  const q = supabase.from("apparatus_check_results")
+    // check_id is required by the fleet report, which groups a batched read back onto its checks.
+    // Without it every row groups under `undefined`, every check gets zero items, and the combined
+    // PDF prints no checklists at all while looking like a success. The single-check path carries
+    // the extra field and ignores it.
+    .select("check_id, id, item_label, result, note, resolved_at, resolved_by_name, resolution_note");
+  // One id for a single-check PDF, many for the fleet report. Deliberately the SAME builder:
+  // a separate batched query would be a second column list and a second ORDER BY by another name.
+  return (Array.isArray(checkIdOrIds) ? q.in("check_id", checkIdOrIds) : q.eq("check_id", checkIdOrIds))
     .order("created_at", { ascending: true });
+};
+
+/* PostgREST sends .in() as a URL filter, so a year of fleet checks would build a query string long
+   enough to be rejected by the server. Chunked, then concatenated — the per-check grouping below
+   re-sorts anyway, so chunk boundaries cannot disturb item order within a check. */
+const APPARATUS_RESULT_CHUNK = 100;
+async function fetchResultsForChecks(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += APPARATUS_RESULT_CHUNK) {
+    const { data, error } = await apparatusResultsQuery(ids.slice(i, i + APPARATUS_RESULT_CHUNK));
+    if (error) return { error };
+    out.push(...(data || []));
+  }
+  return { data: out };
+}
+
+// "All apparatus" is a scope, not a rig id. A sentinel that cannot collide with a uuid.
+const ALL_RIGS = "__all__";
 
 /* ---------------- Apparatus Checks (leadership) ----------------
    A home in Reports for the county PDF that previously existed only as a button on an
@@ -6366,7 +6393,15 @@ function ApparatusChecksReport({ S, dept, back }) {
   const [rigs, setRigs] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");            // a failed read is not "no apparatus" — never show empty as fact
-  const [rigId, setRigId] = useState("");
+  const [scope, setScope] = useState("");          // a rig id, or ALL_RIGS
+  const [range, setRange] = useState(() => presetRange("month"));
+  const [presetKey, setPresetKey] = useState("month");
+  const [fleetBusy, setFleetBusy] = useState(false);
+  const [fleetErr, setFleetErr] = useState("");
+  const isFleet = scope === ALL_RIGS;
+  // The per-rig list keeps reading a plain rig id, so fleet mode simply parks it. Nothing in the
+  // existing single-check path had to change to make room for the combined one.
+  const rigId = isFleet ? "" : scope;
   const [checks, setChecks] = useState([]);
   const [checksLoading, setChecksLoading] = useState(false);
   const [checksErr, setChecksErr] = useState("");
@@ -6382,7 +6417,7 @@ function ApparatusChecksReport({ S, dept, back }) {
         setRigs(list);
         // Land on the first unit rather than an empty screen. Only when nothing is chosen yet,
         // so a retry after an error does not yank the user off the rig they were looking at.
-        setRigId((cur) => cur || (list[0]?.id ?? ""));
+        setScope((cur) => cur || (list[0]?.id ?? ""));
       });
   };
   useEffect(() => { loadRigs(); }, []);
@@ -6423,6 +6458,56 @@ function ApparatusChecksReport({ S, dept, back }) {
     });
   }
 
+  /* THE COMBINED REPORT. Assembled on demand rather than held in state: it is a document, not a
+     screen, and keeping a fleet-quarter of checks in memory to render one button would charge for
+     it on every visit.
+
+     Local-midnight bounds, and `< the day after` rather than `<= the end date`. A YYYY-MM-DD
+     compared against a timestamptz means midnight, so a naive .lte() would drop almost the whole
+     final day of the range — on a county report, silently. */
+  async function downloadFleet() {
+    setFleetErr(""); setFleetBusy(true);
+    try {
+      const startAt = new Date(`${range.from}T00:00:00`);
+      const endAt = new Date(`${range.to}T00:00:00`); endAt.setDate(endAt.getDate() + 1);
+      if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) { setFleetErr("Those dates don't look right — nothing was downloaded."); return; }
+
+      const { data: checks, error: cErr } = await supabase.from("apparatus_checks")
+        .select(APPARATUS_CHECK_COLS)
+        .eq("state", "finalized")
+        .gte("performed_at", startAt.toISOString())
+        .lt("performed_at", endAt.toISOString())
+        .order("performed_at", { ascending: false });
+      if (cErr) { setFleetErr(cErr.message || "Couldn't load the checks — nothing was downloaded."); return; }
+
+      // Items for every check in the range, batched. REFUSE on failure: a combined packet missing
+      // its checklists is a WRONG document, not a partial one, and the wrong one gets filed.
+      const ids = (checks || []).map((c) => c.id);
+      const itemsByCheck = {};
+      if (ids.length) {
+        const { data: rows, error: rErr } = await fetchResultsForChecks(ids);
+        if (rErr) { setFleetErr(rErr.message || "Couldn't load the checklist items — nothing was downloaded."); return; }
+        for (const r of rows) { (itemsByCheck[r.check_id] = itemsByCheck[r.check_id] || []).push(r); }
+      }
+
+      // Grouped by truck in the rig order already on screen. Every rig is included even with no
+      // checks in the period: a truck missing from a county packet reads as an oversight, while a
+      // truck listed as "no checks in this period" is a finding.
+      const byRig = rigs.map((r) => ({
+        name: r.name, type: r.type,
+        checks: (checks || []).filter((c) => c.apparatus_id === r.id)
+          .map((c) => ({ ...c, items: itemsByCheck[c.id] || [] })),
+      }));
+
+      downloadFleetCheck({
+        deptName: dept?.name || "Department",
+        station: dept?.station || "",
+        range: { from: range.from, to: range.to },
+        rigs: byRig,
+      });
+    } finally { setFleetBusy(false); }
+  }
+
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }); };
 
   return (
@@ -6445,19 +6530,51 @@ function ApparatusChecksReport({ S, dept, back }) {
         </div>
       )}
 
-      {/* TOOLBAR — this is the seam. The month picker and "Monthly report" button join this row. */}
+      {/* TOOLBAR. Scope first: a single unit keeps the per-check list exactly as it was, and
+          "All apparatus" swaps in a date range plus one combined download. The date controls
+          appear only in fleet mode — a range would do nothing in single-rig mode, and a control
+          that does nothing is worse than no control. */}
       {loaded && !err && rigs.length > 0 && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
           <label style={{ ...S.field, minWidth: 220 }}>
             <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Apparatus</span>
-            <select style={FS.input} value={rigId} onChange={(e) => setRigId(e.target.value)}>
+            <select style={FS.input} value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value={ALL_RIGS}>All apparatus — combined report</option>
               {rigs.map((r) => <option key={r.id} value={r.id}>{r.name}{r.type ? ` — ${r.type}` : ""}</option>)}
             </select>
           </label>
+          {isFleet && <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />}
         </div>
       )}
 
-      {!loaded || err ? null : rigs.length === 0 ? (
+      {/* FLEET MODE — one combined PDF for every unit over the range. The per-rig list below is
+          untouched and still runs the single-check path. */}
+      {loaded && !err && rigs.length > 0 && isFleet && (
+        <div style={{ ...FS.card, padding: "16px 18px" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Combined apparatus report</div>
+              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
+                Every unit's completed checks between the selected dates, in one PDF: a fleet summary,
+                then each truck's checks. Failed checks are expanded item by item.
+              </div>
+            </div>
+            <button disabled={fleetBusy} onClick={downloadFleet}
+              style={{ ...FS.btnPrimary, opacity: fleetBusy ? 0.6 : 1 }}>
+              {fleetBusy ? <><Loader2 size={14} className="spin" /> Building…</> : <><Download size={15} /> Download combined report</>}
+            </button>
+          </div>
+          {fleetErr && (
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 12, padding: "9px 11px", borderRadius: 9, background: "rgba(200,50,58,.10)", border: `0.5px solid ${FIRE.hairline}` }}>
+              <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{fleetErr}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!loaded || err || isFleet ? null : rigs.length === 0 ? (
         <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus on record yet.</div>

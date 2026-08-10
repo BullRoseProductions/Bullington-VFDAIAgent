@@ -77,11 +77,17 @@ function reportBanner(doc, { deptName, station, subtitle, period, prepared }) {
   doc.setFillColor(255);
   doc.rect(cx - 2.4, cy - 9.5, 4.8, 19, "F");
   doc.rect(cx - 9.5, cy - 2.4, 19, 4.8, "F");
-  // dept name (auto-fit)
+  // dept name (auto-fit). Reserve the right column's width so a long department name can't
+  // collide with the period. A single date ("AUG 4, 2026") fits the old fixed 100pt reserve; a
+  // date RANGE ("JUL 1, 2026 – JUL 31, 2026") is wider, so grow the reserve to the period's
+  // measured width when it exceeds 100. Never below 100 -> single-date reports (department,
+  // single check) are byte-for-byte unchanged.
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+  const rightReserve = Math.max(100, doc.getTextWidth(period || "") + 18);
   doc.setTextColor(255); doc.setFont("helvetica", "bold");
   let fs = 15.5;
   doc.setFontSize(fs);
-  const avail = CW - 60 - 100;
+  const avail = CW - 60 - rightReserve;
   while (doc.getTextWidth(deptName) > avail && fs > 10) { fs -= 0.5; doc.setFontSize(fs); }
   doc.text(deptName, M + 56, y + 36);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...PINK);
@@ -424,6 +430,38 @@ export function buildCapitalPlanDoc(data) {
 }
 
 
+/* Shared with the fleet report below, so the two documents cannot describe the same check
+   differently. A timestamp that fails to parse prints an em dash rather than "Invalid Date",
+   which is what an unguarded toLocaleString would put on a county form. */
+function apparatusWhen(iso) {
+  const d = iso ? new Date(iso) : null;
+  if (!d || isNaN(d.getTime())) return "—";
+  const hh = d.getHours(), mm = String(d.getMinutes()).padStart(2, "0");
+  const h12 = ((hh + 11) % 12) + 1, ap = hh < 12 ? "AM" : "PM";
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} at ${h12}:${mm} ${ap}`;
+}
+
+/* One checklist item -> one table row. SHARED so the single-check PDF and the fleet PDF give a
+   failure identical treatment: same wording, same resolution trail, same "UNRESOLVED" language.
+   If these diverged, the same failed item would read as closed on one document and open on the
+   other, which is the worst thing either document could do. */
+function apparatusItemRows(items) {
+  return (items || []).map((it) => {
+    const isFail = String(it.result || "").toLowerCase() === "fail";
+    const bits = [];
+    if (it.note) bits.push(it.note);
+    // An open failure has to be legible AS an open failure. A county reader should not have to
+    // notice the absence of a resolution line to work out that nothing was fixed.
+    if (isFail) {
+      bits.push(it.resolved_at
+        ? `Resolved by ${it.resolved_by_name || "—"} on ${apparatusWhen(it.resolved_at)}${it.resolution_note ? ` — ${it.resolution_note}` : ""}`
+        : "UNRESOLVED as of this report");
+    }
+    return [it.item_label || "—", isFail ? "Fail" : "Pass", bits.join("\n") || "—"];
+  });
+}
+const APPARATUS_ITEM_COLSTYLE = { badgeCol: 1, columnStyles: { 0: { fontStyle: "bold" }, 1: { cellWidth: 54 } } };
+
 /* ---------------- Apparatus Check Report ----------------
    The artifact a department hands the county: one completed truck check — who ran it, when,
    what passed, what failed, and whether each failure was closed out. A pure function of what
@@ -466,13 +504,7 @@ export function buildApparatusCheckDoc(data) {
   // from the screen if the screen's formatting ever changes. A bad timestamp prints "—"
   // instead of "Invalid Date", which is what an unguarded toLocaleString would put on a
   // county form.
-  const when = (iso) => {
-    const d = iso ? new Date(iso) : null;
-    if (!d || isNaN(d.getTime())) return "\u2014";
-    const hh = d.getHours(), mm = String(d.getMinutes()).padStart(2, "0");
-    const h12 = ((hh + 11) % 12) + 1, ap = hh < 12 ? "AM" : "PM";
-    return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} at ${h12}:${mm} ${ap}`;
-  };
+  const when = apparatusWhen;   // shared with the fleet report — one formatter, one em-dash guard
   const pd = chk.performed_at ? new Date(chk.performed_at) : null;
   const periodLabel = (pd && !isNaN(pd.getTime()))
     ? `${MONTHS[pd.getMonth()].slice(0, 3).toUpperCase()} ${pd.getDate()}, ${pd.getFullYear()}`
@@ -545,20 +577,7 @@ export function buildApparatusCheckDoc(data) {
   header("Checklist");
   if (items.length) {
     table(["Item", "Result", "Notes & resolution"],
-      items.map((it) => {
-        const isFail = String(it.result || "").toLowerCase() === "fail";
-        const bits = [];
-        if (it.note) bits.push(it.note);
-        // An open failure has to be legible AS an open failure. A county reader should not
-        // have to notice the absence of a resolution line to work out that nothing was fixed.
-        if (isFail) {
-          bits.push(it.resolved_at
-            ? `Resolved by ${it.resolved_by_name || "\u2014"} on ${when(it.resolved_at)}${it.resolution_note ? ` \u2014 ${it.resolution_note}` : ""}`
-            : "UNRESOLVED as of this report");
-        }
-        return [it.item_label || "\u2014", isFail ? "Fail" : "Pass", bits.join("\n") || "\u2014"];
-      }),
-      { badgeCol: 1, columnStyles: { 0: { fontStyle: "bold" }, 1: { cellWidth: 54 } } });
+      apparatusItemRows(items), APPARATUS_ITEM_COLSTYLE);
   } else {
     para("No checklist items were recorded for this check.", GRAY);
     y += 8;
@@ -601,5 +620,218 @@ export function buildApparatusCheckDoc(data) {
     : `${now.getFullYear()}`;
   const slug = clean(fullName) + (station ? "-" + station.replace(/\s+/g, "") : "")
     + `-${clean(rig.name) || "Apparatus"}-Check-${stamp}.pdf`;
+  return { doc, slug };
+}
+
+/* ---------------- Fleet Apparatus Checks (date range) ----------------
+   Every unit's checks over a period, as ONE document — what a county asks for when it wants
+   the quarter rather than a single truck on a single day.
+
+   Built entirely from the shared chrome (reportBanner / makeChrome / signatureBlock /
+   badgeColors) and the shared item mapping, so a failed item reads identically here and on the
+   single-check PDF.
+
+   data = { deptName, station,
+            range: { from, to },                       // YYYY-MM-DD, inclusive, as shown to the user
+            rigs: [ { name, type, checks: [ { ...check row, items: [...] } ] } ] }
+
+   Totals are computed HERE rather than passed in, so the cover figures cannot disagree with the
+   per-truck tables printed underneath them — the one inconsistency a reader would actually catch. */
+
+/* DETAIL LEVEL — TUNABLE. Today a FAILED check expands to its full item-by-item checklist and a
+   passing check stays one line, which keeps a quarterly packet readable while still showing every
+   failure in full. To print the complete checklist for EVERY check, change this one line to
+   `() => true`. That is the whole switch; nothing else below depends on the choice. */
+const FLEET_EXPAND_ITEMS = (check) => String(check?.outcome || "").toLowerCase() === "fail";
+
+export function downloadFleetCheck(data) {
+  const { doc, slug } = buildFleetCheckDoc(data);
+  doc.save(slug);
+}
+
+export function buildFleetCheckDoc(data) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
+  const M = 44, CW = PW - 2 * M;
+  const BOTTOM = PH - 50;
+  let y = M;
+
+  const now = new Date();
+  const prepared = `Prepared ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+  const fullName = data.deptName || "Department";
+  const station = data.station || "";
+  const rigs = data.rigs || [];
+  const range = data.range || {};
+
+  // Range labels come off the YYYY-MM-DD strings the picker produced. Parsed as local dates
+  // (not UTC) so the printed period matches the days the user selected.
+  const dayLabel = (s) => {
+    if (!s) return "—";
+    const [yy, mm, dd] = String(s).split("-").map(Number);
+    const d = new Date(yy, (mm || 1) - 1, dd || 1);
+    return isNaN(d.getTime()) ? "—" : `${MONTHS[d.getMonth()].slice(0, 3).toUpperCase()} ${d.getDate()}, ${d.getFullYear()}`;
+  };
+  const periodLabel = `${dayLabel(range.from)} – ${dayLabel(range.to)}`;
+
+  y = reportBanner(doc, { deptName: fullName, station, subtitle: "Apparatus Checks", period: periodLabel, prepared });
+
+  const { ensure, header } = makeChrome(doc, { M, BOTTOM, getY: () => y, setY: (v) => { y = v; } });
+  function para(text, color = SLATE, size = 9.3) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(size); doc.setTextColor(...color);
+    doc.splitTextToSize(text, CW).forEach((ln) => { ensure(13); doc.text(ln, M, y + 9); y += 13; });
+  }
+  function table(head, body, opts = {}) {
+    ensure(40);
+    doc.autoTable({
+      startY: y,
+      head: [head],
+      body,
+      margin: { left: M, right: M },
+      styles: { font: "helvetica", fontSize: 8.6, textColor: SLATE, cellPadding: 4.5, lineColor: LINE, lineWidth: 0.3, valign: "middle" },
+      headStyles: { fillColor: SLATE, textColor: 255, fontStyle: "bold", fontSize: 8.4 },
+      alternateRowStyles: { fillColor: PANEL },
+      columnStyles: opts.columnStyles || {},
+      didParseCell: (hook) => {
+        if (hook.section === "body" && opts.badgeCol != null && hook.column.index === opts.badgeCol) {
+          const [bg, fg] = badgeColors(hook.cell.raw);
+          hook.cell.styles.fillColor = bg; hook.cell.styles.textColor = fg;
+          hook.cell.styles.fontStyle = "bold"; hook.cell.styles.halign = "center";
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 14;
+  }
+
+  // ---------- per-rig figures ----------
+  const isFail = (c) => String(c?.outcome || "").toLowerCase() === "fail";
+  const stats = rigs.map((r) => {
+    const checks = r.checks || [];
+    const open = checks.reduce((n, c) => n + (c.items || []).filter(
+      (it) => String(it.result || "").toLowerCase() === "fail" && !it.resolved_at).length, 0);
+    const latest = checks.reduce((best, c) => {
+      const t = c.performed_at ? new Date(c.performed_at).getTime() : NaN;
+      return (!isNaN(t) && (best == null || t > best)) ? t : best;
+    }, null);
+    return {
+      rig: r,
+      checks,
+      total: checks.length,
+      passed: checks.filter((c) => !isFail(c)).length,
+      failed: checks.filter(isFail).length,
+      open,
+      latest,
+    };
+  });
+  const fleet = stats.reduce((a, s) => ({
+    checks: a.checks + s.total, passed: a.passed + s.passed, failed: a.failed + s.failed, open: a.open + s.open,
+  }), { checks: 0, passed: 0, failed: 0, open: 0 });
+
+  // ---------- cover summary ----------
+  const SH = 64;
+  ensure(SH + 10);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, SH, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2.2, "F");
+  const tiles = [
+    { num: String(rigs.length), label: "UNITS", sc: GRAY },
+    { num: String(fleet.checks), label: "CHECKS IN PERIOD", sc: GRAY },
+    { num: String(fleet.passed), label: "PASSED", sc: GREEN },
+    { num: String(fleet.failed), label: "FAILED", sc: fleet.failed ? REDX : GRAY },
+    { num: String(fleet.open), label: "OPEN FAILURES", sc: fleet.open ? REDX : GREEN },
+  ];
+  const colW = CW / tiles.length;
+  tiles.forEach((t, i) => {
+    const x = M + i * colW;
+    if (i > 0) { doc.setDrawColor(...LINE); doc.setLineWidth(0.75); doc.line(x, y + 10, x, y + SH - 10); }
+    doc.setTextColor(...RED); doc.setFont("helvetica", "bold"); doc.setFontSize(19);
+    doc.text(t.num, x + 13, y + 32);
+    doc.setTextColor(...t.sc); doc.setFont("helvetica", "normal"); doc.setFontSize(7.2);
+    doc.text(t.label, x + 13, y + 47);
+  });
+  y += SH + 16;
+
+  // ---------- fleet summary table ----------
+  header("Fleet summary");
+  if (!rigs.length) {
+    para("No apparatus on record for this department.", GRAY);
+    y += 8;
+  } else {
+    table(["Apparatus", "Checks", "Pass", "Fail", "Open failures", "Most recent check"],
+      stats.map((s) => [
+        s.rig.name || "—",
+        String(s.total),
+        String(s.passed),
+        String(s.failed),
+        s.open ? `${s.open} open` : "None",
+        s.latest == null ? "No checks in this period" : apparatusWhen(new Date(s.latest).toISOString()),
+      ]),
+      { badgeCol: 4, columnStyles: { 0: { fontStyle: "bold" }, 1: { halign: "center", cellWidth: 44 }, 2: { halign: "center", cellWidth: 40 }, 3: { halign: "center", cellWidth: 40 }, 4: { cellWidth: 84 } } });
+  }
+
+  // ---------- one section per truck ----------
+  stats.forEach((s) => {
+    header(`${s.rig.name || "Apparatus"}${s.rig.type ? ` — ${s.rig.type}` : ""}`);
+    if (!s.checks.length) {
+      // Said explicitly. A truck silently missing from a county packet reads as an oversight;
+      // a truck listed with "no checks in this period" is a finding.
+      para("No checks in this period.", GRAY);
+      y += 6;
+      return;
+    }
+    table(["Date", "Performed by", "Result", "Failed items"],
+      s.checks.map((c) => [
+        apparatusWhen(c.performed_at),
+        c.performed_by_name || "—",
+        isFail(c) ? "Fail" : "Pass",
+        String(c.fail_count ?? 0),
+      ]),
+      { badgeCol: 2, columnStyles: { 2: { cellWidth: 54 }, 3: { halign: "center", cellWidth: 66 } } });
+
+    // Failed checks expand to the full checklist — see FLEET_EXPAND_ITEMS.
+    s.checks.filter((c) => FLEET_EXPAND_ITEMS(c)).forEach((c) => {
+      ensure(30);
+      doc.setTextColor(...GRAY); doc.setFont("helvetica", "bold"); doc.setFontSize(8.6);
+      doc.text(`Checklist — ${apparatusWhen(c.performed_at)}`, M, y + 8);
+      y += 16;
+      if (c.general_note) para(`“${c.general_note}”`, GRAY, 8.4);
+      const rows = apparatusItemRows(c.items);
+      if (rows.length) table(["Item", "Result", "Notes & resolution"], rows, APPARATUS_ITEM_COLSTYLE);
+      else { para("No checklist items were recorded for this check.", GRAY, 8.4); y += 6; }
+    });
+  });
+
+  // ---------- provenance ----------
+  ensure(46);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 40, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  const prov = doc.splitTextToSize(
+    "Generated from the department’s own apparatus-check records for the period shown. Item results, "
+    + "notes and resolutions are reproduced exactly as recorded by the member who performed each check "
+    + "and the officer who closed out each failure. Checks that passed are listed by date; checks that "
+    + "failed are expanded in full. Times are shown in the department’s local time.", CW - 24);
+  let py = y + 13;
+  prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
+  y += 40 + 14;
+
+  // ---------- certification ----------
+  ensure(120);
+  header("Certification");
+  y = signatureBlock(doc, y, { lines: ["Inspected by", "Reviewed by"] });
+
+  // ---------- footers ----------
+  const n = doc.getNumberOfPages();
+  const shortName = (station ? `${fullName} · ${station}` : fullName);
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.5); doc.line(M, PH - 38, PW - M, PH - 38);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.2); doc.setTextColor(...GRAY);
+    doc.text(`${shortName} · Apparatus Checks · ${periodLabel}`, M, PH - 26);
+    doc.text(`Page ${i} of ${n}`, PW - M, PH - 26, { align: "right" });
+  }
+
+  const clean = (v) => String(v || "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = clean(fullName) + (station ? "-" + station.replace(/\s+/g, "") : "")
+    + `-Apparatus-Checks-${range.from || "start"}_to_${range.to || "end"}.pdf`;
   return { doc, slug };
 }
