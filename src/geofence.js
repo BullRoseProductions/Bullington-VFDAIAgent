@@ -120,16 +120,6 @@ export function clearGeofenceConsent(memberId) {
 let configured = false;   // ready() is idempotent per launch — config must not be re-applied on every render
 let BG = null;            // the plugin handle, resolved once
 
-/* ─── TEMP — REVERT BEFORE RELEASE ────────────────────────────────────────────
-   Desk-test instrumentation. Wraps every return so the reason string reaches the
-   Capacitor console (Logcat tag: "Capacitor/Console"). Revert = delete this helper
-   and unwrap the TT(...) calls below. */
-const TT = (where, res) => {
-  console.log(`[geofence] ${where} →`, res?.reason, res?.detail || "", res?.ok === true ? "OK" : "");
-  return res;
-};
-/* ─── END TEMP ─────────────────────────────────────────────────────────────── */
-
 /* Dynamic import, exactly as push.js does it: this keeps the native plugin out of the
    web bundle entirely rather than shipping it to browsers that can never use it. */
 async function loadPlugin() {
@@ -155,12 +145,12 @@ async function loadPlugin() {
    written here, so all consent wording stays in one reviewed place. */
 export async function initGeofence({ rationale } = {}) {
   if (!geofenceAvailable()) {
-    return TT("initGeofence", { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" });
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
   }
-  if (configured) return TT("initGeofence", { ok: true, reason: "already-configured" });
+  if (configured) return { ok: true, reason: "already-configured" };
 
   const bg = await loadPlugin();
-  if (!bg) return TT("initGeofence", { ok: false, reason: "plugin-missing" });
+  if (!bg) return { ok: false, reason: "plugin-missing" };
 
   try {
     const state = await bg.ready({
@@ -204,19 +194,18 @@ export async function initGeofence({ rationale } = {}) {
       persistMode: bg.PERSIST_MODE_GEOFENCE,
       maxDaysToPersist: 14,
 
-      /* TEMP — REVERT BEFORE RELEASE.
-         Release values are  debug: false  and  logLevel: bg.LOG_LEVEL_ERROR.
-         debug:true plays a sound on every transition and posts a notification; VERBOSE
-         fills Logcat. Both are desk-test aids and both are wrong on a member's phone. */
-      debug: true,
-      logLevel: bg.LOG_LEVEL_VERBOSE,
+      // Debug mode plays a sound and posts a notification on every geofence transition.
+      // Genuinely useful for a field test and completely wrong on a member's phone, so it
+      // stays off here and gets switched on deliberately for testing.
+      debug: false,
+      logLevel: bg.LOG_LEVEL_ERROR,
     });
     configured = true;
     // enabled:false is the assertion that this slice is inert — ready() configured the
     // SDK and started nothing.
-    return TT("initGeofence", { ok: true, reason: "configured", enabled: !!state?.enabled });
+    return { ok: true, reason: "configured", enabled: !!state?.enabled };
   } catch (e) {
-    return TT("initGeofence", { ok: false, reason: "ready-failed", detail: String(e?.message || e) });
+    return { ok: false, reason: "ready-failed", detail: String(e?.message || e) };
   }
 }
 
@@ -333,12 +322,7 @@ const FENCE_MIN_RADIUS_M = 100;
    The cost is honest and small: the clock starts at the dwell mark rather than the moment
    of crossing, so a shift loses its first two minutes. Against multi-hour standby that is
    noise, and it buys a number nobody has to explain away. */
-/* TEMP — REVERT BEFORE RELEASE. Release value is 2 * 60 * 1000 (120s).
-   Lowered to 10s so a single emulator teleport produces a DWELL while you're watching,
-   instead of requiring two minutes of simulated loitering. notifyOnDwell / notifyOnEntry
-   are unchanged — only the wait is shortened. At 10s the anti-flapping property this
-   constant exists for is effectively gone, which is fine at a desk and wrong in the field. */
-const FENCE_LOITERING_MS = 10 * 1000;
+const FENCE_LOITERING_MS = 2 * 60 * 1000;
 
 let fenceSignature = null;   // lat|lng|radius currently registered — re-register when it changes
 let geoSub = null;           // the onGeofence subscription; must never stack
@@ -369,9 +353,6 @@ let running = false;
 async function handleGeofenceEvent(evt, { onEvent } = {}) {
   const action = evt?.action;
   const at = evt?.timestamp || null;    // ISO string; the RPCs bound and clamp it server-side
-
-  // TEMP — REVERT BEFORE RELEASE: prove the transition reached JS at all.
-  console.log("[geofence] onGeofence FIRED:", action, evt?.identifier, at, evt?.location?.coords);
 
   try {
     if (action === "EXIT") {
@@ -499,28 +480,27 @@ export async function drainGeofenceQueue({ onEvent } = {}) {
    location must not leave members fenced to the old one. */
 export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
   if (!geofenceAvailable()) {
-    return TT("startStationGeofence", { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" });
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
   }
-  if (!dept?.geofence_enabled) return TT("startStationGeofence", { ok: false, reason: "dept-not-enabled" });
+  if (!dept?.geofence_enabled) return { ok: false, reason: "dept-not-enabled" };
 
   const lat = Number(dept?.station_lat);
   const lng = Number(dept?.station_lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     // No pin, no fence. Silent would be wrong — this is a department that switched the
     // feature on without finishing the setup it depends on.
-    return TT("startStationGeofence", { ok: false, reason: "no-station-pin" });
+    return { ok: false, reason: "no-station-pin" };
   }
   const radius = Math.max(Number(dept?.station_radius_m) || 150, FENCE_MIN_RADIUS_M);
 
   const init = await initGeofence({ rationale });
-  if (!init.ok) return TT("startStationGeofence", init);
+  if (!init.ok) return init;
   const bg = BG;
 
   // Never prompt from here. Starting is a consequence of permission already granted;
   // a dialog appearing because an effect re-ran is exactly the nagging G4c avoids.
   const perm = await getGeofencePermission();
-  console.log("[geofence] getGeofencePermission →", perm);   // TEMP — REVERT BEFORE RELEASE
-  if (perm.reason !== "always") return TT("startStationGeofence", { ok: false, reason: `permission-${perm.reason}` });
+  if (perm.reason !== "always") return { ok: false, reason: `permission-${perm.reason}` };
 
   try {
     // Listener BEFORE start, and exactly one of them — the push.js rule. A subscription
@@ -541,17 +521,15 @@ export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
         notifyOnExit: true,
       });
       fenceSignature = signature;
-      console.log("[geofence] addGeofence registered:", { id: STATION_FENCE_ID, lat, lng, radius, loiteringDelay: FENCE_LOITERING_MS });   // TEMP — REVERT BEFORE RELEASE
     }
 
     if (!running) {
       await bg.startGeofences();      // geofence-only mode. NOT start().
       running = true;
-      console.log("[geofence] startGeofences() returned — monitoring is live");   // TEMP — REVERT BEFORE RELEASE
     }
-    return TT("startStationGeofence", { ok: true, reason: "monitoring", radius, dwellMs: FENCE_LOITERING_MS });
+    return { ok: true, reason: "monitoring", radius, dwellMs: FENCE_LOITERING_MS };
   } catch (e) {
-    return TT("startStationGeofence", { ok: false, reason: "start-failed", detail: String(e?.message || e) });
+    return { ok: false, reason: "start-failed", detail: String(e?.message || e) };
   }
 }
 

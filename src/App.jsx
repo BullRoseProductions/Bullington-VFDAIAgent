@@ -1425,15 +1425,8 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    // TEMP — REVERT BEFORE RELEASE: desk-test breadcrumbs naming which guard bailed.
-    if (!myMemberId) { console.log("[geofence] effect bail: no myMemberId"); setGeofenceActive(false); return; }
-    if (!dept?.geofence_enabled) { console.log("[geofence] effect bail: dept.geofence_enabled is", dept?.geofence_enabled); setGeofenceActive(false); return; }
-    if (!geofenceAvailable()) { console.log("[geofence] effect bail: geofenceAvailable() false (flag off or not native)"); setGeofenceActive(false); return; }
-    const consentNow = readGeofenceConsent(myMemberId);
-    if (consentNow !== "granted") { console.log("[geofence] effect bail: consent is", consentNow); setGeofenceActive(false); return; }
-    console.log("[geofence] effect passed all guards — calling startStationGeofence", {
-      lat: dept?.station_lat, lng: dept?.station_lng, radius: dept?.station_radius_m, consentVersion,
-    });
+    if (!myMemberId || !dept?.geofence_enabled || !geofenceAvailable()) { setGeofenceActive(false); return; }
+    if (readGeofenceConsent(myMemberId) !== "granted") { setGeofenceActive(false); return; }
 
     startStationGeofence({
       dept,
@@ -1441,12 +1434,10 @@ export default function App() {
       // Fires from the background daemon, so it must stay cheap and never block. A failed
       // write is surfaced quietly — the member is still on shift and can check in by hand,
       // and a toast for something they didn't do would be noise they can't act on.
-      // TEMP — REVERT BEFORE RELEASE: log every event, not just errors.
-      onEvent: (e) => { console.log("[geofence] onEvent:", e?.action, e?.at || e?.reason || ""); },
+      onEvent: (e) => { if (e?.action === "error") console.warn("[geofence]", e.reason); },
     }).then((res) => {
       if (!alive) return;
       setGeofenceActive(!!res.ok);
-      console.log("[geofence] startStationGeofence →", res);   // TEMP — REVERT BEFORE RELEASE
       if (!res.ok && !["web", "flag-off", "dept-not-enabled"].includes(res.reason)) {
         console.warn("[geofence] not monitoring:", res.reason, res.detail || "");
       }
@@ -1465,9 +1456,8 @@ export default function App() {
          where the write can actually succeed. It never blocks the UI — it's a detached
          promise — and drainGeofenceQueue self-limits to once per app open. */
       drainGeofenceQueue({
-        onEvent: (e) => { console.log("[geofence] replay:", e?.action, e?.at || e?.reason || ""); },   // TEMP — REVERT BEFORE RELEASE
+        onEvent: (e) => { if (e?.action === "error") console.warn("[geofence] replay:", e.reason); },
       }).then((d) => {
-        console.log("[geofence] drainGeofenceQueue →", d);   // TEMP — REVERT BEFORE RELEASE
         if (d?.failed) console.warn("[geofence] replay left", d.failed, "event(s) queued for next open");
       });
     });
