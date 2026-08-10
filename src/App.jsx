@@ -6209,6 +6209,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
   if (view === "stationhours") return <StationHoursReport S={S} dept={dept} notify={notify} back={() => setView(null)} />;   // notify: the needs-review panel writes, so it reports failures the same way every other leadership mutation does
   if (view === "capital") return <CapitalPlanReport S={S} dept={dept} back={() => setView(null)} />;
+  if (view === "apparatuschecks") return <ApparatusChecksReport S={S} dept={dept} back={() => setView(null)} />;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 16 }}>
@@ -6273,6 +6274,20 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
             </div>
           </div>
         )}
+        {/* Same apparatus-module gate as the Capital Plan above: both read the apparatus tables,
+            so a department that switched the module off should not be offered either. */}
+        {moduleEnabled("apparatus", dept?.disabled_modules) && (
+          <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView("apparatuschecks")}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Apparatus Checks</div></div>
+            </div>
+            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Completed truck checks per unit — download any one as the county report.</div>
+            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -6308,6 +6323,181 @@ function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
     </div>
   );
 }
+/* The column lists for a finalized apparatus check and its result rows.
+
+   MODULE SCOPE ON PURPOSE. Both the in-context history panel and the Reports sub-view read
+   these tables and both feed downloadApparatusCheck. Two hand-maintained copies of the same
+   column list would drift, and the first symptom would be a county PDF that quietly differs
+   depending on which screen it was downloaded from — the kind of defect nobody reports,
+   because each document looks fine on its own. One list, two readers. */
+const APPARATUS_CHECK_COLS  = "id, performed_by_name, performed_at, outcome, pass_count, fail_count, general_note";
+/* The result rows that become the PDF's checklist, IN THE ORDER THEY APPEAR ON IT.
+
+   Columns and ORDER BY live together in one builder because both have to match across
+   screens. A drifting column list would drop a field and be noticed; a drifting ORDER BY
+   would silently reorder the county's checklist without changing a single value — the same
+   items, the same results, in a different sequence — the kind of mismatch that survives
+   every spot-check, because both documents look correct in isolation. */
+const apparatusResultsQuery = (checkId) =>
+  supabase.from("apparatus_check_results")
+    .select("id, item_label, result, note, resolved_at, resolved_by_name, resolution_note")
+    .eq("check_id", checkId)
+    .order("created_at", { ascending: true });
+
+/* ---------------- Apparatus Checks (leadership) ----------------
+   A home in Reports for the county PDF that previously existed only as a button on an
+   individual expanded check. That button stays — it is a useful shortcut in context; this is
+   where a chief looks when they are doing paperwork rather than a truck check.
+
+   Self-fetching for the same reason CapitalPlanReport is: the Apparatus screen keeps its
+   rigs, checks and results in its OWN component state, so there is no App-level list to
+   thread in. Same tables, same department RLS, no new RPC.
+
+   IDENTICAL PAYLOAD, NOT A SIMILAR ONE. The object handed to downloadApparatusCheck below is
+   assembled from the same shared column lists the history panel uses, so a PDF pulled from
+   here is the same document as one pulled from the check itself.
+
+   SEAM FOR THE MONTHLY REPORT: the toolbar holds the rig picker today. A monthly summary
+   (pick a month, get one PDF covering every check in it) is a second control in that same
+   toolbar plus a second generator in report.js — it does not need this component reshaped.
+   Deliberately not built: it is waiting on the county's answer about detail vs summary. */
+function ApparatusChecksReport({ S, dept, back }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const [rigs, setRigs] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState("");            // a failed read is not "no apparatus" — never show empty as fact
+  const [rigId, setRigId] = useState("");
+  const [checks, setChecks] = useState([]);
+  const [checksLoading, setChecksLoading] = useState(false);
+  const [checksErr, setChecksErr] = useState("");
+  const [busyId, setBusyId] = useState(null);    // check whose items are being fetched for download
+
+  const loadRigs = () => {
+    setErr("");
+    supabase.from("apparatus").select("id, name, type").order("name", { ascending: true })
+      .then(({ data, error }) => {
+        setLoaded(true);
+        if (error) { setErr(error.message || "Please try again."); return; }
+        const list = data || [];
+        setRigs(list);
+        // Land on the first unit rather than an empty screen. Only when nothing is chosen yet,
+        // so a retry after an error does not yank the user off the rig they were looking at.
+        setRigId((cur) => cur || (list[0]?.id ?? ""));
+      });
+  };
+  useEffect(() => { loadRigs(); }, []);
+
+  const loadChecks = (id) => {
+    if (!id) { setChecks([]); return; }
+    setChecksLoading(true); setChecksErr("");
+    supabase.from("apparatus_checks")
+      .select(APPARATUS_CHECK_COLS)
+      .eq("apparatus_id", id).eq("state", "finalized").order("performed_at", { ascending: false })
+      .then(({ data, error }) => {
+        setChecksLoading(false);
+        // Keep whatever is on screen. Replacing it with [] would read as "this rig has never
+        // been checked" — a different and much worse claim than "we could not load it".
+        if (error) { setChecksErr(error.message || "Please try again."); return; }
+        setChecks(data || []);
+      });
+  };
+  useEffect(() => { loadChecks(rigId); }, [rigId]);
+
+  const rig = rigs.find((r) => r.id === rigId) || null;
+
+  /* Items are fetched at download time, not with the list: a rig with fifty checks would
+     otherwise fire fifty queries to build a screen where one button gets pressed. */
+  async function downloadOne(c) {
+    setBusyId(c.id);
+    const { data, error } = await apparatusResultsQuery(c.id);
+    setBusyId(null);
+    // Refuse rather than hand over a checklist with nothing on it. An empty county report is a
+    // WRONG document, not a failed download, and a wrong document is the one that gets filed.
+    if (error) { setChecksErr(error.message || "Couldn't load that check's items — nothing was downloaded."); return; }
+    downloadApparatusCheck({
+      deptName: dept?.name || "Department",
+      station: dept?.station || "",
+      rig: { name: rig?.name, type: rig?.type },
+      check: c,
+      items: data || [],
+    });
+  }
+
+  const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }); };
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>APPARATUS CHECKS</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Completed checks for each unit, newest first. Download any one as the county report.</div>
+      </div>
+
+      {err && (
+        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load the apparatus list</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{err}</div>
+          </div>
+          <button onClick={loadRigs} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+        </div>
+      )}
+
+      {/* TOOLBAR — this is the seam. The month picker and "Monthly report" button join this row. */}
+      {loaded && !err && rigs.length > 0 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+          <label style={{ ...S.field, minWidth: 220 }}>
+            <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Apparatus</span>
+            <select style={FS.input} value={rigId} onChange={(e) => setRigId(e.target.value)}>
+              {rigs.map((r) => <option key={r.id} value={r.id}>{r.name}{r.type ? ` — ${r.type}` : ""}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {!loaded || err ? null : rigs.length === 0 ? (
+        <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+          <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
+          <div>No apparatus on record yet.</div>
+        </div>
+      ) : (<>
+        {checksErr && (
+          <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+            <AlertTriangle size={17} color={FIRE.redText} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>{checksErr}</div>
+            <button onClick={() => loadChecks(rigId)} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+          </div>
+        )}
+        {checksLoading ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading checks…</div>
+        ) : (checks.length === 0 && !checksErr) ? (
+          <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+            <ClipboardCheck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
+            <div>No completed checks recorded for {rig?.name || "this unit"} yet.</div>
+          </div>
+        ) : checks.map((c) => {
+          const failed = c.outcome === "fail";
+          return (
+            <div key={c.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <Pill S={S} color={failed ? FIRE.redBright : FIRE.green}>{failed ? "FAIL" : "PASS"}</Pill>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
+              </div>
+              <button disabled={busyId === c.id} onClick={() => downloadOne(c)}
+                style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: busyId === c.id ? 0.6 : 1 }}>
+                {busyId === c.id ? <><Loader2 size={13} className="spin" /> Preparing…</> : <><Download size={13} color={FIRE.btnIcon} /> County report</>}
+              </button>
+            </div>
+          );
+        })}
+      </>)}
+    </div>
+  );
+}
+
 /* ---------------- Capital Replacement Plan (leadership) ---------------- */
 // Self-fetching for the same reason CertProposals is: the Apparatus screen keeps its rig list in its OWN
 // component state, so there is no App-level list to thread in. Same `apparatus` table, same department
@@ -7806,10 +7996,8 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
   const [resolveFor, setResolveFor] = useState(null);  // result id whose resolve editor is open
   const [resolveNote, setResolveNote] = useState("");
   const [resolving, setResolving] = useState(false);
-  const RESULT_COLS = "id, item_label, result, note, resolved_at, resolved_by_name, resolution_note";
   async function reloadResults(checkId) {
-    const { data } = await supabase.from("apparatus_check_results")
-      .select(RESULT_COLS).eq("check_id", checkId).order("created_at", { ascending: true });
+    const { data } = await apparatusResultsQuery(checkId);
     setResultsById((m) => ({ ...m, [checkId]: data || [] }));
   }
   async function doResolve(resultId, checkId) {
@@ -7829,7 +8017,7 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
     if (next && checks === null) {
       setLoading(true);
       const { data } = await supabase.from("apparatus_checks")
-        .select("id, performed_by_name, performed_at, outcome, pass_count, fail_count, general_note")
+        .select(APPARATUS_CHECK_COLS)
         .eq("apparatus_id", rig.id).eq("state", "finalized").order("performed_at", { ascending: false });
       setChecks(data || []); setLoading(false);
     }
@@ -7839,8 +8027,7 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
     setExpanded(id);
     if (!resultsById[id]) {
       setResLoading(id);
-      const { data } = await supabase.from("apparatus_check_results")
-        .select(RESULT_COLS).eq("check_id", id).order("created_at", { ascending: true });
+      const { data } = await apparatusResultsQuery(id);
       setResultsById((m) => ({ ...m, [id]: data || [] })); setResLoading(null);
     }
   }
