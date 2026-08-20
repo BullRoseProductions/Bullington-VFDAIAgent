@@ -18,7 +18,7 @@ import { authedFetch } from "./apiBase";
 import { useReconnect, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush } from "./push";
-import { supabase, APP_URL, setOnSessionExpired } from "./supabaseClient";
+import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 // that parser is lazy-imported in extractPdfText() on first upload.
@@ -9276,7 +9276,7 @@ function HandoffModal({ items, notify, onClose }) {
   }
 
   const url = (st.phase === "live")
-    ? `${window.location.origin}${window.location.pathname}?handoff=${st.handoffId}&t=${st.code}`
+    ? `${APP_ORIGIN}/?handoff=${st.handoffId}&t=${st.code}`
     : "";
 
   return createPortal(
@@ -11376,7 +11376,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     setSigninTokens((t) => { const n = { ...t }; delete n[s.id]; return n; });
     loadSessions();
   }
-  const checkinURL = (s, token) => `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?checkin=${s.id}&t=${token || ""}`;
+  const checkinURL = (s, token) => `${APP_ORIGIN}/?checkin=${s.id}&t=${token || ""}`;
   // Full-screen QR overlay + hi-res PNG export for the sign-in code
   const [expandQR, setExpandQR] = useState(null);   // { s, token } | null
   const dlQRRef = useRef(null);                      // wraps the hidden 720px export QR (only one panel open at a time)

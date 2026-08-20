@@ -10,6 +10,10 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 // local dev (where VITE_APP_URL is unset).
 export const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin;
 
+// Production origin for SHAREABLE links (transfer / check-in QR) opened on someone else's device.
+// Unlike APP_URL, it never falls back to window.location.origin — a shared link must never be localhost.
+export const APP_ORIGIN = import.meta.env.VITE_APP_URL || "https://app.b4thecall.com";
+
 // App-registered handler, fired when a token refresh FAILS (dead refresh token). Lets the app
 // surface an actionable "your session expired — sign back in" instead of a dead-end write error.
 let onSessionExpired = null;
