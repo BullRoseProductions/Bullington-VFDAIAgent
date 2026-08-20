@@ -41,9 +41,15 @@ const MAINT_CADENCE_DAYS = { Weekly: 7, Monthly: 30, Quarterly: 90, Annual: 365 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_MS = 86400000;
 
-// A department with nothing flagged sends no email at all (slice 2 rule). Metrics alone don't trigger a send.
-// Flip to true if the summary is worth mailing on a quiet week.
-const SEND_WHEN_NOTHING_FLAGGED = false;
+// ALWAYS SEND. This is now a weekly station-health report, not an exception report: every department's
+// admins get the readiness snapshot each Monday whether or not anything is flagged.
+//
+// The old behaviour (skip a department with nothing flagged) made silence ambiguous. A quiet inbox could
+// mean "nothing needs attention" or "the digest is broken" — and for months it meant the latter, with no
+// way for anyone to tell the difference. A report that arrives every week is falsifiable: if it stops,
+// something is wrong. compose() carries the quiet-week wording so an all-clear reads as reassurance
+// rather than an empty template.
+const SEND_WHEN_NOTHING_FLAGGED = true;
 
 // Notification rows + push stay OFF until a device test confirms delivery. Set PUSH_ENABLED=1 in
 // Vercel to turn them on; the email digest is completely unaffected either way.
@@ -73,6 +79,20 @@ const STATS_EXCLUDED_IDS = new Set([
   "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com)
 ]);
 const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !(Array.isArray(m.access) && m.access.includes("Project Admin"));
+
+/* NEVER MAIL THESE, and note what is NOT in the list.
+   Removing countsInStats from deptAdminEmails (see below) was the fix for the owner never receiving
+   her own department's digest — but that predicate was doing two unrelated jobs, and dropping it
+   wholesale would also have started mailing the test and demo logins. With every department now
+   sending every week, the demo department would have begun emailing itself on a schedule.
+   So the service accounts get their own list, holding ONLY the two accounts that are not people.
+   The owner is deliberately absent from it: she is a real Department Admin at North Hood and the
+   entire reason the recipient rule changed. Excluding an account from the STATISTICS and refusing to
+   MAIL it are, once again, different questions — this is the second one, asked on its own. */
+const NO_MAIL_IDS = new Set([
+  "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
+  "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com)
+]);
 
 /* ---------------- Station Duties week window ----------------
    The digest reports the WEEK THAT JUST ENDED: [Monday 00:00, next Monday 00:00) in local time.
@@ -422,8 +442,28 @@ function metricsBlock(m) {
 
 function compose(deptName, groups, metrics, duties, { testMode } = {}) {
   const total = groups.certs.length + groups.gear.length + groups.maint.length;
-  const subject = `B4C — ${deptName}: ${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
-  const headline = `${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
+  const hasDuties = !!(duties && duties.total);
+  // Now that a quiet department gets mail too, the old wording would have greeted an all-clear week with
+  // "0 items need attention" in the subject line — a sentence that reads like a bug and buries the good
+  // news. Three cases, because a week with no flags but real duty activity is not the same as a week
+  // where nothing happened, and neither is a problem.
+  const quiet = total === 0;
+  const flagged = `${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
+  const subject = quiet
+    ? `B4C — ${deptName}: weekly station health`
+    : `B4C — ${deptName}: ${flagged}`;
+  const headline = !quiet ? flagged
+    : hasDuties ? "Nothing flagged — here is your week"
+    : "Quiet week — all systems steady";
+  // Says plainly WHICH checks came back clear. "Nothing flagged" on its own could mean nothing was
+  // looked at; naming the three categories is what makes it an all-clear rather than a shrug.
+  const quietBlock = quiet ? `<tr><td style="padding:22px 24px 0">
+        <div style="background:rgba(46,125,82,.10);border:1px solid ${C.hairline};border-radius:8px;padding:12px 14px">
+          <div style="font-size:14px;color:${C.text};font-weight:700">Nothing needs attention this week</div>
+          <div style="font-size:13px;color:${C.secondary};margin-top:4px;line-height:1.5">
+            Certifications, gear retirement and apparatus maintenance are all clear for ${esc(deptName)}.
+            The readiness figures above are your current snapshot.</div>
+        </div></td></tr>` : "";
   const testBanner = testMode
     ? `<tr><td style="padding:12px 24px 0"><div style="background:rgba(214,169,94,.12);border:1px solid ${C.amber};border-radius:8px;padding:9px 12px;font-size:12px;color:${C.amber}">
         TEST MODE &mdash; preview sent to the test address, not to ${esc(deptName)}'s admins.</div></td></tr>` : "";
@@ -441,6 +481,7 @@ function compose(deptName, groups, metrics, duties, { testMode } = {}) {
       </td></tr>
       ${testBanner}
       ${metricsBlock(metrics)}
+      ${quietBlock}
       ${section("Certifications", groups.certs, (it) => `${esc(it.member)} &middot; ${esc(it.cert)} &middot;`)}
       ${section("Gear retirement", groups.gear, (it) => `${esc(it.item)} &middot;`)}
       ${section("Maintenance", groups.maint, (it) => `${esc(it.apparatus)} &middot; ${esc(it.task)} &middot;`)}
@@ -461,15 +502,30 @@ function compose(deptName, groups, metrics, duties, { testMode } = {}) {
 }
 
 /* ---------------- send ---------------- */
-// Recipients for a REAL send: active Department Admins of that one department, same exclusions as the
-// stats, deduped by lowercased email. Scoping by department_id is what keeps one department's roster out
-// of another's inbox now that service-role has removed RLS from the picture.
+// Recipients for a REAL send: active Department Admins of that one department, deduped by lowercased
+// email. Scoping by department_id is what keeps one department's roster out of another's inbox now that
+// service-role has removed RLS from the picture.
+//
+// countsInStats IS DELIBERATELY NOT APPLIED HERE, and that is the whole point of this function.
+// STATS_EXCLUDED_IDS answers "whose work should be left out of the percentages" — the owner, the test
+// and demo accounts, and Project Admins, so the digest's denominators match the dashboard. That is a
+// question about ARITHMETIC. Who should receive the email is a question about PEOPLE, and the two had
+// been sharing one predicate.
+//
+// The cost of conflating them was total: North Hood's Department Admin is the owner, so she was struck
+// from her own department's recipient list by id and never received a single weekly digest. Nothing
+// errored — the list simply came back empty and the send was skipped. A ?to= test send still worked,
+// because that path bypasses this function entirely, which is exactly why it looked like a delivery
+// problem rather than a filter.
+//
+// The stats math is untouched: countsInStats still governs every denominator, so the owner stays out
+// of the numbers while receiving the mail about them.
 function deptAdminEmails(members, deptId) {
   const out = new Set();
   for (const m of members) {
     if (m.department_id !== deptId) continue;
     if (m.status !== "Active") continue;                              // inactive admins don't get mail
-    if (!countsInStats(m)) continue;                                  // owner/test/demo + Project Admin
+    if (NO_MAIL_IDS.has(m.id)) continue;                              // test/demo logins — never real recipients
     if (!Array.isArray(m.access) || !m.access.includes("Department Admin")) continue;
     const e = String(m.email || "").trim().toLowerCase();
     if (e) out.add(e);
@@ -710,3 +766,4 @@ export default async function handler(req, res) {
     ...(mi.error ? { metricsError: mi.error } : {}),
   });
 }
+
