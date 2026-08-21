@@ -15,6 +15,12 @@ const NEUT = [107, 114, 128], NEUT_BG = [236, 237, 240];
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
+/* Hours, always one decimal — the Station Hours screen's formatter, character for character. Module
+   scope because three builders now print hours (the standalone Station Hours PDF, the Chief's Report,
+   and anything that follows); a per-builder copy is exactly how two documents start disagreeing about
+   the same number for reasons no reader could diagnose. */
+const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
+
 function badgeColors(text) {
   const t = String(text).toLowerCase();
   // "fail" added for the apparatus check report. Without it a FAILED checklist item fell
@@ -257,6 +263,23 @@ export function buildReportDoc(data) {
     data.members.map((m) => [m.name, m.role, m.participation == null ? "\u2014" : `${m.participation}%`, m.status]),
     { badgeCol: 3, columnStyles: { 0: { fontStyle: "bold" }, 2: { halign: "right" }, 3: { cellWidth: 90 } } });
 
+  // ---------- Station Hours (PERIOD) ----------
+  // Board-level summary only; the shift-by-shift record lives in the standalone Station Hours PDF.
+  // `stationHours` is null when the read failed — the section is OMITTED rather than printed as zeros,
+  // because "0 credited hours" in front of a council is a false statement, not a missing one.
+  const sh = data.stationHours;
+  if (sh) {
+    header("Station Hours \u2014 ISO/LOSAP");
+    para(`${h1(sh.credited)} hours credited during the period across ${sh.shifts} shift${sh.shifts === 1 ? "" : "s"} by ${sh.members} member${sh.members === 1 ? "" : "s"}. `
+      + `${h1(sh.unverified)} further hours are recorded but not credited. ISO figure: ${h1(sh.iso)} hours. `
+      + `${sh.vpct}% of check-ins were location-verified.`);
+    if (sh.rows.length) {
+      table(["Member", "Credited", "Not credited", "Shifts"],
+        sh.rows.map((r) => [r.name || "\u2014", h1(r.credited), h1(r.unverified), String(r.shifts)]),
+        { columnStyles: { 0: { fontStyle: "bold" }, 1: { halign: "right", cellWidth: 66 }, 2: { halign: "right", cellWidth: 76 }, 3: { halign: "center", cellWidth: 50 } } });
+    } else { para("No station hours were recorded during this period.", GRAY); y += 8; }
+  }
+
   // ---------- Recent Training ----------
   header("Recent Training");
   // Optional (off-hours/one-off) sessions are marked so a bare "4 / 25" on a printed
@@ -274,10 +297,30 @@ export function buildReportDoc(data) {
       { columnStyles: { 0: { fontStyle: "bold" } } });
   } else { para("No upcoming training is currently scheduled.", GRAY); y += 8; }
 
+  // ---------- Apparatus Readiness (AS OF TODAY) ----------
+  // Labelled as a snapshot, like the roster: readiness is a today fact and must never read as though it
+  // described the reporting period.
+  const rd = data.readiness;
+  if (rd) {
+    header("Apparatus Readiness");
+    para(`As of ${rd.asOf}: ${rd.ready} ready, ${rd.flagged} needing attention, ${rd.oos} out of service of ${rd.total} apparatus. `
+      + `${rd.openFailures} check failure${rd.openFailures === 1 ? "" : "s"} remain${rd.openFailures === 1 ? "s" : ""} unresolved.`);
+    const rigRows = [
+      ...rd.flaggedRigs.map((r) => [r.name || "\u2014", "Needs attention", r.note || "\u2014"]),
+      ...rd.oosRigs.map((r) => [r.name || "\u2014", "Out of service", r.note || "\u2014"]),
+    ];
+    if (rigRows.length) {
+      table(["Apparatus", "Status", "Reason on record"], rigRows,
+        { badgeCol: 1, columnStyles: { 0: { fontStyle: "bold" }, 1: { cellWidth: 96 } } });
+    } else { para("Every apparatus is in service and passing its last check.", GRAY); y += 8; }
+  }
+
   // ---------- Recommended Actions ----------
   const actions = [];
   data.flaggedCerts.filter((f) => f.status === "Lapsed").slice(0, 3).forEach((f) =>
     actions.push(`Schedule ${f.member} for the next ${f.cert} refresher \u2014 certification has lapsed.`));
+  if (sh && sh.autoClosed > 0) actions.push(`Review ${sh.autoClosed} auto-closed shift${sh.autoClosed > 1 ? "s" : ""} \u2014 the system estimated the stop time, so those hours are not credited until an officer confirms them.`);
+  if (rd && rd.openFailures > 0) actions.push(`Close out ${rd.openFailures} open apparatus check failure${rd.openFailures > 1 ? "s" : ""}.`);
   if (c.prob > 0) actions.push(`Continue mentoring ${c.prob} probationary member${c.prob > 1 ? "s" : ""}; review status at the next business meeting.`);
   if (data.flaggedCerts.some((f) => f.status === "Expiring")) actions.push("Confirm seats for members with certifications expiring in the next 90 days in upcoming refresher classes.");
   if (actions.length) {
@@ -882,9 +925,6 @@ export function buildStationHoursDoc(data) {
   const shifts = data.shifts || [];
   const range = data.range || {};
 
-  // The screen's formatter, character for character. Anything else and the column would stop matching
-  // the tile above it for reasons no reader could diagnose.
-  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
   const stamp = (iso) => {
     const d = iso ? new Date(iso) : null;
     if (!d || isNaN(d.getTime())) return "—";

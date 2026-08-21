@@ -5978,6 +5978,16 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       optional: isOptionalEvent(s),   // shown, but not an accountability number
     }));
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  // Station hours for the REPORT PERIOD, and apparatus readiness AS OF TODAY. Both use the same shared
+  // derivations the standalone screens use, so a figure quoted here and a figure quoted there are the
+  // same number by construction rather than by coincidence.
+  const sh = useStationHoursRange(range);
+  const ap = useApparatusReadiness();
+  // A section is included ONLY when its read succeeded. On failure it is omitted entirely and the chief
+  // is told — printing zeros would put "0 credited hours" in front of a council because a query failed.
+  const shOk = sh.loaded && !sh.err;
+  const apOk = ap.loaded && !ap.err;
+  const h1r = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
   // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
   const flaggedCerts = [];
   cm.forEach((m) => m.certs.forEach((c) => {
@@ -6036,6 +6046,18 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       }).map((d) => ({ duty: d.duty, due: d.due_date || "", who: nameById.get(d.assigned_to) || (d.assigned_to ? "Unassigned" : "Station-wide"), overdue: !!(d.due_date && d.due_date < todayISO) })),
       upcoming: upcoming.map((s) => ({ title: s.title, date: fmtSess(s), leadership: s.audience === "leadership" })),
       pendingCerts: pendingCerts.map((p) => ({ member: nameById.get(p.member_id) || "A member", cert: p.name })),
+      // null (not an empty object) when the read failed — buildReportDoc omits the whole section rather
+      // than rendering a confident-looking table of zeros.
+      stationHours: shOk ? {
+        credited: sh.totals.credited, unverified: sh.totals.unverified, iso: sh.isoTotal,
+        vpct: sh.totals.vpct, members: sh.totals.members, shifts: sh.totals.shifts, autoClosed: sh.totals.autoClosed,
+        rows: sh.rows.slice(0, 10).map((r) => ({ name: r.name, credited: r.total, unverified: r.unverified, shifts: r.n })),
+      } : null,
+      readiness: apOk ? {
+        ...ap.totals, asOf: todayLabel,
+        flaggedRigs: ap.flaggedRigs.map((r) => ({ name: r.name, note: r.note })),
+        oosRigs: ap.oosRigs.map((r) => ({ name: r.name, note: r.note })),
+      } : null,
     };
   }
   async function draft() {
@@ -6056,6 +6078,13 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       `Average training attendance during the period: ${avgPart}%`,
       `Duties completed: ${dutiesDone}`,
       `Action items resolved (completed or cancelled): ${actionsResolved}`,
+      ...(shOk ? [
+        `Station hours credited (verified station standby + training): ${h1r(sh.totals.credited)} h across ${sh.totals.shifts} shifts by ${sh.totals.members} members`,
+        `Station hours recorded but NOT credited (unverified or auto-closed): ${h1r(sh.totals.unverified)} h`,
+        `ISO/LOSAP hours (de-overlapped, clipped to the period): ${h1r(sh.isoTotal)} h`,
+        `Share of check-ins location-verified: ${sh.totals.vpct}%`,
+        ...(sh.totals.autoClosed ? [`Shifts auto-closed by the system and awaiting an officer's confirmation: ${sh.totals.autoClosed} (their hours are NOT credited until reviewed)`] : []),
+      ] : [`Station hours: unavailable — the record could not be read, so no hours figure is provided.`]),
       ``,
       `=== AS OF TODAY (${todayLabel}) — current status, NOT specific to the period above ===`,
       `Members: ${active} active, ${prob} probationary (${cm.length} total)`,
@@ -6064,6 +6093,12 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       `Overdue duties (most overdue first): ${topN(overdueDuties, (d) => `${d.duty} — ${nameById.get(d.assigned_to) || (d.assigned_to ? "unassigned" : "station-wide")}${d.due_date ? `, due ${d.due_date}` : ""}`)}`,
       `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
+      ...(apOk ? [
+        `Apparatus readiness: ${ap.totals.ready} ready, ${ap.totals.flagged} needing attention, ${ap.totals.oos} out of service (${ap.totals.total} total)`,
+        `Open apparatus check failures not yet resolved: ${ap.totals.openFailures}`,
+        `Apparatus needing attention: ${topN(ap.flaggedRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
+        `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
+      ] : [`Apparatus readiness: unavailable — the record could not be read, so no readiness figure is provided.`]),
     ];
     const summary = lines.join("\n");
     const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's real records for a specific REPORT PERIOD. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nPERIOD vs. CURRENT — the data below is split into two labeled blocks. 'DURING THE REPORT PERIOD' facts describe what happened in the report window: narrate them as the period's activity and STATE THE REPORT PERIOD near the top. 'AS OF TODAY' facts are the department's CURRENT status (certification currency, roster) and are NOT specific to the period: narrate them as today's standing, and NEVER imply the current numbers describe the period — do not say attendance, certification, or roster levels were a certain value 'during the period' unless it is a DURING-THE-PERIOD fact. Keep the two clearly distinct so a reader always knows whether a number covers the period or today.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
@@ -6123,6 +6158,20 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         <Stat S={S} dark n={`${certPct}%`} label="Cert compliance" warn={expd > 0} />
       </div>
       <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
+        {/* Station hours belong to the PERIOD block: they describe the window, not today. */}
+        {sh.err ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
+            <AlertTriangle size={14} color={FIRE.redText} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>Station hours couldn't be loaded — this section will be left out of the report.</span>
+            <button onClick={sh.retry} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}><RefreshCw size={12} color={FIRE.btnIcon} /> Retry</button>
+          </div>
+        ) : shOk && (
+          <>
+            <SubHead>Station hours — {h1r(sh.totals.credited)} h credited · {h1r(sh.totals.unverified)} h not credited</SubHead>
+            <Line>ISO {h1r(sh.isoTotal)} h · {sh.totals.vpct}% verified · {sh.totals.members} members · {sh.totals.shifts} shifts</Line>
+            {sh.totals.autoClosed > 0 && <Line>⚠ {sh.totals.autoClosed} auto-closed shift{sh.totals.autoClosed > 1 ? "s" : ""} awaiting officer confirmation — not credited</Line>}
+          </>
+        )}
         <div style={{ ...FS.kicker, marginBottom: 2 }}>AS OF TODAY · CURRENT STATUS</div>
         <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
         {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
@@ -6130,6 +6179,20 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         {flaggedCerts.length === 0 ? <None /> : flaggedCerts.slice(0, 8).map((f, i) => <Line key={i}>{f.member} · {f.cert} · {f.exp} ({f.status})</Line>)}
         <SubHead>Upcoming training — {upcoming.length}</SubHead>
         {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "board" ? " · board" : s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+        {ap.err ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
+            <AlertTriangle size={14} color={FIRE.redText} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>Apparatus readiness couldn't be loaded — this section will be left out of the report.</span>
+            <button onClick={ap.retry} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}><RefreshCw size={12} color={FIRE.btnIcon} /> Retry</button>
+          </div>
+        ) : apOk && (
+          <>
+            <SubHead>Apparatus readiness — {ap.totals.ready} ready · {ap.totals.flagged} needs attention · {ap.totals.oos} out of service</SubHead>
+            {ap.totals.openFailures > 0 && <Line>⚠ {ap.totals.openFailures} open check failure{ap.totals.openFailures > 1 ? "s" : ""}</Line>}
+            {[...ap.flaggedRigs, ...ap.oosRigs].length === 0 ? <Line>All apparatus in service and passing.</Line>
+              : [...ap.flaggedRigs, ...ap.oosRigs].slice(0, 6).map((r) => <Line key={r.id}>{r.name}{r.note ? ` · ${r.note}` : ""}{r.inService ? "" : " · out of service"}</Line>)}
+          </>
+        )}
         <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
         {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
       </div>
@@ -6615,6 +6678,134 @@ function ApparatusChecksReport({ S, dept, back }) {
   );
 }
 
+/* THE station-hours bucketing rule — one definition, three readers.
+
+   Lifted verbatim out of StationHoursReport so the Station Hours screen, the Chief's Report and the
+   Meeting Agenda cannot drift apart. They already did once: api/digest.js kept its own copy, missed the
+   auto_closed rule, and now credits hours the screen does not. That divergence is invisible until two
+   documents quoting the same period disagree in front of a board.
+
+   ORDER IS THE RULE. auto_closed is tested BEFORE verified, because a check-in can be properly
+   geo-verified while its stop time was guessed by the sweeper — the duration is fiction, so the shift is
+   recorded and never credited until an officer confirms the real out-time. Reversing these two lines
+   would silently credit estimated hours to ISO/LOSAP.
+
+   Sums are raw; rounding happens once at the display edge. Rounding per row would drift a column away
+   from the total printed above it.
+
+   Input rows are dept_station_shifts output, which already excludes incident, off-site and open shifts
+   at the SQL layer — this function must not re-filter, or the two layers would each hold half a rule. */
+function rollupStationHours(shifts) {
+  const byMember = {};
+  for (const s of shifts || []) {
+    // `id` is carried so PDF detail sections can join on member_id rather than a display name.
+    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0, autoClosed: 0 });
+    const hrs = Number(s.hours) || 0;
+    if (s.auto_closed) { m.unverified += hrs; m.autoClosed += 1; }
+    else if (!s.verified) m.unverified += hrs;                   // recorded, not credited
+    else if (s.kind === "training") m.training += hrs;
+    else m.standby += hrs;                                       // standby is the only other surfaced kind
+    if (s.verified) m.vTrue += 1;
+    m.n += 1;
+  }
+  const rows = Object.values(byMember)
+    .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
+    .sort((x, y) => y.total - x.total);   // ranked by CREDITED hours — padding unverified time can't climb this list
+  const standby    = rows.reduce((a, r) => a + r.standby, 0);
+  const training   = rows.reduce((a, r) => a + r.training, 0);
+  const unverified = rows.reduce((a, r) => a + r.unverified, 0);
+  const n          = rows.reduce((a, r) => a + r.n, 0);
+  const vTrue      = rows.reduce((a, r) => a + r.vTrue, 0);
+  const autoClosed = rows.reduce((a, r) => a + r.autoClosed, 0);
+  return {
+    rows,
+    totals: { standby, training, credited: standby + training, unverified, shifts: n, members: rows.length,
+              vTrue, vpct: n ? Math.round(100 * vTrue / n) : 0, autoClosed },
+  };
+}
+
+/* Station hours for an arbitrary reporting window, for the Chief's Report and the Agenda.
+
+   Same two RPCs the Station Hours screen calls and the same rollup rule; only the window differs.
+   dept_station_shifts is is_leadership() gated, which both callers already are.
+
+   BOUNDS. DateRangePicker yields YYYY-MM-DD. Compared against a timestamptz that means MIDNIGHT, so a
+   naive `to` would drop almost the whole final day of the period — silently, on a document read to a
+   board. Local midnight, and `< the day after`, matching the >= p_from AND < p_to convention used
+   elsewhere.
+
+   FAILURE. Never blanks: the last good figures stay, `err` is raised so the caller can OMIT the section
+   rather than print zeros, and useReconnect retries. A Chief's Report claiming "0 credited hours"
+   because a query failed is far worse than one with no hours section at all. */
+function useStationHoursRange(range) {
+  const [shifts, setShifts] = useState([]);
+  const [iso, setIso] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState("");
+  const reqRef = useRef(0);
+  const from = range?.from, to = range?.to;
+  const load = () => {
+    if (!from || !to) return;
+    const startAt = new Date(`${from}T00:00:00`);
+    const endAt = new Date(`${to}T00:00:00`); endAt.setDate(endAt.getDate() + 1);
+    if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) { setErr("Those dates don't look right."); return; }
+    const my = ++reqRef.current;
+    setErr("");
+    Promise.all([
+      supabase.rpc("dept_station_shifts", { p_from: startAt.toISOString(), p_to: endAt.toISOString() }),
+      supabase.rpc("dept_iso_hours", { p_from: startAt.toISOString(), p_to: endAt.toISOString() }),
+    ]).then(([a, b]) => {
+      if (my !== reqRef.current) return;            // a newer range won — dropping this keeps the figures and the label in step
+      if (a.error || b.error) { setErr((a.error || b.error).message || "Please try again."); return; }
+      setShifts(Array.isArray(a.data) ? a.data : []);
+      setIso(Array.isArray(b.data) ? b.data : []);
+      setLoaded(true);
+    });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [from, to]);
+  useReconnect(() => { if (err) load(); });
+  const { rows, totals } = rollupStationHours(shifts);
+  const isoTotal = (iso || []).reduce((a, r) => a + (Number(r.iso_total_hours) || 0), 0);
+  return { rows, totals, isoTotal, shifts, loaded, err, retry: load };
+}
+
+/* Apparatus readiness, AS OF TODAY. Same derivation as the Apparatus screen: out-of-service rigs are
+   excluded from readiness, and `flagged` is computed directly on in-service rigs rather than
+   total − ready, so a rig that is both out of service and failing cannot be counted twice.
+   Open failures reuse the same predicate as the failures dashboard: a finalized check, result fail,
+   never resolved. */
+function useApparatusReadiness() {
+  const [rigs, setRigs] = useState([]);
+  const [failures, setFailures] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState("");
+  const load = () => {
+    setErr("");
+    Promise.all([
+      supabase.from("apparatus").select("id, name, type, status, note, in_service").order("name", { ascending: true }),
+      supabase.from("apparatus_check_results")
+        .select("id, apparatus_checks!inner(apparatus_name, state)")
+        .eq("result", "fail").is("resolved_at", null).eq("apparatus_checks.state", "finalized"),
+    ]).then(([a, b]) => {
+      if (a.error || b.error) { setErr((a.error || b.error).message || "Please try again."); return; }
+      setRigs((a.data || []).map((r) => ({ id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false })));
+      setFailures(b.data || []);
+      setLoaded(true);
+    });
+  };
+  useEffect(() => { load(); }, []);
+  useReconnect(() => { if (err) load(); });
+  const inService = rigs.filter((r) => r.inService);
+  const readyRigs = inService.filter((r) => r.status === "Pass");
+  const flaggedRigs = inService.filter((r) => r.status !== "Pass");
+  const oosRigs = rigs.filter((r) => !r.inService);
+  return {
+    loaded, err, retry: load, rigs,
+    totals: { total: rigs.length, ready: readyRigs.length, flagged: flaggedRigs.length, oos: oosRigs.length, openFailures: failures.length },
+    flaggedRigs, oosRigs,
+  };
+}
+
 /* ---------------- Capital Replacement Plan (leadership) ---------------- */
 // Self-fetching for the same reason CertProposals is: the Apparatus screen keeps its rig list in its OWN
 // component state, so there is no App-level list to thread in. Same `apparatus` table, same department
@@ -6875,37 +7066,22 @@ function StationHoursReport({ S, dept, notify, back }) {
   // check-in was location-verified at the station. Unverified time is still recorded and shown — it is
   // never deleted or hidden — but it is accumulated in a SEPARATE bucket so it cannot inflate a figure
   // a chief reports to an outside body. standby/training/total below are verified-only by construction.
-  const byMember = {};
-  for (const s of shifts) {
-    // `id` is carried so the PDF can join each member's shift detail on member_id rather than on a
-    // display name — two members can share a name, and a county filing is the wrong place to find out.
-    // Nothing else about this rollup changes: no figure below is derived any differently.
-    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0 });
-    const hrs = Number(s.hours) || 0;
-    // AUTO-CLOSED FIRST, ahead of the verified check: the stop time was guessed by the safety-net job,
-    // not observed, so the DURATION is fiction even when the check-in itself was properly geo-verified.
-    // It lands in the same uncredited bucket as unverified time — visible, never added to a credited
-    // figure — until a human confirms the real out-time.
-    if (s.auto_closed) m.unverified += hrs;
-    else if (!s.verified) m.unverified += hrs;                   // recorded, not credited
-    else if (s.kind === "training") m.training += hrs;
-    else m.standby += hrs;                                       // standby is the only other surfaced kind
-    if (s.verified) m.vTrue += 1;
-    m.n += 1;
-  }
+  // The rule itself now lives in rollupStationHours (module scope) so the Chief's Report and the
+  // Agenda read the same one. The names below are unchanged deliberately: everything downstream —
+  // the tiles, the roster table, the PDF payload — keeps referring to exactly what it did before,
+  // which is what makes this a pure extraction rather than a rewrite.
+  const { rows: shRows, totals: SH } = rollupStationHours(shifts);
   // NOTE: the banner count comes from the UNWINDOWED review queue (review.length), not from `shifts`.
   // Counting auto-closed rows inside the current range would hide a shift flagged last month while
   // you're viewing "This month" — the exact case the queue exists to prevent.
-  const rows = Object.values(byMember)
-    .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
-    .sort((x, y) => y.total - x.total);   // ranked by CREDITED hours — padding unverified time can't climb this list
-  const dept_standby    = rows.reduce((a, r) => a + r.standby, 0);
-  const dept_training   = rows.reduce((a, r) => a + r.training, 0);
-  const dept_total      = dept_standby + dept_training;          // the credited figure
-  const dept_unverified = rows.reduce((a, r) => a + r.unverified, 0);
-  const dept_n          = rows.reduce((a, r) => a + r.n, 0);
-  const dept_vtrue      = rows.reduce((a, r) => a + r.vTrue, 0);
-  const dept_vpct       = dept_n ? Math.round(100 * dept_vtrue / dept_n) : 0;
+  const rows            = shRows;
+  const dept_standby    = SH.standby;
+  const dept_training   = SH.training;
+  const dept_total      = SH.credited;                           // the credited figure
+  const dept_unverified = SH.unverified;
+  const dept_n          = SH.shifts;
+  const dept_vtrue      = SH.vTrue;
+  const dept_vpct       = SH.vpct;
   // ---- ISO rollup ----
   // Straight sums of what dept_iso_hours already de-overlapped per member. Deliberately NOT recomputed
   // here: the union has to happen in SQL, over intervals, and any client-side arithmetic on these
@@ -10619,6 +10795,22 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
   const expired = certContext?.expired || [];
   const expiring = certContext?.expiring || [];
+  /* Station hours for the meeting need a window, and the agenda screen has no range picker. Last 30
+     days, computed explicitly from today so the span is reproducible rather than a floating phrase —
+     the agenda is read aloud, and "last 30 days" without dates is a claim nobody can check later.
+     useMemo so a re-render mid-meeting cannot slide the window under the numbers already on screen. */
+  const agendaRange = useMemo(() => {
+    const to = new Date();
+    const from = new Date(); from.setDate(from.getDate() - 29);   // 30 days inclusive of today
+    return { from: toISODate(from), to: toISODate(to) };
+  }, []);
+  const fmtAg = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const agendaSpan = `${fmtAg(agendaRange.from)} – ${fmtAg(agendaRange.to)}`;
+  const sh = useStationHoursRange(agendaRange);
+  const ap = useApparatusReadiness();
+  const shOk = sh.loaded && !sh.err;
+  const apOk = ap.loaded && !ap.err;
+  const h1r = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
   const [title, setTitle] = useState("Monthly Business Meeting");
   const [mtgDate, setMtgDate] = useState("");
   const [topics, setTopics] = useState("");   // leader's own meeting items — real intent, woven into the agenda
@@ -10645,9 +10837,18 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       `Certifications expiring within 90 days: ${topN(expiring, (r) => `${r.member}'s ${r.cert} (${r.phrase})`)}`,
       `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}${s.audience === "board" ? " (board)" : s.audience === "leadership" ? " (leadership)" : ""}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
+      ...(shOk ? [
+        `Station hours · ${agendaSpan}: ${h1r(sh.totals.credited)} h credited (verified) across ${sh.totals.shifts} shifts by ${sh.totals.members} members; ${h1r(sh.totals.unverified)} h recorded but not credited; ISO ${h1r(sh.isoTotal)} h; ${sh.totals.vpct}% of check-ins verified`,
+        ...(sh.totals.autoClosed ? [`Auto-closed shifts awaiting an officer's confirmation: ${sh.totals.autoClosed} (hours not credited until reviewed)`] : []),
+      ] : [`Station hours: unavailable — not read, so no hours figure is provided.`]),
+      ...(apOk ? [
+        `Apparatus readiness as of today: ${ap.totals.ready} ready, ${ap.totals.flagged} needing attention, ${ap.totals.oos} out of service (${ap.totals.total} total); ${ap.totals.openFailures} open check failures`,
+        `Apparatus needing attention: ${topN(ap.flaggedRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
+        `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
+      ] : [`Apparatus readiness: unavailable — not read, so no readiness figure is provided.`]),
     ];
     const user = lines.join("\n");
-    const sys = "You draft a clear, professional meeting agenda for a volunteer fire department's business meeting, for the chief or secretary to run the meeting from. Produce a standard agenda structure with the usual sections — Call to Order, Roll Call, Approval of Previous Minutes, Officer & Committee Reports, Old Business, New Business, Training, Announcements, and Adjournment (with the next meeting) — in a clean, numbered or bulleted format.\n\nYou may write the STANDARD AGENDA STRUCTURE and its section headings freely — those are normal parts of any meeting agenda, not department facts. But every DEPARTMENT-SPECIFIC item that fills those sections — a specific overdue duty and who owns it, a member whose certification is expired or expiring, an upcoming training date, a pending certification approval — must come ONLY from the real context provided below. Slot each into a sensible section: overdue and open duties under Old or New Business as items to address; expired/expiring certifications under New Business or a training/readiness item; upcoming training under Training; pending certification approvals under New Business or Officer Reports. Name the specifics — the duty, the member, the date — so the agenda reads like this department's real meeting, not a template.\n\nThe context below may also include 'Leader-provided topics to include' — items the meeting leader typed themselves. These are real meeting intent, not system data, so you may use them freely: add each as an agenda item under the most sensible section (New Business, Old Business, or Announcements), and you may lightly reword or group them to read cleanly. BUT do NOT invent any DETAIL the leader did not provide about a topic. For example, if the leader writes 'tanker purchase', list it as a discussion item like 'Tanker purchase — discussion'; do NOT invent a price, a vendor, a dollar amount, or a decision. If they write 'Johnson recognition', list 'Recognition — Johnson'; do not invent what it is for. Add each topic as stated, placed in the right section, and nothing more.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts in the real context below for department-specific items. NEVER invent or infer a duty, a certification, a member name, a date, a count, or an event that is not listed. Do not add plausible-sounding agenda items to fill space. If a category says 'none', do not create items for it — either omit that line or note there is nothing to report (for example, 'No overdue duties this period'). Where the context shows '…and N more', you may refer to that remaining count without naming them. Keep dates and windows exactly as written in the context. The harm this prevents is real: a chief runs a live meeting from this agenda, and a fabricated duty, certification, member, or date wastes the crew's time or misinforms the department.\n\nWarm but businesslike. Keep it to a runnable one-page agenda. Under 450 words.";
+    const sys = "You draft a clear, professional meeting agenda for a volunteer fire department's business meeting, for the chief or secretary to run the meeting from. Produce a standard agenda structure with the usual sections — Call to Order, Roll Call, Approval of Previous Minutes, Officer & Committee Reports, Old Business, New Business, Training, Announcements, and Adjournment (with the next meeting) — in a clean, numbered or bulleted format.\n\nYou may write the STANDARD AGENDA STRUCTURE and its section headings freely — those are normal parts of any meeting agenda, not department facts. But every DEPARTMENT-SPECIFIC item that fills those sections — a specific overdue duty and who owns it, a member whose certification is expired or expiring, an upcoming training date, a pending certification approval — must come ONLY from the real context provided below. Slot each into a sensible section: overdue and open duties under Old or New Business as items to address; expired/expiring certifications under New Business or a training/readiness item; upcoming training under Training; pending certification approvals under New Business or Officer Reports; station hours under Officer Reports, stated WITH the date span given and described as verified/credited hours; apparatus readiness as a readiness item under Officer Reports or New Business, naming any apparatus needing attention or out of service along with the reason on record. Name the specifics — the duty, the member, the date — so the agenda reads like this department's real meeting, not a template.\n\nThe context below may also include 'Leader-provided topics to include' — items the meeting leader typed themselves. These are real meeting intent, not system data, so you may use them freely: add each as an agenda item under the most sensible section (New Business, Old Business, or Announcements), and you may lightly reword or group them to read cleanly. BUT do NOT invent any DETAIL the leader did not provide about a topic. For example, if the leader writes 'tanker purchase', list it as a discussion item like 'Tanker purchase — discussion'; do NOT invent a price, a vendor, a dollar amount, or a decision. If they write 'Johnson recognition', list 'Recognition — Johnson'; do not invent what it is for. Add each topic as stated, placed in the right section, and nothing more.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts in the real context below for department-specific items. NEVER invent or infer a duty, a certification, a member name, a date, a count, or an event that is not listed. Do not add plausible-sounding agenda items to fill space. If a category says 'none', do not create items for it — either omit that line or note there is nothing to report (for example, 'No overdue duties this period'). Where the context shows '…and N more', you may refer to that remaining count without naming them. Keep dates and windows exactly as written in the context. The harm this prevents is real: a chief runs a live meeting from this agenda, and a fabricated duty, certification, member, or date wastes the crew's time or misinforms the department.\n\nWarm but businesslike. Keep it to a runnable one-page agenda. Under 450 words.";
     try { const t = await callClaude(sys, user); setOut(t); setSaveTitle(title.trim().slice(0, 60) || `Agenda · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
     catch { setErr("Couldn't draft the agenda just now. Try again."); } finally { setLoading(false); }
   }
