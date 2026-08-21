@@ -11876,9 +11876,27 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   async function removeSession(id) {
     const sess = sessions.find((x) => x.id === id);
+    // The button is hidden for closed sessions, so reaching here means the list went stale —
+    // someone else closed it in another tab since this render. RLS refuses either way; this
+    // just turns a raw policy violation into a sentence that says what to do about it.
+    if (sess?.done) {
+      notify({ kind: "error", title: "That session is closed",
+               text: "A completed session can't be removed, because deleting it would take its attendance record with it. Reopen it first if you need to make a change." });
+      return;
+    }
     if (!window.confirm(`Remove “${sess?.title || "this session"}” from the training calendar?`)) return;
     const { error } = await supabase.from("training_sessions").delete().eq("id", id);
-    if (error) { notify({ kind: "error", title: "Couldn't remove the session", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    if (error) {
+      // RLS refusing a closed session surfaces as an empty result or a policy violation rather
+      // than a friendly message. Name the likely cause instead of "something went wrong".
+      const closed = /policy|permission|row-level/i.test(error.message || "");
+      notify({ kind: "error", title: "Couldn't remove the session",
+               text: closed
+                 ? "This session looks closed. A completed session can't be removed \u2014 reopen it first if you need to make a change."
+                 : "Something went wrong removing that. Please try again.",
+               details: error.message });
+      return;
+    }
     loadSessions();
   }
   function startEditSession(s) {
@@ -12351,7 +12369,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                         ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
                         : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
                       {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
-                      {canManage && editSessionMode && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
+                      {/* Remove disappears once the session is CLOSED — a completed drill is an attendance
+                          record, and deleting it cascades the roster. Guarded on !s.done specifically and NOT
+                          on `locked`: locked also covers signinOpen and has-attendance, but a session that is
+                          not yet closed must stay deletable so a mistyped calendar entry can be cleaned up.
+                          Matches the RLS policy (done IS NOT TRUE) exactly. Reopen already renders in the
+                          done branch above, so hiding this surfaces the correct action rather than a dead end. */}
+                      {canManage && editSessionMode && !s.done && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                     </div>
                   </div>
                   {editingSessionId === s.id && (
