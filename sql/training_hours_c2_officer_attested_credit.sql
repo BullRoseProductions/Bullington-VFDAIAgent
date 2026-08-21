@@ -21,6 +21,15 @@
 --                        downstream — live, agg, range_agg, secs, final, the
 --                        ordering — is byte-for-byte unchanged.
 --
+-- MEASURED 2026-08-21: THE CAP COSTS NOTHING TODAY. The impact query below was run
+-- against live data and returned NO ROWS — no drill in either department exceeds 90
+-- minutes, so the cap never binds and credited hours do not move. The warning that
+-- follows is retained because it becomes true the day someone logs a longer drill,
+-- but it is NOT a reason to hesitate over applying this now.
+--
+-- The real change this makes is to ISO: attested drills begin counting toward
+-- dept_iso_hours, which previously read only verified station_presence rows.
+--
 -- READ THIS BEFORE APPLYING — C2 LOWERS SOME NUMBERS THAT ARE ALREADY PUBLISHED.
 --
 -- Part A is live, and it credits attendance-derived rows their FULL drill length.
@@ -333,6 +342,20 @@ NOTIFY pgrst, 'reload schema';
 -- =====================================================================
 -- VERIFY (run after)
 -- =====================================================================
+--
+-- WHICH OF THESE ACTUALLY RUN IN THE SUPABASE SQL EDITOR:
+--   1, 2, 3   yes — they read catalogs and base tables.
+--   4, 5, 6   NO. They call dept_station_shifts / dept_iso_hours, which gate on
+--             is_leadership(). That reads the JWT, and the editor has none, so all
+--             three raise "Not authorized" — the gate working, not a failure.
+--
+-- To check 4-6 without the gate, use the DRY RUN, which replicates the same logic
+-- reading base tables directly and shows before/after/delta side by side. It also
+-- answers 4-6 BEFORE applying rather than after, which is the better order:
+--     scratchpad/dryrun.sql   (standby_delta must be 0.00 on every row)
+--
+-- Or check them from the app as a leadership user: open the Station Hours report,
+-- where the ledger shows the location-verified vs officer check-in split directly.
 --
 -- -- 1. Shape. Expect officer_attested present as the 11th column, definer=t,
 -- --    search_path pinned, and exactly one of each function (no overloads).
