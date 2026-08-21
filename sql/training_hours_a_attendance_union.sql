@@ -128,11 +128,25 @@ begin
     -- B. ATTENDANCE-DERIVED — everyone marked present at a finished drill that has
     -- a recorded length and no observed training row of their own.
     --
+    -- TIMEZONE — HARDCODED TO CENTRAL, DELIBERATELY, AND THIS IS A KNOWN LIMIT.
+    -- training_sessions.date + start_time is a WALL-CLOCK time with no zone: a drill at
+    -- "19:00" means seven in the evening where the department is. Interpreting it with
+    -- current_setting('TimeZone') would read it in the SERVER's zone — Supabase runs UTC —
+    -- so a 7pm drill would render as 2pm and a drill near midnight on the 1st or the 31st
+    -- could fall into the wrong reporting period entirely. The HOURS are unaffected either
+    -- way (duration_min is a length, not a difference of two instants); what breaks is the
+    -- displayed in/out times and the window placement at month boundaries.
+    -- Every department is Central Texas today, so the zone is stated outright rather than
+    -- inherited from wherever the database happens to run. WHEN A NON-CENTRAL DEPARTMENT IS
+    -- ONBOARDED this must become a per-department timezone column (departments.timezone,
+    -- IANA name) read here instead of the literal — at which point every other place that
+    -- turns a wall-clock into an instant needs the same treatment.
+    --
     -- The window is applied to the drill's start instant, the same way the observed
     -- half windows on checked_in_at, so a report period means the same thing for both.
     select m.id, m.name,
-           (ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone current_setting('TimeZone') as checked_in_at,
-           ((ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone current_setting('TimeZone'))
+           (ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone 'America/Chicago' as checked_in_at,
+           ((ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone 'America/Chicago')
              + make_interval(mins => ts.duration_min)                                                  as checked_out_at,
            round((ts.duration_min / 60.0)::numeric, 2)   as hours,
            'training'::text                              as kind,
@@ -148,8 +162,8 @@ begin
       and ts.duration_min is not null
       and coalesce(ts.audience, 'everyone') <> 'board'     -- a board meeting is not training
       and coalesce(ts.is_offsite, false) = false           -- off-site stays out of station hours
-      and ((ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone current_setting('TimeZone')) >= p_from
-      and ((ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone current_setting('TimeZone')) <  p_to
+      and ((ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone 'America/Chicago') >= p_from
+      and ((ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone 'America/Chicago') <  p_to
       -- OBSERVED WINS. One source per (member, session), enforced here rather than
       -- hoped for: if the member has a real training presence row for this drill,
       -- their clocked duration is the truth and the estimate is not emitted at all.
