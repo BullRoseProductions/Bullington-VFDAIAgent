@@ -326,7 +326,9 @@ const FENCE_LOITERING_MS = 2 * 60 * 1000;
 
 let fenceSignature = null;   // lat|lng|radius currently registered — re-register when it changes
 let geoSub = null;           // the onGeofence subscription; must never stack
+let provSub = null;          // onProviderChange — watches for a late Always grant or a revocation
 let running = false;
+let eventSink = null;        // where handleGeofenceEvent reports; set by whoever starts monitoring
 
 /* The handler. Reads coordinates from THE EVENT — never getCurrentPosition().
 
@@ -470,6 +472,41 @@ export async function drainGeofenceQueue({ onEvent } = {}) {
   return { ok: true, reason: "drained", replayed, failed, total: pending.length };
 }
 
+/* ATTACH THE LISTENER AT LAUNCH, NOT BEHIND THE AUTH GATE.
+
+   iOS relaunches a terminated app in the background when a region transition fires, and gives it a
+   short, unpredictable window. Registration can afford to wait for auth — the SDK persists fences
+   natively, so a relaunch does not need to re-add them — but LISTENING cannot: if the subscription
+   is only attached after myMemberId, dept and consent have all resolved, a relaunch that is
+   suspended first never sees its own event.
+
+   This does not try to win that race, because it cannot be won reliably. It follows the Layer 1
+   answer instead: attach early so a live event is written when the session happens to be ready, and
+   let persistMode keep the event in the SDK's own queue when it is not. drainGeofenceQueue replays
+   it on the next open, the RPCs are idempotent on arrival time, and the hours come out right —
+   just late. Exactly the Android cold-auth case, which needs no new mechanism to cover iOS.
+
+   A failed live write costs nothing: only the drain deletes queued records, and only after a
+   successful write, so an attempt made before auth resolved leaves the record intact for later. */
+function attachGeofenceListener(bg) {
+  if (geoSub) return;
+  geoSub = bg.onGeofence((evt) => handleGeofenceEvent(evt, { onEvent: (e) => eventSink?.(e) }));
+}
+
+/* Called once on native launch, before anything is known about the member. Configures the SDK and
+   starts listening. Deliberately does NOT register a fence or ask for permission — both need
+   consent and a department, and neither is knowable this early. */
+export async function bootstrapGeofence({ onEvent } = {}) {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  if (onEvent) eventSink = onEvent;
+  const init = await initGeofence({});
+  if (!init.ok) return init;
+  attachGeofenceListener(BG);
+  return { ok: true, reason: "listening" };
+}
+
 /* Start geofence-only monitoring for this department's station.
 
    startGeofences(), NEVER start(). start() is continuous tracking — a breadcrumb trail,
@@ -499,13 +536,30 @@ export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
 
   // Never prompt from here. Starting is a consequence of permission already granted;
   // a dialog appearing because an effect re-ran is exactly the nagging G4c avoids.
+  /* WHEN-IN-USE IS ENOUGH TO REGISTER, and requiring "always" is why iOS never did.
+
+     Android escalates to Always in one flow, so `always` was a reasonable gate when only Android
+     had run. iOS does not: it grants When-In-Use first and defers the Always upgrade, sometimes by
+     days, to its own "keep allowing?" prompt. So on a correctly-consenting iPhone this read
+     `when-in-use`, returned permission-when-in-use, and never registered anything — and nothing
+     retried, because registration only re-runs when the effect's dependencies change.
+
+     Region monitoring works under When-In-Use while the app is open; Always is what makes it work
+     while the app is closed. Registering under either is strictly better than registering under
+     neither: the member gets arrivals recorded whenever the app is up, and the moment iOS upgrades
+     to Always the same fence starts working in the background with no further action. What must
+     NOT happen is claiming full coverage — the caller reports the actual grant so the UI can say
+     plainly that closed-app arrivals will not record yet. */
   const perm = await getGeofencePermission();
-  if (perm.reason !== "always") return { ok: false, reason: `permission-${perm.reason}` };
+  if (perm.reason !== "always" && perm.reason !== "when-in-use") {
+    return { ok: false, reason: `permission-${perm.reason}` };
+  }
 
   try {
-    // Listener BEFORE start, and exactly one of them — the push.js rule. A subscription
-    // added per render would fire the same transition N times and open N sessions.
-    if (!geoSub) geoSub = bg.onGeofence((evt) => handleGeofenceEvent(evt, { onEvent }));
+    // The listener is attached by bootstrapGeofence() at launch now, not here. This only records
+    // where events should be reported for the rest of this session.
+    eventSink = onEvent || eventSink;
+    attachGeofenceListener(bg);
 
     const signature = `${lat}|${lng}|${radius}`;
     if (fenceSignature !== signature) {
@@ -527,7 +581,22 @@ export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
       await bg.startGeofences();      // geofence-only mode. NOT start().
       running = true;
     }
-    return { ok: true, reason: "monitoring", radius, dwellMs: FENCE_LOITERING_MS };
+    /* WATCH FOR THE UPGRADE. iOS can grant Always long after the app asked, and Android can have it
+       revoked in Settings mid-life. onProviderChange fires on both, so the fence follows the grant
+       instead of being frozen at whatever was true during one render. Attached once; the guard is
+       what stops a re-registration adding a second listener. */
+    if (!provSub) {
+      provSub = bg.onProviderChange((state) => {
+        const name = authName(state?.status);
+        if (name === "always" || name === "when-in-use") {
+          // Idempotent: the fence signature is unchanged, so this re-registers nothing and simply
+          // ensures startGeofences() is running under the newly-granted permission.
+          startStationGeofence({ dept, rationale, onEvent }).catch(() => {});
+        }
+        onEvent?.({ action: "permission", reason: name });
+      });
+    }
+    return { ok: true, reason: "monitoring", radius, dwellMs: FENCE_LOITERING_MS, permission: perm.reason };
   } catch (e) {
     return { ok: false, reason: "start-failed", detail: String(e?.message || e) };
   }

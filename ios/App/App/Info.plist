@@ -61,6 +61,24 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<!-- fetch + processing are REQUIRED, and their absence is why iOS compiled but never
+		     registered a fence. TSBackgroundFetch ships as a hard dependency of the geolocation
+		     SDK and registers BGTaskScheduler work at launch: the binary uses BGAppRefreshTask
+		     (which needs "fetch") and BGProcessingTask (which needs "processing"). On iOS 13+,
+		     registering a task identifier that is not permitted THROWS during startup — before
+		     anything of ours could add a geofence. Verified by reading the shipped framework,
+		     not from the setup docs, which describe the Xcode capability checkboxes rather than
+		     these plist values. -->
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<!-- The identifier TSBackgroundFetch actually registers. Exactly one, read out of the
+	     framework binary: com.transistorsoft.fetch. Some setup notes also mention a
+	     "customtask" identifier — this version registers no such thing, and listing an
+	     identifier nothing registers is harmless but misleading. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.transistorsoft.fetch</string>
 	</array>
 
 	<!-- Transistorsoft licence, iOS. Key name VERIFIED, not assumed: TSLocationManagerLicense

@@ -18,7 +18,7 @@ import { authedFetch } from "./apiBase";
 import { useReconnect, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush } from "./push";
-import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue } from "./geofence";
+import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -1398,6 +1398,16 @@ export default function App() {
          notification prompt.
      Deliberately NOT tied to a screen or a tap: the disclosure has to come before the OS
      dialog, and the OS dialog is the first thing that would otherwise appear. */
+  /* Start LISTENING as early as the app can — no member, no department, no consent required.
+     A background relaunch on iOS may be suspended before auth resolves, and a listener attached
+     behind that gate would miss the very event that woke the app. Registration still waits for
+     consent below; only the subscription moves earlier. Anything that fires before a session is
+     ready stays in the SDK's queue and is replayed by the drain. */
+  useEffect(() => {
+    if (!geofenceAvailable()) return;
+    bootstrapGeofence({ onEvent: (e) => { if (e?.action === "error") console.warn("[geofence]", e.reason); } });
+  }, []);
+
   const [geofenceFirstRun, setGeofenceFirstRun] = useState(false);
   useEffect(() => {
     if (!myMemberId || !dept?.geofence_enabled) return;
