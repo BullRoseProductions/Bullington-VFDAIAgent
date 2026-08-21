@@ -23,3 +23,8 @@ ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 *.jks
 *.keystore
 keystore.properties
+
+# Local preview artefacts — generated samples for review, never part of the app.
+# They were committed once by an over-broad `git add -A`; this stops it recurring.
+_report_preview/
+_digest_preview/
