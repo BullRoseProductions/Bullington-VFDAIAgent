@@ -127,7 +127,17 @@ NOTIFY pgrst, 'reload schema';
 -- VERIFY (run after) — all read-only, and all safe: nothing calls this yet.
 -- =====================================================================
 --
--- -- 1. Signature and rights. Expect definer=f (invoker), anon=f, auth=t.
+-- HOW TO RUN THESE. Queries 3-5 call the function, and EXECUTE is revoked from
+-- everyone, so they only work as the OWNER — which is what the Supabase SQL editor
+-- gives you. They will fail from the app, by design.
+--
+-- SUBSTITUTE A REAL DEPARTMENT ID. my_department_id() reads the JWT, and the SQL
+-- editor has no JWT, so it returns NULL and every query below returns zero rows —
+-- which looks like a failure and is not one. Get an id first and paste it in:
+--     SELECT id, name FROM public.departments ORDER BY name;
+--
+-- -- 1. Signature and rights. Expect definer=f (invoker), and BOTH anon=f and
+-- --    auth=f — the revoke means nobody but the owner can call it.
 -- SELECT format('%s(%s)', proname, pg_get_function_identity_arguments(oid)) AS fn,
 --        format('definer=%s anon=%s auth=%s', prosecdef,
 --               has_function_privilege('anon', oid, 'EXECUTE'),
@@ -146,25 +156,24 @@ NOTIFY pgrst, 'reload schema';
 --        count(DISTINCT member_id)                  AS members,
 --        round(sum(extract(epoch FROM (end_at - start_at)))/3600.0, 2) AS hours,
 --        max(extract(epoch FROM (end_at - start_at))/60.0)             AS longest_minutes  -- expect <= 90
---   FROM public.attested_training(public.my_department_id(),
+--   FROM public.attested_training('<paste-dept-id>'::uuid,
 --                                 date_trunc('year', now()), now());
 --
 -- -- 4. The times must read as local wall-clock, NOT shifted five hours. A 19:00
 -- --    drill must show 19:00 here.
 -- SELECT session_id, start_at AT TIME ZONE 'America/Chicago' AS local_start,
 --        end_at   AT TIME ZONE 'America/Chicago' AS local_end
---   FROM public.attested_training(public.my_department_id(),
+--   FROM public.attested_training('<paste-dept-id>'::uuid,
 --                                 date_trunc('year', now()), now())
 --  ORDER BY start_at DESC LIMIT 5;
 --
--- -- 4b. EXECUTE is revoked from everyone: expect anon=f AND auth=f. Internal calls
--- --     from the two DEFINER RPCs still work because they run as the owner.
--- SELECT has_function_privilege('authenticated', oid, 'EXECUTE') AS auth_can_call,
---        has_function_privilege('anon', oid, 'EXECUTE')          AS anon_can_call,
---        pg_get_userbyid(proowner)                               AS owner
---   FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname='attested_training';
+-- -- 4b. OWNERSHIP MUST MATCH across all three, or the DEFINER functions cannot call
+-- --     this one and both RPCs error at runtime. Run this AFTER C2.
+-- SELECT proname, pg_get_userbyid(proowner) AS owner FROM pg_proc
+--  WHERE pronamespace='public'::regnamespace
+--    AND proname IN ('attested_training','dept_station_shifts','dept_iso_hours');
 --
 -- -- 5. Optional sessions are FLAGGED, not excluded, here — dept_iso_hours filters
 -- --    them out itself. Expect this to show the split.
--- SELECT optional, count(*) FROM public.attested_training(public.my_department_id(),
+-- SELECT optional, count(*) FROM public.attested_training('<paste-dept-id>'::uuid,
 --                                 date_trunc('year', now()), now()) GROUP BY 1;
