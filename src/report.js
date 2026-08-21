@@ -270,11 +270,15 @@ export function buildReportDoc(data) {
   const sh = data.stationHours;
   if (sh) {
     header("Station Hours \u2014 ISO/LOSAP");
-    para(`${h1(sh.credited)} hours credited during the period across ${sh.shifts} shift${sh.shifts === 1 ? "" : "s"} by ${sh.members} member${sh.members === 1 ? "" : "s"}. `
-      + `${h1(sh.unverified)} further hours are recorded but not credited. ISO figure: ${h1(sh.iso)} hours. `
-      + `${sh.vpct}% of check-ins were location-verified.`);
+    // CREDITED leads every sentence. The recorded figure is named in full every time it appears —
+    // a board that sees a bigger second number without a label will read it as hours worked.
+    para(`${h1(sh.credited)} hours CREDITED during the period (location-verified station standby and training) `
+      + `across ${sh.shifts} record${sh.shifts === 1 ? "" : "s"} by ${sh.members} member${sh.members === 1 ? "" : "s"}. `
+      + `ISO/LOSAP figure: ${h1(sh.iso)} hours. ${sh.vpct}% of check-ins were location-verified.`);
+    para(`RECORDED \u2014 attendance & unverified check-ins, not credited toward ISO/LOSAP: ${h1(sh.unverified)} hours.`
+      + (sh.attendanceHrs ? ` Of that, ${h1(sh.attendanceHrs)} hours come from drill attendance at each drill's recorded length rather than from a check-in.` : ""), GRAY, 8.6);
     if (sh.rows.length) {
-      table(["Member", "Credited", "Not credited", "Shifts"],
+      table(["Member", "Credited", "Recorded (not credited)", "Records"],
         sh.rows.map((r) => [r.name || "\u2014", h1(r.credited), h1(r.unverified), String(r.shifts)]),
         { columnStyles: { 0: { fontStyle: "bold" }, 1: { halign: "right", cellWidth: 66 }, 2: { halign: "right", cellWidth: 76 }, 3: { halign: "center", cellWidth: 50 } } });
     } else { para("No station hours were recorded during this period.", GRAY); y += 8; }
@@ -973,7 +977,7 @@ export function buildStationHoursDoc(data) {
   doc.setFillColor(...RED); doc.rect(M, y, CW, 2.2, "F");
   const tiles = [
     { num: h1(t.credited), label: "CREDITED HRS", nc: RED,  sc: GRAY },
-    { num: h1(t.unverified), label: "UNVERIFIED", nc: NEUT, sc: NEUT },
+    { num: h1(t.unverified), label: "RECORDED", nc: NEUT, sc: NEUT },
     { num: h1(t.iso), label: "ISO HRS", nc: RED,  sc: GRAY },
     { num: String(t.members ?? members.length), label: "MEMBERS", nc: SLATE, sc: GRAY },
     { num: String(t.shifts ?? shifts.length), label: "SHIFTS", nc: SLATE, sc: GRAY },
@@ -989,7 +993,14 @@ export function buildStationHoursDoc(data) {
   });
   y += SH + 8;
   doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-  doc.text(`${range.label || "Selected period"}${t.verifiedPct == null ? "" : `  ·  ${t.verifiedPct}% of check-ins verified`}`, M, y + 8);
+  doc.text(`${range.label || "Selected period"}${t.verifiedPct == null ? "" : `  \u00b7  ${t.verifiedPct}% of check-ins verified`}`, M, y + 8);
+  y += 12;
+  // The recorded bucket is spelled out, not left as a bare word. A board reading "unverified: 60.0"
+  // beside "credited: 5.0" will otherwise take the larger number for hours worked. Naming what it is
+  // made of — attendance estimates and unverified check-ins — and that it is not creditable, is the
+  // difference between a figure that informs and one that misleads.
+  doc.setFontSize(7.4); doc.setTextColor(...NEUT);
+  doc.text("RECORDED = drill attendance at the drill's recorded length + check-ins that were not location-verified. Not credited toward ISO/LOSAP.", M, y + 8);
   y += 20;
 
   // ---------- roster summary ----------
@@ -1000,7 +1011,7 @@ export function buildStationHoursDoc(data) {
   } else {
     // Already ranked by credited hours on the screen; the order is preserved rather than re-sorted so
     // the two lists read identically. Padding unverified time cannot climb this list.
-    table(["Member", "Credited", "Unverified", "Shifts", "Verified"],
+    table(["Member", "Credited", "Recorded", "Shifts", "Verified"],
       members.map((m) => [
         m.name || "—",
         h1(m.total),
@@ -1025,13 +1036,17 @@ export function buildStationHoursDoc(data) {
       .sort((a, b) => String(a.checked_in_at || "").localeCompare(String(b.checked_in_at || "")));
     header(`${m.name || "Member"} — ${h1(m.total)} credited`);
     if (!list.length) { para("No shifts in this period.", GRAY); y += 6; return; }
-    table(["Date", "In", "Out", "Hours", "Kind", "Status"],
+    table(["Date", "In", "Out", "Hours", "Kind", "Source", "Status"],
       list.map((s) => [
         stamp(s.checked_in_at),
         clock(s.checked_in_at),
         clock(s.checked_out_at),
         h1(s.hours),
         s.kind === "training" ? "Training" : "Standby",
+        // WHERE THE ROW CAME FROM. "From attendance" means nobody clocked in — the times shown are
+        // the drill's scheduled start and its recorded length, not an observed arrival and departure.
+        // Printing those beside clocked rows without saying so would dress an estimate as a punch.
+        s.source === "attendance" ? (s.optional ? "Attendance (optional)" : "From attendance") : "Clocked",
         // One column, because these are one question: does this shift count, and if not, why not.
         // auto-closed is named FIRST — it is the reason a verified shift can still be uncredited, and a
         // reader who sees only "Verified" on such a row would draw the wrong conclusion.
@@ -1040,7 +1055,7 @@ export function buildStationHoursDoc(data) {
       // Widths deliberately NOT pinned. Fixing all six columns left 174pt of the page unallocated,
       // which autoTable cannot distribute — it warns and renders the table narrow, adrift from the
       // full-width tables above it. Only the alignments are set; autoTable fits the rest to the page.
-      { badgeCol: 5, columnStyles: { 3: { halign: "right" }, 5: { halign: "center" } } });
+      { badgeCol: 6, columnStyles: { 3: { halign: "right" }, 6: { halign: "center" } } });
   });
 
   // ---------- provenance ----------
@@ -1051,6 +1066,11 @@ export function buildStationHoursDoc(data) {
   const prov = doc.splitTextToSize(
     "WHAT COUNTS. Credited hours are station standby and training shifts whose check-in was "
     + "location-verified at the station. Those are the hours reported for ISO and LOSAP.\n"
+    + "ATTENDANCE-DERIVED HOURS. A member marked present at a drill earns hours at the drill's recorded "
+    + "length. Those hours are RECORDED, never credited: nobody verified they were at the station, and the "
+    + "times shown are the drill's schedule rather than an observed arrival. Where a member did check in, "
+    + "their actual clocked duration is used instead and the estimate is not produced at all. Board meetings, "
+    + "off-site sessions and drills with no recorded length produce no hours.\n"
     + "WHAT IS EXCLUDED, and shown anyway. Unverified shifts are recorded and listed but never added to "
     + "the credited figure. Auto-closed shifts are excluded even when the check-in was verified: the stop "
     + "time was estimated by the system rather than observed, so the duration is not evidence until an "

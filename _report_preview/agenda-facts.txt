@@ -1,0 +1,17 @@
+SAMPLE — the agenda context block, exactly as assembled by MeetingAgenda for the same fixture.
+This is what the model is given; the TRUTH GUARDRAIL forbids anything not listed here.
+
+North Hood County Fire Department — real context for the agenda. Use ONLY these facts for department-specific items; add nothing not listed.
+Meeting: Monthly Business Meeting on 2026-09-02
+Leader-provided topics to include: tanker purchase; Johnson recognition
+Overdue duties (most overdue first): Hose test — J. Alvarez, due 2026-08-10
+Other open duties: Bay floor — station-wide
+Certifications expired: R. Chen's FF I (lapsed Jul 3)
+Certifications expiring within 90 days: J. Alvarez's EMT-B (Sep 12)
+Upcoming training: Pump ops on Sep 2
+Pending certification approvals: T. Okafor's Hazmat Ops
+Station hours · Jul 23 – Aug 21: 16.0 h credited (verified) across 7 shifts by 3 members; 15.0 h recorded but not credited; ISO 27.5 h; 71% of check-ins verified
+Auto-closed shifts awaiting an officer's confirmation: 1 (hours not credited until reviewed)
+Apparatus readiness as of today: 2 ready, 1 needing attention, 1 out of service (4 total); 3 open check failures
+Apparatus needing attention: Engine 21 — Pump pressure low
+Apparatus out of service: Tanker 22 — At the shop — brakes

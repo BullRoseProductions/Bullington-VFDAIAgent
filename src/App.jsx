@@ -952,7 +952,7 @@ export default function App() {
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -986,7 +986,7 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
           // off-site location: null lat/lng = at the station (every existing drill, and the default)
           isOffsite: !!r.is_offsite, locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
@@ -6051,6 +6051,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       stationHours: shOk ? {
         credited: sh.totals.credited, unverified: sh.totals.unverified, iso: sh.isoTotal,
         vpct: sh.totals.vpct, members: sh.totals.members, shifts: sh.totals.shifts, autoClosed: sh.totals.autoClosed,
+        attendanceHrs: sh.totals.attendanceHrs,
         rows: sh.rows.slice(0, 10).map((r) => ({ name: r.name, credited: r.total, unverified: r.unverified, shifts: r.n })),
       } : null,
       readiness: apOk ? {
@@ -6080,7 +6081,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       `Action items resolved (completed or cancelled): ${actionsResolved}`,
       ...(shOk ? [
         `Station hours credited (verified station standby + training): ${h1r(sh.totals.credited)} h across ${sh.totals.shifts} shifts by ${sh.totals.members} members`,
-        `Station hours recorded but NOT credited (unverified or auto-closed): ${h1r(sh.totals.unverified)} h`,
+        `Station hours RECORDED but NOT credited toward ISO/LOSAP — drill attendance estimated at each drill's recorded length, plus check-ins that were not location-verified, plus auto-closed shifts: ${h1r(sh.totals.unverified)} h${sh.totals.attendanceHrs ? ` (of which ${h1r(sh.totals.attendanceHrs)} h is drill attendance, not clocked time)` : ""}`,
         `ISO/LOSAP hours (de-overlapped, clipped to the period): ${h1r(sh.isoTotal)} h`,
         `Share of check-ins location-verified: ${sh.totals.vpct}%`,
         ...(sh.totals.autoClosed ? [`Shifts auto-closed by the system and awaiting an officer's confirmation: ${sh.totals.autoClosed} (their hours are NOT credited until reviewed)`] : []),
@@ -6167,8 +6168,9 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
           </div>
         ) : shOk && (
           <>
-            <SubHead>Station hours — {h1r(sh.totals.credited)} h credited · {h1r(sh.totals.unverified)} h not credited</SubHead>
-            <Line>ISO {h1r(sh.isoTotal)} h · {sh.totals.vpct}% verified · {sh.totals.members} members · {sh.totals.shifts} shifts</Line>
+            <SubHead>Station hours — {h1r(sh.totals.credited)} h credited (verified)</SubHead>
+            <Line>Recorded, not credited: {h1r(sh.totals.unverified)} h{sh.totals.attendanceHrs ? ` (${h1r(sh.totals.attendanceHrs)} h from drill attendance)` : ""}</Line>
+            <Line>ISO {h1r(sh.isoTotal)} h · {sh.totals.vpct}% of check-ins verified · {sh.totals.members} members · {sh.totals.shifts} records</Line>
             {sh.totals.autoClosed > 0 && <Line>⚠ {sh.totals.autoClosed} auto-closed shift{sh.totals.autoClosed > 1 ? "s" : ""} awaiting officer confirmation — not credited</Line>}
           </>
         )}
@@ -6699,7 +6701,7 @@ function rollupStationHours(shifts) {
   const byMember = {};
   for (const s of shifts || []) {
     // `id` is carried so PDF detail sections can join on member_id rather than a display name.
-    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0, autoClosed: 0 });
+    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0, autoClosed: 0, checkins: 0, attendanceHrs: 0, optionalHrs: 0 });
     const hrs = Number(s.hours) || 0;
     if (s.auto_closed) { m.unverified += hrs; m.autoClosed += 1; }
     else if (!s.verified) m.unverified += hrs;                   // recorded, not credited
@@ -6707,9 +6709,18 @@ function rollupStationHours(shifts) {
     else m.standby += hrs;                                       // standby is the only other surfaced kind
     if (s.verified) m.vTrue += 1;
     m.n += 1;
+    // VERIFIED % DENOMINATOR — a deliberate choice, and it stays "of CHECK-INS".
+    // Attendance-derived rows involve no check-in at all, so counting them would silently
+    // change what the metric measures: from "how often did people verify at the station when
+    // they checked in" (a discipline number an officer can act on) to "what share of all
+    // recorded time is creditable" (a different question). Including them would also make the
+    // figure fall the moment attendance hours switch on, for reasons unrelated to check-in
+    // behaviour. Derived rows are excluded from the denominator and the label says "of check-ins".
+    if (s.source !== "attendance") m.checkins += 1;
+    if (s.source === "attendance") { m.attendanceHrs += hrs; if (s.optional) m.optionalHrs += hrs; }
   }
   const rows = Object.values(byMember)
-    .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.n ? Math.round(100 * m.vTrue / m.n) : 0 }))
+    .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.checkins ? Math.round(100 * m.vTrue / m.checkins) : 0 }))
     .sort((x, y) => y.total - x.total);   // ranked by CREDITED hours — padding unverified time can't climb this list
   const standby    = rows.reduce((a, r) => a + r.standby, 0);
   const training   = rows.reduce((a, r) => a + r.training, 0);
@@ -6717,10 +6728,14 @@ function rollupStationHours(shifts) {
   const n          = rows.reduce((a, r) => a + r.n, 0);
   const vTrue      = rows.reduce((a, r) => a + r.vTrue, 0);
   const autoClosed = rows.reduce((a, r) => a + r.autoClosed, 0);
+  const checkins   = rows.reduce((a, r) => a + r.checkins, 0);
+  const attendanceHrs = rows.reduce((a, r) => a + r.attendanceHrs, 0);
+  const optionalHrs   = rows.reduce((a, r) => a + r.optionalHrs, 0);
   return {
     rows,
     totals: { standby, training, credited: standby + training, unverified, shifts: n, members: rows.length,
-              vTrue, vpct: n ? Math.round(100 * vTrue / n) : 0, autoClosed },
+              vTrue, checkins, vpct: checkins ? Math.round(100 * vTrue / checkins) : 0,
+              autoClosed, attendanceHrs, optionalHrs },
   };
 }
 
@@ -10838,7 +10853,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}${s.audience === "board" ? " (board)" : s.audience === "leadership" ? " (leadership)" : ""}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
       ...(shOk ? [
-        `Station hours · ${agendaSpan}: ${h1r(sh.totals.credited)} h credited (verified) across ${sh.totals.shifts} shifts by ${sh.totals.members} members; ${h1r(sh.totals.unverified)} h recorded but not credited; ISO ${h1r(sh.isoTotal)} h; ${sh.totals.vpct}% of check-ins verified`,
+        `Station hours · ${agendaSpan}: ${h1r(sh.totals.credited)} h CREDITED (location-verified) by ${sh.totals.members} members; ${h1r(sh.totals.unverified)} h RECORDED but not credited toward ISO/LOSAP${sh.totals.attendanceHrs ? `, of which ${h1r(sh.totals.attendanceHrs)} h is drill attendance estimated at the drill's recorded length rather than clocked time` : ""}; ISO ${h1r(sh.isoTotal)} h; ${sh.totals.vpct}% of check-ins verified`,
         ...(sh.totals.autoClosed ? [`Auto-closed shifts awaiting an officer's confirmation: ${sh.totals.autoClosed} (hours not credited until reviewed)`] : []),
       ] : [`Station hours: unavailable — not read, so no hours figure is provided.`]),
       ...(apOk ? [
@@ -11644,7 +11659,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [stitle, setStitle] = useState(""); const [sTime, setSTime] = useState("");
   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
-  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", planId: "", audience: "everyone", countsAttendance: true });
+  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true });
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
   const [sCounts, setSCounts] = useState(true);   // create-session "counts toward attendance rate"; default ON, feeds addSession + scheduleRecurring
@@ -11800,7 +11815,23 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       if (cErr) { notify({ kind: "error", title: "Couldn't close the sign-in", text: "Attendance was not locked — please try again.", details: cErr.message }); return; }
       setSigninTokens((t) => { const n = { ...t }; delete n[s.id]; return n; });
     }
-    const { error } = await supabase.from("training_sessions").update({ done: true }).eq("id", s.id);
+    /* TOUCHPOINT 2 — ask for the length at the moment the officer actually knows it, and let them
+       say no. window.prompt returns null on Cancel and "" on an empty OK: BOTH mean "not recorded",
+       and both stay permanently valid. The drill finalizes either way — refusing to close a drill
+       over a missing length would be the tail wagging the dog, and a REQUIRED field would just
+       collect guesses, which is worse than nothing once the number becomes hours on a report.
+       Asked only while it is still blank, so re-finalizing never nags. */
+    let dur = s.durationMin ?? null;
+    if (dur == null) {
+      const answer = window.prompt(
+        `How long was "${s.title}"? Minutes, e.g. 180.\n\nThis gives everyone marked present their training hours (recorded, not credited toward ISO/LOSAP).\n\nLeave blank or press Cancel — you can add it later.`, "");
+      const nMin = answer == null ? null : parseInt(String(answer).trim(), 10);
+      if (Number.isFinite(nMin) && nMin >= 1 && nMin <= 1440) dur = nMin;
+      else if (answer != null && String(answer).trim() !== "") {
+        notify({ kind: "error", title: "That length didn't look right", text: "Finalized without a length — you can set it from the session's Edit later." });
+      }
+    }
+    const { error } = await supabase.from("training_sessions").update({ done: true, ...(dur == null ? {} : { duration_min: dur }) }).eq("id", s.id);
     if (error) { notify({ kind: "error", title: "Couldn't finalize the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     // plan-linked -> reset the overdue clock to today, persisted. One-offs reset nothing.
     if (s.planId) {
@@ -11832,7 +11863,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   function startEditSession(s) {
     setEditingSessionId(s.id);
-    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isOffsite: !!s.isOffsite, offLabel: s.locLabel || "" });
+    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), durationMin: s.durationMin ?? "", planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isOffsite: !!s.isOffsite, offLabel: s.locLabel || "" });
   }
   async function saveEditSession(id) {
     if (!sessEdit.date) { notify({ kind: "error", title: "Pick a date", text: "Choose a date for this training." }); return; }
@@ -11843,7 +11874,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       // training_sessions_coords_require_offsite CHECK rejects "not off-site with coordinates", so a
       // two-step (flip flag, then clear) would fail on the first step. Turning it ON leaves any
       // existing coordinates alone.
-      .update({ title, date: sessEdit.date, start_time: sessEdit.startTime || null, plan_id: sessEdit.planId || null, audience: sessEdit.audience, counts_toward_attendance: sessEdit.countsAttendance,
+      .update({ title, date: sessEdit.date, start_time: sessEdit.startTime || null,
+          // "" -> null, never 0. NULL means "length not recorded", a different fact from a zero-length
+          // drill, and it is what stops attendance hours being invented for a drill nobody timed.
+          duration_min: sessEdit.durationMin === "" || sessEdit.durationMin == null ? null : Number(sessEdit.durationMin),
+          plan_id: sessEdit.planId || null, audience: sessEdit.audience, counts_toward_attendance: sessEdit.countsAttendance,
         is_offsite: !!sessEdit.isOffsite,
         ...(sessEdit.isOffsite
           ? { location_label: (sessEdit.offLabel || "").trim() || null }
@@ -11974,6 +12009,36 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
         {/* 5 — this month's sessions */}
         <div style={card}>
+          {/* TOUCHPOINT 3 — BACKFILL. Finished drills with no recorded length produce no attendance
+              hours at all, and that absence is invisible unless something names it: the hours simply
+              never appear and nobody knows to look. Listed here, in Training, because this is where
+              drills are owned; Station Hours shows the same count so the gap is noticed where the
+              missing hours would have shown up. Set the length from the session's own Edit — one
+              place to change it, not two. */}
+          {(() => {
+            const noLen = (sessions || []).filter((x) => x.done && x.durationMin == null
+              && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0);
+            if (!noLen.length) return null;
+            return (
+              <div style={{ ...FS.card, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
+                <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+                  <Clock size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>
+                      {noLen.length} finished drill{noLen.length === 1 ? "" : "s"} with no length recorded
+                    </div>
+                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
+                      Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Open a session below and set its length to fix that — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
+                    </div>
+                    <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
+                      {noLen.slice(0, 5).map((x) => `${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`).join("  ·  ")}
+                      {noLen.length > 5 ? `  ·  …and ${noLen.length - 5} more` : ""}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           <div style={kick}>THIS MONTH'S SESSIONS</div>
           <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
             {monthSessions.length === 0 ? (
@@ -12168,6 +12233,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           {!repeat && <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>}
           <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sTime} onChange={(e) => setSTime(e.target.value)} /></label>
+                      {/* TOUCHPOINT 1 — set the length here. Optional and permanently so: a blank
+                          length is valid and simply produces no attendance hours. It is NOT a
+                          required field, because forcing a number would get a guess typed in, and a
+                          guessed length becomes hours on an ISO/LOSAP-adjacent report. */}
+                      <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sessEdit.durationMin} onChange={(e) => setSessEdit((b) => ({ ...b, durationMin: e.target.value }))} /></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
