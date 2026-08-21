@@ -109,30 +109,44 @@ $do$;
 -- 1. CAPTURE THE GRANTS BEFORE THE DROP.
 --
 -- DROP FUNCTION discards proacl. Re-granting from memory is how a function comes
--- back subtly more open — or more closed — than it was, and neither is
--- noticeable until something breaks in production. This reads the ACL that is
--- actually live and replays it verbatim after the CREATE, so whatever had
--- EXECUTE still has it and nothing else gains it.
+-- back subtly more open — or more closed — than it was, and neither is noticeable
+-- until something breaks in production. This reads the ACL that is actually live
+-- and replays it verbatim after the CREATE.
 --
--- A NULL proacl means "PostgreSQL defaults", which for a function is EXECUTE to
--- PUBLIC. The recreated function defaults the same way, so there is nothing to
--- replay — but it is worth a NOTICE, because on this project a NULL ACL would
--- itself be a surprise: every RPC here is explicitly revoked from anon.
+-- CARRIED IN A SESSION GUC, NOT A TEMP TABLE. The first attempt used
+-- CREATE TEMP TABLE ... ON COMMIT DROP and failed with "relation _dss_acl does not
+-- exist": the Supabase SQL editor commits between statements, so ON COMMIT DROP
+-- fired the instant the table was created and it was gone before the next statement
+-- read it. set_config(..., false) is session-scoped rather than transaction-scoped,
+-- so it survives that regardless of how the editor frames each statement.
+--
+-- The whole GRANT text is built here, up front, so replaying it later is a single
+-- EXECUTE with nothing left to get wrong. PUBLIC is grantee 0 and is written by
+-- name; every other role goes through quote_ident.
+--
+-- An empty capture means a NULL proacl — PostgreSQL's default of EXECUTE to PUBLIC,
+-- which the recreated function gets anyway. It still raises a NOTICE, because on
+-- this project a NULL ACL would itself be the surprise: every RPC here is
+-- explicitly revoked from anon.
 -- ---------------------------------------------------------------------
-CREATE TEMP TABLE _dss_acl ON COMMIT DROP AS
-SELECT a.grantee::regrole::text AS grantee, a.privilege_type AS priv
-  FROM pg_proc p
-  CROSS JOIN LATERAL aclexplode(p.proacl) a
- WHERE p.oid = 'public.dept_station_shifts(timestamptz,timestamptz)'::regprocedure;
-
 DO $do$
-DECLARE v_n int; v_list text;
+DECLARE v_sql text;
 BEGIN
-  SELECT count(*), string_agg(DISTINCT grantee || ':' || priv, ', ') INTO v_n, v_list FROM _dss_acl;
-  IF v_n = 0 THEN
-    RAISE NOTICE 'dept_station_shifts had a NULL ACL (PostgreSQL default: EXECUTE to PUBLIC). Nothing to replay — but check this is intended.';
+  SELECT coalesce(string_agg(
+           format('GRANT %s ON FUNCTION public.dept_station_shifts(timestamptz, timestamptz) TO %s;',
+                  a.privilege_type,
+                  CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(a.grantee::regrole::text) END),
+           ' '), '')
+    INTO v_sql
+    FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+   WHERE p.oid = 'public.dept_station_shifts(timestamptz,timestamptz)'::regprocedure;
+
+  PERFORM set_config('b4c.dss_grants', v_sql, false);   -- false = session, not transaction
+
+  IF v_sql = '' THEN
+    RAISE NOTICE 'dept_station_shifts had a NULL ACL (default: EXECUTE to PUBLIC). Nothing to replay — check this is intended.';
   ELSE
-    RAISE NOTICE 'Captured % grant(s) to replay after the drop: %', v_n, v_list;
+    RAISE NOTICE 'Captured grants to replay: %', v_sql;
   END IF;
 END
 $do$;
@@ -210,20 +224,27 @@ $function$;
 
 -- ---------------------------------------------------------------------
 -- 3. REPLAY THE CAPTURED GRANTS.
+--
+-- Reads back what section 1 stored. current_setting(..., true) returns NULL rather
+-- than raising if the GUC is absent, so a partial run says so plainly instead of
+-- failing with a confusing missing-parameter error.
+--
+-- IF THIS RAISES, the function exists but may have NO grants — the app would start
+-- getting permission-denied on dept_station_shifts. The fix is one line, and the
+-- state check will have shown you the value:
+--     GRANT EXECUTE ON FUNCTION public.dept_station_shifts(timestamptz, timestamptz) TO authenticated;
 -- ---------------------------------------------------------------------
 DO $do$
-DECLARE r record; v_n int := 0;
+DECLARE v_sql text := current_setting('b4c.dss_grants', true);
 BEGIN
-  FOR r IN SELECT DISTINCT grantee, priv FROM _dss_acl LOOP
-    -- PUBLIC comes back from regrole as '-'; it is granted by name, not quoted as an identifier.
-    IF r.grantee = '-' THEN
-      EXECUTE format('GRANT %s ON FUNCTION public.dept_station_shifts(timestamptz, timestamptz) TO PUBLIC', r.priv);
-    ELSE
-      EXECUTE format('GRANT %s ON FUNCTION public.dept_station_shifts(timestamptz, timestamptz) TO %I', r.priv, r.grantee);
-    END IF;
-    v_n := v_n + 1;
-  END LOOP;
-  RAISE NOTICE 'Replayed % grant(s) onto the recreated dept_station_shifts.', v_n;
+  IF v_sql IS NULL THEN
+    RAISE EXCEPTION 'The captured grants are missing — section 1 did not run in this session. dept_station_shifts may now have NO grants; re-grant by hand before using the app.';
+  ELSIF v_sql = '' THEN
+    RAISE NOTICE 'Nothing to replay (NULL ACL captured).';
+  ELSE
+    EXECUTE v_sql;
+    RAISE NOTICE 'Replayed grants: %', v_sql;
+  END IF;
 END
 $do$;
 
