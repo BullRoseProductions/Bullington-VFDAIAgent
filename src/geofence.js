@@ -329,6 +329,8 @@ let geoSub = null;           // the onGeofence subscription; must never stack
 let provSub = null;          // onProviderChange — watches for a late Always grant or a revocation
 let running = false;
 let eventSink = null;        // where handleGeofenceEvent reports; set by whoever starts monitoring
+let lastStartArgs = null;    // the last start request, kept so a permission grant can retry it verbatim
+let restarting = false;      // re-entrancy guard: the watcher calls the function that attached it
 
 /* The handler. Reads coordinates from THE EVENT — never getCurrentPosition().
 
@@ -472,6 +474,35 @@ export async function drainGeofenceQueue({ onEvent } = {}) {
   return { ok: true, reason: "drained", replayed, failed, total: pending.length };
 }
 
+/* WATCH FOR THE PERMISSION GRANT — and attach this BEFORE the permission gate, not after it.
+
+   This listener previously lived on the success path of startStationGeofence, inside the try block
+   that runs only once permission has already been granted. On a fresh install that path is never
+   reached: the consent screen writes consent, the effect fires and calls startStationGeofence while
+   the iOS dialog is still on screen, the gate reads "not-determined" and returns — several lines
+   ABOVE the attach. So the one mechanism meant to notice the grant was never subscribed at the only
+   moment it mattered, and the fence armed only after the member happened to relaunch the app. Real
+   members do not know to relaunch.
+
+   Attached as soon as the SDK is configured, so it is live during the bail. When iOS reports the
+   grant, the exact same start request is retried from lastStartArgs — verbatim, so the fence lands
+   at the same pin with the same radius as the attempt that was refused.
+
+   RE-ENTRANCY IS REAL HERE: this calls the function that attaches it. `restarting` bounds that, and
+   the fenceSignature/running guards inside make the retry idempotent — a second grant event
+   re-registers nothing. */
+function attachProviderWatch(bg) {
+  if (provSub) return;
+  provSub = bg.onProviderChange((state) => {
+    const name = authName(state?.status);
+    eventSink?.({ action: "permission", reason: name });
+    if ((name === "always" || name === "when-in-use") && lastStartArgs && !restarting) {
+      restarting = true;
+      startStationGeofence(lastStartArgs).finally(() => { restarting = false; });
+    }
+  });
+}
+
 /* ATTACH THE LISTENER AT LAUNCH, NOT BEHIND THE AUTH GATE.
 
    iOS relaunches a terminated app in the background when a region transition fires, and gives it a
@@ -519,6 +550,10 @@ export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
   if (!geofenceAvailable()) {
     return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
   }
+  // Remembered BEFORE any gate, so a grant that arrives after a refusal can retry this exact
+  // request. Without it the watcher would fire with nothing to re-run.
+  lastStartArgs = { dept, rationale, onEvent };
+  if (onEvent) eventSink = onEvent;
   if (!dept?.geofence_enabled) return { ok: false, reason: "dept-not-enabled" };
 
   const lat = Number(dept?.station_lat);
@@ -533,6 +568,9 @@ export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
   const init = await initGeofence({ rationale });
   if (!init.ok) return init;
   const bg = BG;
+  // Above the permission gate deliberately — see attachProviderWatch. If this moves below the gate
+  // again, a fresh install stops arming until the app is relaunched.
+  attachProviderWatch(bg);
 
   // Never prompt from here. Starting is a consequence of permission already granted;
   // a dialog appearing because an effect re-ran is exactly the nagging G4c avoids.
@@ -580,21 +618,6 @@ export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
     if (!running) {
       await bg.startGeofences();      // geofence-only mode. NOT start().
       running = true;
-    }
-    /* WATCH FOR THE UPGRADE. iOS can grant Always long after the app asked, and Android can have it
-       revoked in Settings mid-life. onProviderChange fires on both, so the fence follows the grant
-       instead of being frozen at whatever was true during one render. Attached once; the guard is
-       what stops a re-registration adding a second listener. */
-    if (!provSub) {
-      provSub = bg.onProviderChange((state) => {
-        const name = authName(state?.status);
-        if (name === "always" || name === "when-in-use") {
-          // Idempotent: the fence signature is unchanged, so this re-registers nothing and simply
-          // ensures startGeofences() is running under the newly-granted permission.
-          startStationGeofence({ dept, rationale, onEvent }).catch(() => {});
-        }
-        onEvent?.({ action: "permission", reason: name });
-      });
     }
     return { ok: true, reason: "monitoring", radius, dwellMs: FENCE_LOITERING_MS, permission: perm.reason };
   } catch (e) {
