@@ -1,3 +1,45 @@
+-- #####################################################################
+-- ##                                                                 ##
+-- ##   DO NOT APPLY — SUPERSEDED. RUNNING THIS WOULD REGRESS PROD.   ##
+-- ##                                                                 ##
+-- #####################################################################
+--
+-- KEPT AS A RECORD ONLY. Do not run it against any environment.
+--
+-- WHAT WAS WRONG WITH IT. This file was written by patching
+-- sql/slice3_dept_iso_hours.sql — the ORIGINAL definition of dept_iso_hours —
+-- and the live function has moved on since. Production already:
+--
+--   • excludes auto_closed shifts (the fix this file exists to make: the live
+--     function beat it to it), and
+--   • filters `kind`, added later by slice5, which this file's body does NOT
+--     contain because slice3 predates it.
+--
+-- So applying this would not add the auto_closed rule — it is already there —
+-- it would REPLACE the live function with an older shape and STRIP THE KIND
+-- FILTER, silently pulling non-training/standby rows back into the ISO figure.
+-- A migration whose whole purpose was to make ISO stricter would have made it
+-- looser, on the number reported for ISO/LOSAP.
+--
+-- HOW THIS HAPPENED, so the next one is caught earlier. Migrations here are
+-- applied by hand, so a file in sql/ records what was written, never what is
+-- live. The database is the source of truth. This file's own header told the
+-- reader to diff pg_get_functiondef first, and doing exactly that is what
+-- caught it before it ran. Do that every time a CREATE OR REPLACE rebuilds a
+-- function body from a file:
+--
+--   SELECT pg_get_functiondef('public.dept_iso_hours(timestamptz,timestamptz)'::regprocedure);
+--
+-- THE SAME HAZARD APPLIES TO PART A. training_hours_a_attendance_union.sql
+-- DROPs and recreates dept_station_shifts from the slice5 body plus the UNION.
+-- If that function has drifted the way this one did, Part A drops the drift
+-- with it. Diff it against pg_get_functiondef before running Part A.
+--
+-- Nothing below this banner should be executed. It is retained so the reasoning
+-- and the intended change survive, not because the change is still wanted.
+-- #####################################################################
+
+
 -- =====================================================================
 -- TRAINING HOURS, PART B — ISO must not count auto-closed shifts.
 --
@@ -28,6 +70,20 @@
 -- =====================================================================
 
 BEGIN;
+
+-- A GUARD, not a formality. The banner above asks; this refuses.
+-- Someone in a hurry select-alls a file in sql/ and runs it — that is exactly how this
+-- would have shipped, and the damage (a silently looser ISO/LOSAP figure) is the kind
+-- nobody notices for months. Raising inside the transaction aborts before the
+-- CREATE OR REPLACE below can touch anything, so an accidental run changes nothing.
+-- Delete this block only if you have diffed pg_get_functiondef and decided the body
+-- below is genuinely what production should have.
+DO $guard$
+BEGIN
+  RAISE EXCEPTION
+    'SUPERSEDED MIGRATION — not applied. The live dept_iso_hours already excludes auto_closed AND filters kind (slice5); this file was patched from the older slice3 body, so applying it would STRIP the kind filter and loosen the ISO figure. Nothing was changed.';
+END
+$guard$;
 
 CREATE OR REPLACE FUNCTION public.dept_iso_hours(
   p_from timestamptz,
