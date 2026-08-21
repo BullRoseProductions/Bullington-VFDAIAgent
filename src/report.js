@@ -275,8 +275,8 @@ export function buildReportDoc(data) {
     para(`${h1(sh.credited)} hours CREDITED during the period (location-verified station standby and training) `
       + `across ${sh.shifts} record${sh.shifts === 1 ? "" : "s"} by ${sh.members} member${sh.members === 1 ? "" : "s"}. `
       + `ISO/LOSAP figure: ${h1(sh.iso)} hours. ${sh.vpct}% of check-ins were location-verified.`);
-    para(`RECORDED \u2014 attendance & unverified check-ins, not credited toward ISO/LOSAP: ${h1(sh.unverified)} hours.`
-      + (sh.attendanceHrs ? ` Of that, ${h1(sh.attendanceHrs)} hours come from drill attendance at each drill's recorded length rather than from a check-in.` : ""), GRAY, 8.6);
+    para(`RECORDED \u2014 neither location-verified nor officer-attested, not credited toward ISO/LOSAP: ${h1(sh.unverified)} hours.`
+      + (sh.attestedHrs ? ` Of the credited total, ${h1(sh.attestedHrs)} hours are officer-attested drill attendance at a flat 90 minutes each rather than clocked time.` : ""), GRAY, 8.6);
     if (sh.rows.length) {
       table(["Member", "Credited", "Recorded (not credited)", "Records"],
         sh.rows.map((r) => [r.name || "\u2014", h1(r.credited), h1(r.unverified), String(r.shifts)]),
@@ -993,14 +993,16 @@ export function buildStationHoursDoc(data) {
   });
   y += SH + 8;
   doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-  doc.text(`${range.label || "Selected period"}${t.verifiedPct == null ? "" : `  \u00b7  ${t.verifiedPct}% of check-ins verified`}`, M, y + 8);
+  // Counts, not a percentage. "100% of check-ins verified" printed beside eighteen officer-marked
+  // rows read as a contradiction, because the percentage silently excluded them.
+  doc.text(`${range.label || "Selected period"}${t.vTrue == null ? "" : `  \u00b7  ${t.vTrue} location-verified  \u00b7  ${t.oTrue || 0} officer check-in${t.oTrue === 1 ? "" : "s"}`}`, M, y + 8);
   y += 12;
   // The recorded bucket is spelled out, not left as a bare word. A board reading "unverified: 60.0"
   // beside "credited: 5.0" will otherwise take the larger number for hours worked. Naming what it is
   // made of — attendance estimates and unverified check-ins — and that it is not creditable, is the
   // difference between a figure that informs and one that misleads.
   doc.setFontSize(7.4); doc.setTextColor(...NEUT);
-  doc.text("RECORDED = drill attendance at the drill's recorded length + check-ins that were not location-verified. Not credited toward ISO/LOSAP.", M, y + 8);
+  doc.text("CREDITED = location-verified check-ins at actual duration + officer-attested attendance at a flat 90 min.   RECORDED = neither verified nor attested, plus auto-closed. Not credited.", M, y + 8);
   y += 20;
 
   // ---------- roster summary ----------
@@ -1046,11 +1048,14 @@ export function buildStationHoursDoc(data) {
         // WHERE THE ROW CAME FROM. "From attendance" means nobody clocked in — the times shown are
         // the drill's scheduled start and its recorded length, not an observed arrival and departure.
         // Printing those beside clocked rows without saying so would dress an estimate as a punch.
-        s.source === "attendance" ? (s.optional ? "Attendance (optional)" : "From attendance") : "Clocked",
+        // WHERE THE ROW CAME FROM. "Officer check-in" is not a softer way of saying verified — it
+        // means a person attested to attendance rather than a device proving location. Both credit;
+        // only one is evidence, and the column exists so a reader can tell them apart.
+        s.officer_attested ? (s.optional ? "Officer check-in (optional)" : "Officer check-in") : "Clocked",
         // One column, because these are one question: does this shift count, and if not, why not.
         // auto-closed is named FIRST — it is the reason a verified shift can still be uncredited, and a
         // reader who sees only "Verified" on such a row would draw the wrong conclusion.
-        s.auto_closed ? "Auto-closed" : s.verified ? "Verified" : "Unverified",
+        s.auto_closed ? "Auto-closed" : s.verified ? "Verified" : s.officer_attested ? "Officer check-in" : "Unverified",
       ]),
       // Widths deliberately NOT pinned. Fixing all six columns left 174pt of the page unallocated,
       // which autoTable cannot distribute — it warns and renders the table narrow, adrift from the
@@ -1066,11 +1071,13 @@ export function buildStationHoursDoc(data) {
   const prov = doc.splitTextToSize(
     "WHAT COUNTS. Credited hours are station standby and training shifts whose check-in was "
     + "location-verified at the station. Those are the hours reported for ISO and LOSAP.\n"
-    + "ATTENDANCE-DERIVED HOURS. A member marked present at a drill earns hours at the drill's recorded "
-    + "length. Those hours are RECORDED, never credited: nobody verified they were at the station, and the "
-    + "times shown are the drill's schedule rather than an observed arrival. Where a member did check in, "
-    + "their actual clocked duration is used instead and the estimate is not produced at all. Board meetings, "
-    + "off-site sessions and drills with no recorded length produce no hours.\n"
+    + "OFFICER-ATTESTED ATTENDANCE. A member marked present at a drill by an officer is credited a flat "
+    + "90 minutes, or the drill's length if it ran shorter. Those hours DO count toward ISO and LOSAP, but "
+    + "they are attested, not location-verified: an officer states the member was there. Each such row is "
+    + "labelled \u201cOfficer check-in\u201d so the two can always be told apart, and the flat allowance is "
+    + "deliberately conservative rather than the drill's full length. Where a member also checked in on "
+    + "location, that observed row wins and their actual clocked duration is used instead. Board meetings, "
+    + "off-site sessions and drills with no recorded length produce no hours at all.\n"
     + "WHAT IS EXCLUDED, and shown anyway. Unverified shifts are recorded and listed but never added to "
     + "the credited figure. Auto-closed shifts are excluded even when the check-in was verified: the stop "
     + "time was estimated by the system rather than observed, so the duration is not evidence until an "

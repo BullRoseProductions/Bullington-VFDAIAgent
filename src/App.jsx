@@ -6051,7 +6051,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       stationHours: shOk ? {
         credited: sh.totals.credited, unverified: sh.totals.unverified, iso: sh.isoTotal,
         vpct: sh.totals.vpct, members: sh.totals.members, shifts: sh.totals.shifts, autoClosed: sh.totals.autoClosed,
-        attendanceHrs: sh.totals.attendanceHrs,
+        attestedHrs: sh.totals.attestedHrs, vTrue: sh.totals.vTrue, oTrue: sh.totals.oTrue,
         rows: sh.rows.slice(0, 10).map((r) => ({ name: r.name, credited: r.total, unverified: r.unverified, shifts: r.n })),
       } : null,
       readiness: apOk ? {
@@ -6081,7 +6081,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       `Action items resolved (completed or cancelled): ${actionsResolved}`,
       ...(shOk ? [
         `Station hours credited (verified station standby + training): ${h1r(sh.totals.credited)} h across ${sh.totals.shifts} shifts by ${sh.totals.members} members`,
-        `Station hours RECORDED but NOT credited toward ISO/LOSAP — drill attendance estimated at each drill's recorded length, plus check-ins that were not location-verified, plus auto-closed shifts: ${h1r(sh.totals.unverified)} h${sh.totals.attendanceHrs ? ` (of which ${h1r(sh.totals.attendanceHrs)} h is drill attendance, not clocked time)` : ""}`,
+        `Station hours CREDITED comprises location-verified check-ins at their actual clocked duration plus officer-attested drill attendance at a flat 90 minutes each${sh.totals.attestedHrs ? `; ${h1r(sh.totals.attestedHrs)} h of the credited total is officer-attested` : ""}`,
+        `Station hours RECORDED but NOT credited toward ISO/LOSAP — check-ins that were neither location-verified nor officer-attested, plus auto-closed shifts whose stop time the system guessed: ${h1r(sh.totals.unverified)} h`,
         `ISO/LOSAP hours (de-overlapped, clipped to the period): ${h1r(sh.isoTotal)} h`,
         `Share of check-ins location-verified: ${sh.totals.vpct}%`,
         ...(sh.totals.autoClosed ? [`Shifts auto-closed by the system and awaiting an officer's confirmation: ${sh.totals.autoClosed} (their hours are NOT credited until reviewed)`] : []),
@@ -6169,8 +6170,11 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         ) : shOk && (
           <>
             <SubHead>Station hours — {h1r(sh.totals.credited)} h credited (verified)</SubHead>
-            <Line>Recorded, not credited: {h1r(sh.totals.unverified)} h{sh.totals.attendanceHrs ? ` (${h1r(sh.totals.attendanceHrs)} h from drill attendance)` : ""}</Line>
-            <Line>ISO {h1r(sh.isoTotal)} h · {sh.totals.vpct}% of check-ins verified · {sh.totals.members} members · {sh.totals.shifts} records</Line>
+            <Line>Recorded, not credited: {h1r(sh.totals.unverified)} h</Line>
+            {/* Three states named, because "100% of check-ins verified" beside 18 uncredited rows read
+                as a contradiction. A count of each is unambiguous where a single percentage was not. */}
+            <Line>{sh.totals.vTrue} location-verified · {sh.totals.oTrue} officer check-in{sh.totals.oTrue === 1 ? "" : "s"}{sh.totals.attestedHrs ? ` (${h1r(sh.totals.attestedHrs)} h)` : ""}</Line>
+            <Line>ISO {h1r(sh.isoTotal)} h · {sh.totals.members} members · {sh.totals.shifts} records</Line>
             {sh.totals.autoClosed > 0 && <Line>⚠ {sh.totals.autoClosed} auto-closed shift{sh.totals.autoClosed > 1 ? "s" : ""} awaiting officer confirmation — not credited</Line>}
           </>
         )}
@@ -6701,13 +6705,25 @@ function rollupStationHours(shifts) {
   const byMember = {};
   for (const s of shifts || []) {
     // `id` is carried so PDF detail sections can join on member_id rather than a display name.
-    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0, autoClosed: 0, checkins: 0, attendanceHrs: 0, optionalHrs: 0 });
+    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, oTrue: 0, n: 0, autoClosed: 0, checkins: 0, attestedHrs: 0, optionalHrs: 0 });
+    // THREE STATES NOW, not two. `officer_attested` is a separate flag from `verified` on purpose:
+    // an officer marking someone present is a human attestation, not a location proof, and the
+    // ledger has to keep saying which one it was. Crediting them equally is a policy decision;
+    // recording them identically would be a lie, and the whole audit story rests on the difference
+    // staying visible. Never set verified=true on a derived row to make the arithmetic simpler.
+    const attested = !!s.officer_attested;
+    // Older RPC, before the migration lands, returns no such column -> undefined -> false -> these
+    // rows stay in the uncredited bucket exactly as they do today. The client can ship first.
     const hrs = Number(s.hours) || 0;
+    // auto_closed STILL FIRST and still uncredited, even for an attested row: the stop time was
+    // guessed by the sweeper either way, and an attestation about attendance is not an attestation
+    // about when someone left.
     if (s.auto_closed) { m.unverified += hrs; m.autoClosed += 1; }
-    else if (!s.verified) m.unverified += hrs;                   // recorded, not credited
+    else if (!s.verified && !attested) m.unverified += hrs;      // neither proven nor attested
     else if (s.kind === "training") m.training += hrs;
     else m.standby += hrs;                                       // standby is the only other surfaced kind
     if (s.verified) m.vTrue += 1;
+    if (attested && !s.verified) m.oTrue += 1;                   // counted once, in one state only
     m.n += 1;
     // VERIFIED % DENOMINATOR — a deliberate choice, and it stays "of CHECK-INS".
     // Attendance-derived rows involve no check-in at all, so counting them would silently
@@ -6716,8 +6732,11 @@ function rollupStationHours(shifts) {
     // recorded time is creditable" (a different question). Including them would also make the
     // figure fall the moment attendance hours switch on, for reasons unrelated to check-in
     // behaviour. Derived rows are excluded from the denominator and the label says "of check-ins".
-    if (s.source !== "attendance") m.checkins += 1;
-    if (s.source === "attendance") { m.attendanceHrs += hrs; if (s.optional) m.optionalHrs += hrs; }
+    // "check-ins" means someone actually checked in — a real punch, geo or otherwise. An officer
+    // marking a roster is not a check-in, so attested rows stay out of this denominator and the
+    // verified % keeps meaning "how often did people verify when they checked in".
+    if (!attested) m.checkins += 1;
+    if (attested) { m.attestedHrs += hrs; if (s.optional) m.optionalHrs += hrs; }
   }
   const rows = Object.values(byMember)
     .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.checkins ? Math.round(100 * m.vTrue / m.checkins) : 0 }))
@@ -6729,13 +6748,14 @@ function rollupStationHours(shifts) {
   const vTrue      = rows.reduce((a, r) => a + r.vTrue, 0);
   const autoClosed = rows.reduce((a, r) => a + r.autoClosed, 0);
   const checkins   = rows.reduce((a, r) => a + r.checkins, 0);
-  const attendanceHrs = rows.reduce((a, r) => a + r.attendanceHrs, 0);
+  const oTrue       = rows.reduce((a, r) => a + r.oTrue, 0);
+  const attestedHrs = rows.reduce((a, r) => a + r.attestedHrs, 0);
   const optionalHrs   = rows.reduce((a, r) => a + r.optionalHrs, 0);
   return {
     rows,
     totals: { standby, training, credited: standby + training, unverified, shifts: n, members: rows.length,
-              vTrue, checkins, vpct: checkins ? Math.round(100 * vTrue / checkins) : 0,
-              autoClosed, attendanceHrs, optionalHrs },
+              vTrue, oTrue, checkins, vpct: checkins ? Math.round(100 * vTrue / checkins) : 0,
+              autoClosed, attestedHrs, optionalHrs },
   };
 }
 
@@ -10853,7 +10873,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}${s.audience === "board" ? " (board)" : s.audience === "leadership" ? " (leadership)" : ""}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
       ...(shOk ? [
-        `Station hours · ${agendaSpan}: ${h1r(sh.totals.credited)} h CREDITED (location-verified) by ${sh.totals.members} members; ${h1r(sh.totals.unverified)} h RECORDED but not credited toward ISO/LOSAP${sh.totals.attendanceHrs ? `, of which ${h1r(sh.totals.attendanceHrs)} h is drill attendance estimated at the drill's recorded length rather than clocked time` : ""}; ISO ${h1r(sh.isoTotal)} h; ${sh.totals.vpct}% of check-ins verified`,
+        `Station hours · ${agendaSpan}: ${h1r(sh.totals.credited)} h CREDITED — location-verified check-ins at actual duration plus officer-attested attendance at a flat 90 minutes each${sh.totals.attestedHrs ? ` (${h1r(sh.totals.attestedHrs)} h attested)` : ""}; ${h1r(sh.totals.unverified)} h RECORDED but not credited; ISO ${h1r(sh.isoTotal)} h; ${sh.totals.vTrue} location-verified and ${sh.totals.oTrue} officer check-ins`,
         ...(sh.totals.autoClosed ? [`Auto-closed shifts awaiting an officer's confirmation: ${sh.totals.autoClosed} (hours not credited until reviewed)`] : []),
       ] : [`Station hours: unavailable — not read, so no hours figure is provided.`]),
       ...(apOk ? [
