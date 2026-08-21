@@ -11876,12 +11876,17 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   async function removeSession(id) {
     const sess = sessions.find((x) => x.id === id);
-    // The button is hidden for closed sessions, so reaching here means the list went stale —
-    // someone else closed it in another tab since this render. RLS refuses either way; this
-    // just turns a raw policy violation into a sentence that says what to do about it.
+    // The button is hidden in both these cases, so reaching here means the list went stale —
+    // someone closed the session, or checked in, in another tab since this render. RLS refuses
+    // either way; this turns a raw policy violation into a sentence that says what to do next.
     if (sess?.done) {
       notify({ kind: "error", title: "That session is closed",
                text: "A completed session can't be removed, because deleting it would take its attendance record with it. Reopen it first if you need to make a change." });
+      return;
+    }
+    if (sess?.attendance?.length > 0) {
+      notify({ kind: "error", title: "Somebody has checked in",
+               text: `${sess.attendance.length} ${sess.attendance.length === 1 ? "person has" : "people have"} already been marked present for this session, so removing it would erase their attendance. Clear the roster first if you really need to delete it.` });
       return;
     }
     if (!window.confirm(`Remove “${sess?.title || "this session"}” from the training calendar?`)) return;
@@ -11892,7 +11897,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       const closed = /policy|permission|row-level/i.test(error.message || "");
       notify({ kind: "error", title: "Couldn't remove the session",
                text: closed
-                 ? "This session looks closed. A completed session can't be removed \u2014 reopen it first if you need to make a change."
+                 ? "This session can't be removed \u2014 it is either closed or somebody has already been marked present. Reopen it, or clear the roster, if you need to make a change."
                  : "Something went wrong removing that. Please try again.",
                details: error.message });
       return;
@@ -12369,13 +12374,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                         ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
                         : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
                       {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
-                      {/* Remove disappears once the session is CLOSED — a completed drill is an attendance
-                          record, and deleting it cascades the roster. Guarded on !s.done specifically and NOT
-                          on `locked`: locked also covers signinOpen and has-attendance, but a session that is
-                          not yet closed must stay deletable so a mistyped calendar entry can be cleaned up.
-                          Matches the RLS policy (done IS NOT TRUE) exactly. Reopen already renders in the
-                          done branch above, so hiding this surfaces the correct action rather than a dead end. */}
-                      {canManage && editSessionMode && !s.done && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
+                      {/* Remove survives only while the session is UNCLOSED and EMPTY. A closed drill is an
+                          attendance record; so is an open one somebody has already checked into, and deleting
+                          either cascades the roster away. Mirrors the RLS policy term for term
+                          (done IS NOT TRUE AND NOT session_has_attendance(id)) — the button must not offer
+                          what the server will refuse.
+                          Deliberately NOT reusing `locked`, which also covers signinOpen: an open QR sign-in
+                          nobody has used yet is still an empty session and still cleanup-able. Reopen renders
+                          in the done branch above, so a closed session shows the right action instead. */}
+                      {canManage && editSessionMode && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                     </div>
                   </div>
                   {editingSessionId === s.id && (
