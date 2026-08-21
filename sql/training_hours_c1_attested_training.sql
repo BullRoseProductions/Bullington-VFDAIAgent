@@ -98,9 +98,25 @@ AS $function$
   );
 $function$;
 
--- Invoker rights (see header) — no SECURITY DEFINER. anon has no business here at all.
-REVOKE ALL ON FUNCTION public.attested_training(uuid, timestamptz, timestamptz) FROM public, anon;
-GRANT EXECUTE ON FUNCTION public.attested_training(uuid, timestamptz, timestamptz) TO authenticated;
+/* NOBODY CALLS THIS DIRECTLY — not even a signed-in member.
+
+   Invoker rights alone would have left the foreign-p_dept question resting on RLS being tight on
+   session_attendance and training_sessions. That is an argument, and an argument is a weaker thing
+   to protect a roster with than a permission. Revoking EXECUTE from everyone closes the path
+   outright: the only callers left are the two SECURITY DEFINER RPCs, which run as the function's
+   owner and are unaffected, and both already gate on is_leadership() before they read anything.
+
+   Belt and braces on purpose. Invoker rights mean a direct call could not escalate; the revoke means
+   there is no direct call to reason about.
+
+   NOTE FOR WHOEVER APPLIES THIS: it assumes dept_station_shifts, dept_iso_hours and this function
+   share an owner. They do if all were created by the same Supabase role, which is the normal case.
+   If ownership ever diverges, the DEFINER functions lose the ability to call this and both RPCs
+   start erroring — a loud failure, not a silent one, but worth knowing where to look. Confirm with:
+     SELECT proname, pg_get_userbyid(proowner) FROM pg_proc
+      WHERE proname IN ('attested_training','dept_station_shifts','dept_iso_hours'); */
+REVOKE EXECUTE ON FUNCTION public.attested_training(uuid, timestamptz, timestamptz)
+  FROM PUBLIC, authenticated, anon;
 
 COMMIT;
 
@@ -140,6 +156,13 @@ NOTIFY pgrst, 'reload schema';
 --   FROM public.attested_training(public.my_department_id(),
 --                                 date_trunc('year', now()), now())
 --  ORDER BY start_at DESC LIMIT 5;
+--
+-- -- 4b. EXECUTE is revoked from everyone: expect anon=f AND auth=f. Internal calls
+-- --     from the two DEFINER RPCs still work because they run as the owner.
+-- SELECT has_function_privilege('authenticated', oid, 'EXECUTE') AS auth_can_call,
+--        has_function_privilege('anon', oid, 'EXECUTE')          AS anon_can_call,
+--        pg_get_userbyid(proowner)                               AS owner
+--   FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname='attested_training';
 --
 -- -- 5. Optional sessions are FLAGGED, not excluded, here — dept_iso_hours filters
 -- --    them out itself. Expect this to show the split.
