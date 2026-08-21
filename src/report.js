@@ -835,3 +835,212 @@ export function buildFleetCheckDoc(data) {
     + `-Apparatus-Checks-${range.from || "start"}_to_${range.to || "end"}.pdf`;
   return { doc, slug };
 }
+
+/* ---------------- Station Hours (verified/credited, per member) ----------------
+   The ISO/LOSAP artifact: who stood how many hours, which of those hours count, and the shift-by-shift
+   record behind the totals.
+
+   RENDERS, DOES NOT RECOMPUTE. Every figure here is passed in already summed by the Station Hours
+   screen — the same `rows` it ranks the roster with and the same dept totals under its tiles. This
+   builder does no arithmetic on hours beyond formatting them, which is the only way the PDF and the
+   screen can be guaranteed to agree. If a number looks wrong, it is wrong on the screen too, and the
+   fix belongs in the one place both read from.
+
+   Rounding matches the screen exactly (h1: one decimal, rounded once at the end). Rounding per row
+   would drift the column away from the total printed above it.
+
+   data = { deptName, station,
+            range:   { label, from, to },              // the chip the user picked, as shown on screen
+            totals:  { credited, unverified, iso, members, shifts, verifiedPct },
+            members: [ { id, name, standby, training, unverified, total, n, vTrue, vpct } ],
+            shifts:  [ { member_id, member_name, checked_in_at, checked_out_at, hours, kind,
+                         verified, auto_closed } ] }
+
+   NO CAPTURE-METHOD COLUMN, deliberately. station_presence carries `source` (geo, gps_geofence, …) but
+   dept_station_shifts does not return it, and widening that RPC is a schema change. An always-blank
+   "Capture" column would look like missing data rather than an absent field, so the column is omitted
+   and the provenance note says why. */
+export function downloadStationHoursReport(data) {
+  const { doc, slug } = buildStationHoursDoc(data);
+  doc.save(slug);
+}
+
+export function buildStationHoursDoc(data) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
+  const M = 44, CW = PW - 2 * M;
+  const BOTTOM = PH - 50;
+  let y = M;
+
+  const now = new Date();
+  const prepared = `Prepared ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+  const fullName = data.deptName || "Department";
+  const station = data.station || "";
+  const t = data.totals || {};
+  const members = data.members || [];
+  const shifts = data.shifts || [];
+  const range = data.range || {};
+
+  // The screen's formatter, character for character. Anything else and the column would stop matching
+  // the tile above it for reasons no reader could diagnose.
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
+  const stamp = (iso) => {
+    const d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d.getTime())) return "—";
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  };
+  const clock = (iso) => {
+    const d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d.getTime())) return "—";
+    const hh = d.getHours(), mm = String(d.getMinutes()).padStart(2, "0");
+    return `${((hh + 11) % 12) + 1}:${mm} ${hh < 12 ? "AM" : "PM"}`;
+  };
+  const periodLabel = range.label ? String(range.label).toUpperCase() : "";
+
+  y = reportBanner(doc, { deptName: fullName, station, subtitle: "Station Hours", period: periodLabel, prepared });
+
+  const { ensure, header } = makeChrome(doc, { M, BOTTOM, getY: () => y, setY: (v) => { y = v; } });
+  function para(text, color = SLATE, size = 9.3) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(size); doc.setTextColor(...color);
+    doc.splitTextToSize(text, CW).forEach((ln) => { ensure(13); doc.text(ln, M, y + 9); y += 13; });
+  }
+  function table(head, body, opts = {}) {
+    ensure(40);
+    doc.autoTable({
+      startY: y, head: [head], body, margin: { left: M, right: M },
+      styles: { font: "helvetica", fontSize: 8.6, textColor: SLATE, cellPadding: 4.5, lineColor: LINE, lineWidth: 0.3, valign: "middle" },
+      headStyles: { fillColor: SLATE, textColor: 255, fontStyle: "bold", fontSize: 8.4 },
+      alternateRowStyles: { fillColor: PANEL },
+      columnStyles: opts.columnStyles || {},
+      didParseCell: (hook) => {
+        if (hook.section === "body" && opts.badgeCol != null && hook.column.index === opts.badgeCol) {
+          const [bg, fg] = badgeColors(hook.cell.raw);
+          hook.cell.styles.fillColor = bg; hook.cell.styles.textColor = fg;
+          hook.cell.styles.fontStyle = "bold"; hook.cell.styles.halign = "center";
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 14;
+  }
+
+  // ---------- cover ----------
+  // CREDITED leads and is the only figure in red. Unverified sits beside it in muted grey on purpose:
+  // it is recorded time and belongs on the page, but it must never read as though it were countable.
+  const SH = 66;
+  ensure(SH + 10);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, SH, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2.2, "F");
+  const tiles = [
+    { num: h1(t.credited), label: "CREDITED HRS", nc: RED,  sc: GRAY },
+    { num: h1(t.unverified), label: "UNVERIFIED", nc: NEUT, sc: NEUT },
+    { num: h1(t.iso), label: "ISO HRS", nc: RED,  sc: GRAY },
+    { num: String(t.members ?? members.length), label: "MEMBERS", nc: SLATE, sc: GRAY },
+    { num: String(t.shifts ?? shifts.length), label: "SHIFTS", nc: SLATE, sc: GRAY },
+  ];
+  const colW = CW / tiles.length;
+  tiles.forEach((tile, i) => {
+    const x = M + i * colW;
+    if (i > 0) { doc.setDrawColor(...LINE); doc.setLineWidth(0.75); doc.line(x, y + 10, x, y + SH - 10); }
+    doc.setTextColor(...tile.nc); doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+    doc.text(tile.num, x + 12, y + 32);
+    doc.setTextColor(...tile.sc); doc.setFont("helvetica", "normal"); doc.setFontSize(7.2);
+    doc.text(tile.label, x + 12, y + 47);
+  });
+  y += SH + 8;
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  doc.text(`${range.label || "Selected period"}${t.verifiedPct == null ? "" : `  ·  ${t.verifiedPct}% of check-ins verified`}`, M, y + 8);
+  y += 20;
+
+  // ---------- roster summary ----------
+  header("Roster summary");
+  if (!members.length) {
+    para("No station hours recorded in this period.", GRAY);
+    y += 8;
+  } else {
+    // Already ranked by credited hours on the screen; the order is preserved rather than re-sorted so
+    // the two lists read identically. Padding unverified time cannot climb this list.
+    table(["Member", "Credited", "Unverified", "Shifts", "Verified"],
+      members.map((m) => [
+        m.name || "—",
+        h1(m.total),
+        h1(m.unverified),
+        String(m.n ?? 0),
+        `${m.vpct ?? 0}%`,
+      ]),
+      { columnStyles: { 0: { fontStyle: "bold" }, 1: { halign: "right", cellWidth: 62 }, 2: { halign: "right", cellWidth: 66 }, 3: { halign: "center", cellWidth: 48 }, 4: { halign: "center", cellWidth: 56 } } });
+  }
+
+  // ---------- per-member detail ----------
+  // Joined on member_id, not name: two members can share a name, and a county filing is the wrong place
+  // to find that out.
+  const byMember = new Map();
+  for (const s of shifts) {
+    const k = s.member_id ?? s.member_name;
+    if (!byMember.has(k)) byMember.set(k, []);
+    byMember.get(k).push(s);
+  }
+  members.forEach((m) => {
+    const list = (byMember.get(m.id) || []).slice()
+      .sort((a, b) => String(a.checked_in_at || "").localeCompare(String(b.checked_in_at || "")));
+    header(`${m.name || "Member"} — ${h1(m.total)} credited`);
+    if (!list.length) { para("No shifts in this period.", GRAY); y += 6; return; }
+    table(["Date", "In", "Out", "Hours", "Kind", "Status"],
+      list.map((s) => [
+        stamp(s.checked_in_at),
+        clock(s.checked_in_at),
+        clock(s.checked_out_at),
+        h1(s.hours),
+        s.kind === "training" ? "Training" : "Standby",
+        // One column, because these are one question: does this shift count, and if not, why not.
+        // auto-closed is named FIRST — it is the reason a verified shift can still be uncredited, and a
+        // reader who sees only "Verified" on such a row would draw the wrong conclusion.
+        s.auto_closed ? "Auto-closed" : s.verified ? "Verified" : "Unverified",
+      ]),
+      // Widths deliberately NOT pinned. Fixing all six columns left 174pt of the page unallocated,
+      // which autoTable cannot distribute — it warns and renders the table narrow, adrift from the
+      // full-width tables above it. Only the alignments are set; autoTable fits the rest to the page.
+      { badgeCol: 5, columnStyles: { 3: { halign: "right" }, 5: { halign: "center" } } });
+  });
+
+  // ---------- provenance ----------
+  ensure(84);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 78, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  const prov = doc.splitTextToSize(
+    "WHAT COUNTS. Credited hours are station standby and training shifts whose check-in was "
+    + "location-verified at the station. Those are the hours reported for ISO and LOSAP.\n"
+    + "WHAT IS EXCLUDED, and shown anyway. Unverified shifts are recorded and listed but never added to "
+    + "the credited figure. Auto-closed shifts are excluded even when the check-in was verified: the stop "
+    + "time was estimated by the system rather than observed, so the duration is not evidence until an "
+    + "officer confirms it. Off-site work, incident time, and shifts still open at the end of the period "
+    + "are not included at all.\n"
+    + "The ISO figure de-overlaps concurrent shifts and clips them to the period, so it will not always "
+    + "equal the credited total. Capture method (manual or automatic check-in) is recorded against each "
+    + "shift but is not reproduced here.", CW - 24);
+  let py = y + 12;
+  prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 9.4; });
+  y += 78 + 14;
+
+  // ---------- certification ----------
+  ensure(120);
+  header("Certification");
+  y = signatureBlock(doc, y, { lines: ["Prepared by", "Certified by"] });
+
+  // ---------- footers ----------
+  const n = doc.getNumberOfPages();
+  const shortName = (station ? `${fullName} · ${station}` : fullName);
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.5); doc.line(M, PH - 38, PW - M, PH - 38);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.2); doc.setTextColor(...GRAY);
+    doc.text(`${shortName} · Station Hours · ${range.label || ""}`, M, PH - 26);
+    doc.text(`Page ${i} of ${n}`, PW - M, PH - 26, { align: "right" });
+  }
+
+  const clean = (v) => String(v || "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = clean(fullName) + (station ? "-" + station.replace(/\s+/g, "") : "")
+    + `-Station-Hours-${clean(range.label) || "period"}.pdf`;
+  return { doc, slug };
+}

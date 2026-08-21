@@ -10,7 +10,7 @@ import {
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
 } from "lucide-react";
-import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck } from "./report.js";
+import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -6877,7 +6877,10 @@ function StationHoursReport({ S, dept, notify, back }) {
   // a chief reports to an outside body. standby/training/total below are verified-only by construction.
   const byMember = {};
   for (const s of shifts) {
-    const m = (byMember[s.member_id] ||= { name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0 });
+    // `id` is carried so the PDF can join each member's shift detail on member_id rather than on a
+    // display name — two members can share a name, and a county filing is the wrong place to find out.
+    // Nothing else about this rollup changes: no figure below is derived any differently.
+    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, n: 0 });
     const hrs = Number(s.hours) || 0;
     // AUTO-CLOSED FIRST, ahead of the verified check: the stop time was guessed by the safety-net job,
     // not observed, so the DURATION is fiction even when the check-in itself was properly geo-verified.
@@ -6942,6 +6945,29 @@ function StationHoursReport({ S, dept, notify, back }) {
         <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Who's putting in time at the station, and how much of it was verified on location.</div>
       </div>
+      {/* PDF export. Hands the builder the figures THIS SCREEN ALREADY COMPUTED — the same `rows` the
+          roster below is ranked from and the same dept totals under the tiles — so the document and the
+          page cannot disagree. The builder does no arithmetic on hours beyond formatting.
+          Hidden until a successful load: offering "Download PDF" over a failed read would produce a
+          confident-looking report of zero hours, which is worse than no button. */}
+      {loaded && !err && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button style={FS.btn} onClick={() => {
+            const r = RANGES[rangeKey]();
+            downloadStationHoursReport({
+              deptName: dept?.name || "Department",
+              station: dept?.station || "",
+              range: { label: r.label, from: r.from.toISOString(), to: r.to.toISOString() },
+              totals: {
+                credited: dept_total, unverified: dept_unverified, iso: iso_total,
+                members: rows.length, shifts: dept_n, verifiedPct: dept_vpct,
+              },
+              members: rows,
+              shifts,
+            });
+          }}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
+        </div>
+      )}
       {err && (
         <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
           <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
