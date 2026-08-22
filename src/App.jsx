@@ -94,6 +94,7 @@ import {
   SIGNIN_ROLES, ANNOUNCE_ROLES, GRANTABLE_ROLES,
   hasAny, isLeader, isDeptAdmin, isBoard, canManage, isTrainingLeader,
 } from "../shared/roles.js";
+import { isDoneThisPeriod, weekStartKey } from "../shared/duty-period.js";
 // Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
 // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
 // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
@@ -13398,42 +13399,15 @@ function GraphicStudio({ S, brand }) {
 const DUTY_CATEGORIES = ["Cleanup", "Station", "Equipment", "Apparatus", "EMS", "Admin"];
 const RECUR = ["Weekly", "Monthly", "Quarterly", "One-time"];
 const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-function weekStartOf(date, startDay) { const d = new Date(date); d.setHours(0, 0, 0, 0); const diff = (d.getDay() - startDay + 7) % 7; d.setDate(d.getDate() - diff); return d; }
-const monthKey = (date) => { const d = date ? new Date(date) : new Date(); return `${d.getFullYear()}-${d.getMonth()}`; };
-const quarterKey = (date) => { const d = date ? new Date(date) : new Date(); return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3)}`; };
-// ---------------------------------------------------------------------------
-// THE duty-completion rule. A duty is done FOR THE CURRENT PERIOD iff done_at
-// falls inside the current period for its recurrence. Read-time and derived —
-// there is no scheduled sweep and nothing ever clears `done` on a rollover, so
-// a weekly duty completed last week simply stops satisfying this and shows due
-// again. duties.done/done_at are written ONLY by complete_duty/uncomplete_duty.
-//
-// Gates on `done` FIRST, not on done_at alone: a legacy row with done=true and
-// done_at=null then stays done if One-off, and reads as due if recurring —
-// the safe direction both ways. (0 such rows today; the guard is free.)
-//
-// BOUNDARY — pa_department_radar deliberately does NOT use this rule. Its
-// overdue_duties_count means "has a past due_date and was never completed",
-// a different and self-consistent definition. The two surfaces disagreeing
-// about outstanding duties is EXPECTED. Do not teach the radar this rule (it
-// would live in two languages and have to stay in lockstep — the
-// certStatus/dept_cert_readiness trap), and do not bend this rule to match it.
-//
-// Callers must select recurrence and done_at, not just done.
-// ---------------------------------------------------------------------------
-function isDoneThisPeriod(duty, weekStartDay) {
-  if (!duty?.done) return false;
-  const rec = duty.recurrence || "One-off";
-  if (rec === "One-off") return true;                  // never resets
-  const at = duty.doneAt ?? duty.done_at;
-  if (!at) return false;                               // recurring with no timestamp -> treat as due
-  const d = new Date(at);
-  if (isNaN(d.getTime())) return false;
-  if (rec === "Weekly")    return toISO(weekStartOf(d, weekStartDay)) === toISO(weekStartOf(new Date(), weekStartDay));
-  if (rec === "Monthly")   return monthKey(d) === monthKey();
-  if (rec === "Quarterly") return quarterKey(d) === quarterKey();
-  return true;   // unknown recurrence: behave like One-off rather than silently reopening
-}
+/* weekStartOf / monthKey / quarterKey / isDoneThisPeriod now live in shared/duty-period.js, which
+   api/pulse.js imports too — the reminder engine and these screens must not disagree about whether
+   a duty is outstanding.
+
+   They are NOT a straight copy. The originals used local-time methods, which meant the member's
+   device zone here and UTC on Vercel: the same weekly duty could read done on one and due on the
+   other. The shared version computes every boundary in an explicit IANA zone (Central by default,
+   matching the SQL). Verified against the originals across ~10,000 instants spanning a full year:
+   identical on a Central device, and differing only where the old code was wrong about UTC. */
 const DUTY_SEED = [
   { id: 1, duty: "Sweep & mop the apparatus bay", category: "Cleanup", recurrence: "Weekly", done: true, doneBy: "Sam Whitfield", doneAt: "Mon 6:30 PM" },
   { id: 2, duty: "Kitchen & dayroom wipe-down", category: "Cleanup", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
@@ -13543,7 +13517,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   // both the DB default and the fallback used when the column doesn't exist yet or the read fails,
   // so this works before AND after the migration.
   const [weekStartDay, setWeekStartDay] = useState(1);
-  const isoWeek = (day) => toISO(weekStartOf(new Date(), Number(day)));
+  const isoWeek = (day) => weekStartKey(new Date(), Number(day));
   const [weekLabel, setWeekLabel] = useState(() => isoWeek(1));
   const weekRef = useRef(weekLabel);
   // monthRef/quarterRef went with the rollover tick — nothing compares period keys any more, because
@@ -13682,8 +13656,8 @@ function StationDuties({ S, role, members, meId, notify }) {
   // History: group duty_log completions by the station's week setting (newest first)
   // Current week boundary, recomputed every render — no timer. A tab left open across the rollover
   // re-slices on the next render; useReconnect below forces one on app resume.
-  const weekStartISO = toISO(weekStartOf(new Date(), weekStartDay));
-  const inCurrentWeek = (iso) => !!iso && toISO(weekStartOf(new Date(iso), weekStartDay)) === weekStartISO;
+  const weekStartISO = weekStartKey(new Date(), weekStartDay);
+  const inCurrentWeek = (iso) => !!iso && weekStartKey(new Date(iso), weekStartDay) === weekStartISO;
   const currentOtherWork = log.filter((e) => inCurrentWeek(e.doneAt));   // section shows THIS week only; nothing is deleted
   /* History buckets BOTH sources by the same week key: checklist completions (duty_log) and other work
      (station_log). `kind` keeps them separable for rendering and CSV. Past weeks only — the current
@@ -13692,7 +13666,7 @@ function StationDuties({ S, role, members, meId, notify }) {
     const byWeek = new Map();
     const put = (iso, entry) => {
       if (!iso) return;
-      const wk = toISO(weekStartOf(new Date(iso), weekStartDay));
+      const wk = weekStartKey(new Date(iso), weekStartDay);
       if (wk === weekStartISO) return;                       // current week lives in the section above
       if (!byWeek.has(wk)) byWeek.set(wk, []);
       byWeek.get(wk).push(entry);
