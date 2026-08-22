@@ -27,21 +27,10 @@
  * key that leaks into a log should not say "Q0".
  */
 
-const DEFAULT_TZ = "America/Chicago";
-const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-const pad2 = (n) => String(n).padStart(2, "0");
+import { civil, shiftCivil, civilToISO, zonedInstantFrom } from "./zoned-time.js";
 
-/* An instant, expressed as the calendar date it falls on IN A GIVEN ZONE. Everything below works on
-   these civil values with plain integer arithmetic, so no DST transition can shift a boundary: the
-   arithmetic never touches an instant again once the civil date is known. */
-function civil(date, tz) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, hour12: false, weekday: "short",
-    year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(date);
-  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
-  return { y: +p.year, m: +p.month, d: +p.day, wd: WD[p.weekday] };
-}
+const DEFAULT_TZ = "America/Chicago";
+const pad2 = (n) => String(n).padStart(2, "0");
 
 /* The date key of the week's first day, in `tz`. startDay follows Date#getDay: 0 = Sunday, 1 = Monday.
    Day subtraction goes through Date.UTC purely as calendar arithmetic — UTC is used BECAUSE it has no
@@ -113,4 +102,85 @@ export function periodKey(duty, weekStartDay = 1, tz = DEFAULT_TZ, now = new Dat
   if (rec === "Monthly")   return monthKey(now, tz);
   if (rec === "Quarterly") return quarterKey(now, tz);
   return "once";
+}
+
+
+/* ---------------------------------------------------------------------------
+ * PERIOD CLOSE — when a recurring duty's period ends, and when to nudge about it.
+ *
+ * Recurring station duties are collective, unassigned and undated: "sweep the bay, weekly, whoever
+ * is on". There is no due_date to count down to, so the PERIOD ITSELF is the deadline and the
+ * reminder has to be derived from when that period closes.
+ * ------------------------------------------------------------------------ */
+
+/* How many days before the period ends the nudge window opens. A longer period earns more runway —
+ * a day's notice on a quarterly job is not notice, it is an accusation.
+ *
+ * ONE TABLE, DELIBERATELY. Changing Weekly from 1 to 2 (nudge on Saturday rather than Sunday) is a
+ * single number here and nothing else moves. */
+export const LEAD_DAYS = { Weekly: 1, Monthly: 2, Quarterly: 3 };
+
+/* The hour, department-local, at which a nudge window opens. Morning on purpose: a station-duty
+ * reminder that arrives at 22:00 is one nobody can act on until tomorrow, by which point the period
+ * may have closed. */
+export const NUDGE_HOUR = 8;
+
+/* The LAST CALENDAR DAY of the period `now` falls in, in `tz`. Returns null for One-off and unknown
+ * recurrences — they have no period, so they can never have a period-close nudge. That null is the
+ * mechanism by which One-off duties are skipped entirely, rather than a separate check somewhere
+ * that could be forgotten. */
+export function periodEndCivil(recurrence, weekStartDay = 1, tz = DEFAULT_TZ, now = new Date()) {
+  if (recurrence === "Weekly") {
+    const [y, m, d] = weekStartKey(now, weekStartDay, tz).split("-").map(Number);
+    return shiftCivil({ y, m, d }, 6);
+  }
+  const c = civil(now, tz);
+  // Day 0 of the FOLLOWING month is the last day of this one — the standard trick, and it is why
+  // February needs no special case and leap years need no table.
+  if (recurrence === "Monthly") {
+    const t = new Date(Date.UTC(c.y, c.m, 0));
+    return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
+  }
+  if (recurrence === "Quarterly") {
+    const qEndMonth = Math.floor((c.m - 1) / 3) * 3 + 3;      // -> 3, 6, 9, 12
+    const t = new Date(Date.UTC(c.y, qEndMonth, 0));
+    return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
+  }
+  return null;
+}
+
+export function periodEndISO(recurrence, weekStartDay = 1, tz = DEFAULT_TZ, now = new Date()) {
+  const e = periodEndCivil(recurrence, weekStartDay, tz, now);
+  return e ? civilToISO(e) : null;
+}
+
+/* The nudge window: [08:00 local on the Nth-from-last day, the instant the period ends).
+ *
+ * A WINDOW, NOT AN INSTANT — the same reasoning as the event lead-time bands. The hourly run that
+ * first lands inside it writes the row, and the dedupe key makes every later run a no-op. An exact
+ * 08:00 trigger would silently skip an entire period whenever that one hour was missed by a deploy,
+ * a cold start or an outage; a window turns that into a delay of an hour instead of a loss.
+ *
+ * Closes at midnight local on the day AFTER the last day — i.e. the moment the period ends, which
+ * is also the moment periodKey rolls over. Half-open on purpose: exactly one window contains any
+ * given instant, so a nudge can never belong to two periods. */
+export function nudgeWindow(recurrence, weekStartDay = 1, tz = DEFAULT_TZ, now = new Date()) {
+  const lead = LEAD_DAYS[recurrence];
+  const end = periodEndCivil(recurrence, weekStartDay, tz, now);
+  if (!lead || !end) return null;                       // One-off / unknown: no window, ever
+
+  const open = shiftCivil(end, -(lead - 1));
+  const dayAfter = shiftCivil(end, 1);
+  return {
+    opensAt: zonedInstantFrom(open.y, open.m, open.d, NUDGE_HOUR, 0, tz),
+    closesAt: zonedInstantFrom(dayAfter.y, dayAfter.m, dayAfter.d, 0, 0, tz),
+    periodEnd: civilToISO(end),
+  };
+}
+
+export function isNudgeWindowOpen(recurrence, weekStartDay = 1, tz = DEFAULT_TZ, now = new Date()) {
+  const w = nudgeWindow(recurrence, weekStartDay, tz, now);
+  if (!w) return false;
+  const t = now.getTime();
+  return t >= w.opensAt.getTime() && t < w.closesAt.getTime();
 }

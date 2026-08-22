@@ -36,47 +36,17 @@ import { LEADERSHIP, BOARD, hasAny } from "../shared/roles.js";
 import { isDoneThisPeriod, periodKey } from "../shared/duty-period.js";
 
 /* ---------------- wall clock -> instant ----------------
-   training_sessions stores `date` + `start_time` as a WALL CLOCK with no zone. Read in the server's
-   zone (Vercel runs UTC) a 7pm drill becomes 7pm UTC — 1pm Central — and every lead-time window is
-   five or six hours wrong. The same bug already cost this project once, in dept_station_shifts,
-   which is why the SQL side now hardcodes 'America/Chicago' at four sites.
+   These lived here until slice 3b. They now come from shared/zoned-time.js, which duty-period.js
+   also builds on — a slice whose whole point is removing duplicated time logic should not leave a
+   second wall-clock converter behind. Moved verbatim; the two-pass DST resolution is unchanged and
+   still verified 7/7 against both 2026 transitions.
 
-   Two passes, deliberately. The first offset is computed at the GUESSED instant, which is wrong for
-   any wall time that lands near a DST transition; re-deriving the offset at that corrected instant
-   settles it. Verified against both 2026 transitions and both standard offsets.
+   TZ stays hardcoded Central, matching the SQL (dept_station_shifts, attested_training). When a
+   non-Central department is onboarded, this constant and those SQL sites become one per-department
+   column — a single decision, not four. */
+import { zonedInstant, todayISOIn, addDaysISO } from "../shared/zoned-time.js";
 
-   Hardcoded Central, matching the SQL. When a non-Central department is onboarded this becomes a
-   per-department IANA column, here and at the four SQL sites together — they are one decision. */
 const TZ = "America/Chicago";
-
-function tzOffsetMs(date, tz) {
-  const dtf = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false,
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const p = Object.fromEntries(dtf.formatToParts(date).map((x) => [x.type, x.value]));
-  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
-  return asUTC - date.getTime();
-}
-
-function zonedInstant(dateISO, timeHHMM, tz = TZ) {
-  const [Y, M, D] = String(dateISO).split("-").map(Number);
-  const [h, m] = String(timeHHMM || "00:00").slice(0, 5).split(":").map(Number);
-  const guess = Date.UTC(Y, M - 1, D, h, m, 0);
-  let inst = guess - tzOffsetMs(new Date(guess), tz);
-  inst = guess - tzOffsetMs(new Date(inst), tz);
-  return new Date(inst);
-}
-
-// Today, as the department experiences it. due_date is a plain date, so comparing it against a UTC
-// "today" would roll over six hours early and call things overdue on the evening before.
-function todayISOIn(tz = TZ, now = new Date()) {
-  const dtf = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
-  return dtf.format(now);   // en-CA formats as YYYY-MM-DD
-}
-const addDaysISO = (iso, n) => {
-  const [Y, M, D] = iso.split("-").map(Number);
-  const d = new Date(Date.UTC(Y, M - 1, D + n));
-  return d.toISOString().slice(0, 10);
-};
 
 /* ---------------- audience ----------------
    Mirrors rollFor()/isBoard()/isLeader() in App.jsx — and now literally shares their definitions
