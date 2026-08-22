@@ -14,7 +14,7 @@ import { supabase } from "./supabaseClient";
 // A type with no entry here renders as a generic warning triangle without erroring — so any new
 // type added to api/pulse.js needs its prefix added here in the SAME change, or it ships looking
 // like a bug nobody filed.
-const ICON = { cert: Award, gear: HardHat, maint: Wrench, event: CalendarClock, task: ClipboardCheck };
+const ICON = { cert: Award, gear: HardHat, maint: Wrench, event: CalendarClock, task: ClipboardCheck, duty: ClipboardList };
 const iconFor = (type) => ICON[String(type || "").split("_")[0]] || AlertTriangle;
 const COLOR = { critical: "#E58A90", warning: "#D6A95E", info: "#8FA3C4" };
 

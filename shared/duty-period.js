@@ -118,7 +118,10 @@ export function periodKey(duty, weekStartDay = 1, tz = DEFAULT_TZ, now = new Dat
  *
  * ONE TABLE, DELIBERATELY. Changing Weekly from 1 to 2 (nudge on Saturday rather than Sunday) is a
  * single number here and nothing else moves. */
-export const LEAD_DAYS = { Weekly: 1, Monthly: 2, Quarterly: 3 };
+export const LEAD_DAYS = { Weekly: 2, Monthly: 2, Quarterly: 3 };
+// Weekly is 2 (Saturday 08:00, ~40 hours of runway) rather than 1 (Sunday 08:00, ~16 hours). A
+// station chore needs somebody to physically come in, and a Sunday-morning nudge about a period
+// closing that midnight is barely a warning. Set back to 1 to move it to Sunday; nothing else moves.
 
 /* The hour, department-local, at which a nudge window opens. Morning on purpose: a station-duty
  * reminder that arrives at 22:00 is one nobody can act on until tomorrow, by which point the period

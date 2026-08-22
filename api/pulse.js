@@ -313,10 +313,10 @@ export default async function handler(req, res) {
     detectErrors.push({ family: "tasks", error: String(e?.message || e) });
   }
 
-  /* STATION DUTIES — MEASUREMENT ONLY. Emits nothing.
-     Nothing here pushes to `detected`, so no duty can produce a notification row or a push. The
-     purpose is to answer two questions with real numbers before emission is enabled, because both
-     could make the feature wrong in a way that only shows up on members' phones:
+  /* STATION DUTIES — period-close summaries, plus the measurement that gated them.
+     Recurring duties are collective, unassigned and undated, so the PERIOD is the deadline: one
+     summary per member per recurrence-period, sent as that period closes. The diagnostics below
+     stay in place because they answer two questions that decide whether this stays sane:
 
        1. ASSIGNEE COVERAGE. Duties notify the assignee only, matching tasks. But assigned_to is
           nullable and station chores are often left unassigned — if most are, assignee-only
@@ -327,7 +327,8 @@ export default async function handler(req, res) {
           period from now on, and because subject_ref carries the period it fires ONCE PER WEEK,
           indefinitely, until someone completes it. That may be exactly right for an outstanding
           chore, or it may be the thing that teaches a roster to swipe notifications away unread.
-          The count decides it, not an opinion.
+          Measured at 11.1 projected pushes/week before enabling; the counters remain so a
+          change in duty habits shows up here rather than on phones.
 
      Done-ness uses the shared isDoneThisPeriod, never due_date < today AND NOT done — a weekly
      duty completed last week is open again this week, and the naive form would tell a member their
@@ -384,6 +385,11 @@ export default async function handler(req, res) {
         });
       }
     }
+    /* wouldNotify's duty_due_* keys are HYPOTHETICAL — they count what the abandoned per-duty,
+       assignee-only, due-date-driven design would have sent. Nothing emits them. They stay because
+       they measure assignee and due-date coverage, which is what showed that design was wrong here
+       (6 of 8 duties unassigned, 7 of 8 undated) and would show if duty habits changed. */
+    d.note = "wouldNotify/standingNag are hypothetical counts for the abandoned per-duty design. Only duty_summary is emitted.";
     d.recurrenceHistogram = (duties || []).reduce((acc, r) => {
       const k = r.recurrence || "(none)"; acc[k] = (acc[k] || 0) + 1; return acc;
     }, {});
@@ -445,6 +451,28 @@ export default async function handler(req, res) {
         }
         fanOut += recipients.size;
         if (open) notifyNow += recipients.size;
+
+        /* EMISSION. Deliberately inside the loop that already built `recipients`, so what ships is
+           what was measured — a separate derivation could drift from the numbers the gate approved.
+           Window-gated: outside [opensAt, closesAt) this produces nothing, and the dedupe key means
+           the first run inside the window wins and every later one collides harmlessly. */
+        if (open && w) {
+          const pk = periodKey({ recurrence: rec }, wsd, TZ, now);
+          for (const [memberId, names] of recipients) {
+            const sorted = [...names].sort();          // stable text across runs
+            detected.push({
+              member_id: memberId,
+              department_id: deptId,
+              family: "tasks",                          // duties mute with action items, per the locked design
+              type: "duty_summary",                     // prefix "duty" -> ICON["duty"]; drain matches duty.like.*
+              subject_ref: `${deptId}:${rec}:${pk}`,    // one summary per member per period
+              title: summaryTitle(rec),
+              body: summaryBody(sorted),
+              severity: "info",
+              why: `${sorted.length} outstanding ${rec} ${sorted.length === 1 ? "duty" : "duties"}, period ends ${w.periodEnd}`,
+            });
+          }
+        }
 
         // Show the actual composed text once, so the wording is reviewable before it can send.
         if (!previewShown && recipients.size) {
@@ -586,7 +614,7 @@ export default async function handler(req, res) {
       .select("id, member_id, type, title, body, created_at")
       .is("pushed_at", null)
       .gte("created_at", drainSince)
-      .or("type.like.event_*,type.like.task_*")
+      .or("type.like.event_*,type.like.task_*,type.like.duty_*")
       .order("created_at", { ascending: true })
       .limit(500);                                   // a bounded run; leftovers go on the next pass
     if (onlyMember) q = q.eq("member_id", onlyMember);

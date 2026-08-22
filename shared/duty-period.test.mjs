@@ -104,7 +104,7 @@ eq(periodEndISO("Sporadic", 1, TZ, new Date("2026-08-26T17:00:00Z")), null, "unk
 
 console.log("\n-- nudge window: opens 08:00 local, closes at period end --");
 const wk = nudgeWindow("Weekly", 1, TZ, new Date("2026-08-26T17:00:00Z"));
-eq(wk.opensAt.toISOString(),  "2026-08-30T13:00:00.000Z", "Weekly (lead 1): opens Sun 08:00 CDT");
+eq(wk.opensAt.toISOString(),  "2026-08-29T13:00:00.000Z", "Weekly (lead 2): opens SATURDAY 08:00 CDT");
 eq(wk.closesAt.toISOString(), "2026-08-31T05:00:00.000Z", "Weekly: closes at Mon 00:00 CDT");
 const mo = nudgeWindow("Monthly", 1, TZ, new Date("2026-08-10T17:00:00Z"));
 eq(mo.opensAt.toISOString(),  "2026-08-30T13:00:00.000Z", "Monthly (lead 2): opens on the 30th, 08:00 CDT");
@@ -118,26 +118,26 @@ console.log("\n-- nudge window across DST --");
 // Fall back is 2026-11-01 02:00. A window opening at 08:00 that day is CST (UTC-6), not CDT.
 const fb = nudgeWindow("Weekly", 1, TZ, new Date("2026-10-28T17:00:00Z"));
 eq(fb.periodEnd, "2026-11-01", "week of 10-26 ends on fall-back Sunday");
-eq(fb.opensAt.toISOString(),  "2026-11-01T14:00:00.000Z", "opens 08:00 CST (14:00Z), not 13:00Z");
+eq(fb.opensAt.toISOString(),  "2026-10-31T13:00:00.000Z", "opens Sat 10-31 08:00 CDT — window OPENS in CDT and CLOSES in CST");
 eq(fb.closesAt.toISOString(), "2026-11-02T06:00:00.000Z", "closes Mon 00:00 CST");
 // Spring forward is 2026-03-08 02:00; 08:00 that day is already CDT.
 const sf = nudgeWindow("Weekly", 1, TZ, new Date("2026-03-04T18:00:00Z"));
 eq(sf.periodEnd, "2026-03-08", "week of 03-02 ends on spring-forward Sunday");
-eq(sf.opensAt.toISOString(),  "2026-03-08T13:00:00.000Z", "opens 08:00 CDT (13:00Z)");
+eq(sf.opensAt.toISOString(),  "2026-03-07T14:00:00.000Z", "opens Sat 03-07 08:00 CST — window OPENS in CST and CLOSES in CDT");
 const nv = nudgeWindow("Monthly", 1, TZ, new Date("2026-11-15T18:00:00Z"));
 eq(nv.opensAt.toISOString(),  "2026-11-29T14:00:00.000Z", "November monthly opens 08:00 CST");
 eq(nv.closesAt.toISOString(), "2026-12-01T06:00:00.000Z", "and closes Dec 1 00:00 CST");
 
 console.log("\n-- isNudgeWindowOpen (half-open interval) --");
 const W = (iso) => isNudgeWindowOpen("Weekly", 1, TZ, new Date(iso));
-eq(W("2026-08-30T12:59:59Z"), false, "one second before opening -> shut");
-eq(W("2026-08-30T13:00:00Z"), true,  "exactly at opening -> OPEN");
+eq(W("2026-08-29T12:59:59Z"), false, "one second before opening -> shut");
+eq(W("2026-08-29T13:00:00Z"), true,  "exactly at opening -> OPEN");
 eq(W("2026-08-30T20:00:00Z"), true,  "mid-window -> open");
 eq(W("2026-08-31T04:59:59Z"), true,  "one second before close -> still open");
 eq(W("2026-08-31T05:00:00Z"), false, "exactly at close -> SHUT (half-open, so no period overlap)");
 eq(isNudgeWindowOpen("One-off", 1, TZ, new Date("2026-08-30T20:00:00Z")), false, "One-off is never open");
-eq(LEAD_DAYS.Weekly === 1 && LEAD_DAYS.Monthly === 2 && LEAD_DAYS.Quarterly === 3, true,
-   "LEAD_DAYS table is the single place to retune (Weekly 1 = Sunday; set 2 for Saturday)");
+eq(LEAD_DAYS.Weekly === 2 && LEAD_DAYS.Monthly === 2 && LEAD_DAYS.Quarterly === 3, true,
+   "LEAD_DAYS is the single place to retune (Weekly 2 = Saturday; set 1 for Sunday)");
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
