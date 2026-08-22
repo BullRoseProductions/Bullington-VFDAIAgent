@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench } from "lucide-react";
+import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 /* Notification centre — reads the STORED notifications table (not a recomputed list), so read/unread
@@ -10,7 +10,11 @@ import { supabase } from "./supabaseClient";
    duplicating the rule in the client is how the two drift apart. The `mine` flag below is a
    DISPLAY distinction (yours vs the department's), never a security boundary. */
 
-const ICON = { cert: Award, gear: HardHat, maint: Wrench };
+// Keyed on the prefix BEFORE the first underscore, so event_24h and event_1h share one icon.
+// A type with no entry here renders as a generic warning triangle without erroring — so any new
+// type added to api/pulse.js needs its prefix added here in the SAME change, or it ships looking
+// like a bug nobody filed.
+const ICON = { cert: Award, gear: HardHat, maint: Wrench, event: CalendarClock, task: ClipboardCheck };
 const iconFor = (type) => ICON[String(type || "").split("_")[0]] || AlertTriangle;
 const COLOR = { critical: "#E58A90", warning: "#D6A95E", info: "#8FA3C4" };
 
