@@ -405,6 +405,12 @@ export default async function handler(req, res) {
     detectErrors.push({ family: "duties", error: String(e?.message || e) });
   }
 
+  const candidates = detected;
+
+  /* SCOPE IS APPLIED HERE, ONCE — not at send time. Narrowing the recipient list is what makes a
+     real-engine test safe, so it happens before anything downstream can act on a candidate. */
+  const scoped = onlyMember ? candidates.filter((c) => c.member_id === onlyMember) : candidates;
+
   /* ---- MUTE GATE ------------------------------------------------------------------------------
      A muted family produces NO ROW AT ALL, rather than a row suppressed at send time. The inbox is
      the record: a member who opted out of event reminders should not find them waiting there, and
