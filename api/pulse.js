@@ -33,7 +33,7 @@ import { insertNotifications, sendPush } from "./_push.js";
 // The role vocabulary, shared with the client. See shared/roles.js for why this is not a copy.
 import { LEADERSHIP, BOARD, hasAny } from "../shared/roles.js";
 // Same definition the duty screens use — see shared/duty-period.js for why this is not a copy.
-import { isDoneThisPeriod, periodKey } from "../shared/duty-period.js";
+import { isDoneThisPeriod, periodKey, nudgeWindow, isNudgeWindowOpen } from "../shared/duty-period.js";
 
 /* ---------------- wall clock -> instant ----------------
    These lived here until slice 3b. They now come from shared/zoned-time.js, which duty-period.js
@@ -77,6 +77,20 @@ const FAMILIES = ["certs", "gear", "maint", "events", "tasks"];
 // Type names are load-bearing UI: the inbox picks its icon from type.split("_")[0]. Anything added
 // here needs a matching ICON entry in src/Notifications.jsx or it renders as a generic warning.
 const TYPE_PREFIX_BY_FAMILY = { events: "event", tasks: "task" };
+
+const RECURRING = ["Weekly", "Monthly", "Quarterly"];   // One-off has no period, so never a nudge
+const PERIOD_WORD = { Weekly: "this week", Monthly: "this month", Quarterly: "this quarter" };
+
+/* One summary per member per period, not one notification per duty. Three names then "and N more":
+   both APNs and Android truncate a lock-screen line around 120 characters, and a body that ends
+   mid-word reads as broken rather than abbreviated. Names arrive pre-sorted so the text is stable
+   across runs. */
+const summaryTitle = (rec) => `Station duties — ${PERIOD_WORD[rec] || "this period"}`;
+function summaryBody(names) {
+  const shown = names.slice(0, 3);
+  const more = names.length - shown.length;
+  return `${names.length} still need doing: ${shown.join(", ")}${more > 0 ? `, and ${more} more` : ""}.`;
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -370,7 +384,89 @@ export default async function handler(req, res) {
         });
       }
     }
+    d.recurrenceHistogram = (duties || []).reduce((acc, r) => {
+      const k = r.recurrence || "(none)"; acc[k] = (acc[k] || 0) + 1; return acc;
+    }, {});
     diag.duties = d;
+
+    /* ---- SUMMARY FAN-OUT — the gate number. Still emits nothing. ------------------------------
+       Two counts per recurrence, deliberately:
+
+         wouldNotifyNow   what a run at THIS moment would send — window-gated, so it is 0 whenever
+                          the nudge window happens to be shut.
+         fanOutIfFired    the same calculation with the window ignored — the real blast radius.
+
+       Reporting only the first would mean a dry run on a Tuesday reports zero and teaches us
+       nothing except that it is Tuesday. fanOutIfFired is the number that decides whether crew-wide
+       emission is sane, and it is knowable at any hour. */
+    const outstanding = new Map();            // `${deptId}|${rec}` -> duty rows still open
+    for (const row of duties || []) {
+      if (!RECURRING.includes(row.recurrence)) continue;
+      const wsd = wsdByDept.get(row.department_id) ?? 1;
+      if (isDoneThisPeriod(row, wsd, TZ, now)) continue;
+      const k = `${row.department_id}|${row.recurrence}`;
+      if (!outstanding.has(k)) outstanding.set(k, []);
+      outstanding.get(k).push(row);
+    }
+
+    const affected = [...new Set([...outstanding.keys()].map((k) => k.split("|")[0]))];
+    let active = [];
+    if (affected.length) {
+      const { data: mem, error: mErr } = await sb.from("members")
+        .select("id, department_id, status").in("department_id", affected);
+      if (mErr) throw new Error(mErr.message);
+      active = (mem || []).filter((m) => m.status === "Active");
+    }
+
+    const summary = {};
+    let previewShown = false;
+    for (const rec of RECURRING) {
+      let outstandingDuties = 0, deptsAffected = 0, fanOut = 0, notifyNow = 0, win = null;
+      for (const [k, rows] of outstanding) {
+        const [deptId, r] = k.split("|");
+        if (r !== rec) continue;
+        deptsAffected += 1; outstandingDuties += rows.length;
+        const wsd = wsdByDept.get(deptId) ?? 1;
+        const w = nudgeWindow(rec, wsd, TZ, now);
+        const open = isNudgeWindowOpen(rec, wsd, TZ, now);
+        if (!win && w) win = { periodEnd: w.periodEnd, opensAt: w.opensAt.toISOString(), closesAt: w.closesAt.toISOString(), open };
+
+        /* A member gets ONE summary covering both their own assigned duties and the crew's
+           unassigned ones — hence a Set. Two notifications for the same period would be the
+           feature arguing with itself. */
+        const deptActive = active.filter((m) => m.department_id === deptId);
+        const recipients = new Map();          // member_id -> duty names
+        for (const row of rows) {
+          const targets = row.assigned_to ? [row.assigned_to] : deptActive.map((m) => m.id);
+          for (const id of targets) {
+            if (!recipients.has(id)) recipients.set(id, []);
+            recipients.get(id).push(row.duty || "a duty");
+          }
+        }
+        fanOut += recipients.size;
+        if (open) notifyNow += recipients.size;
+
+        // Show the actual composed text once, so the wording is reviewable before it can send.
+        if (!previewShown && recipients.size) {
+          const [mid, names] = [...recipients.entries()][0];
+          const sorted = [...names].sort();
+          diag.dutySummaryPreview = {
+            member_id: mid, recurrence: rec,
+            title: summaryTitle(rec), body: summaryBody(sorted),
+            subject_ref: `${deptId}:${rec}:${periodKey({ recurrence: rec }, wsd, TZ, now)}`,
+            type: "duty_summary", family: "tasks",
+          };
+          previewShown = true;
+        }
+      }
+      summary[rec] = { outstandingDuties, deptsAffected, fanOutIfFired: fanOut, wouldNotifyNow: notifyNow, ...(win || {}) };
+    }
+
+    // Steady state, in pushes per week: monthly lands ~4.35 weeks apart, quarterly ~13.
+    const perWeek = (summary.Weekly?.fanOutIfFired || 0)
+                  + (summary.Monthly?.fanOutIfFired || 0) / 4.345
+                  + (summary.Quarterly?.fanOutIfFired || 0) / 13.04;
+    diag.dutySummary = { ...summary, projectedPushesPerWeek: Math.round(perWeek * 10) / 10 };
   } catch (e) {
     detectErrors.push({ family: "duties", error: String(e?.message || e) });
   }
