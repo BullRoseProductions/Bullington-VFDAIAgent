@@ -227,7 +227,33 @@ export default async function handler(req, res) {
     }
     diag.sessionsScanned = (sessions || []).length;
 
+    // How many FUTURE sessions carry no start_time at all — i.e. how many are permanently
+    // unreachable by lead-time reminders. head:true so this counts without pulling rows.
+    const { count: futureTotal } = await sb.from("training_sessions")
+      .select("id", { count: "exact", head: true }).gte("date", todayISO);
+    const { count: futureNoTime } = await sb.from("training_sessions")
+      .select("id", { count: "exact", head: true }).gte("date", todayISO).is("start_time", null);
+    diag.futureSessions = { total: futureTotal ?? null, withoutStartTime: futureNoTime ?? null };
+
     for (const sess of sessions || []) {
+      /* NO START TIME = NO REMINDER. zonedInstant coalesces a missing time to 00:00, which invents a
+         start nobody scheduled: a session dated tomorrow with no time would read as ~midnight, land
+         in the 24h band, and tell every member "Training at 12:00 AM". A lead-time reminder is a
+         claim about WHEN something starts, and for these rows we do not know. Skipping is the only
+         honest option — the session still exists, still shows on the calendar, and still takes
+         attendance; it simply cannot be the subject of a "starts in N hours" push.
+
+         Recorded in diag so these are visible rather than silently absent: a department whose
+         sessions never carry times would otherwise look like a broken feature. */
+      if (!sess.start_time) {
+        diag.sessions.push({
+          id: sess.id, date: sess.date, start_time: null, audience: sess.audience, done: sess.done,
+          band: "no-start-time",
+          note: "skipped — no start_time, so no lead time can be computed without inventing one",
+        });
+        continue;
+      }
+
       const startsAt = zonedInstant(sess.date, sess.start_time);
       const hoursUntil = (startsAt.getTime() - nowMs) / 3_600_000;
 
