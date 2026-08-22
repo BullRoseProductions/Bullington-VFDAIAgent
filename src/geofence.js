@@ -165,10 +165,32 @@ export async function initGeofence({ rationale } = {}) {
       // never move one without the other.
       disableMotionActivityUpdates: true,
 
-      // Ask for Always. The SDK sequences it correctly per platform: When-In-Use first,
-      // then the separate Always escalation that Android 11+ refuses to bundle into one
-      // dialog. We do not hand-roll that sequence.
+      // Ask for Always. On ANDROID the SDK sequences this correctly on its own: When-In-Use
+      // first, then the separate background escalation that Android 11+ refuses to bundle into
+      // one dialog. That path is field-tested and unchanged.
+      //
+      // On iOS it is NOT enough by itself, which is what this comment used to get wrong. iOS
+      // grants WhenInUse on the first request and will only show the "Change to Always Allow"
+      // prompt in response to a SECOND, separate request made while WhenInUse is already held.
+      // requestGeofencePermission() now drives that second step explicitly.
       locationAuthorizationRequest: "Always",
+
+      /* THE SDK'S OWN ALERT, OFF. Left at its default (false) the SDK puts up
+         TSAuthorizationAlertPresenter — "Background location is not enabled / To use background
+         location, you must enable 'Always' in the Location Services settings / Open Settings" —
+         and that alert fires INSTEAD of the native iOS upgrade prompt, not after it. The member
+         is sent to a Settings screen that does not yet list "Always", because iOS only offers
+         Always once the app has actually requested it. A dead end that looks like instructions.
+
+         With it off we own that moment: the escalation request fires for real, iOS shows its own
+         "Change to Always Allow" prompt, and if the member is still on when-in-use afterwards the
+         Automatic station presence screen offers a button that re-fires the request rather than
+         text pointing at a switch that isn't there.
+
+         Verified against the installed 9.3.0 framework binary, which carries both the alert
+         strings above and a persisted `didRequestUpgradeLocationAuthorization` config flag —
+         the SDK models the upgrade as a distinct step and remembers whether it has fired. */
+      disableLocationAuthorizationAlert: true,
       backgroundPermissionRationale: rationale || undefined,
 
       // Presence has to survive the things phones actually do: get swiped closed, run
@@ -218,6 +240,19 @@ export async function initGeofence({ rationale } = {}) {
    comparison quietly evaluates false, authName returns "unknown", and geofencing simply
    never starts with nothing logged and nothing thrown. A silent never-starts is the worst
    failure this file could have, so it reads the wire values directly. */
+/* Permission-path logging. Tagged so it can be filtered to just this flow in Safari's Web
+   Inspector (device console) with a "[B4C-GEO]" filter.
+
+   Left ON in production deliberately. This path is un-debuggable after the fact: it depends on
+   OS state we cannot read back, it behaves differently on a fresh install than a reinstall, and
+   the only tester with an iPhone is not going to be holding a laptop when it misbehaves. None of
+   it carries personal data — authorization names and booleans, never coordinates. */
+function glog(event, data) {
+  try {
+    console.log(`[B4C-GEO] ${event}`, data === undefined ? "" : JSON.stringify(data));
+  } catch { /* logging must never be the thing that breaks the flow */ }
+}
+
 const AUTH = { 0: "not-determined", 1: "restricted", 2: "denied", 3: "always", 4: "when-in-use" };
 function authName(status) {
   return AUTH[status] ?? "unknown";
@@ -234,22 +269,94 @@ function authName(status) {
    to something, just not to background. Collapsing it into "denied" would lose the
    difference between a refusal and a half-grant, and G4d needs that difference — it
    decides whether presence can be recorded while the app is closed. */
+/* One trip to the OS. Returns the status NUMBER, or null if the plugin failed in a way that
+   isn't an authorization answer at all.
+
+   requestPermission() REJECTS rather than resolves when the answer is no, and the rejection
+   value is the bare status integer (confirmed in the 9.3.0 JS wrapper: it resolves
+   result.status on success and rejects result.status otherwise). Treating that as an error
+   would turn an ordinary "no thanks" into a crash report, so both paths read the same. */
+async function askOnce(bg, label) {
+  try {
+    const status = await bg.requestPermission();
+    glog(`request:${label}:resolved`, { status, name: authName(status) });
+    return status;
+  } catch (e) {
+    const status = typeof e === "number" ? e : e?.status;
+    if (typeof status !== "number") {
+      glog(`request:${label}:failed`, { detail: String(e?.message || e) });
+      return null;
+    }
+    glog(`request:${label}:rejected`, { status, name: authName(status) });
+    return status;
+  }
+}
+
+async function readProviderState(bg, label) {
+  try {
+    const st = await bg.getProviderState();
+    glog(`provider:${label}`, { status: st?.status, name: authName(st?.status), enabled: !!st?.enabled, gps: !!st?.gps });
+    return st;
+  } catch (e) {
+    glog(`provider:${label}:failed`, { detail: String(e?.message || e) });
+    return null;
+  }
+}
+
+/* Ask the OS for location. Call ONLY after the member has read the disclosure and pressed
+   Continue — the whole point of G4b is that this dialog never arrives cold.
+
+   THE iOS TWO-STEP, which is what this function exists for.
+   iOS will not grant Always in one request. The first request yields WhenInUse; the "Change to
+   Always Allow" prompt is a SEPARATE request that iOS only honours while WhenInUse is already
+   held. Calling requestPermission() once — which is what this did — therefore stops at
+   WhenInUse forever, and because the Always request never fires, iOS never even LISTS Always in
+   Settings for the app. That is exactly the reported symptom: Never / Ask Next Time / While
+   Using, no Always, and the when-in-use usage string rather than the Always one.
+
+   So: ask, and if the answer is when-in-use, ask again. The second call is what produces the
+   upgrade prompt.
+
+   NOT GATED TO iOS. On Android the SDK sequences both steps internally and the field drive
+   already reaches "always", so the escalation branch simply never runs there. Leaving it
+   ungated means an Android device that DOES stall on when-in-use gets the same second chance
+   rather than a platform check silently excluding it.
+
+   "when-in-use" remains a real, partial outcome and is still reported as such: the member said
+   yes to something, just not to background. Collapsing it into "denied" would lose the
+   difference, and the caller needs it — it decides whether presence can be recorded while the
+   app is closed, and it drives the "Enable background location" button. */
 export async function requestGeofencePermission({ rationale } = {}) {
   const init = await initGeofence({ rationale });
-  if (!init.ok) return init;
+  if (!init.ok) {
+    glog("request:init-failed", init);
+    return init;
+  }
 
   const bg = BG;
-  let status;
-  try {
-    status = await bg.requestPermission();
-  } catch (e) {
-    status = typeof e === "number" ? e : e?.status;
-    if (typeof status !== "number") {
-      return { ok: false, reason: "request-failed", detail: String(e?.message || e) };
+  glog("request:begin");
+  await readProviderState(bg, "before");
+
+  let status = await askOnce(bg, "first");
+  if (status === null) {
+    await readProviderState(bg, "after-failure");
+    return { ok: false, reason: "request-failed" };
+  }
+  let name = authName(status);
+
+  // THE SECOND STEP. Only ever one extra call, and only when the first landed on the
+  // half-grant — never a loop, and never a prompt the member has not already opted into.
+  if (name === "when-in-use") {
+    glog("request:escalating", { from: name, why: "ios grants when-in-use first; Always is a separate request" });
+    const escalated = await askOnce(bg, "escalate");
+    if (escalated !== null) {
+      status = escalated;
+      name = authName(status);
     }
   }
 
-  const name = authName(status);
+  await readProviderState(bg, "after");
+  glog("request:end", { reason: name, status, ok: name === "always" });
   return { ok: name === "always", reason: name, status };
 }
 
@@ -265,6 +372,7 @@ export async function getGeofencePermission() {
   try {
     const status = await bg.getProviderState();
     const name = authName(status?.status);
+    glog("get-permission", { status: status?.status, name, enabled: !!status?.enabled, gps: !!status?.gps });
     return { ok: name === "always", reason: name, enabled: !!status?.enabled };
   } catch (e) {
     return { ok: false, reason: "state-failed", detail: String(e?.message || e) };
@@ -495,6 +603,8 @@ function attachProviderWatch(bg) {
   if (provSub) return;
   provSub = bg.onProviderChange((state) => {
     const name = authName(state?.status);
+    glog("provider-change", { status: state?.status, name, enabled: !!state?.enabled,
+                              gps: !!state?.gps, willRestart: (name === "always" || name === "when-in-use") && !!lastStartArgs && !restarting });
     eventSink?.({ action: "permission", reason: name });
     if ((name === "always" || name === "when-in-use") && lastStartArgs && !restarting) {
       restarting = true;

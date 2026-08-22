@@ -710,9 +710,18 @@ const GEOFENCE_COPY_IS_DRAFT = false;
    `permission` is what the OS actually says, passed in by the caller. Settings has to be
    able to tell someone their phone is blocking this; a screen that reports "on" while the
    OS quietly refuses is worse than one that reports nothing. */
-function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, permission }) {
+function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEscalate, permission }) {
   const [consent, setConsent] = useState(() => readGeofenceConsent(meId));
   const [busy, setBusy] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+
+  // Re-fire the Always request. Separate busy flag from `decide` so the escalation button
+  // spins on its own rather than greying out the whole panel.
+  async function escalate() {
+    if (!onEscalate) return;
+    setEscalating(true);
+    try { await onEscalate(); } finally { setEscalating(false); }
+  }
 
   // A decision we could not store would be re-asked on the next launch, which for
   // "granted" means a member thinks this is on when nothing is. Say so rather than
@@ -826,7 +835,7 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, perm
                 {consent !== "granted"
                   ? "Check in and out by hand as usual. You can change your mind here any time."
                   : permission === "when-in-use"
-                    ? "Your phone is only allowing location while B4C is open, so arrivals and departures can't be recorded once you close it. Choose \"Allow all the time\" in your phone's location settings for B4C."
+                    ? "Your phone is only allowing location while B4C is open, so arrivals and departures can't be recorded once you close it. Tap \"Allow in the background\" below and choose \"Change to Always Allow\" when your phone asks."
                     : permission === "denied" || permission === "restricted"
                       ? "Your phone is blocking location for B4C, so nothing can be recorded. You can change that in your phone's location settings."
                       : permission === "always"
@@ -836,6 +845,19 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, perm
             </div>
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+            {/* THE HALF-GRANT NEEDS A BUTTON, NOT INSTRUCTIONS. iOS does not list "Always" in
+                Settings until the app has actually requested it, so telling a member to go and
+                choose it sends them to a screen where the option is genuinely absent — which
+                reads as the app being broken, or them being stupid, and neither is true.
+                This re-fires the request so iOS shows its own "Change to Always Allow" prompt.
+                Primary styling because it is the one thing standing between the member and the
+                feature working; "Turn it off" steps back to secondary while it matters. */}
+            {consent === "granted" && permission === "when-in-use" && onEscalate && (
+              <button disabled={escalating || busy} onClick={escalate}
+                      style={{ ...FS.btnPrimary, opacity: (escalating || busy) ? 0.6 : 1 }}>
+                {escalating ? "Asking your phone…" : "Allow in the background"}
+              </button>
+            )}
             {consent === "granted"
               ? <button disabled={busy} onClick={withdraw} style={{ ...FS.btn, opacity: busy ? 0.6 : 1 }}>{busy ? "Turning off…" : "Turn it off"}</button>
               : <button disabled={busy} onClick={() => decide("granted")} style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }}>{busy ? "Just a moment…" : GEOFENCE_DISCLOSURE.accept}</button>}
@@ -923,8 +945,36 @@ function GeofenceConsentFlow({ meId, notify, onBack, onDone }) {
     onDone?.();
   }
 
+  /* Re-ask for Always, for a member already sitting on the half-grant.
+     Runs the SAME requestGeofencePermission as first-run, so the two-step escalation logic has
+     exactly one definition. On iOS the second request is what makes the OS show "Change to
+     Always Allow"; if the member has already refused that prompt once, iOS will not show it
+     again and we fall through to telling them where the switch is — which by then genuinely
+     EXISTS in Settings, because the request has now fired at least once. */
+  async function handleEscalate() {
+    const res = await requestGeofencePermission({ rationale: GEOFENCE_RATIONALE });
+    if (["always", "when-in-use", "denied", "restricted"].includes(res.reason)) setPermission(res.reason);
+
+    if (res.reason === "always") {
+      notify({ kind: "success", title: "Background location is on",
+               text: "Your phone will let B4C record arrivals and departures even when the app is closed." });
+    } else if (res.reason === "when-in-use") {
+      // Second refusal, or iOS declining to re-prompt. NOW the Settings instruction is honest:
+      // the request has fired, so "Always" is actually listed on that screen.
+      notify({ kind: "error", title: "Still limited to while the app is open",
+               text: "Your phone didn't switch to background location. Open Settings → B4C → Location and choose \"Always\" — it will be listed there now." });
+    } else if (res.reason === "denied" || res.reason === "restricted") {
+      notify({ kind: "error", title: "Location is blocked",
+               text: "Your phone is blocking location for B4C. You can allow it in Settings → B4C → Location, or keep checking in by hand." });
+    } else {
+      notify({ kind: "error", title: "Couldn't ask your phone", text: "Keep checking in by hand for now.",
+               details: `${res.reason}${res.detail ? `: ${res.detail}` : ""}` });
+    }
+  }
+
   return <GeofenceDisclosure meId={meId} notify={notify} onBack={onBack}
-                             onDecision={handleDecision} onWithdraw={handleWithdraw} permission={permission} />;
+                             onDecision={handleDecision} onWithdraw={handleWithdraw}
+                             onEscalate={handleEscalate} permission={permission} />;
 }
 
 function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests, members, meId, notify }) {
