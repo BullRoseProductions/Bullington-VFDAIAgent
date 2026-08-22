@@ -1795,10 +1795,51 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to").eq("assigned_to", meId)
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setMine(data); });
   }
-  useEffect(() => { loadMine(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
-  useReconnect(() => { if (loadErr) loadMine(); });
+  /* The crew's UNASSIGNED duties, shown when the member has nothing open of their own. Dept-scoped
+     by RLS — no .eq("department_id") here, matching StationDuties (which loads duties unfiltered for
+     every role) and the rest of this file's convention that scope is the database's job.
+
+     Kept as a SEPARATE query rather than widening loadMine's filter: `mine` feeds the completion
+     buttons and the "N of M" count, and quietly folding other people's work into it would make both
+     wrong. */
+  const [crew, setCrew] = useState([]);
+  const [crewErr, setCrewErr] = useState(false);
+  function loadCrew() {
+    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
+      .is("assigned_to", null)
+      .then(({ data, error }) => {
+        // A failed read is not an empty department. Keep whatever was last known and flag it, so a
+        // dropped connection can never render as "there's no outstanding station work".
+        if (error || !data) { setCrewErr(true); return; }
+        setCrewErr(false); setCrew(data);
+      });
+  }
+  useEffect(() => { loadMine(); loadCrew(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  useReconnect(() => { if (loadErr) loadMine(); if (crewErr) loadCrew(); });
   // Period-relative, not raw `done` — a rolled-over weekly duty must show as open again.
   const mineOpen = mine.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1))), mineDone = mine.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
+  /* OUTSTANDING = "this duty still needs doing", for every kind of duty:
+       recurring   -> the current period has not been satisfied
+       non-recurring -> it has simply never been done
+
+     ONE TEST COVERS BOTH, and deliberately so rather than branching on recurrence. isDoneThisPeriod
+     returns plain `done` for anything non-recurring, so !isDoneThisPeriod IS "recurring and not done
+     this period, OR non-recurring and not done".
+
+     Writing that branch by hand would have been a bug: the duty form's dropdown (RECUR) offers
+     "One-time", while the shared module's literal is "One-off". A hand-rolled
+     `recurrence === "One-off" && !done` clause would therefore have matched NOTHING a member ever
+     created through the UI, and silently hidden exactly the duties this change exists to surface.
+     The two spellings only agree today because the module treats an unrecognised recurrence like a
+     one-off — a fallback that is load-bearing here.
+
+     Uses the SHARED isDoneThisPeriod, the same function api/pulse.js uses to decide whether to send
+     a duty summary, so this card and the reminder cannot disagree about what is open. */
+  const CREW_CAP = 5;
+  const crewOpen = crew.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
+  const crewShown = crewOpen.slice(0, CREW_CAP);
+  const crewMore = crewOpen.length - crewShown.length;
+
   async function markMineDone(id) {
     const { error } = await supabase.rpc("complete_duty", { p_duty_id: id, p_helper_ids: [] });
     if (error) { notify({ kind: "error", title: "Couldn't mark it done", text: "Something went wrong updating that. Please try again.", details: error.message }); return; }
@@ -1882,6 +1923,42 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
                 </div>
               )}
             </>)}
+
+            {/* COLLECTIVE WORK, shown only when the member has nothing open of their own — otherwise
+                their own duties are the thing that needs doing and this would compete with them.
+                Keyed on mineOpen (not on `mine` being empty), so a member who has finished all their
+                assigned duties this period sees the crew's remaining work rather than a tidy card
+                that implies the station is done.
+
+                DISPLAY ONLY — no completion button. Completing a duty lives on the Station Duties
+                screen, and a second live control here would be a second copy of that state to
+                disagree with; the same reason StationClockCard routes to the page that owns the
+                punch instead of clocking out inline.
+
+                Includes non-recurring duties: an unassigned one-time job nobody has done is still
+                open, and this is a display rather than a reminder — the reason pulse skips them
+                (a lead-time nudge for something with no period is always too late) does not apply
+                to showing them. */}
+            {mineOpen.length === 0 && crewOpen.length > 0 && (
+              <div style={{ marginTop: (mineOpen.length + mineDone.length) > 0 ? 10 : 12, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ ...FS.kicker, marginBottom: 8 }}>STATION DUTIES STILL OPEN</div>
+                {crewShown.map((d) => (
+                  <div key={d.id} style={{ ...FS.row, padding: "8px 0" }}>
+                    <ClipboardList size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{d.duty}</div>
+                      <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{d.recurrence || "One-time"} · unassigned</div>
+                    </div>
+                  </div>
+                ))}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  {crewMore > 0 && <span style={{ fontSize: 12, color: FIRE.textMuted2, ...FS.num }}>+{crewMore} more</span>}
+                  <button style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5 }} onClick={() => go("duties")}>
+                    View duties
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         {showUpcomingTraining && (
