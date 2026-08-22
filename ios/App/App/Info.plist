@@ -12,11 +12,87 @@
 	<string>B4C uses the camera so you can attach photos of equipment and gear to your department's records.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>B4C uses your photo library so you can attach existing photos to equipment and gear records.</string>
-	<!-- Location, when-in-use only. Without this key WKWebView's geolocation call never invokes EITHER
-	     callback, so the clock-in promise never settles and the button spins forever. Only the
-	     when-in-use variant: check-in is foreground-only and nothing tracks in the background. -->
+	<!-- Location. Without the when-in-use key WKWebView's geolocation call never invokes EITHER
+	     callback, so the clock-in promise never settles and the button spins forever.
+
+	     THE OLD COMMENT HERE SAID "check-in is foreground-only and nothing tracks in the
+	     background". That stops being true with the Always key below: automatic station
+	     presence monitors a geofence while the app is closed. The claim is corrected rather
+	     than left in place, because a stale reassurance in the one file that documents what
+	     the app may do is worse than no comment at all.
+
+	     PENDING LEGAL GLANCE — both strings below are member-facing. They are what iOS shows
+	     at the permission moment, and unlike the in-app disclosure they cannot be revised
+	     without shipping a new build. Counsel cleared the disclosure SCREEN; these two strings
+	     were not part of that review. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>B4C uses your location only at check-in to confirm you're at the station and mark the shift verified. Your location is never stored.</string>
+	<string>B4C confirms you're at your department's approved locations when you check in.</string>
+	<!-- The Always string is the one that matters most: iOS shows it when escalating to
+	     "Allow all the time", which is the moment a member decides whether to be located while
+	     the app is closed. Mirrors the approved in-app disclosure — background collection,
+	     purpose, and the two explicit limits (no route tracking, never sold). -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>B4C records arrivals and departures at your department's approved locations, even when the app is closed, so your station and duty hours are logged automatically. It does not track your routes and your location is never sold.</string>
+
+	<!-- NSMotionUsageDescription is DELIBERATELY ABSENT. We run with
+	     disableMotionActivityUpdates:true, mirroring the Android decision to strip
+	     ACTIVITY_RECOGNITION: a member who agreed the app may notice they are at the station
+	     has not agreed to report what their body is doing. The SDK never touches
+	     CMMotionActivityManager with that flag set, so no prompt is raised and no string is
+	     needed. If motion is ever re-enabled this key must be added FIRST — iOS terminates the
+	     app on first access to a protected API whose usage string is missing, with no dialog
+	     and no catchable error. -->
+
+	<!-- Background execution. "location" ONLY.
+	     iOS wakes a terminated app for a region transition through CLLocationManager, which is
+	     what this mode covers and what geofence-only monitoring actually depends on.
+
+	     NOT ADDED, on purpose: "fetch" and "processing", which the vendor's general setup guide
+	     lists, serve the SDK's BackgroundFetch/BGTaskScheduler integration — its scheduler and
+	     heartbeat features. We use neither; we register one geofence and respond to its
+	     transitions. "audio" is listed there only to keep debug sound effects alive, and
+	     debug is false.
+
+	     HONEST LIMIT: the vendor's docs do NOT distinguish geofence-only from continuous
+	     tracking, so this is reasoned from what the modes are for rather than quoted from a
+	     line that says "geofence-only needs exactly this". A compile cannot test it either.
+	     If TSBackgroundFetch complains at init on a real device, "processing" (and possibly
+	     "fetch") is the first thing to add. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<!-- fetch + processing are REQUIRED, and their absence is why iOS compiled but never
+		     registered a fence. TSBackgroundFetch ships as a hard dependency of the geolocation
+		     SDK and registers BGTaskScheduler work at launch: the binary uses BGAppRefreshTask
+		     (which needs "fetch") and BGProcessingTask (which needs "processing"). On iOS 13+,
+		     registering a task identifier that is not permitted THROWS during startup — before
+		     anything of ours could add a geofence. Verified by reading the shipped framework,
+		     not from the setup docs, which describe the Xcode capability checkboxes rather than
+		     these plist values. -->
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<!-- The identifier TSBackgroundFetch actually registers. Exactly one, read out of the
+	     framework binary: com.transistorsoft.fetch. Some setup notes also mention a
+	     "customtask" identifier — this version registers no such thing, and listing an
+	     identifier nothing registers is harmless but misleading. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.transistorsoft.fetch</string>
+	</array>
+
+	<!-- Transistorsoft licence, iOS. Key name VERIFIED, not assumed: TSLocationManagerLicense
+	     appears as a string constant in TSLocationManager.xcframework alongside
+	     objectForInfoDictionaryKey — the binary this build actually links — and the vendor's
+	     setup docs name the same key. Same check that was run for the Android meta-data name.
+
+	     Not a secret: bound to the bundle id, ships inside every build, worthless elsewhere.
+	     Order 16956, os=ios, app_id=com.bigbulltech.b4c, entitlement "core".
+
+	     RENEWAL: max_build_stamp 20270828, grace_builds 0 — same date as the Android key. A
+	     build made after 28 Aug 2027 will not validate; builds made before it keep working. -->
+	<key>TSLocationManagerLicense</key>
+	<string>eyJhbGciOiJFZERTQSIsImtpZCI6ImVkMjU1MTktbWFpbi12MSJ9.eyJvcyI6ImlvcyIsImFwcF9pZCI6ImNvbS5iaWdidWxsdGVjaC5iNGMiLCJvcmRlcl9udW1iZXIiOjE2OTU2LCJyZW5ld2FsX3VybCI6Imh0dHBzOi8vc2hvcC50cmFuc2lzdG9yc29mdC5jb20vY2FydC8zOTM2NzA3MTIzNjE5OToxP25vdGU9MTEyNzYiLCJjdXN0b21lcl9pZCI6MTAyNTgsInByb2R1Y3QiOiJjYXBhY2l0b3ItYmFja2dyb3VuZC1nZW9sb2NhdGlvbiIsImtleV92ZXJzaW9uIjoxLCJhbGxvd2VkX3N1ZmZpeGVzIjpbIi5kZXYiLCIuZGV2ZWxvcG1lbnQiLCIuc3RhZ2luZyIsIi5zdGFnZSIsIi5xYSIsIi51YXQiLCIudGVzdCIsIi5kZWJ1ZyJdLCJtYXhfYnVpbGRfc3RhbXAiOjIwMjcwODI4LCJncmFjZV9idWlsZHMiOjAsImVudGl0bGVtZW50cyI6WyJjb3JlIl0sImlhdCI6MTc4NjMyNDIyMn0.fdbbKKjjBC7E4YAO7IHpDnIdDOUMj8l7OPhPute0qKTqGH7Ks68CQ_wgItUhK3n0Z9Urdh9Y8i_dp5Fcb6aDBQ</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>

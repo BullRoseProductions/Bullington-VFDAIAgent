@@ -1,0 +1,748 @@
+import { Capacitor } from "@capacitor/core";
+import { supabase } from "./supabaseClient";
+
+/* Automatic station presence — the consent layer and the permission flow.
+   G4b was the disclosure and the record of what the member answered. G4c adds the first
+   real plugin calls: configuring the SDK and asking the OS for location.
+
+   STILL NO FENCES AND NO HANDLERS. Nothing is registered, nothing is started, no
+   enter/exit event can fire. ready() applies configuration and leaves the plugin
+   DISABLED — no foreground service, no notification, no battery cost. G4d is what
+   turns it on.
+
+   Behind VITE_GEOFENCE_ENABLED so the whole feature stays dark until a device test
+   confirms enter/exit actually fires. Mirrors departments.geofence_enabled on the
+   server; either side can be off independently, and BOTH must be on for a member to
+   see anything. Today the flag is unset and 0 of 2 departments have opted in. */
+const FLAG_ON = import.meta.env.VITE_GEOFENCE_ENABLED === "1";
+
+/* Deliberately NOT gated on Capacitor.isNativePlatform() — G4b makes no native calls, so
+   the disclosure can be reviewed in a browser before any device exists. The native gate
+   belongs in G4c, where the first real plugin call appears. Web must never get further
+   than reading this copy. */
+export const geofenceConsentAvailable = () => FLAG_ON;
+
+/* True only where a geofence could actually run. G4c's entry point, exported now so the
+   native check lands in one place rather than being rediscovered later. */
+export const geofenceAvailable = () => FLAG_ON && Capacitor.isNativePlatform();
+
+/* WHY LOCAL STORAGE, AND WHY KEYED BY MEMBER.
+
+   Consent to be located is consent given on a PARTICULAR PHONE. The OS permission it
+   leads to is per-device and per-install, so a record of it that syncs across devices
+   would be lying: agreeing on your phone says nothing about the station tablet, and an
+   answer that followed you to a new device would skip a disclosure the store requires
+   us to show. Device-local is the honest scope.
+
+   Keyed by member id because a station tablet can be signed into by different people.
+   One member's answer must never stand in for another's — an unkeyed record would let
+   the second person's phone start reporting their location because the first agreed.
+
+   NOT AN AUDIT TRAIL. localStorage is clearable and unsigned; this decides whether to
+   show a screen, and nothing more. If the department ever needs to prove who consented
+   and when — a fair thing to want before tracking volunteers — that is a server-side
+   record with a timestamp, and it is a separate slice. Do not let this stand in for it. */
+const KEY = (memberId) => `b4c.geofence.consent.${memberId}`;
+
+/* Returns "granted" | "declined" | null (never asked). Never throws: Safari private mode
+   and locked-down WebViews can make localStorage itself raise, and a storage failure must
+   not take down Settings. An unreadable record reads as "never asked", which errs toward
+   showing the disclosure again — the safe direction, since the cost is re-reading a
+   screen and the alternative is tracking someone who never saw it. */
+export function readGeofenceConsent(memberId) {
+  if (!memberId) return null;
+  try {
+    const v = localStorage.getItem(KEY(memberId));
+    return v === "granted" || v === "declined" ? v : null;
+  } catch { return null; }
+}
+
+/* CONSENT IS OBSERVABLE, and it has to be.
+
+   localStorage is invisible to React: writing it re-renders nothing. The fence-start
+   effect reads consent as a GUARD but could never list it as a dependency, so on the one
+   run that matters — the run where the member actually consents — the effect had already
+   bailed and nothing re-ran it. The fence was never registered until the next launch, and
+   a feature that needs a manual restart to work is broken.
+
+   A subscription rather than a prop threaded through the tree, because there are two
+   independent writers (the first-run overlay and the Settings panel) and a third will
+   eventually exist. Anything that has to be wired up per call site is something a future
+   call site will forget to wire. */
+const consentListeners = new Set();
+
+export function subscribeGeofenceConsent(fn) {
+  consentListeners.add(fn);
+  return () => consentListeners.delete(fn);
+}
+
+// One listener throwing must not stop the others from hearing about it.
+function announceConsentChange() {
+  consentListeners.forEach((fn) => { try { fn(); } catch { /* a bad listener is not the store's problem */ } });
+}
+
+/* Records the answer. Returns false if it could not be stored, so the caller can decide
+   whether to proceed — a decision we could not persist will be asked again next launch.
+   Announces ONLY on a successful write: a failed store must not make the app believe
+   something changed. */
+export function writeGeofenceConsent(memberId, decision) {
+  if (!memberId || (decision !== "granted" && decision !== "declined")) return false;
+  try {
+    localStorage.setItem(KEY(memberId), decision);
+    announceConsentChange();
+    return true;
+  } catch { return false; }
+}
+
+/* Withdrawing is a first-class action, not an edge case: the disclosure promises members
+   they can turn this off, and that promise has to be executable from our own UI rather
+   than by sending them into the phone's settings. Clearing the record returns them to
+   "never asked", so the full disclosure shows again before anything restarts. */
+export function clearGeofenceConsent(memberId) {
+  if (!memberId) return false;
+  try {
+    localStorage.removeItem(KEY(memberId));
+    announceConsentChange();
+    return true;
+  } catch { return false; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   NATIVE — the first plugin calls in the project.
+
+   Everything below no-ops on web and while the flag is off, and every function
+   returns a reason instead of throwing. Location failing must never block someone
+   from using the app: a member who cannot get a permission dialog still has to be
+   able to check in by hand.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+let configured = false;   // ready() is idempotent per launch — config must not be re-applied on every render
+let BG = null;            // the plugin handle, resolved once
+
+/* Dynamic import, exactly as push.js does it: this keeps the native plugin out of the
+   web bundle entirely rather than shipping it to browsers that can never use it. */
+async function loadPlugin() {
+  if (BG) return BG;
+  try {
+    const mod = await import("@transistorsoft/capacitor-background-geolocation");
+    BG = mod?.default ?? mod?.BackgroundGeolocation ?? null;
+    return BG;
+  } catch { return null; }
+}
+
+/* Configure the SDK. Does NOT start it and does NOT ask for permission.
+
+   ON "GEOFENCE-ONLY MODE": there is no config key that means it. Geofences-only is a
+   RUNTIME mode the SDK enters when startGeofences() is called instead of start(), and
+   that call belongs to G4d. What this function does is set everything so that mode is
+   the only thing that can happen — no motion engine, no continuous tracking config —
+   and leave the plugin disabled. Calling it "configured for geofence-only" would be
+   describing an intention as if it were a setting.
+
+   `rationale` is the Android 11+ dialog shown before the OS sends someone to Settings
+   to pick "Allow all the time". It is member-facing copy and is passed in rather than
+   written here, so all consent wording stays in one reviewed place. */
+export async function initGeofence({ rationale } = {}) {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  if (configured) return { ok: true, reason: "already-configured" };
+
+  const bg = await loadPlugin();
+  if (!bg) return { ok: false, reason: "plugin-missing" };
+
+  try {
+    const state = await bg.ready({
+      // reset:true so OUR config wins on every launch. The SDK persists configuration
+      // across restarts, which means a value changed in a past build would otherwise
+      // survive in the field and quietly outlive the code that set it.
+      reset: true,
+
+      // THE BINDING CONSTRAINT from G4a. We stripped ACTIVITY_RECOGNITION from the
+      // manifest; without this the SDK still reaches for a Motion API it no longer has
+      // rights to. The permission removal and this flag are one change in two files —
+      // never move one without the other.
+      disableMotionActivityUpdates: true,
+
+      // Ask for Always. On ANDROID the SDK sequences this correctly on its own: When-In-Use
+      // first, then the separate background escalation that Android 11+ refuses to bundle into
+      // one dialog. That path is field-tested and unchanged.
+      //
+      // On iOS it is NOT enough by itself, which is what this comment used to get wrong. iOS
+      // grants WhenInUse on the first request and will only show the "Change to Always Allow"
+      // prompt in response to a SECOND, separate request made while WhenInUse is already held.
+      // requestGeofencePermission() now drives that second step explicitly.
+      locationAuthorizationRequest: "Always",
+
+      /* THE SDK'S OWN ALERT, OFF. Left at its default (false) the SDK puts up
+         TSAuthorizationAlertPresenter — "Background location is not enabled / To use background
+         location, you must enable 'Always' in the Location Services settings / Open Settings" —
+         and that alert fires INSTEAD of the native iOS upgrade prompt, not after it. The member
+         is sent to a Settings screen that does not yet list "Always", because iOS only offers
+         Always once the app has actually requested it. A dead end that looks like instructions.
+
+         With it off we own that moment: the escalation request fires for real, iOS shows its own
+         "Change to Always Allow" prompt, and if the member is still on when-in-use afterwards the
+         Automatic station presence screen offers a button that re-fires the request rather than
+         text pointing at a switch that isn't there.
+
+         Verified against the installed 9.3.0 framework binary, which carries both the alert
+         strings above and a persisted `didRequestUpgradeLocationAuthorization` config flag —
+         the SDK models the upgrade as a distinct step and remembers whether it has fired. */
+      disableLocationAuthorizationAlert: true,
+      backgroundPermissionRationale: rationale || undefined,
+
+      // Presence has to survive the things phones actually do: get swiped closed, run
+      // out of battery, reboot in the night. A departure the app was not alive to notice
+      // is a shift that never closes.
+      stopOnTerminate: false,
+      startOnBoot: true,
+
+      /* THE REPLAY BUFFER. Capacitor has no JS headless task — a transition that fires
+         while the app is dead reaches no listener and is NOT re-delivered later. Without
+         this the event is simply gone.
+
+         PERSIST_MODE_GEOFENCE writes geofence transitions (and only those) to the SDK's
+         own SQLite queue. We configure no `url`, so nothing is ever uploaded from here;
+         the queue exists purely as our buffer, and drainGeofenceQueue() empties it on the
+         next app open. If the constant were ever missing the value falls back to the SDK
+         default, which persists MORE rather than less — a benign direction to fail in.
+
+         maxDaysToPersist is set explicitly because the SDK's default is short (1 day) and
+         would quietly discard the exact case this exists for: a member who works a shift
+         and doesn't open the app again for several days. Fourteen days is well past any
+         plausible gap while still bounding the queue. */
+      persistMode: bg.PERSIST_MODE_GEOFENCE,
+      maxDaysToPersist: 14,
+
+      // Debug mode plays a sound and posts a notification on every geofence transition.
+      // Genuinely useful for a field test and completely wrong on a member's phone, so it
+      // stays off here and gets switched on deliberately for testing.
+      debug: false,
+      logLevel: bg.LOG_LEVEL_ERROR,
+    });
+    configured = true;
+    // enabled:false is the assertion that this slice is inert — ready() configured the
+    // SDK and started nothing.
+    return { ok: true, reason: "configured", enabled: !!state?.enabled };
+  } catch (e) {
+    return { ok: false, reason: "ready-failed", detail: String(e?.message || e) };
+  }
+}
+
+/* Translate the SDK's authorization integer into something the app can reason about.
+
+   These are the AuthorizationStatus enum values the native layer sends over the bridge
+   (NotDetermined 0, Restricted 1, Denied 2, Always 3, WhenInUse 4). The plugin also
+   exposes them as AUTHORIZATION_STATUS_* getters, but depending on those makes the whole
+   permission gate hinge on legacy aliases surviving: if they ever disappear, every
+   comparison quietly evaluates false, authName returns "unknown", and geofencing simply
+   never starts with nothing logged and nothing thrown. A silent never-starts is the worst
+   failure this file could have, so it reads the wire values directly. */
+/* Permission-path logging. Tagged so it can be filtered to just this flow in Safari's Web
+   Inspector (device console) with a "[B4C-GEO]" filter.
+
+   Left ON in production deliberately. This path is un-debuggable after the fact: it depends on
+   OS state we cannot read back, it behaves differently on a fresh install than a reinstall, and
+   the only tester with an iPhone is not going to be holding a laptop when it misbehaves. None of
+   it carries personal data — authorization names and booleans, never coordinates. */
+function glog(event, data) {
+  try {
+    console.log(`[B4C-GEO] ${event}`, data === undefined ? "" : JSON.stringify(data));
+  } catch { /* logging must never be the thing that breaks the flow */ }
+}
+
+const AUTH = { 0: "not-determined", 1: "restricted", 2: "denied", 3: "always", 4: "when-in-use" };
+function authName(status) {
+  return AUTH[status] ?? "unknown";
+}
+
+/* Ask the OS for location. Call ONLY after the member has read the disclosure and
+   pressed Continue — the whole point of G4b is that this dialog never arrives cold.
+
+   requestPermission() REJECTS rather than resolves when the answer is no, and the
+   rejection value is the status itself. Treating that as an error would turn an
+   ordinary "no thanks" into a crash report, so both paths are read the same way.
+
+   "when-in-use" is a real, partial outcome and is reported as such: the member said yes
+   to something, just not to background. Collapsing it into "denied" would lose the
+   difference between a refusal and a half-grant, and G4d needs that difference — it
+   decides whether presence can be recorded while the app is closed. */
+/* One trip to the OS. Returns the status NUMBER, or null if the plugin failed in a way that
+   isn't an authorization answer at all.
+
+   requestPermission() REJECTS rather than resolves when the answer is no, and the rejection
+   value is the bare status integer (confirmed in the 9.3.0 JS wrapper: it resolves
+   result.status on success and rejects result.status otherwise). Treating that as an error
+   would turn an ordinary "no thanks" into a crash report, so both paths read the same. */
+async function askOnce(bg, label) {
+  try {
+    const status = await bg.requestPermission();
+    glog(`request:${label}:resolved`, { status, name: authName(status) });
+    return status;
+  } catch (e) {
+    const status = typeof e === "number" ? e : e?.status;
+    if (typeof status !== "number") {
+      glog(`request:${label}:failed`, { detail: String(e?.message || e) });
+      return null;
+    }
+    glog(`request:${label}:rejected`, { status, name: authName(status) });
+    return status;
+  }
+}
+
+async function readProviderState(bg, label) {
+  try {
+    const st = await bg.getProviderState();
+    glog(`provider:${label}`, { status: st?.status, name: authName(st?.status), enabled: !!st?.enabled, gps: !!st?.gps });
+    return st;
+  } catch (e) {
+    glog(`provider:${label}:failed`, { detail: String(e?.message || e) });
+    return null;
+  }
+}
+
+/* Ask the OS for location. Call ONLY after the member has read the disclosure and pressed
+   Continue — the whole point of G4b is that this dialog never arrives cold.
+
+   THE iOS TWO-STEP, which is what this function exists for.
+   iOS will not grant Always in one request. The first request yields WhenInUse; the "Change to
+   Always Allow" prompt is a SEPARATE request that iOS only honours while WhenInUse is already
+   held. Calling requestPermission() once — which is what this did — therefore stops at
+   WhenInUse forever, and because the Always request never fires, iOS never even LISTS Always in
+   Settings for the app. That is exactly the reported symptom: Never / Ask Next Time / While
+   Using, no Always, and the when-in-use usage string rather than the Always one.
+
+   So: ask, and if the answer is when-in-use, ask again. The second call is what produces the
+   upgrade prompt.
+
+   NOT GATED TO iOS. On Android the SDK sequences both steps internally and the field drive
+   already reaches "always", so the escalation branch simply never runs there. Leaving it
+   ungated means an Android device that DOES stall on when-in-use gets the same second chance
+   rather than a platform check silently excluding it.
+
+   "when-in-use" remains a real, partial outcome and is still reported as such: the member said
+   yes to something, just not to background. Collapsing it into "denied" would lose the
+   difference, and the caller needs it — it decides whether presence can be recorded while the
+   app is closed, and it drives the "Enable background location" button. */
+export async function requestGeofencePermission({ rationale } = {}) {
+  const init = await initGeofence({ rationale });
+  if (!init.ok) {
+    glog("request:init-failed", init);
+    return init;
+  }
+
+  const bg = BG;
+  glog("request:begin");
+  await readProviderState(bg, "before");
+
+  let status = await askOnce(bg, "first");
+  if (status === null) {
+    await readProviderState(bg, "after-failure");
+    return { ok: false, reason: "request-failed" };
+  }
+  let name = authName(status);
+
+  // THE SECOND STEP. Only ever one extra call, and only when the first landed on the
+  // half-grant — never a loop, and never a prompt the member has not already opted into.
+  if (name === "when-in-use") {
+    glog("request:escalating", { from: name, why: "ios grants when-in-use first; Always is a separate request" });
+    const escalated = await askOnce(bg, "escalate");
+    if (escalated !== null) {
+      status = escalated;
+      name = authName(status);
+    }
+  }
+
+  await readProviderState(bg, "after");
+  glog("request:end", { reason: name, status, ok: name === "always" });
+  return { ok: name === "always", reason: name, status };
+}
+
+/* What the OS currently thinks, without asking for anything. Lets Settings tell a member
+   the truth ("your phone is blocking this") instead of showing them a switch that claims
+   to be on while the OS quietly refuses. Never prompts. */
+export async function getGeofencePermission() {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  const bg = await loadPlugin();
+  if (!bg) return { ok: false, reason: "plugin-missing" };
+  try {
+    const status = await bg.getProviderState();
+    const name = authName(status?.status);
+    glog("get-permission", { status: status?.status, name, enabled: !!status?.enabled, gps: !!status?.gps });
+    return { ok: name === "always", reason: name, enabled: !!status?.enabled };
+  } catch (e) {
+    return { ok: false, reason: "state-failed", detail: String(e?.message || e) };
+  }
+}
+
+/* Turn it off — remove the fence, drop the listener, stop the plugin.
+
+   Order matters. Remove the fence FIRST so a transition cannot fire while we are tearing
+   down, and drop the listener before stop() so a final event can't arrive at a handler
+   whose department context is already gone. Every step is idempotent and safe against a
+   plugin that was never started. */
+export async function stopGeofence() {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  const bg = await loadPlugin();
+  if (!bg) return { ok: false, reason: "plugin-missing" };
+  try {
+    await bg.removeGeofences([STATION_FENCE_ID]).catch(() => {});
+    fenceSignature = null;
+    if (geoSub) { try { geoSub.remove(); } catch { /* already gone */ } geoSub = null; }
+    await bg.stop();
+    running = false;
+    return { ok: true, reason: "stopped" };
+  } catch (e) {
+    return { ok: false, reason: "stop-failed", detail: String(e?.message || e) };
+  }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   G4d — the station fence and the handlers that write to the ledger.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+const STATION_FENCE_ID = "b4c-station";
+
+/* A geofence is a TRIGGER, not a verdict. The server decides truth: geofence_arrive
+   re-runs is_at_point() against the department's own radius and stamps `verified`
+   accordingly, so the fence's job is only to wake us at roughly the right moment.
+
+   The floor exists because OS geofencing does not work at small radii — a 25 m fence
+   simply never fires reliably, and a fence that never fires is worse than one that fires
+   early. It only bites below 100 m; the 150 m default is untouched. When it DOES bite,
+   the gap between fence and station radius produces arrivals the server marks unverified,
+   which is the honest outcome and visible in the ledger rather than silently credited. */
+const FENCE_MIN_RADIUS_M = 100;
+
+/* Arrival is DWELL, not ENTER. Crossing a line means nothing — someone driving past the
+   station at 40 mph crosses it twice and has not turned out. Requiring two minutes inside
+   is what separates "arrived" from "went by", and it kills edge-flapping: a phone sitting
+   at the boundary re-triggering ENTER/EXIT would otherwise litter the ledger with
+   minute-long sessions that all look like real shifts.
+
+   The cost is honest and small: the clock starts at the dwell mark rather than the moment
+   of crossing, so a shift loses its first two minutes. Against multi-hour standby that is
+   noise, and it buys a number nobody has to explain away. */
+const FENCE_LOITERING_MS = 2 * 60 * 1000;
+
+let fenceSignature = null;   // lat|lng|radius currently registered — re-register when it changes
+let geoSub = null;           // the onGeofence subscription; must never stack
+let provSub = null;          // onProviderChange — watches for a late Always grant or a revocation
+let running = false;
+let eventSink = null;        // where handleGeofenceEvent reports; set by whoever starts monitoring
+let lastStartArgs = null;    // the last start request, kept so a permission grant can retry it verbatim
+let restarting = false;      // re-entrancy guard: the watcher calls the function that attached it
+
+/* The handler. Reads coordinates from THE EVENT — never getCurrentPosition().
+
+   That is the binding constraint from G4a: we dropped SCHEDULE_EXACT_ALARM, and without
+   exact alarms a backgrounded getCurrentPosition() can fail outright. The event already
+   carries the fix it was captured with, which is also the more truthful number — it is
+   where the member was when the transition happened, not where they are now that we got
+   around to asking.
+
+   REPLAY SAFETY — true only once the Layer 1 migration is applied, and worth stating
+   precisely because the earlier version of this comment was wrong. It claimed replay
+   "cannot double-open a session" on the strength of arrive returning an existing OPEN
+   row. That guard never covered the case that actually matters: the SDK persists every
+   transition, this handler does not delete the record it just processed, and so the next
+   app open replays arrivals for shifts that have since CLOSED. A closed shift is invisible
+   to an open-row check, so the replay inserted a SECOND row and the replayed EXIT closed
+   it — every ordinary shift double-counted, not merely the terminated-app case.
+
+   What makes it safe now is that geofence_arrive is idempotent on ARRIVAL TIME, matching a
+   row within two minutes of the event timestamp whether that row is open or closed. A
+   replayed event carries the timestamp it fired with, so it lands on the row it already
+   created and returns it unchanged. Both RPCs still take p_at, so hours are credited to
+   when they happened rather than to when the phone got round to saying so. */
+async function handleGeofenceEvent(evt, { onEvent } = {}) {
+  const action = evt?.action;
+  const at = evt?.timestamp || null;    // ISO string; the RPCs bound and clamp it server-side
+
+  try {
+    if (action === "EXIT") {
+      const { error } = await supabase.rpc("geofence_depart", { p_at: at });
+      if (error) throw error;
+      onEvent?.({ action: "depart", at });
+      return { ok: true, action: "depart" };
+    }
+
+    // DWELL is what we registered for. ENTER is handled identically and defensively: if the
+    // registration is ever changed to notify on entry, this keeps working, and the RPC
+    // returns the existing open row rather than opening a second one.
+    if (action === "DWELL" || action === "ENTER") {
+      const c = evt?.location?.coords;
+      if (!c || typeof c.latitude !== "number" || typeof c.longitude !== "number") {
+        onEvent?.({ action: "error", reason: "event-without-coords" });
+        return { ok: false, reason: "event-without-coords" };
+      }
+      const { error } = await supabase.rpc("geofence_arrive", {
+        p_lat: c.latitude,
+        p_lng: c.longitude,
+        p_accuracy: typeof c.accuracy === "number" ? c.accuracy : null,
+        p_at: at,
+      });
+      if (error) throw error;
+      onEvent?.({ action: "arrive", at });
+      return { ok: true, action: "arrive" };
+    }
+
+    // An action we don't act on (nothing today registers for it).
+    return { ok: false, reason: `unhandled-action-${action}` };
+  } catch (e) {
+    // A failed write must never take down the daemon. The member is still on shift; the
+    // sweeper and the manual check-in both remain available, and the next transition gets
+    // its own attempt. The RESULT matters to the replay path: a record is only deleted
+    // from the queue once its write actually succeeded.
+    onEvent?.({ action: "error", reason: String(e?.message || e) });
+    return { ok: false, reason: String(e?.message || e) };
+  }
+}
+
+
+/* ── Catch-up on next open ─────────────────────────────────────────────────────
+   Capacitor has no JS headless task, so a transition that fires while the app is
+   terminated reaches nothing and is never re-delivered. This is what makes those
+   events recoverable: the SDK persisted them, and on the next open we replay them
+   through the SAME path a live event takes.
+
+   The hours come out RIGHT, just late. Each record carries its own coordinates and
+   its own timestamp, and both RPCs take p_at, so a shift that ended yesterday is
+   written with yesterday's times rather than with the moment we got around to it.
+
+   CHRONOLOGICAL ORDER IS LOAD-BEARING. Replaying an EXIT before its ENTER would
+   close nothing and then open a session that never closes. Sorted ascending.
+
+   DELETE ONLY WHAT LANDED. destroyLocation(uuid) per record, after its write
+   succeeded — never destroyLocations(), which would clear the whole queue including
+   anything that failed or arrived between the read and the delete. A record whose
+   write failed stays put and is retried on the next open; the RPCs' idempotency is
+   what makes that retry harmless. */
+let drained = false;
+
+function persistedToEvent(rec) {
+  const g = rec?.geofence || {};
+  // Prefer the geofence event's own location/timestamp; fall back to the containing
+  // record, whose shape differs slightly depending on how the SDK serialised it.
+  const coords = g?.location?.coords || rec?.coords || null;
+  return {
+    action: g?.action,
+    identifier: g?.identifier,
+    timestamp: g?.timestamp || rec?.timestamp || null,
+    location: coords ? { coords } : null,
+  };
+}
+
+export async function drainGeofenceQueue({ onEvent } = {}) {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  // Once per app open. Re-running on every effect re-fire would replay the queue
+  // repeatedly — harmless thanks to idempotency, but pointless work against the network.
+  if (drained) return { ok: true, reason: "already-drained" };
+  drained = true;
+
+  const bg = await loadPlugin();
+  if (!bg) return { ok: false, reason: "plugin-missing" };
+
+  let rows;
+  try {
+    rows = await bg.getLocations();
+  } catch (e) {
+    drained = false;                                   // a read that failed is not a drain
+    return { ok: false, reason: "read-failed", detail: String(e?.message || e) };
+  }
+
+  const pending = (Array.isArray(rows) ? rows : [])
+    .filter((r) => r?.geofence?.action)
+    .sort((a, b) => String(a?.geofence?.timestamp || a?.timestamp || "")
+      .localeCompare(String(b?.geofence?.timestamp || b?.timestamp || "")));
+
+  if (!pending.length) return { ok: true, reason: "nothing-queued", replayed: 0 };
+
+  let replayed = 0, failed = 0;
+  for (const rec of pending) {
+    // Sequential, not parallel: these are ordered state transitions on one member's
+    // shift, and firing them concurrently would race arrive against depart.
+    const res = await handleGeofenceEvent(persistedToEvent(rec), { onEvent });
+    if (res?.ok && rec?.uuid) {
+      await bg.destroyLocation(rec.uuid).catch(() => {});
+      replayed++;
+    } else {
+      failed++;                                        // left in the queue for next time
+    }
+  }
+  return { ok: true, reason: "drained", replayed, failed, total: pending.length };
+}
+
+/* WATCH FOR THE PERMISSION GRANT — and attach this BEFORE the permission gate, not after it.
+
+   This listener previously lived on the success path of startStationGeofence, inside the try block
+   that runs only once permission has already been granted. On a fresh install that path is never
+   reached: the consent screen writes consent, the effect fires and calls startStationGeofence while
+   the iOS dialog is still on screen, the gate reads "not-determined" and returns — several lines
+   ABOVE the attach. So the one mechanism meant to notice the grant was never subscribed at the only
+   moment it mattered, and the fence armed only after the member happened to relaunch the app. Real
+   members do not know to relaunch.
+
+   Attached as soon as the SDK is configured, so it is live during the bail. When iOS reports the
+   grant, the exact same start request is retried from lastStartArgs — verbatim, so the fence lands
+   at the same pin with the same radius as the attempt that was refused.
+
+   RE-ENTRANCY IS REAL HERE: this calls the function that attaches it. `restarting` bounds that, and
+   the fenceSignature/running guards inside make the retry idempotent — a second grant event
+   re-registers nothing. */
+function attachProviderWatch(bg) {
+  if (provSub) return;
+  provSub = bg.onProviderChange((state) => {
+    const name = authName(state?.status);
+    glog("provider-change", { status: state?.status, name, enabled: !!state?.enabled,
+                              gps: !!state?.gps, willRestart: (name === "always" || name === "when-in-use") && !!lastStartArgs && !restarting });
+    eventSink?.({ action: "permission", reason: name });
+    if ((name === "always" || name === "when-in-use") && lastStartArgs && !restarting) {
+      restarting = true;
+      startStationGeofence(lastStartArgs).finally(() => { restarting = false; });
+    }
+  });
+}
+
+/* ATTACH THE LISTENER AT LAUNCH, NOT BEHIND THE AUTH GATE.
+
+   iOS relaunches a terminated app in the background when a region transition fires, and gives it a
+   short, unpredictable window. Registration can afford to wait for auth — the SDK persists fences
+   natively, so a relaunch does not need to re-add them — but LISTENING cannot: if the subscription
+   is only attached after myMemberId, dept and consent have all resolved, a relaunch that is
+   suspended first never sees its own event.
+
+   This does not try to win that race, because it cannot be won reliably. It follows the Layer 1
+   answer instead: attach early so a live event is written when the session happens to be ready, and
+   let persistMode keep the event in the SDK's own queue when it is not. drainGeofenceQueue replays
+   it on the next open, the RPCs are idempotent on arrival time, and the hours come out right —
+   just late. Exactly the Android cold-auth case, which needs no new mechanism to cover iOS.
+
+   A failed live write costs nothing: only the drain deletes queued records, and only after a
+   successful write, so an attempt made before auth resolved leaves the record intact for later. */
+function attachGeofenceListener(bg) {
+  if (geoSub) return;
+  geoSub = bg.onGeofence((evt) => handleGeofenceEvent(evt, { onEvent: (e) => eventSink?.(e) }));
+}
+
+/* Called once on native launch, before anything is known about the member. Configures the SDK and
+   starts listening. Deliberately does NOT register a fence or ask for permission — both need
+   consent and a department, and neither is knowable this early. */
+export async function bootstrapGeofence({ onEvent } = {}) {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  if (onEvent) eventSink = onEvent;
+  const init = await initGeofence({});
+  if (!init.ok) return init;
+  attachGeofenceListener(BG);
+  return { ok: true, reason: "listening" };
+}
+
+/* Start geofence-only monitoring for this department's station.
+
+   startGeofences(), NEVER start(). start() is continuous tracking — a breadcrumb trail,
+   the thing the disclosure promises we do not do. The two calls differ by one word and by
+   everything that matters, so this is the only place either may be called.
+
+   Re-registers when the department moves its pin: an officer correcting the station
+   location must not leave members fenced to the old one. */
+export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
+  if (!geofenceAvailable()) {
+    return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
+  }
+  // Remembered BEFORE any gate, so a grant that arrives after a refusal can retry this exact
+  // request. Without it the watcher would fire with nothing to re-run.
+  lastStartArgs = { dept, rationale, onEvent };
+  if (onEvent) eventSink = onEvent;
+  if (!dept?.geofence_enabled) return { ok: false, reason: "dept-not-enabled" };
+
+  const lat = Number(dept?.station_lat);
+  const lng = Number(dept?.station_lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    // No pin, no fence. Silent would be wrong — this is a department that switched the
+    // feature on without finishing the setup it depends on.
+    return { ok: false, reason: "no-station-pin" };
+  }
+  const radius = Math.max(Number(dept?.station_radius_m) || 150, FENCE_MIN_RADIUS_M);
+
+  const init = await initGeofence({ rationale });
+  if (!init.ok) return init;
+  const bg = BG;
+  // Above the permission gate deliberately — see attachProviderWatch. If this moves below the gate
+  // again, a fresh install stops arming until the app is relaunched.
+  attachProviderWatch(bg);
+
+  // Never prompt from here. Starting is a consequence of permission already granted;
+  // a dialog appearing because an effect re-ran is exactly the nagging G4c avoids.
+  /* WHEN-IN-USE IS ENOUGH TO REGISTER, and requiring "always" is why iOS never did.
+
+     Android escalates to Always in one flow, so `always` was a reasonable gate when only Android
+     had run. iOS does not: it grants When-In-Use first and defers the Always upgrade, sometimes by
+     days, to its own "keep allowing?" prompt. So on a correctly-consenting iPhone this read
+     `when-in-use`, returned permission-when-in-use, and never registered anything — and nothing
+     retried, because registration only re-runs when the effect's dependencies change.
+
+     Region monitoring works under When-In-Use while the app is open; Always is what makes it work
+     while the app is closed. Registering under either is strictly better than registering under
+     neither: the member gets arrivals recorded whenever the app is up, and the moment iOS upgrades
+     to Always the same fence starts working in the background with no further action. What must
+     NOT happen is claiming full coverage — the caller reports the actual grant so the UI can say
+     plainly that closed-app arrivals will not record yet. */
+  const perm = await getGeofencePermission();
+  if (perm.reason !== "always" && perm.reason !== "when-in-use") {
+    return { ok: false, reason: `permission-${perm.reason}` };
+  }
+
+  try {
+    // The listener is attached by bootstrapGeofence() at launch now, not here. This only records
+    // where events should be reported for the rest of this session.
+    eventSink = onEvent || eventSink;
+    attachGeofenceListener(bg);
+
+    const signature = `${lat}|${lng}|${radius}`;
+    if (fenceSignature !== signature) {
+      await bg.removeGeofences([STATION_FENCE_ID]).catch(() => {});
+      await bg.addGeofence({
+        identifier: STATION_FENCE_ID,
+        latitude: lat,
+        longitude: lng,
+        radius,
+        notifyOnEntry: false,          // crossing is not arriving — see FENCE_LOITERING_MS
+        notifyOnDwell: true,
+        loiteringDelay: FENCE_LOITERING_MS,
+        notifyOnExit: true,
+      });
+      fenceSignature = signature;
+    }
+
+    if (!running) {
+      await bg.startGeofences();      // geofence-only mode. NOT start().
+      running = true;
+    }
+    return { ok: true, reason: "monitoring", radius, dwellMs: FENCE_LOITERING_MS, permission: perm.reason };
+  } catch (e) {
+    return { ok: false, reason: "start-failed", detail: String(e?.message || e) };
+  }
+}
+
+/* Is the fence actually up? Asked of the plugin rather than of our own flags, because a
+   module variable saying "running" survives states the plugin does not. */
+export async function isStationGeofenceActive() {
+  if (!geofenceAvailable()) return false;
+  const bg = await loadPlugin();
+  if (!bg) return false;
+  try {
+    const fences = await bg.getGeofences();
+    return Array.isArray(fences) && fences.some((f) => f.identifier === STATION_FENCE_ID);
+  } catch { return false; }
+}

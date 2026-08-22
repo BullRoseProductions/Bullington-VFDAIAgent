@@ -18,6 +18,7 @@ import { authedFetch } from "./apiBase";
 import { useReconnect, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
+import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -644,6 +645,338 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
     </div>
   );
 }
+/* ── Automatic station presence: the prominent disclosure ────────────────────────────────
+   Shown BEFORE any OS permission prompt, which is both a Play Store requirement for
+   background location and the only honest order to do it in: the system dialog asks
+   "allow all the time?" without ever explaining what for, and a member cannot agree to
+   something nobody described.
+
+   G4b IS THIS SCREEN AND NOTHING ELSE. No plugin call, no OS prompt, no geofence. The
+   buttons record an answer and stop. G4c reads that answer and does the native work.
+
+   Written as a plain panel rather than a modal on purpose. Consent is not a thing to
+   dismiss with an X — it belongs in Settings where a member can re-read it later, and
+   G4c can mount this same panel inside an overlay for the first-run pass without the
+   copy having to be written twice. */
+
+/* Owner-supplied copy, aligned to APP-002 Background Location Policy. RENDERED VERBATIM.
+   Do not reword, re-split or "tighten" any of it: this is the text a member is agreeing
+   to, and an edit made for rhythm is an edit to what we promised. Every sentence is also
+   a commitment the code has to keep — if the behaviour changes, this changes with it, or
+   we are misleading the person consenting.
+
+   The one presentational decision: `lead` renders in a set-apart callout rather than the
+   body flow, because it carries the "even when the app is closed or not in use" statement
+   that Play requires to be conspicuous. That is emphasis, not rewording. */
+const GEOFENCE_DISCLOSURE = {
+  title: "Automatic station presence",
+  lead: "B4C can automatically record when you arrive at and leave your department's approved locations — even when the app is closed or not in use — so your station and duty hours are logged without checking in and out by hand.",
+  body: [
+    "When you cross one of those locations, B4C checks your location at that moment to confirm you were really there, then records an arrival or departure event. It does not follow you between those moments.",
+    "This is optional, used only for department-enabled attendance and service-hour features. It does not track your routes, driving, destinations, or off-duty activity, and your location is never sold.",
+    "You can turn this off any time in Settings.",
+  ],
+  policy: { label: "Read the full Background Location Policy", href: "https://b4thecall.com/legal/background-location-policy" },
+  accept: "Continue",
+  decline: "Not now",
+};
+
+/* NEW MEMBER-FACING COPY, and it needs the same sign-off as the panel above.
+
+   Android 11+ will not put "Allow all the time" in the same dialog as the first location
+   prompt. It sends the member to a Settings page instead, and this is the explanation
+   shown before that happens — the last thing they read before the OS stops explaining
+   anything. Worded from the approved disclosure rather than invented, but it is still
+   consent-adjacent text that no attorney has seen, so it lives under the same guard. */
+const GEOFENCE_RATIONALE = {
+  title: "Allow location all the time?",
+  message: "B4C records arrivals and departures at your department's approved locations, even when the app is closed. To let it do that, choose \"Allow all the time\" on the next screen.",
+  positiveAction: "Open settings",
+  negativeAction: "Not now",
+};
+
+// Guard rail, now cleared. The assembled screen has been signed off by counsel, so the
+// "awaiting legal sign-off" banner no longer renders. The mechanism stays in place: any
+// future change to the disclosure wording, or to what the app actually does with location,
+// puts this back to TRUE until the changed screen is reviewed again. Consent copy that
+// drifts from behaviour is the failure this exists to catch.
+const GEOFENCE_COPY_IS_DRAFT = false;
+
+/* `onDecision` / `onWithdraw` let the caller do the native work (ask the OS, stop the
+   plugin) while this panel stays responsible only for the copy and the record. When they
+   are absent the panel is still self-contained and reviewable on its own — which is how
+   G4b shipped and how it stays previewable in a browser.
+
+   `permission` is what the OS actually says, passed in by the caller. Settings has to be
+   able to tell someone their phone is blocking this; a screen that reports "on" while the
+   OS quietly refuses is worse than one that reports nothing. */
+function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEscalate, permission }) {
+  const [consent, setConsent] = useState(() => readGeofenceConsent(meId));
+  const [busy, setBusy] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+
+  // Re-fire the Always request. Separate busy flag from `decide` so the escalation button
+  // spins on its own rather than greying out the whole panel.
+  async function escalate() {
+    if (!onEscalate) return;
+    setEscalating(true);
+    try { await onEscalate(); } finally { setEscalating(false); }
+  }
+
+  // A decision we could not store would be re-asked on the next launch, which for
+  // "granted" means a member thinks this is on when nothing is. Say so rather than
+  // showing a success message that isn't true.
+  async function decide(next) {
+    const stored = writeGeofenceConsent(meId, next);
+    if (!stored) {
+      notify({ kind: "error", title: "Couldn't save that", text: "Your phone wouldn't let us store the choice, so we'll have to ask again next time." });
+      return;
+    }
+    setConsent(next);
+    if (onDecision) {
+      // The caller owns the message from here: only it knows how the OS answered, and
+      // two notifications for one tap is how you teach people to ignore them.
+      setBusy(true);
+      try { await onDecision(next); } finally { setBusy(false); }
+      return;
+    }
+    notify(next === "granted"
+      ? { kind: "success", title: "Automatic station presence is set up", text: "Your phone will ask for location access when this goes live." }
+      : { kind: "success", title: "Left off", text: "Nothing changes — keep checking in by hand." });
+  }
+
+  async function withdraw() {
+    if (!clearGeofenceConsent(meId)) {
+      notify({ kind: "error", title: "Couldn't turn it off", text: "Your phone wouldn't let us update the choice. Try again." });
+      return;
+    }
+    setConsent(null);
+    if (onWithdraw) {
+      setBusy(true);
+      try { await onWithdraw(); } finally { setBusy(false); }
+      return;
+    }
+    notify({ kind: "success", title: "Turned off", text: "Automatic station presence is off. Check in by hand as usual." });
+  }
+
+  const para = { fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6, margin: "0 0 12px" };
+
+  return (
+    <div>
+      {/* The hub's copy of this rule lives in its own <style>, which this sub-screen doesn't
+          render — without it the class is a dead hook and the link has no visible focus ring.
+          A policy link that keyboard users can't see themselves land on is the wrong one to
+          leave inaccessible. */}
+      <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
+      <div style={FS.kicker}>LOCATION</div>
+      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 12px", letterSpacing: "-0.01em" }}>
+        {GEOFENCE_DISCLOSURE.title}
+      </h1>
+
+      {GEOFENCE_COPY_IS_DRAFT && (
+        <div style={{ ...FS.card, padding: 14, marginBottom: 14, borderLeft: `4px solid ${FIRE.red}` }}>
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+            <AlertTriangle size={16} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
+              <strong style={{ color: FIRE.textPrimary }}>Awaiting legal sign-off on this screen.</strong> The wording matches
+              APP-002, but the assembled screen hasn't been cleared yet — it must not go in front of members or the app stores
+              until it has.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ ...FS.card, padding: 18 }}>
+        {/* Paragraph 1 carries "even when the app is closed or not in use" — the statement the
+            store looks for and the one a member most needs to actually read. Set apart so it
+            cannot be skimmed past in a wall of text. The words are untouched. */}
+        <div style={{ background: FIRE.track, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 10, padding: "13px 14px", margin: "0 0 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <MapPin size={17} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.55 }}>
+            {GEOFENCE_DISCLOSURE.lead}
+          </div>
+        </div>
+
+        {GEOFENCE_DISCLOSURE.body.map((line, i, arr) => (
+          <p key={line} style={{ ...para, marginBottom: i === arr.length - 1 ? 0 : 12 }}>{line}</p>
+        ))}
+      </div>
+
+      {/* The policy link sits between the copy and the buttons on purpose: a member deciding
+          whether to agree should pass it on the way to the decision, not hunt for it after.
+          Opens externally — leaving the app to read a policy must never cost someone the
+          screen they were part-way through. */}
+      <a href={GEOFENCE_DISCLOSURE.policy.href} target="_blank" rel="noopener noreferrer" className="b4c-legal-link"
+         style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, padding: "2px 2px", textDecoration: "none" }}>
+        <ShieldAlert size={15} color={FIRE.red} style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{GEOFENCE_DISCLOSURE.policy.label}</span>
+        <ExternalLink size={13} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+      </a>
+
+      {/* Answered already → show what they chose and let them change it. An agreement you
+          cannot walk back is not consent, so "turn it off" is always on screen. */}
+      {consent ? (
+        <div style={{ ...FS.card, padding: 16, marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+            {consent === "granted"
+              ? <CheckCircle2 size={17} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              : <Clock size={17} color={FIRE.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>
+                {consent === "granted" ? "You turned this on for this phone." : "You left this off."}
+              </div>
+              {/* Report what the PHONE says, not what we asked for. Someone who tapped
+                  Continue and then picked "While using the app" has agreed to something
+                  that cannot actually work in the background, and the only useful thing
+                  we can do is say so plainly and point at the setting that fixes it.
+                  A half-grant shown as success is the failure people discover weeks later
+                  when their hours are missing. */}
+              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
+                {consent !== "granted"
+                  ? "Check in and out by hand as usual. You can change your mind here any time."
+                  : permission === "when-in-use"
+                    ? "Your phone is only allowing location while B4C is open, so arrivals and departures can't be recorded once you close it. Tap \"Allow in the background\" below and choose \"Change to Always Allow\" when your phone asks."
+                    : permission === "denied" || permission === "restricted"
+                      ? "Your phone is blocking location for B4C, so nothing can be recorded. You can change that in your phone's location settings."
+                      : permission === "always"
+                        ? "Your phone is allowing location all the time. Recording of arrivals and departures isn't switched on yet — nothing is being logged."
+                        : "Nothing is recording yet. When this goes live, your phone will ask for location access first."}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+            {/* THE HALF-GRANT NEEDS A BUTTON, NOT INSTRUCTIONS. iOS does not list "Always" in
+                Settings until the app has actually requested it, so telling a member to go and
+                choose it sends them to a screen where the option is genuinely absent — which
+                reads as the app being broken, or them being stupid, and neither is true.
+                This re-fires the request so iOS shows its own "Change to Always Allow" prompt.
+                Primary styling because it is the one thing standing between the member and the
+                feature working; "Turn it off" steps back to secondary while it matters. */}
+            {consent === "granted" && permission === "when-in-use" && onEscalate && (
+              <button disabled={escalating || busy} onClick={escalate}
+                      style={{ ...FS.btnPrimary, opacity: (escalating || busy) ? 0.6 : 1 }}>
+                {escalating ? "Asking your phone…" : "Allow in the background"}
+              </button>
+            )}
+            {consent === "granted"
+              ? <button disabled={busy} onClick={withdraw} style={{ ...FS.btn, opacity: busy ? 0.6 : 1 }}>{busy ? "Turning off…" : "Turn it off"}</button>
+              : <button disabled={busy} onClick={() => decide("granted")} style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }}>{busy ? "Just a moment…" : GEOFENCE_DISCLOSURE.accept}</button>}
+            {onBack && <button onClick={onBack} style={FS.btn}>Done</button>}
+          </div>
+        </div>
+      ) : (
+        // Never answered. Both choices are equally reachable and neither is preselected —
+        // a store requirement, and the difference between asking and assuming.
+        <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+          <button disabled={busy} onClick={() => decide("granted")} style={{ ...FS.btnPrimary, flex: "1 1 220px", opacity: busy ? 0.6 : 1 }}>{busy ? "Just a moment…" : GEOFENCE_DISCLOSURE.accept}</button>
+          <button disabled={busy} onClick={() => decide("declined")} style={{ ...FS.btn, flex: "0 1 auto", opacity: busy ? 0.6 : 1 }}>{GEOFENCE_DISCLOSURE.decline}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* The panel plus the native work behind it. Exists so Settings and the first-run overlay
+   run the SAME flow — two copies of "ask the OS, then interpret the answer" would drift,
+   and the one that drifted would be the one nobody was looking at. */
+function GeofenceConsentFlow({ meId, notify, onBack, onDone }) {
+  const [permission, setPermission] = useState(null);
+
+  // What the OS says right now, asked without prompting. Web and flag-off return a reason
+  // that isn't a permission state, so it stays null and the panel says nothing about it
+  // rather than inventing a status.
+  useEffect(() => {
+    let alive = true;
+    if (!geofenceAvailable()) return;
+    getGeofencePermission().then((r) => {
+      if (!alive) return;
+      if (["always", "when-in-use", "denied", "restricted", "not-determined"].includes(r.reason)) setPermission(r.reason);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  async function handleDecision(next) {
+    if (next !== "granted") {
+      // A refusal is a legitimate answer. It is recorded and never asked again — the
+      // push.js rule, and the difference between asking someone once and nagging them.
+      notify({ kind: "success", title: "Left off", text: "Nothing changes — keep checking in by hand. You can turn this on later in Settings." });
+      onDone?.();
+      return;
+    }
+
+    // Consent given somewhere the plugin cannot run (browser preview, flag off). The
+    // record stands; the OS gets asked the first time this opens on a real device.
+    if (!geofenceAvailable()) {
+      notify({ kind: "success", title: "Saved", text: "Your phone will ask for location access when this goes live." });
+      onDone?.();
+      return;
+    }
+
+    const res = await requestGeofencePermission({ rationale: GEOFENCE_RATIONALE });
+    if (["always", "when-in-use", "denied", "restricted"].includes(res.reason)) setPermission(res.reason);
+
+    if (res.reason === "always") {
+      notify({ kind: "success", title: "You're set up", text: "Your phone will let B4C record arrivals and departures. Nothing is being logged yet." });
+    } else if (res.reason === "when-in-use") {
+      // Deliberately an error: this LOOKS like success to the member and silently cannot
+      // work. Left quiet, it surfaces weeks later as missing hours nobody can explain.
+      notify({ kind: "error", title: "Only allowed while the app is open",
+               text: "Arrivals and departures can't be recorded once you close B4C. Choose \"Allow all the time\" in your phone's location settings." });
+    } else if (res.reason === "denied" || res.reason === "restricted") {
+      notify({ kind: "error", title: "Location is blocked",
+               text: "Your phone is blocking location for B4C. You can allow it in your phone's location settings, or keep checking in by hand." });
+    } else {
+      notify({ kind: "error", title: "Couldn't set that up", text: "Keep checking in by hand for now.", details: `${res.reason}${res.detail ? `: ${res.detail}` : ""}` });
+    }
+    onDone?.();
+  }
+
+  async function handleWithdraw() {
+    // Stop first, then report. In G4c there is nothing running to stop, but the switch is
+    // wired to the real call from the moment it appears so G4d doesn't inherit a button
+    // that only pretends to work.
+    const res = await stopGeofence();
+    setPermission(null);
+    if (!res.ok && !["web", "flag-off"].includes(res.reason)) {
+      notify({ kind: "error", title: "Turned off, with a hitch", text: "Your choice is saved, but the phone didn't confirm it stopped.", details: `${res.reason}${res.detail ? `: ${res.detail}` : ""}` });
+    } else {
+      notify({ kind: "success", title: "Turned off", text: "Automatic station presence is off. Check in by hand as usual." });
+    }
+    onDone?.();
+  }
+
+  /* Re-ask for Always, for a member already sitting on the half-grant.
+     Runs the SAME requestGeofencePermission as first-run, so the two-step escalation logic has
+     exactly one definition. On iOS the second request is what makes the OS show "Change to
+     Always Allow"; if the member has already refused that prompt once, iOS will not show it
+     again and we fall through to telling them where the switch is — which by then genuinely
+     EXISTS in Settings, because the request has now fired at least once. */
+  async function handleEscalate() {
+    const res = await requestGeofencePermission({ rationale: GEOFENCE_RATIONALE });
+    if (["always", "when-in-use", "denied", "restricted"].includes(res.reason)) setPermission(res.reason);
+
+    if (res.reason === "always") {
+      notify({ kind: "success", title: "Background location is on",
+               text: "Your phone will let B4C record arrivals and departures even when the app is closed." });
+    } else if (res.reason === "when-in-use") {
+      // Second refusal, or iOS declining to re-prompt. NOW the Settings instruction is honest:
+      // the request has fired, so "Always" is actually listed on that screen.
+      notify({ kind: "error", title: "Still limited to while the app is open",
+               text: "Your phone didn't switch to background location. Open Settings → B4C → Location and choose \"Always\" — it will be listed there now." });
+    } else if (res.reason === "denied" || res.reason === "restricted") {
+      notify({ kind: "error", title: "Location is blocked",
+               text: "Your phone is blocking location for B4C. You can allow it in Settings → B4C → Location, or keep checking in by hand." });
+    } else {
+      notify({ kind: "error", title: "Couldn't ask your phone", text: "Keep checking in by hand for now.",
+               details: `${res.reason}${res.detail ? `: ${res.detail}` : ""}` });
+    }
+  }
+
+  return <GeofenceDisclosure meId={meId} notify={notify} onBack={onBack}
+                             onDecision={handleDecision} onWithdraw={handleWithdraw}
+                             onEscalate={handleEscalate} permission={permission} />;
+}
+
 function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests, members, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
   const isDA = isDeptAdmin(role);
@@ -657,6 +990,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 Big Bull Technologies, LLC. All rights reserved.</>);
+  if (view === "geofence") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<GeofenceConsentFlow meId={meId} notify={notify} onBack={back} /></div>;
   const card = (key, Icon, title, desc) => (
     <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -679,6 +1013,13 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
       {card("person", HeartHandshake, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
       {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
       {card("brand", Palette, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
+      {/* DOUBLE-GATED, and invisible today on both counts: VITE_GEOFENCE_ENABLED is unset, and
+          no department has opted in (0 of 2). The client flag is the kill switch for a feature
+          that has never run on a real device; the department flag is the consent boundary — a
+          department that hasn't agreed to locate its members must not be offered the option,
+          because offering it is already a suggestion that it's expected. Both must be on. */}
+      {geofenceConsentAvailable() && dept?.geofence_enabled &&
+        card("geofence", MapPin, "Automatic station presence", "Record arrivals and departures at your department's approved locations — read what's collected before you decide.")}
       {card("support", Mail, "Support & Contact", "Get help, send feedback, or request custom training.")}
       {card("about", Award, "About", "App info and copyright.")}
     </div>
@@ -913,7 +1254,7 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day").eq("id", id).single().then(({ data }) => {
+      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day, geofence_enabled").eq("id", id).single().then(({ data }) => {
         if (!data) return;
         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
@@ -1108,6 +1449,93 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, [myMemberId]);
+
+  /* First-run consent for automatic station presence. Opens ONCE, for a member whose
+     department has opted in and who has never answered. Every one of these conditions is
+     load-bearing:
+       • geofenceAvailable() — native + VITE_GEOFENCE_ENABLED. On web this can never open.
+       • dept.geofence_enabled — a department that hasn't opted in must not be asked, since
+         asking already implies it's expected of them.
+       • readGeofenceConsent(...) === null — answered means answered. "Not now" is a real
+         answer and is never re-asked, which is the same rule push.js follows for a denied
+         notification prompt.
+     Deliberately NOT tied to a screen or a tap: the disclosure has to come before the OS
+     dialog, and the OS dialog is the first thing that would otherwise appear. */
+  /* Start LISTENING as early as the app can — no member, no department, no consent required.
+     A background relaunch on iOS may be suspended before auth resolves, and a listener attached
+     behind that gate would miss the very event that woke the app. Registration still waits for
+     consent below; only the subscription moves earlier. Anything that fires before a session is
+     ready stays in the SDK's queue and is replayed by the drain. */
+  useEffect(() => {
+    if (!geofenceAvailable()) return;
+    bootstrapGeofence({ onEvent: (e) => { if (e?.action === "error") console.warn("[geofence]", e.reason); } });
+  }, []);
+
+  const [geofenceFirstRun, setGeofenceFirstRun] = useState(false);
+  useEffect(() => {
+    if (!myMemberId || !dept?.geofence_enabled) return;
+    if (!geofenceAvailable()) return;
+    if (readGeofenceConsent(myMemberId) !== null) return;
+    setGeofenceFirstRun(true);
+  }, [myMemberId, dept?.geofence_enabled]);
+
+  /* Start (or re-point) the station fence. Runs only for a member who has consented AND
+     whose department has opted in; startStationGeofence re-checks the OS permission and
+     refuses rather than prompting, so this effect can re-run harmlessly.
+
+     Keyed on the station coordinates as well as the member, so an officer correcting the
+     department's pin re-registers the fence instead of leaving everyone monitoring the old
+     location. `monitoring` drives the Station Hours card, and it is set from the result
+     rather than from our own assumptions about what should have happened. */
+  const [geofenceActive, setGeofenceActive] = useState(false);
+
+  /* Consent lives in localStorage, which React cannot see. This counter is what makes it a
+     dependency: every write or clear, from any screen, bumps it and re-runs the effect
+     below — so the fence registers on the SAME run the member consents, not on the next
+     launch. Without it, granting consent changed nothing until the app was restarted. */
+  const [consentVersion, setConsentVersion] = useState(0);
+  useEffect(() => subscribeGeofenceConsent(() => setConsentVersion((v) => v + 1)), []);
+
+  useEffect(() => {
+    let alive = true;
+    if (!myMemberId || !dept?.geofence_enabled || !geofenceAvailable()) { setGeofenceActive(false); return; }
+    if (readGeofenceConsent(myMemberId) !== "granted") { setGeofenceActive(false); return; }
+
+    startStationGeofence({
+      dept,
+      rationale: GEOFENCE_RATIONALE,
+      // Fires from the background daemon, so it must stay cheap and never block. A failed
+      // write is surfaced quietly — the member is still on shift and can check in by hand,
+      // and a toast for something they didn't do would be noise they can't act on.
+      onEvent: (e) => { if (e?.action === "error") console.warn("[geofence]", e.reason); },
+    }).then((res) => {
+      if (!alive) return;
+      setGeofenceActive(!!res.ok);
+      if (!res.ok && !["web", "flag-off", "dept-not-enabled"].includes(res.reason)) {
+        console.warn("[geofence] not monitoring:", res.reason, res.detail || "");
+      }
+
+      /* CATCH-UP, after start settles and DELIBERATELY NOT conditional on it.
+
+         Queued events are hours somebody actually stood. If the fence failed to start
+         this launch — permission downgraded to when-in-use, the pin removed, Play
+         Services unhappy — those hours are still owed, and gating recovery on the thing
+         that just failed is how you lose them permanently.
+
+         Placed here rather than at the JS entrypoint because replaying requires an
+         authenticated Supabase session AND a resolved member: geofence_arrive is
+         SECURITY DEFINER off my_member_id(), so a drain at cold start would fire
+         before auth resolves and every RPC would refuse. This is the earliest point
+         where the write can actually succeed. It never blocks the UI — it's a detached
+         promise — and drainGeofenceQueue self-limits to once per app open. */
+      drainGeofenceQueue({
+        onEvent: (e) => { if (e?.action === "error") console.warn("[geofence] replay:", e.reason); },
+      }).then((d) => {
+        if (d?.failed) console.warn("[geofence] replay left", d.failed, "event(s) queued for next open");
+      });
+    });
+    return () => { alive = false; };
+  }, [myMemberId, dept?.geofence_enabled, dept?.station_lat, dept?.station_lng, dept?.station_radius_m, consentVersion]);
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
   // Trim to the oversight+support surface ONLY when the ACTIVE role is exactly Project Admin
   // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —
@@ -1129,6 +1557,18 @@ export default function App() {
     <div style={S.app}>
       <Fonts />
       {toast && <Notification S={S} kind={toast.kind} title={toast.title} text={toast.text} details={toast.details} action={toast.action} onClose={() => setToast(null)} />}
+      {/* First-run consent. NO backdrop dismissal and no X on purpose: this is the screen a
+          member has to answer before the OS asks them anything, and a modal you can tap
+          past is one people tap past. Both answers are one tap away, so there is nothing
+          to escape from — "Not now" closes it for good. */}
+      {geofenceFirstRun && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 140, background: "rgba(8,10,16,.78)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+          <div style={{ width: "100%", maxWidth: 520, margin: "24px 0" }}>
+            <GeofenceConsentFlow meId={myMemberId} notify={notify} onDone={() => setGeofenceFirstRun(false)} />
+          </div>
+        </div>,
+        document.body
+      )}
       {drawer && <div style={S.scrim} onClick={() => setDrawer(false)} />}
       <aside className={`dr-side${drawer ? " open" : ""}`} style={S.sidebar}>
         <div style={S.brandRow}>
@@ -2452,12 +2892,21 @@ function StationClockCard({ S, dept, go }) {
   const [open, setOpen] = useState(null);     // the open station_presence row, or null when clocked out
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Asked of the plugin, not of our own flags: a fence is "active" only if it is actually
+  // registered. Web and flag-off both return false, so this stays silent everywhere it
+  // isn't true.
+  const [autoPresence, setAutoPresence] = useState(false);
   useEffect(() => {
     supabase.rpc("my_open_station_session").then(({ data, error }) => {
       if (error) setFailed(true);
       else setOpen(Array.isArray(data) ? (data[0] || null) : (data || null));   // same tolerant shape read as StationHours — these two must never disagree
       setLoaded(true);
     });
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    isStationGeofenceActive().then((v) => { if (alive) setAutoPresence(!!v); });
+    return () => { alive = false; };
   }, []);
   if (!loaded || failed) return null;   // a read that failed is not "clocked out" — say nothing rather than something wrong
   const onClock = !!open;
@@ -2474,16 +2923,33 @@ function StationClockCard({ S, dept, go }) {
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: 12, fontWeight: 600, color: open.verified ? FIRE.greenText : FIRE.amberText }}>
             {open.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{open.verified ? "Verified" : "Not verified"}
           </div>
-          {/* Same standing reminder as the Station Hours page, trimmed: "On the clock since …" is
-              directly above, so repeating "You're on the clock" here would just be noise. This card is
-              display-only — the button routes to the page that owns the punch. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(214,169,94,.12)", border: "1px solid rgba(214,169,94,.35)" }}>
-            <Clock size={12} color={FIRE.amberText} style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: 11.5, color: FIRE.amberText, lineHeight: 1.4 }}>Remember to clock out before you leave.</span>
-          </div>
+          {/* THE REMINDER IS CONDITIONAL, and the condition is load-bearing. geofence_depart
+              closes ONLY rows the daemon opened (source='gps_geofence') — a shift someone
+              punched in by hand is a human statement the phone must not overrule. So a
+              member on a manual row still has to clock out themselves even with the fence
+              running, and telling them otherwise would cost them the end of their shift. */}
+          {autoPresence && open.source === "gps_geofence" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(255,255,255,.06)", border: `0.5px solid ${FIRE.hairline}` }}>
+              <MapPin size={12} color={FIRE.textSecondary} style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.4 }}>Started automatically — this closes when you leave the station.</span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(214,169,94,.12)", border: "1px solid rgba(214,169,94,.35)" }}>
+              <Clock size={12} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 11.5, color: FIRE.amberText, lineHeight: 1.4 }}>Remember to clock out before you leave.</span>
+            </div>
+          )}
         </>
       ) : (
         <div style={{ fontSize: 14, color: FIRE.textMuted, marginTop: 9 }}>Not on the clock</div>
+      )}
+      {/* Shown in both states: off the clock it's the promise that arriving is enough, on the
+          clock it's the reason the row appeared without anyone tapping anything. */}
+      {autoPresence && (
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 11.5, color: FIRE.textMuted }}>
+          <MapPin size={11} style={{ flexShrink: 0 }} />
+          <span>Presence tracked automatically at the station.</span>
+        </div>
       )}
       <button style={{ ...FS.btn, marginTop: 12 }} onClick={() => go("stationhours")}>{onClock ? "Clock out →" : "Clock in →"}</button>
     </div>
