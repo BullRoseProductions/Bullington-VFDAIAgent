@@ -28,3 +28,13 @@ keystore.properties
 # They were committed once by an over-broad `git add -A`; this stops it recurring.
 _report_preview/
 _digest_preview/
+
+# Secrets. `.env` alone matched only that exact filename, leaving .env.local and
+# .env.production — which is what `vercel env pull` writes — perfectly committable.
+.env*
+!.env.example
+
+# Firebase service-account keys and APNs auth keys. Admin credentials that arrive
+# as ordinary-looking files in ~/Downloads and are one `git add -A` from being public.
+*firebase-adminsdk*.json
+*.p8
