@@ -17,7 +17,7 @@ import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { authedFetch } from "./apiBase";
 import { useReconnect, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
-import { initPush } from "./push";
+import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -1094,7 +1094,20 @@ export default function App() {
   // Native push registration — once we know which member is signed in, so the device token is filed
   // against the right person. No-op on web and while VITE_PUSH_ENABLED is off. Tapping a push opens
   // the inbox rather than deep-linking to the subject: the inbox is the one destination we control.
-  useEffect(() => { if (!myMemberId) return; initPush({ onOpen: () => go("notifications") }); }, [myMemberId]);
+  /* Runs on every member change, not just the first. initPush() attaches listeners once per
+     launch and short-circuits after that; syncDeviceRegistration() is what actually re-files the
+     device token against whoever is signed in now. Both are needed: the first launch has no token
+     until the listener fires, and a later member change has a token but no reason to re-register.
+     Awaited in sequence so a first-launch registration cannot race the re-file. */
+  useEffect(() => {
+    if (!myMemberId) return;
+    let cancelled = false;
+    (async () => {
+      await initPush({ onOpen: () => go("notifications") });
+      if (!cancelled) await syncDeviceRegistration();
+    })();
+    return () => { cancelled = true; };
+  }, [myMemberId]);
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
   // Trim to the oversight+support surface ONLY when the ACTIVE role is exactly Project Admin
   // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —
@@ -1132,7 +1145,12 @@ export default function App() {
             );
           })}
         </nav>
-        <button onClick={() => supabase.auth.signOut()} aria-label="Sign out" style={{ ...S.navItem, borderTop: "1px solid #2A2F35", marginTop: 6, paddingTop: 13 }}>
+        {/* Unfile the device BEFORE signing out. The delete is governed by
+            member_devices_delete_own (USING member_id = my_member_id()), so after signOut() the
+            policy matches nothing and the row would silently survive — leaving this phone
+            receiving the last member's pushes. Failure is swallowed on purpose: a device that
+            cannot be unfiled must not become a phone that cannot be signed out of. */}
+        <button onClick={async () => { try { await unregisterPush(); } catch { /* never block sign-out */ } await supabase.auth.signOut(); }} aria-label="Sign out" style={{ ...S.navItem, borderTop: "1px solid #2A2F35", marginTop: 6, paddingTop: 13 }}>
           <LogOut size={18} /><span style={{ flex: 1, textAlign: "left" }}>Sign out</span>
         </button>
         <div style={S.deptCard}>
