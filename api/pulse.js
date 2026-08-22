@@ -183,6 +183,14 @@ export default async function handler(req, res) {
   const detected = [];
   const detectErrors = [];
 
+  /* DIAGNOSTICS, dry-run only. candidates:0 is ambiguous on its own — it could mean the calendar is
+     empty, the window is wrong, every session is already past, or no Active member matched the
+     audience. Reporting the intermediate counts turns "nothing happened" into a reason. Populated
+     always, emitted only when isDry, so a real run does not dump roster data into a response. */
+  const diag = { now: new Date(nowMs).toISOString(), todayISO, tomorrowISO,
+                 sessionWindow: [addDaysISO(todayISO, -1), addDaysISO(todayISO, 2)],
+                 sessionsScanned: 0, membersLoaded: 0, sessions: [], itemsScanned: 0 };
+
   /* EVENTS — training sessions at 24h and 1h.
 
      The windows are RANGES, not instants, and that is what makes an hourly cron correct without
@@ -214,16 +222,32 @@ export default async function handler(req, res) {
         .in("department_id", deptIds);
       if (mErr) throw new Error(mErr.message);
       members = (m || []).filter((x) => x.status === "Active");   // an inactive member gets no reminders
+      diag.membersLoaded = members.length;
+      diag.membersInDeptsRaw = (m || []).length;                  // if this is >0 while membersLoaded is 0, status is the cause
     }
+    diag.sessionsScanned = (sessions || []).length;
 
     for (const sess of sessions || []) {
       const startsAt = zonedInstant(sess.date, sess.start_time);
       const hoursUntil = (startsAt.getTime() - nowMs) / 3_600_000;
-      if (hoursUntil <= 0) continue;                              // already started or past
 
       let type = null, severity = null, why = null;
-      if (hoursUntil > 1 && hoursUntil <= 24) { type = "event_24h"; severity = "info"; why = `starts in ${hoursUntil.toFixed(1)}h`; }
-      else if (hoursUntil <= 1)               { type = "event_1h";  severity = "warning"; why = `starts in ${Math.round(hoursUntil * 60)}m`; }
+      if (hoursUntil <= 0)                    { /* already started or past */ }
+      else if (hoursUntil > 24)               { /* too far out for either band */ }
+      else if (hoursUntil > 1)                { type = "event_24h"; severity = "info"; why = `starts in ${hoursUntil.toFixed(1)}h`; }
+      else                                    { type = "event_1h";  severity = "warning"; why = `starts in ${Math.round(hoursUntil * 60)}m`; }
+
+      // Recorded for EVERY session in the window, matched or not — a session that misses both bands
+      // is exactly the case that needs explaining, and it is invisible in the candidate list.
+      const audienceMatches = members.filter((mm) => mm.department_id === sess.department_id && appliesTo(sess, mm)).length;
+      diag.sessions.push({
+        id: sess.id, date: sess.date, start_time: sess.start_time, audience: sess.audience, done: sess.done,
+        startsAtUTC: startsAt.toISOString(), hoursUntil: Number(hoursUntil.toFixed(2)),
+        band: type || (hoursUntil <= 0 ? "past" : "beyond-24h"),
+        deptMembersActive: members.filter((mm) => mm.department_id === sess.department_id).length,
+        audienceMatches,
+      });
+
       if (!type) continue;
 
       const localStart = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(startsAt);
@@ -267,6 +291,7 @@ export default async function handler(req, res) {
       .lte("due_date", tomorrowISO);                              // due tomorrow, today, or already past
     if (error) throw new Error(error.message);
 
+    diag.itemsScanned = (items || []).length;
     for (const it of items || []) {
       let type, severity, why;
       if (it.due_date < todayISO)          { type = "task_overdue";       severity = "critical"; why = `due ${it.due_date}, now past`; }
@@ -423,6 +448,7 @@ export default async function handler(req, res) {
       subject_ref: c.subject_ref, title: c.title, body: c.body, severity: c.severity, why: c.why,
     })),
     ...(detectErrors.length ? { detectErrors } : {}),
+    ...(isDry ? { diag } : {}),
     families: FAMILIES,
     typePrefixes: TYPE_PREFIX_BY_FAMILY,
   };
