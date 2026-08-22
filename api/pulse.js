@@ -29,7 +29,7 @@ import { createClient } from "@supabase/supabase-js";
 // insertNotifications already owns the upsert + read-back dance (ignoreDuplicates returns no
 // representation, so "what was actually new" has to be read back by created_at); duplicating
 // that here would be a second definition of the same subtle thing.
-import { insertNotifications } from "./_push.js";
+import { insertNotifications, sendPush } from "./_push.js";
 
 /* ---------------- wall clock -> instant ----------------
    training_sessions stores `date` + `start_time` as a WALL CLOCK with no zone. Read in the server's
@@ -449,14 +449,116 @@ export default async function handler(req, res) {
     }
   }
 
+  /* ---- DRAIN --------------------------------------------------------------------------------
+     Claims unpushed rows and sends them. Three filters, each load-bearing.
+
+     1. created_at >= now - DRAIN_WINDOW_HOURS.
+        Every row that predates the pushed_at column is NULL despite having been pushed by the
+        digest, so an unbounded drain would re-push history — weeks-old cert warnings arriving as
+        fresh notifications, which is worse than never sending at all. Six hours: comfortably wider
+        than the intended hourly cadence so a skipped or slow run still catches up, comfortably
+        narrower than a day so nothing stale can resurface. Anything older has missed its moment
+        and should stay in the inbox as a record rather than buzzing a phone about a drill that has
+        already happened.
+
+     2. type IN (pulse's own types).
+        THIS IS THE ONE THAT PREVENTS A DOUBLE-PUSH, and it is not obvious. api/digest.js writes
+        notification rows too, and pushes them itself — but it predates pushed_at and never stamps
+        it. So every digest row sits at pushed_at IS NULL forever. Without this filter, any pulse
+        run inside the window would find the digest's freshly-pushed compliance rows and send them
+        a second time. Zero risk today only because PUSH_ENABLED means the digest has never
+        written a row; it becomes real the moment that flag goes on. Pulse drains what pulse
+        produces. Matching by prefix rather than an explicit list so a new event_/task_ type is
+        covered automatically — a list would silently stop pushing whatever nobody remembered to
+        add to it.
+
+     3. member_id, when ?only_member is set — so a test drains one person and no one else.
+
+     Ordered oldest-first: if the window ever holds more than one run's worth, the rows that have
+     been waiting longest go first. */
+  const DRAIN_WINDOW_HOURS = 6;
+  const drainSince = new Date(nowMs - DRAIN_WINDOW_HOURS * 3_600_000).toISOString();
+
+  let drained = 0, pushed = 0, pushFailed = 0, pruned = 0, noDevice = 0;
+  const pushErrors = [];
+  let wouldPush = [];
+
+  try {
+    let q = sb.from("notifications")
+      .select("id, member_id, type, title, body, created_at")
+      .is("pushed_at", null)
+      .gte("created_at", drainSince)
+      .or("type.like.event_*,type.like.task_*")
+      .order("created_at", { ascending: true })
+      .limit(500);                                   // a bounded run; leftovers go on the next pass
+    if (onlyMember) q = q.eq("member_id", onlyMember);
+
+    const { data: unpushed, error } = await q;
+    if (error) throw new Error(error.message);
+    drained = (unpushed || []).length;
+
+    if (drained) {
+      const memberIds = [...new Set(unpushed.map((r) => r.member_id))];
+      const { data: devices, error: dErr } = await sb
+        .from("member_devices").select("member_id, token").in("member_id", memberIds);
+      if (dErr) throw new Error(dErr.message);
+
+      const tokensByMember = new Map();
+      for (const d of devices || []) {
+        if (!tokensByMember.has(d.member_id)) tokensByMember.set(d.member_id, []);
+        tokensByMember.get(d.member_id).push(d.token);
+      }
+
+      const sendable = unpushed.filter((r) => (tokensByMember.get(r.member_id) || []).length > 0);
+      const deviceless = unpushed.filter((r) => (tokensByMember.get(r.member_id) || []).length === 0);
+      noDevice = deviceless.length;
+
+      wouldPush = unpushed.map((r) => ({
+        id: r.id, member_id: r.member_id, type: r.type, title: r.title,
+        devices: (tokensByMember.get(r.member_id) || []).length,
+      }));
+
+      if (!isDry) {
+        if (sendable.length) {
+          const res = await sendPush(sb, sendable, tokensByMember);
+          pushed = res.sent || 0;
+          pushFailed = res.failed || 0;
+          pruned = res.pruned || 0;
+          if (res.skipped) pushErrors.push({ skipped: res.skipped });
+          if (res.error) pushErrors.push({ error: res.error });
+        }
+
+        /* STAMP EVERYTHING ATTEMPTED, INCLUDING THE DEVICELESS AND THE FAILED.
+
+           A member with no registered device is stamped deliberately: there is nothing to send, the
+           inbox row already IS the record, and leaving it NULL would make it reappear in every
+           drain until the window slid past — burning a query per run forever on a member who may
+           simply never install the app.
+
+           Failed sends are stamped too, which is a real trade: a transient FCM error loses that
+           notification's push. The alternative is retrying, and an unstamped row inside a
+           six-hour window would retry on every run for six hours — so a device that is merely
+           unreachable gets hammered, and a genuinely dead token is already pruned by sendPush.
+           One attempt per notification is the honest contract, and the inbox never loses the row.
+           If retry ever matters, it needs an attempt counter, not an unbounded NULL. */
+        const stampIds = unpushed.map((r) => r.id);
+        const { error: uErr } = await sb.from("notifications")
+          .update({ pushed_at: new Date().toISOString() }).in("id", stampIds);
+        if (uErr) pushErrors.push({ stamp: uErr.message });
+      }
+    }
+  } catch (e) {
+    pushErrors.push({ drain: String(e?.message || e) });
+  }
+
   const report = {
     enabled: true,
-    slice: "4-write",
+    slice: "5-drain",
     scope,
     dry: isDry,
     note: isDry
-      ? "Dry run: nothing was written. `would` lists the rows that a real run would insert."
-      : "Rows written to notifications. No push sent — sendPush is not imported; pushed_at is NULL and slice 5's drain will claim them.",
+      ? "Dry run: nothing written, nothing sent. `would` lists rows that would be inserted; `wouldPush` lists rows that would be pushed."
+      : "Rows written and unpushed rows drained. pushed counts DEVICE sends, not rows.",
     counts: {
       candidates: candidates.length,     // everything detection found
       afterScope: scoped.length,         // after ?only_member
@@ -464,7 +566,16 @@ export default async function handler(req, res) {
       deliverable: deliverable.length,   // survived the mute gate
       written,                           // genuinely new rows
       deduped,                           // collided with a row already there — the re-run guard working
+      drained,                           // unpushed rows claimed this run
+      pushed,                            // FCM accepts — counts DEVICES, not rows (two phones = two)
+      noDevice,                          // rows for members with no registered device — stamped, not retried
+      pushFailed,                        // FCM rejections
+      pruned,                            // dead tokens removed by sendPush
     },
+    drainWindowHours: DRAIN_WINDOW_HOURS,
+    drainSince,
+    ...(pushErrors.length ? { pushErrors } : {}),
+    ...(isDry ? { wouldPush } : {}),
     ...(muteErrors.length ? { muteErrors, muteNote: "Failed closed: these were treated as muted rather than risk notifying someone who opted out." } : {}),
     ...(writeError ? { writeError } : {}),
     // Grouped so a dry run reads as "who gets what and why" rather than a flat list to eyeball.
