@@ -219,7 +219,7 @@ function getPosition() {
 }
 
 /* ---------------- Settings & Support hub (card → sub-screen, mirrors Reports) ---------------- */
-const SUPPORT_EMAIL = "ashlea@bullroseproductions.com";
+const SUPPORT_EMAIL = "ashlea@b4thecall.com";
 // DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
 function DeptSettings({ S, dept, setDept, setBrand }) {
   // ?? not || on the coordinates: latitude/longitude 0 are real places, and || would wipe them to "".

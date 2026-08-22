@@ -22,7 +22,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildNotifications, insertNotifications, sendPush } from "./_push.js";
 
-const DEFAULT_TO = "ashlea@bullroseproductions.com";
+const DEFAULT_TO = "ashlea@b4thecall.com";
 const FROM = "B4C <notifications@b4thecall.com>";
 // Gmail strips data: URIs, so the logo MUST be an absolute https URL to a public asset.
 // public/b4c-email-logo.png ships with the app and is served at the site root.
