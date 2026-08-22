@@ -30,8 +30,8 @@ import { createClient } from "@supabase/supabase-js";
 // representation, so "what was actually new" has to be read back by created_at); duplicating
 // that here would be a second definition of the same subtle thing.
 import { insertNotifications, sendPush } from "./_push.js";
-// CANARY (temporary): proves api/ can import from outside api/ before real logic moves there.
-import { SHARED_BOUNDARY_OK } from "../shared/_boundary-canary.js";
+// The role vocabulary, shared with the client. See shared/roles.js for why this is not a copy.
+import { LEADERSHIP, BOARD, hasAny } from "../shared/roles.js";
 
 /* ---------------- wall clock -> instant ----------------
    training_sessions stores `date` + `start_time` as a WALL CLOCK with no zone. Read in the server's
@@ -77,32 +77,17 @@ const addDaysISO = (iso, n) => {
 };
 
 /* ---------------- audience ----------------
-   Mirrors rollFor()/isBoard()/isLeader() in App.jsx. A board-only event must not reach the whole
-   roster, and a leadership event must not reach every member.
+   Mirrors rollFor()/isBoard()/isLeader() in App.jsx — and now literally shares their definitions
+   rather than restating them. LEADERSHIP and BOARD come from shared/roles.js, which App.jsx also
+   imports, so the two cannot disagree.
 
-   SOURCE OF TRUTH: App.jsx:88-90 — ROLES / LEADERSHIP / DEPT_ADMIN_ROLES. These literals must equal
-   LEADERSHIP (line 89) exactly. They are values of members.access, NOT members.role: `role` holds
-   rank labels like Chief and Assistant Chief, which can never appear in an access array and would
-   silently match nothing if copied here.
-
-   THIS COPY ALREADY DRIFTED ONCE, before it ever ran: the first version of this file dropped
-   "Board Member" and added two rank labels, which would have quietly withheld every leadership-event
-   reminder from board members. Nothing would have errored. There would have been no failed run and
-   no log line — only notifications that never arrived, discovered whenever somebody happened to
-   mention they were not getting them.
-
-   That is the same silent-drift failure as isDoneThisPeriod, and it retires the argument this
-   comment used to make — that role literals are safer to duplicate than a date algorithm because
-   they "fail loudly". They do not. Slice 3b therefore extracts a shared role-constants module
-   (ROLES / LEADERSHIP / BOARD / DEPT_ADMIN) imported by both App.jsx and this file, alongside
-   isDoneThisPeriod. Until then these literals are a KNOWN duplicate on borrowed time, kept honest
-   only by this comment naming where the original lives. */
-const LEADERSHIP_ROLES = ["Project Admin", "Department Admin", "Board Member", "Officer"];   // === App.jsx:89 LEADERSHIP
-const BOARD_ROLES = ["Board Member"];                                                        // === App.jsx:99 isBoard
-const hasAny = (access, roles) => Array.isArray(access) && access.some((r) => roles.includes(r));
+   The duplicate this replaces had already drifted before it ever executed: it dropped
+   "Board Member" and added "Chief"/"Assistant Chief", which are members.role RANK labels that can
+   never appear in a members.access array. Every leadership-event reminder would have been silently
+   withheld from board members — nothing erroring, nothing logged. */
 const appliesTo = (session, member) =>
-  session.audience === "board" ? hasAny(member.access, BOARD_ROLES)
-  : session.audience === "leadership" ? hasAny(member.access, LEADERSHIP_ROLES)
+  session.audience === "board" ? hasAny(member.access, BOARD)
+  : session.audience === "leadership" ? hasAny(member.access, LEADERSHIP)
   : true;
 
 // Explicit allow-list rather than a truthiness check, matching the digest's reasoning about ?dry=0:
@@ -574,7 +559,6 @@ export default async function handler(req, res) {
       pushFailed,                        // FCM rejections
       pruned,                            // dead tokens removed by sendPush
     },
-    sharedBoundary: SHARED_BOUNDARY_OK,
     drainWindowHours: DRAIN_WINDOW_HOURS,
     drainSince,
     ...(pushErrors.length ? { pushErrors } : {}),

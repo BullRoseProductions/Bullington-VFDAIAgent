@@ -85,20 +85,15 @@ const FS = {
   rowActions: { display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginLeft: "auto" },
 };
 
-const ROLES = ["Project Admin", "Department Admin", "Board Member", "Officer", "Member"];
-const LEADERSHIP = ["Project Admin", "Department Admin", "Board Member", "Officer"];
-const DEPT_ADMIN_ROLES = ["Department Admin", "Project Admin"];
-const CANMANAGE_ROLES  = ["Board Member", "Department Admin", "Officer"];   // NO Project Admin
-const CANMANAGE_OPS_ROLES = ["Department Admin", "Officer"];   // ops writes — Board EXCLUDED (governance-only) + no PA; client half of the live is_canmanage_ops() DB gate
-const SIGNIN_ROLES     = ["Project Admin", "Department Admin", "Officer"];  // PA/DA/TO — QR sign-in + AI planner
-const ANNOUNCE_ROLES   = ["Project Admin", "Department Admin", "Officer"];  // who can POST announcements — Project Admin / Department Admin / Officer (NOT Board); matches is_announcer() at the DB
-const GRANTABLE_ROLES  = ["Member", "Officer", "Board Member", "Department Admin"];   // roster editor checkboxes — Project Admin NOT grantable
-const hasAny           = (rs, set) => Array.isArray(rs) && rs.some((r) => set.includes(r));
-const isLeader         = (rs) => hasAny(rs, LEADERSHIP);
-const isDeptAdmin      = (rs) => hasAny(rs, DEPT_ADMIN_ROLES);
-const isBoard          = (rs) => hasAny(rs, ['Board Member']);
-const canManage        = (rs) => hasAny(rs, CANMANAGE_ROLES);
-const isTrainingLeader = (rs) => hasAny(rs, SIGNIN_ROLES);
+/* Role vocabulary now lives in shared/roles.js so api/pulse.js reads the SAME definitions rather
+   than a copy — a copy it kept, and which drifted before it ever ran. Values are unchanged;
+   isBoard's inline ['Board Member'] became the named BOARD constant. */
+// eslint-disable-next-line no-unused-vars -- several are used only in JSX branches below
+import {
+  ROLES, LEADERSHIP, BOARD, DEPT_ADMIN_ROLES, CANMANAGE_ROLES, CANMANAGE_OPS_ROLES,
+  SIGNIN_ROLES, ANNOUNCE_ROLES, GRANTABLE_ROLES,
+  hasAny, isLeader, isDeptAdmin, isBoard, canManage, isTrainingLeader,
+} from "../shared/roles.js";
 // Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
 // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
 // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
