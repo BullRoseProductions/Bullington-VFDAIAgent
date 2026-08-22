@@ -32,6 +32,8 @@ import { createClient } from "@supabase/supabase-js";
 import { insertNotifications, sendPush } from "./_push.js";
 // The role vocabulary, shared with the client. See shared/roles.js for why this is not a copy.
 import { LEADERSHIP, BOARD, hasAny } from "../shared/roles.js";
+// Same definition the duty screens use — see shared/duty-period.js for why this is not a copy.
+import { isDoneThisPeriod, periodKey } from "../shared/duty-period.js";
 
 /* ---------------- wall clock -> instant ----------------
    training_sessions stores `date` + `start_time` as a WALL CLOCK with no zone. Read in the server's
@@ -327,44 +329,81 @@ export default async function handler(req, res) {
     detectErrors.push({ family: "tasks", error: String(e?.message || e) });
   }
 
-  /* STATION DUTIES ARE DEFERRED, ON PURPOSE.
+  /* STATION DUTIES — MEASUREMENT ONLY. Emits nothing.
+     Nothing here pushes to `detected`, so no duty can produce a notification row or a push. The
+     purpose is to answer two questions with real numbers before emission is enabled, because both
+     could make the feature wrong in a way that only shows up on members' phones:
 
-     A duty's "done" is PERIOD-RELATIVE: isDoneThisPeriod() in App.jsx reads recurrence, done_at and
-     the department's week_start_day, so a Weekly duty completed last week is OPEN again this week
-     and a One-off never reopens. Detecting overdue duties by `due_date < today AND NOT done` — the
-     obvious implementation — would tell members their duty is overdue on the day after they did it.
+       1. ASSIGNEE COVERAGE. Duties notify the assignee only, matching tasks. But assigned_to is
+          nullable and station chores are often left unassigned — if most are, assignee-only
+          emission would notify almost nobody, and "duties reminders" would ship as a feature that
+          silently does nothing for the department that asked for it.
 
-     Getting it right means that rule existing here as well as in App.jsx, and the rule's own comment
-     forbids exactly that: "it would live in two languages and have to stay in lockstep — the
-     certStatus/dept_cert_readiness trap". pa_department_radar already deliberately disagrees with
-     it; adding a third definition would make "how many duties are outstanding" a question with
-     three answers.
+       2. THE STANDING WEEKLY NAG. A Weekly duty whose due_date has passed is overdue in every
+          period from now on, and because subject_ref carries the period it fires ONCE PER WEEK,
+          indefinitely, until someone completes it. That may be exactly right for an outstanding
+          chore, or it may be the thing that teaches a roster to swipe notifications away unread.
+          The count decides it, not an opinion.
 
-     The right shape is a slice of its own: extract isDoneThisPeriod and its date helpers into a
-     module both App.jsx and this file import, then detect duties against the single definition.
-     Shipping action items now and duties on that foundation is slower and correct. The audience
-     mapping above IS duplicated, which is a judgement call rather than a contradiction: three role
-     literals drift visibly and fail loudly, a date algorithm drifts silently. */
+     Done-ness uses the shared isDoneThisPeriod, never due_date < today AND NOT done — a weekly
+     duty completed last week is open again this week, and the naive form would tell a member their
+     duty is overdue the day after they did it. */
+  try {
+    const { data: duties, error } = await sb
+      .from("duties")
+      .select("id, department_id, duty, due_date, done, done_at, recurrence, assigned_to");
+    if (error) throw new Error(error.message);
 
-  /* ---- (former stub) ---------------------------------------------------------------------------
-     Nothing detects yet, so `candidates` is empty and everything downstream reports zero. The shape
-     is fixed now so slices 3 and 4 add rows to a list rather than restructuring the endpoint:
+    // week_start_day is per department and governs where a Weekly period begins.
+    const { data: depts, error: dErr } = await sb.from("departments").select("id, week_start_day");
+    if (dErr) throw new Error(dErr.message);
+    const wsdByDept = new Map((depts || []).map((d) => [d.id, d.week_start_day ?? 1]));
 
-       { member_id, family, type, subject_ref, title, body, severity, why }
+    const now = new Date(nowMs);
+    const d = {
+      scanned: (duties || []).length,
+      assigned: 0, unassigned: 0,
+      withDueDate: 0, withoutDueDate: 0,
+      doneThisPeriod: 0, outstanding: 0,
+      wouldNotify: { duty_due_tomorrow: 0, duty_due_today: 0, duty_overdue: 0 },
+      standingNag: { Weekly: 0, Monthly: 0, Quarterly: 0, "One-off": 0 },
+      sample: [],
+    };
 
-     `why` is for the dry report only — the human-readable reason a row was produced ("starts in
-     under 24h", "due tomorrow") — so a dry run explains itself instead of just listing output.
+    for (const row of duties || []) {
+      const wsd = wsdByDept.get(row.department_id) ?? 1;
+      const done = isDoneThisPeriod(row, wsd, TZ, now);
 
-     Two rules for whoever writes slice 3:
-       • subject_ref for session-based types is `${session.id}:${session.date}` — with a bare
-         session id, RESCHEDULING an event would collide with the already-sent reminder and the
-         member would never hear about the new time.
-       • the recipient filter is applied HERE, once, not at send time. onlyMember narrowing the
-         recipient list is what makes a real-engine test safe.
-     -------------------------------------------------------------------------------------------- */
-  const candidates = detected;
+      if (row.assigned_to) d.assigned += 1; else d.unassigned += 1;
+      if (row.due_date) d.withDueDate += 1; else d.withoutDueDate += 1;
+      if (done) { d.doneThisPeriod += 1; continue; }
+      d.outstanding += 1;
 
-  const scoped = onlyMember ? candidates.filter((c) => c.member_id === onlyMember) : candidates;
+      // What emission WOULD produce: assignee present, due date present, not done this period.
+      if (!row.assigned_to || !row.due_date) continue;
+      let type = null;
+      if (row.due_date < todayISO)        type = "duty_overdue";
+      else if (row.due_date === todayISO) type = "duty_due_today";
+      else if (row.due_date === tomorrowISO) type = "duty_due_tomorrow";
+      if (!type) continue;                        // due further out — nothing fires yet
+      d.wouldNotify[type] += 1;
+
+      // The standing-nag count: past due AND recurring means it repeats every period forever.
+      if (type === "duty_overdue") {
+        const rec = row.recurrence || "One-off";
+        if (d.standingNag[rec] !== undefined) d.standingNag[rec] += 1;
+      }
+      if (d.sample.length < 8) {
+        d.sample.push({
+          duty: row.duty, recurrence: row.recurrence, due_date: row.due_date, type,
+          subject_ref: `${row.id}:${periodKey(row, wsd, TZ, now)}`,
+        });
+      }
+    }
+    diag.duties = d;
+  } catch (e) {
+    detectErrors.push({ family: "duties", error: String(e?.message || e) });
+  }
 
   /* ---- MUTE GATE ------------------------------------------------------------------------------
      A muted family produces NO ROW AT ALL, rather than a row suppressed at send time. The inbox is
