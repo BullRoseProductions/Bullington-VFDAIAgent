@@ -25,6 +25,11 @@
  *                               and no fake compliance rows are needed.
  */
 import { createClient } from "@supabase/supabase-js";
+// The WRITER only. sendPush stays unimported — this slice must remain incapable of sending.
+// insertNotifications already owns the upsert + read-back dance (ignoreDuplicates returns no
+// representation, so "what was actually new" has to be read back by created_at); duplicating
+// that here would be a second definition of the same subtle thing.
+import { insertNotifications } from "./_push.js";
 
 /* ---------------- wall clock -> instant ----------------
    training_sessions stores `date` + `start_time` as a WALL CLOCK with no zone. Read in the server's
@@ -323,20 +328,94 @@ export default async function handler(req, res) {
 
   const scoped = onlyMember ? candidates.filter((c) => c.member_id === onlyMember) : candidates;
 
-  // Mute enforcement is slice 5. Stated here so the seam is obvious and nobody adds a send path
-  // upstream of it: every candidate must survive is_muted(member_id, family) before it becomes a row.
-  const deliverable = scoped;
+  /* ---- MUTE GATE ------------------------------------------------------------------------------
+     A muted family produces NO ROW AT ALL, rather than a row suppressed at send time. The inbox is
+     the record: a member who opted out of event reminders should not find them waiting there, and
+     an unread badge for something they asked not to be told about is the same nuisance the opt-out
+     existed to remove.
 
-  /* NO WRITE AND NO SEND IN THIS SLICE. Not "skipped because isDry" — absent. insertNotifications
-     and sendPush are not imported, so no flag mistake and no future edit to the dry-path can cause
-     this build to reach a phone. Slice 3 adds the write; the send path arrives with a drain. */
+     Checked through the is_muted RPC rather than by reading notification_prefs directly. Reading the
+     table would be one round-trip instead of several, but it would also be a SECOND definition of
+     "muted" living in JavaScript — and the last two slices have both turned up a duplicated rule that
+     drifted. The RPC is the single definition, including its raise-on-unknown-family guard.
+
+     Batched by collapsing to DISTINCT (member, family) pairs first: a department where forty
+     candidates land on twelve members costs twelve or twenty-four checks, not forty. Resolved
+     concurrently. If this ever gets hot, the fix is a batch RPC taking arrays — not a local copy of
+     the rule. */
+  const pairs = [...new Set(scoped.map((c) => `${c.member_id}\u0000${c.family}`))].map((k) => {
+    const [member_id, family] = k.split("\u0000");
+    return { member_id, family };
+  });
+
+  const mutedSet = new Set();
+  const muteErrors = [];
+  await Promise.all(pairs.map(async ({ member_id, family }) => {
+    const { data, error } = await sb.rpc("is_muted", { p_member: member_id, p_family: family });
+    if (error) {
+      // FAIL CLOSED on an unreadable preference. If we cannot tell whether someone opted out, the
+      // safe answer is to say nothing: a missed notification is recoverable, a notification sent to
+      // someone who explicitly asked not to receive it is not. is_muted also RAISES on an unknown
+      // family, so a typo lands here loudly instead of silently reading as "not muted".
+      muteErrors.push({ member_id, family, error: error.message });
+      mutedSet.add(`${member_id}\u0000${family}`);
+      return;
+    }
+    if (data === true) mutedSet.add(`${member_id}\u0000${family}`);
+  }));
+
+  const deliverable = scoped.filter((c) => !mutedSet.has(`${c.member_id}\u0000${c.family}`));
+  const mutedCount = scoped.length - deliverable.length;
+
+  /* ---- WRITE ----------------------------------------------------------------------------------
+     Only the columns that exist. `family` and `why` are candidate-only: family is the mute key and
+     why is the dry-run explanation, and neither has a column — passing them would fail the insert.
+     pushed_at is deliberately not set, so every row lands NULL and slice 5's drain can find it.
+
+     STILL NO SEND. sendPush remains unimported; the only helper brought in is the writer. A row
+     appearing in the inbox is the whole of this slice's effect.
+
+     ON CONFLICT DO NOTHING against (member_id, type, subject_ref) is what makes re-running inside
+     the same lead-time window harmless — which is the property the hourly cron will depend on. */
+  const toWrite = deliverable.map((c) => ({
+    department_id: c.department_id,
+    member_id: c.member_id,
+    type: c.type,
+    title: c.title,
+    body: c.body,
+    subject_ref: c.subject_ref,
+    severity: c.severity,
+  }));
+
+  let written = 0, deduped = 0, writeError = null;
+  if (!isDry && toWrite.length) {
+    try {
+      const { inserted } = await insertNotifications(sb, toWrite);
+      written = inserted;
+      deduped = toWrite.length - inserted;   // the rest collided with rows already there
+    } catch (e) {
+      writeError = String(e?.message || e);
+    }
+  }
+
   const report = {
     enabled: true,
-    slice: "3-detection",
+    slice: "4-write",
     scope,
     dry: isDry,
-    note: "Detection only: candidates are computed and reported. No writes, no push — insertNotifications and sendPush are not imported.",
-    counts: { candidates: candidates.length, afterScope: scoped.length, deliverable: deliverable.length },
+    note: isDry
+      ? "Dry run: nothing was written. `would` lists the rows that a real run would insert."
+      : "Rows written to notifications. No push sent — sendPush is not imported; pushed_at is NULL and slice 5's drain will claim them.",
+    counts: {
+      candidates: candidates.length,     // everything detection found
+      afterScope: scoped.length,         // after ?only_member
+      muted: mutedCount,                 // dropped by an explicit opt-out — no row created
+      deliverable: deliverable.length,   // survived the mute gate
+      written,                           // genuinely new rows
+      deduped,                           // collided with a row already there — the re-run guard working
+    },
+    ...(muteErrors.length ? { muteErrors, muteNote: "Failed closed: these were treated as muted rather than risk notifying someone who opted out." } : {}),
+    ...(writeError ? { writeError } : {}),
     // Grouped so a dry run reads as "who gets what and why" rather than a flat list to eyeball.
     byType: deliverable.reduce((acc, c) => { acc[c.type] = (acc[c.type] || 0) + 1; return acc; }, {}),
     would: deliverable.map((c) => ({
