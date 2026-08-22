@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import Login from "./Login.jsx";
 import { supabase } from "./supabaseClient";
+import { SetNewPassword } from "./SetPassword.jsx";
 
 /* ---------------- Password-recovery URL capture ----------------
  * A reset link lands with `#...type=recovery` in the hash. The auth SDK's
@@ -78,128 +79,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") { checkForUpdate(false); refreshAuthIfStale(); }
 });
 
-/* Password rules — ONE source of truth, used by both the live checklist and the Save gate, so the
-   hints can never show all-green while save() still refuses (or the reverse).
-   The symbol class is the explicit set Supabase's own policy uses rather than "any non-alphanumeric":
-   a lone space would pass a /[^A-Za-z0-9]/ test here and still be rejected server-side, which is
-   exactly the contradiction this screen exists to avoid. */
-const PASSWORD_RULES = [
-  { id: "len",    label: "At least 8 characters",        test: (p) => p.length >= 8 },
-  { id: "upper",  label: "One uppercase letter (A–Z)",   test: (p) => /[A-Z]/.test(p) },
-  { id: "lower",  label: "One lowercase letter (a–z)",   test: (p) => /[a-z]/.test(p) },
-  { id: "digit",  label: "One number (0–9)",             test: (p) => /[0-9]/.test(p) },
-  { id: "symbol", label: "One symbol (! ? # $ …)",       test: (p) => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(p) },
-];
-const unmetRules = (p) => PASSWORD_RULES.filter((r) => !r.test(p || ""));
-
-// Supabase can still refuse a password our checklist accepts — notably `pwned`, a breach-list hit we
-// cannot test client-side. Turn every one of those into plain language; never surface the raw string.
-function friendlyPasswordError(error) {
-  const reasons = Array.isArray(error?.reasons) ? error.reasons : [];
-  const weak = error?.code === "weak_password" || reasons.length > 0;
-  if (!weak) return error?.message || "Something went wrong saving your password. Please try again.";
-  if (reasons.includes("pwned")) return "That password has shown up in a known data breach, so it isn't safe to use. Please pick a different one.";
-  if (reasons.includes("length")) return "That password is too short. Use at least 8 characters.";
-  if (reasons.includes("characters")) return "That password needs a wider mix — check the list above and add what's missing.";
-  return "That password isn't strong enough yet. Check the list above and add what's missing.";
-}
-
-// Set-new-password screen. Only shown after a reset link lands and Supabase fires
-// PASSWORD_RECOVERY (see Root). Built for the lowest common denominator: ONE field
-// plus a Show-password toggle — no confirm field, because a confirm-mismatch is the
-// exact dead-end that loses non-technical users. Letting them SEE what they typed is
-// safer than making them type it twice. On success they're already in a live session,
-// so onDone drops them straight into the app — no second login.
-function SetNewPassword({ hasSession, onDone }) {
-  const [password, setPassword] = useState("");
-  const [show, setShow] = useState(false);
-  const [err, setErr] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  // The recovery screen shows the instant we spot type=recovery, but the token
-  // validates a beat later (a network round-trip). Gate Save on the live session so a
-  // fast typer can't fire updateUser before it lands — a disabled-then-enabled button
-  // beats an error our audience would have to decode and retry.
-  const ready = hasSession && !loading;
-
-  const missing = unmetRules(password);
-
-  async function save() {
-    setErr("");
-    if (!ready) return;
-    // Save stays CLICKABLE even when the rules aren't met — a dead button with no explanation is the
-    // same dead-end this screen was built to avoid. Clicking names what's missing instead.
-    if (missing.length) {
-      setErr(password ? "Your password still needs: " + missing.map((r) => r.label.toLowerCase()).join(", ") + "." : "Pick a password that meets the list below.");
-      return;
-    }
-    setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
-    setLoading(false);
-    if (error) { setErr(friendlyPasswordError(error)); return; }
-    onDone(); // recovery session is already live → straight into the app, signed in
-  }
-
-  return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20, paddingTop: "calc(20px + env(safe-area-inset-top))", paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
-      <style>{`.b4c-input:focus{outline:none;border-color:#2E6FC7;box-shadow:0 0 0 3px rgba(46,111,199,.25)} .b4c-input::placeholder{color:#5D6B85}`}</style>
-      <div style={{ width: "100%", maxWidth: 380 }}>
-        <img src="/B4C-Main.png" alt="Before the Call" style={{ display: "block", width: "100%", maxWidth: 360, height: "auto", margin: "0 auto 24px" }} />
-        <div style={{ background: "#0E1220", borderRadius: 16, border: "1px solid rgba(90,130,200,.14)", padding: 26, boxShadow: "0 12px 34px rgba(0,0,0,.5)" }}>
-          <div style={{ fontSize: 16, color: "#EAEEF5", fontWeight: 700, textAlign: "center", margin: "0 0 6px" }}>Set a new password</div>
-          <div style={{ fontSize: 13, color: "#8FA3C4", textAlign: "center", margin: "0 0 18px", lineHeight: 1.5 }}>
-            Type a new password and you're in. Turn on “Show password” so you can see what you type.
-          </div>
-
-          <input
-            className="b4c-input"
-            type={show ? "text" : "password"}
-            placeholder="New password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && save()}
-            autoFocus
-            style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid rgba(90,130,200,.22)", background: "#10141F", color: "#EAEEF5", colorScheme: "dark", marginBottom: 10 }}
-          />
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "#8FA3C4", cursor: "pointer", marginBottom: 14, userSelect: "none" }}>
-            <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Show password
-          </label>
-
-          {/* Live requirements — every rule visible from the start (never a surprise on submit) and
-              ticking green as it's satisfied. aria-live so a screen reader announces each one passing. */}
-          <div aria-live="polite" style={{ margin: "0 0 14px", padding: "11px 12px", background: "rgba(90,130,200,.06)", border: "1px solid rgba(90,130,200,.14)", borderRadius: 10 }}>
-            <div style={{ fontSize: 12, color: "#8FA3C4", fontWeight: 600, marginBottom: 7 }}>Your password needs:</div>
-            {PASSWORD_RULES.map((r) => {
-              const met = r.test(password);
-              return (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, lineHeight: 1.7, color: met ? "#76C98D" : "#8FA3C4" }}>
-                  <span aria-hidden="true" style={{ width: 14, textAlign: "center", fontWeight: 700 }}>{met ? "✓" : "○"}</span>
-                  <span>{r.label}</span>
-                  <span style={{ position: "absolute", left: -9999 }}>{met ? " — met" : " — not yet met"}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {err && <div style={{ fontSize: 13, color: "#E58A90", marginBottom: 12 }}>{err}</div>}
-
-          <button
-            onClick={save}
-            disabled={!ready}
-            style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2E6FC7", border: "none", borderRadius: 10, cursor: ready ? "pointer" : "default", opacity: ready ? 1 : 0.7, boxShadow: "0 4px 16px rgba(46,111,199,.35)" }}
-          >
-            {loading ? "Saving…" : !hasSession ? "Preparing…" : "Save password & sign in"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Root() {
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
   const [recovery, setRecovery] = useState(IS_RECOVERY); // seeded from URL; event is a backup
+  /* null = still checking. The THIRD state matters: rendering <App/> while the answer is in flight
+     would flash the whole app at somebody who is about to be told to set a password. */
+  const [pwOk, setPwOk] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -215,17 +101,64 @@ function Root() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  if (!ready) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", color: "#6A7178" }}>
-        Loading…
-      </div>
-    );
+  /* THE SET-PASSWORD GATE. An invited member arrives by magic link, which establishes a real
+     session — so without this they land in the app having never chosen a password, and cannot get
+     back in once the link expires.
+
+     DEPENDS ON THE USER ID, NOT THE SESSION OBJECT. onAuthStateChange replaces `session` on every
+     TOKEN_REFRESHED, roughly hourly and forever; depending on it would re-run this RPC for the life
+     of the session.
+
+     FAILS OPEN. If the check errors — function missing, PostgREST cache stale, network gone — we
+     let them through. A detector that locks the entire roster out of the app is a far worse
+     outcome than the gap it exists to close, and this is a UX gate rather than a security
+     boundary. */
+  const userId = session?.user?.id;
+  useEffect(() => {
+    if (!userId) { setPwOk(null); return; }
+    let cancelled = false;
+    supabase.rpc("has_password").then(({ data, error }) => {
+      if (!cancelled) setPwOk(error ? true : data === true);
+    });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  /* After a successful save. updateUser() already returned success, so the password IS set — that
+     is authoritative and we proceed on it. The re-check runs anyway, but only to WARN: gating again
+     on a disagreeing read would loop a member who has done everything asked of them. */
+  function proceedAfterSet() {
+    setPwOk(true);
+    supabase.rpc("has_password").then(({ data, error }) => {
+      if (!error && data !== true) console.warn("[b4c] password saved but has_password() still false");
+    });
   }
 
-  if (recovery) return <SetNewPassword hasSession={!!session} onDone={() => setRecovery(false)} />;
+  const loading = (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", color: "#6A7178" }}>
+      Loading…
+    </div>
+  );
+
+  if (!ready) return loading;
+
+  /* RECOVERY STAYS FIRST. A Forgot-password link must reach the reset screen even for a member who
+     is also gated.
+
+     onDone CLEARS THE GATE TOO, and that is not belt-and-braces. The pwOk effect keys on the user
+     id, which does not change when `recovery` flips — so a member who arrived here with
+     password_set = false already has pwOk cached as false, and dropping only the recovery flag
+     would hand them straight to the firstTime gate seconds after they successfully set a password.
+     save() has already marked the flag; proceedAfterSet is the same "we just set one, go" path the
+     gate itself uses, so there is one definition of it rather than two. */
+  if (recovery) {
+    return <SetNewPassword hasSession={!!session}
+                           onDone={() => { setRecovery(false); proceedAfterSet(); }} />;
+  }
 
   if (!session) return <Login />;
+
+  if (pwOk === null) return loading;                    // never flash <App/> mid-check
+  if (pwOk === false) return <SetNewPassword firstTime hasSession={!!session} onDone={proceedAfterSet} />;
 
   return <App />;
 }
