@@ -30,6 +30,8 @@ import { createClient } from "@supabase/supabase-js";
 // representation, so "what was actually new" has to be read back by created_at); duplicating
 // that here would be a second definition of the same subtle thing.
 import { insertNotifications, sendPush } from "./_push.js";
+// CANARY (temporary): proves api/ can import from outside api/ before real logic moves there.
+import { SHARED_BOUNDARY_OK } from "../shared/_boundary-canary.js";
 
 /* ---------------- wall clock -> instant ----------------
    training_sessions stores `date` + `start_time` as a WALL CLOCK with no zone. Read in the server's
@@ -572,6 +574,7 @@ export default async function handler(req, res) {
       pushFailed,                        // FCM rejections
       pruned,                            // dead tokens removed by sendPush
     },
+    sharedBoundary: SHARED_BOUNDARY_OK,
     drainWindowHours: DRAIN_WINDOW_HOURS,
     drainSince,
     ...(pushErrors.length ? { pushErrors } : {}),
