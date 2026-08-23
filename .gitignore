@@ -38,3 +38,4 @@ _digest_preview/
 # as ordinary-looking files in ~/Downloads and are one `git add -A` from being public.
 *firebase-adminsdk*.json
 *.p8
+CREDENTIALS.txt
