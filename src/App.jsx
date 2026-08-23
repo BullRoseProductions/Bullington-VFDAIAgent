@@ -4485,12 +4485,38 @@ function Documents({ S, role, notify, uploaderName, members }) {
     const path = `${deptId}/${Date.now()}-${file.name}`;                                   // new unique storage path (same pattern as uploadFiles)
     const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
     if (upErr) { notify({ kind: "error", title: "Couldn't upload the new version", text: "Please try again.", details: upErr.message }); return; }
-    const row = { department_id: deptId, name: oldRow.name, type: oldRow.type, storage_path: path, uploaded_by: uploaderName };   // inherit name/type from the original
+    /* Extract text for AI grounding — the SAME three gates uploadFiles uses, best-effort, never
+       blocking the save. This was missing entirely: the row omitted content_text, so it defaulted to
+       null and replacing ANY document silently stripped its grounding text. A replaced SOP stayed
+       in the library, kept its history, and quietly stopped existing as far as Station Q&A was
+       concerned — the worst shape of bug, because nothing on screen said so. */
+    let content_text = null;
+    let noText = false;
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (!isPdf) {
+      noText = true;                                             // gate 1: not a PDF — no text layer we read
+    } else {
+      try {
+        const text = await extractPdfText(file);
+        if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // gate 3: has a real text layer
+        else noText = true;                                      // empty/near-empty → likely a scanned image PDF
+      } catch { noText = true; }                                 // gate 2: getDocument threw — unreadable / not a real PDF
+    }
+    const row = { department_id: deptId, name: oldRow.name, type: oldRow.type, storage_path: path, uploaded_by: uploaderName, content_text };   // inherit name/type from the original
     const { data: newRow, error: insErr } = await supabase.from("documents").insert(row).select().single();
     if (insErr || !newRow) { notify({ kind: "error", title: "Couldn't save the new version", text: "Please try again.", details: insErr?.message }); return; }
     const { error: repErr } = await supabase.rpc("replace_document", { p_old_id: oldRow.id, p_new_id: newRow.id });   // link new→old + archive old
     if (repErr) { notify({ kind: "error", title: "Uploaded, but couldn't archive the old version", text: "The new version saved but the previous one wasn't archived — please try again.", details: repErr.message }); loadDocs(); return; }
-    notify({ kind: "success", title: "New version saved", text: `"${oldRow.name}" was updated — the previous version is kept in history.` });
+    /* The no-text advisory is APPENDED to the success message rather than fired as its own toast,
+       for two reasons found in the code rather than assumed. notify() is setToast(n) — a single
+       toast — so a second call would immediately replace "New version saved" and the member would
+       never see that it worked. And Notification treats kind as binary: only "error" is red, so a
+       "warning" kind would render green with a checkmark, which is the wrong signal for "the
+       assistant cannot read this". uploadFiles solves it exactly this way with its aiNote. */
+    const aiNote = noText
+      ? " The assistant can't read the new file, though — it looks like a scan or has no text layer, so it won't be included in Station Q&A. Upload a text-based PDF (exported from Word) or have it OCR'd."
+      : "";
+    notify({ kind: "success", title: "New version saved", text: `"${oldRow.name}" was updated — the previous version is kept in history.${aiNote}` });
     setHistoryFor(null);   // the chain changed; collapse any open history
     loadDocs();
   }
