@@ -6031,7 +6031,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
           list of what the department is actually running is what you come back to, so it opens the
           page. Gated on canManage rather than the nav's LEADERSHIP: fundraisers is is_canmanage()
           by RLS, so a Project Admin would otherwise get an empty list with no explanation. */}
-      {canManage(role) && <FundraiserIndex S={S} notify={notify} meId={meId} members={members} />}
+      {canManage && <FundraiserIndex S={S} notify={notify} meId={meId} members={members} />}
 
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
