@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, Settings, Lock } from "lucide-react";
+import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, ClipboardList, Settings, Lock } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 /* Notification centre — reads the STORED notifications table (not a recomputed list), so read/unread
