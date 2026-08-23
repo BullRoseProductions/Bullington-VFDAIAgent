@@ -5494,6 +5494,9 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
   const [exErr, setExErr] = useState("");
   const [tdInput, setTdInput] = useState("");       // inline "set a target date" fix
   const [tdBusy, setTdBusy] = useState(false);
+  const [pcOpen, setPcOpen] = useState(false);      // inline "record proceeds"
+  const [pcInput, setPcInput] = useState("");
+  const [pcBusy, setPcBusy] = useState(false);
   const DOC_TYPES = [
     { v: "cta",    label: "Community call-to-action", sys: CTA_SYS,    hint: "Short and warm — for social or a flyer." },
     { v: "letter", label: "Donation-request letter",  sys: LETTER_SYS, hint: "For a local business or community member." },
@@ -5668,6 +5671,31 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
     notify({ kind: "success", title: "Saved", text: `"${title}" is filed under this fundraiser.` });
     cancelDraft();
     load();
+  }
+
+  /* RECORD PROCEEDS — what the night actually brought in.
+
+     ZERO IS A REAL ANSWER, and this parses differently from every other money field in the file
+     because of it. goal_amount uses `Number(...) || null`, which folds 0 into null — fine there,
+     since a goal of zero is nobody's goal. Here $0 means "we ran it and it made nothing", which is
+     a fact a department may need to state, and turning it into null would turn it back into "not
+     recorded yet". Empty clears to null; "0" stores 0. The overview then renders $0 rather than
+     hiding the stat, which is the same "— vs $0" rule the hub uses. */
+  function startProceeds() {
+    setPcInput(fundraiser.proceeds == null ? "" : String(fundraiser.proceeds));
+    setPcOpen(true);
+  }
+  async function saveProceeds() {
+    const raw = pcInput.replace(/[^0-9.]/g, "").trim();
+    const value = raw === "" ? null : Number(raw);
+    if (value !== null && !Number.isFinite(value)) { notify({ kind: "error", title: "That's not a number", text: "Enter the amount raised, digits only." }); return; }
+    setPcBusy(true);
+    const { error } = await supabase.from("fundraisers").update({ proceeds: value }).eq("id", fundraiser.id);
+    setPcBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save that", text: "Something went wrong recording the proceeds. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: value == null ? "Proceeds cleared." : `Recorded $${value.toLocaleString()}.` });
+    setPcOpen(false);
+    onFundraiserChanged?.();     // the row reloads; the overview re-renders from it
   }
 
   /* ADD A PLAN — a plan the department already has, pasted or uploaded.
@@ -5942,12 +5970,41 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         {fundraiser.goal_amount != null && stat("Goal", `$${Number(fundraiser.goal_amount).toLocaleString()}`, "target for the night", FIRE.textSecondary)}
-        {/* Proceeds only once there IS one. A $0 before the event has happened would read as a
-            result rather than an absence. It is set at "done" — slice 6. */}
+        {/* Proceeds only once there IS one — a blank stat before the night has happened would read
+            as a result rather than an absence. Recorded through the control below, where an explicit
+            $0 IS storable and renders as $0. */}
         {fundraiser.proceeds != null && stat("Raised", `$${Number(fundraiser.proceeds).toLocaleString()}`, "logged for this event", FIRE.red)}
         {stat("Jobs", `${doneCount}/${counted.length}`, counted.length ? "done" : "nothing added yet", counted.length && doneCount === counted.length ? FIRE.greenText : FIRE.textSecondary)}
         {fundraiser.target_date && stat("When", when || "—", fundraiser.target_date, FIRE.textSecondary)}
       </div>
+
+      {/* THE PROMPT IS THE POINT. A finished fundraiser with no number recorded is the single most
+          common way this data goes missing — the night ends, everyone goes home, and nobody comes
+          back to type it in. So a done fundraiser with nothing recorded ASKS, rather than waiting to
+          be found. Any other state keeps it as a quiet link. */}
+      {!pcOpen && (
+        fundraiser.status === "done" && fundraiser.proceeds == null ? (
+          <div style={{ ...S.opCard, ...FS.card, marginBottom: 16, borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200, fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.55 }}>
+              This fundraiser is done — record what it brought in.
+            </div>
+            <button style={FS.btnPrimary} onClick={startProceeds}><DollarSign size={15} /> Record proceeds</button>
+          </div>
+        ) : (
+          <button style={{ ...FS.btn, marginBottom: 16 }} onClick={startProceeds}>
+            <DollarSign size={15} /> {fundraiser.proceeds == null ? "Record proceeds" : "Update proceeds"}
+          </button>
+        )
+      )}
+      {pcOpen && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Raised ($)</span>
+            <input style={FS.input} value={pcInput} onChange={(e) => setPcInput(e.target.value)} placeholder="4000" inputMode="decimal" /></label>
+          <button style={{ ...FS.btnPrimary, opacity: pcBusy ? 0.6 : 1 }} disabled={pcBusy} onClick={saveProceeds}>{pcBusy ? "Saving…" : "Save"}</button>
+          <button style={FS.btn} onClick={() => setPcOpen(false)} disabled={pcBusy}>Cancel</button>
+          <span style={{ fontSize: 11.5, color: FIRE.textMuted, paddingBottom: 10 }}>Leave it empty to clear. $0 is a valid answer.</span>
+        </div>
+      )}
 
       {/* ---- 2. Plan & documents ----
            Directly under the overview because the plan is the thing that explains everything below
@@ -6917,26 +6974,32 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
 function Funding({ S, role, notify, dept, meId, members }) {
   const [view, setView] = useState(null);   // null = hub tiles
 
-  /* MONEY RAISED — TWO FIGURES, NEVER ADDED TOGETHER.
+  /* MONEY RAISED — a headline total, and the two dated figures it is made of.
 
-     Donations are dated: every contribution carries occurred_on, so "this calendar year" is an
-     exact filter. Fundraiser proceeds are NOT: fundraiser_log.event_when is free text that
-     defaults to "Recent", so there is no year to bucket by and no honest way to invent one.
+     THIS USED TO SAY "TWO FIGURES, NEVER ADDED TOGETHER", and that was right at the time. The
+     objection was never to adding — it was that one side had no year. fundraiser_log.event_when is
+     free text defaulting to "Recent", so summing it into a this-year total would have produced a
+     number part exact and part all-time with nothing on screen to say which part was which.
 
-     Summing them would produce a single confident number that is part exact and part all-time,
-     and nothing on screen could tell a chief which part was which — the sort of figure that ends
-     up in a county report. So they stay separate and each says plainly what it covers. When
-     fundraiser_log gains a real date column the two can merge; until then this is the truthful
-     render, not a placeholder for a better one.
+     fundraisers.target_date IS a real date, so the fundraiser side is now year-scoped by the same
+     half-open filter the donations side uses, and the two are genuinely the same kind of number.
+     Adding them is honest; it was not before.
 
-     LEADERSHIP-ONLY ON THE DONATIONS SIDE. donation_activity is gated to is_canmanage() by RLS,
-     and Funding's nav is LEADERSHIP — which includes Project Admin, who is NOT canmanage. Without
-     this gate a PA would see a confident $0 (RLS returning no rows reads exactly like "we have
-     raised nothing"), which is worse than seeing nothing at all. */
+     WHAT THE HEADLINE DOES NOT INCLUDE, and this is the caveat worth knowing: the quick-log on the
+     Fundraisers page (fundraiser_log) is still undated and is deliberately NOT summed here. A
+     department that logs events there and never records proceeds on the fundraiser itself will see
+     a headline lower than what they actually raised. The caption says so rather than leaving it to
+     be discovered.
+
+     LEADERSHIP-ONLY ON BOTH SIDES. donation_activity and fundraisers are both gated to
+     is_canmanage() by RLS, and Funding's nav is LEADERSHIP — which includes Project Admin, who is
+     NOT canmanage. Both queries are issued inside the gate: without it a PA would see a confident
+     $0 (RLS returning no rows reads exactly like "we have raised nothing"), which is worse than
+     seeing nothing at all. */
   const year = new Date().getFullYear();
   const canSeeDonations = canManage(role);
-  const [donationsYtd, setDonationsYtd] = useState(null);   // null = not known yet; 0 = genuinely none
-  const [proceeds, setProceeds] = useState(null);
+  const [donationsYtd, setDonationsYtd] = useState(null);    // null = not known yet; 0 = genuinely none
+  const [fundraisersYtd, setFundraisersYtd] = useState(null);
 
   useEffect(() => {
     let off = false;
@@ -6950,15 +7013,24 @@ function Funding({ S, role, notify, dept, meId, members }) {
           // report a fact about the department that we do not actually know.
           if (!off && !error && data) setDonationsYtd(data.reduce((t, r) => t + (Number(r.amount) || 0), 0));
         });
+      // Same half-open window, on the fundraiser's own target_date. An undated fundraiser is not in
+      // any year and is correctly excluded rather than guessed into this one.
+      supabase.from("fundraisers").select("proceeds")
+        .gte("target_date", `${year}-01-01`)
+        .lt("target_date", `${year + 1}-01-01`)
+        .then(({ data, error }) => {
+          if (!off && !error && data) setFundraisersYtd(data.reduce((t, r) => t + (Number(r.proceeds) || 0), 0));
+        });
     }
-    supabase.from("fundraiser_log").select("amount")
-      .then(({ data, error }) => {
-        if (!off && !error && data) setProceeds(data.reduce((t, r) => t + (Number(r.amount) || 0), 0));
-      });
     return () => { off = true; };
   }, [canSeeDonations, year]);
 
   const money = (v) => (v == null ? "—" : `$${v.toLocaleString()}`);
+  /* The headline is "—" unless BOTH parts have arrived. A total missing one of its components is
+     not a smaller total, it is a wrong one, and it would be indistinguishable on screen from a
+     department that genuinely raised that much. Each split figure still shows its own state, so a
+     half-loaded block says exactly which half it knows. */
+  const raisedTotal = (donationsYtd == null || fundraisersYtd == null) ? null : donationsYtd + fundraisersYtd;
   const stat = (label, value, caption, color) => (
     <div style={{ ...FS.card, padding: 14, flex: "1 1 210px", minWidth: 180 }}>
       <div style={{ ...FS.kicker, marginBottom: 6 }}>{label}</div>
@@ -6994,11 +7066,25 @@ function Funding({ S, role, notify, dept, meId, members }) {
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Money in, and where it came from</h1>
       <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Plan and run fundraisers, and keep track of the people and businesses who give.</div>
     </div>
-    {/* Two figures, two scopes, said out loud. Never a blended total — see the note above. */}
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
-      {canSeeDonations && stat(`Donations · ${year}`, money(donationsYtd), `Gifts logged with a date in ${year}.`, FIRE.red)}
-      {stat("Fundraiser proceeds · to date", money(proceeds), "All-time. Logged fundraisers aren't dated by year, so this isn't a this-year figure.", FIRE.amberText)}
-    </div>
+    {/* Headline, then the two dated figures it is made of — see the note above for what it does
+        and does not include. Whole block gated: a PA gets no money figures rather than a false $0. */}
+    {canSeeDonations && (
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ ...FS.card, padding: "16px 18px", marginBottom: 10 }}>
+          <div style={{ ...FS.kicker, marginBottom: 6 }}>RAISED THIS YEAR</div>
+          <div style={{ fontSize: 34, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.05 }}>{money(raisedTotal)}</div>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
+            {raisedTotal == null
+              ? `Waiting on ${donationsYtd == null ? "donations" : "fundraiser proceeds"} — the total is held back rather than shown short.`
+              : `Donations and fundraiser proceeds dated in ${year}. The quick-log on the Fundraisers page isn't dated by year, so it isn't counted here.`}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {stat(`Donations · ${year}`, money(donationsYtd), `Gifts logged with a date in ${year}.`, FIRE.red)}
+          {stat(`Fundraisers · ${year}`, money(fundraisersYtd), `Proceeds recorded on fundraisers with a ${year} target date.`, FIRE.amberText)}
+        </div>
+      </div>
+    )}
 
     <div style={S.opGrid}>
       {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
