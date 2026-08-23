@@ -16724,11 +16724,25 @@ function DepartmentAdmin({ S, role, target, notify }) {
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
+  /* ADD-ONS ARE A SEPARATE WRITE from module visibility, on purpose. Coupling them would mean that
+     toggling a nav checkbox and hitting Save could also flip a paid add-on that happened to be
+     mid-edit, and that a failure in one would report as a failure of both. Different question,
+     different button, different state. */
+  const [geofenceOn, setGeofenceOn] = useState(null);   // null = loading
+  const [addonErr, setAddonErr] = useState(null);
+  const [savingAddons, setSavingAddons] = useState(false);
+  const [addonSaveState, setAddonSaveState] = useState("");   // "" | "ok" | "err"
   useEffect(() => {
     if (!isPA || !deptId) return;
     supabase.rpc("pa_get_disabled_modules", { p_department_id: deptId }).then(({ data, error }) => {
       if (error) { setErr(error.message); setDisabled([]); return; }   // surface, never a silent empty set
       setErr(null); setDisabled(Array.isArray(data) ? data : []);
+    });
+    // Same never-silent rule: on failure say so and fall back to OFF rather than leaving the toggle
+    // showing a state it cannot vouch for. A wrong "on" here misrepresents what a station bought.
+    supabase.rpc("pa_get_geofence_enabled", { p_department_id: deptId }).then(({ data, error }) => {
+      if (error) { setAddonErr(error.message); setGeofenceOn(false); return; }
+      setAddonErr(null); setGeofenceOn(!!data);
     });
   }, [deptId]);
   const setModule = (key, on) => setDisabled((ds) => on ? (ds || []).filter((k) => k !== key) : [...(ds || []), key]);
@@ -16738,6 +16752,13 @@ function DepartmentAdmin({ S, role, target, notify }) {
     setSaving(false);
     if (error) { setSaveState("err"); notify?.({ kind: "error", title: "Couldn't save module visibility", text: error.message || "Please try again." }); return; }
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
+  }
+  async function saveAddons() {
+    setSavingAddons(true); setAddonSaveState("");
+    const { error } = await supabase.rpc("pa_set_geofence_enabled", { p_department_id: deptId, p_enabled: !!geofenceOn });
+    setSavingAddons(false);
+    if (error) { setAddonSaveState("err"); notify?.({ kind: "error", title: "Couldn't save add-ons", text: error.message || "Please try again." }); return; }
+    setAddonSaveState("ok"); setTimeout(() => setAddonSaveState(""), 2500);
   }
 
   // Screen-level PA gate (nav already filters, but guard the render too — mirrors the DB self-gate)
@@ -16776,6 +16797,49 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </div>
         </div>
       )}
+
+      {/* ---- PER-STATION ADD-ONS ----
+           THIS CARD CHANGES REAL BEHAVIOUR, which is what separates it from the one above. Module
+           visibility only hides navigation — nothing about the department actually works
+           differently. Flipping geofencing on turns BACKGROUND LOCATION into something this
+           department's members can be asked for. It is still double-gated (the VITE_GEOFENCE_ENABLED
+           build flag, and each member's own OS permission after the disclosure screen), but this is
+           the switch that makes any of it reachable, so it is worth reading twice before saving.
+
+           ADD_ONS is a list so the next one — the after-call checklist, whatever follows — is a new
+           entry here and nothing else: same card, same save button, same RPC shape. */}
+      {geofenceOn !== null && (() => {
+        const ADD_ONS = [
+          {
+            key: "geofence",
+            label: "Geofencing (paid add-on)",
+            sub: "Automatic station hours via background location. Turn on only for stations on the geofencing add-on.",
+            value: !!geofenceOn,
+            set: setGeofenceOn,
+          },
+        ];
+        return (
+          <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
+            <div style={FS.kicker}>PER-STATION ADD-ONS</div>
+            {addonErr && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 6, lineHeight: 1.45 }}>Couldn't load add-ons: {addonErr} — showing everything off, which may not be accurate.</div>}
+            {ADD_ONS.map((a) => (
+              <label key={a.key} style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "8px 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={a.value} onChange={(e) => a.set(e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red, marginTop: 2 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: a.value ? FIRE.textPrimary : FIRE.textMuted }}>{a.label}</span>
+                  <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.45 }}>{a.sub}</span>
+                </span>
+                {a.value && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.greenText, flexShrink: 0, marginTop: 3 }}>ON</span>}
+              </label>
+            ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+              <button style={{ ...FS.btnPrimary, opacity: savingAddons ? 0.7 : 1 }} onClick={saveAddons} disabled={savingAddons}>{savingAddons ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save add-ons</>}</button>
+              {addonSaveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
+              {addonSaveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
