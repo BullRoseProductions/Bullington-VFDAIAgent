@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "eslint . && vite build",
     "preview": "vite preview",
     "cap:sync": "npm run build && cap sync",
     "cap:ios": "npm run cap:sync && cap open ios",
-    "cap:android": "npm run cap:sync && cap open android"
+    "cap:android": "npm run cap:sync && cap open android",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
@@ -32,6 +33,8 @@
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.5.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "eslint": "^10.9.0",
+    "globals": "^17.11.0",
     "vite": "^5.3.1"
   }
 }
