@@ -5691,6 +5691,56 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
 function Funding({ S, role, notify, dept, meId, members }) {
   const [view, setView] = useState(null);   // null = hub tiles
 
+  /* MONEY RAISED — TWO FIGURES, NEVER ADDED TOGETHER.
+
+     Donations are dated: every contribution carries occurred_on, so "this calendar year" is an
+     exact filter. Fundraiser proceeds are NOT: fundraiser_log.event_when is free text that
+     defaults to "Recent", so there is no year to bucket by and no honest way to invent one.
+
+     Summing them would produce a single confident number that is part exact and part all-time,
+     and nothing on screen could tell a chief which part was which — the sort of figure that ends
+     up in a county report. So they stay separate and each says plainly what it covers. When
+     fundraiser_log gains a real date column the two can merge; until then this is the truthful
+     render, not a placeholder for a better one.
+
+     LEADERSHIP-ONLY ON THE DONATIONS SIDE. donation_activity is gated to is_canmanage() by RLS,
+     and Funding's nav is LEADERSHIP — which includes Project Admin, who is NOT canmanage. Without
+     this gate a PA would see a confident $0 (RLS returning no rows reads exactly like "we have
+     raised nothing"), which is worse than seeing nothing at all. */
+  const year = new Date().getFullYear();
+  const canSeeDonations = canManage(role);
+  const [donationsYtd, setDonationsYtd] = useState(null);   // null = not known yet; 0 = genuinely none
+  const [proceeds, setProceeds] = useState(null);
+
+  useEffect(() => {
+    let off = false;
+    if (canSeeDonations) {
+      supabase.from("donation_activity").select("amount")
+        .eq("kind", "contribution")
+        .gte("occurred_on", `${year}-01-01`)
+        .lt("occurred_on", `${year + 1}-01-01`)     // half-open, so 31 Dec is in and 1 Jan is not
+        .then(({ data, error }) => {
+          // Left at null on failure, which renders "—". Showing $0 because a query failed would
+          // report a fact about the department that we do not actually know.
+          if (!off && !error && data) setDonationsYtd(data.reduce((t, r) => t + (Number(r.amount) || 0), 0));
+        });
+    }
+    supabase.from("fundraiser_log").select("amount")
+      .then(({ data, error }) => {
+        if (!off && !error && data) setProceeds(data.reduce((t, r) => t + (Number(r.amount) || 0), 0));
+      });
+    return () => { off = true; };
+  }, [canSeeDonations, year]);
+
+  const money = (v) => (v == null ? "—" : `$${v.toLocaleString()}`);
+  const stat = (label, value, caption, color) => (
+    <div style={{ ...FS.card, padding: 14, flex: "1 1 210px", minWidth: 180 }}>
+      <div style={{ ...FS.kicker, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color, ...FS.num, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.45 }}>{caption}</div>
+    </div>
+  );
+
   if (view === "fundraisers") {
     return <Fundraisers S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} back={() => setView(null)} />;
   }
@@ -5718,6 +5768,12 @@ function Funding({ S, role, notify, dept, meId, members }) {
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Money in, and where it came from</h1>
       <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Plan and run fundraisers, and keep track of the people and businesses who give.</div>
     </div>
+    {/* Two figures, two scopes, said out loud. Never a blended total — see the note above. */}
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+      {canSeeDonations && stat(`Donations · ${year}`, money(donationsYtd), `Gifts logged with a date in ${year}.`, FIRE.red)}
+      {stat("Fundraiser proceeds · to date", money(proceeds), "All-time. Logged fundraisers aren't dated by year, so this isn't a this-year figure.", FIRE.amberText)}
+    </div>
+
     <div style={S.opGrid}>
       {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
       {/* GATED ON canManage, not on the nav's LEADERSHIP role. The two differ by exactly one role:
