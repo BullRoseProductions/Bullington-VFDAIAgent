@@ -3606,7 +3606,9 @@ function StationQA({ S }) {
         .is("archived_at", null)                // composes with the Failsafe
         .not("content_text", "is", null);
       if (!alive || error || !data || data.length === 0) return;
-      const CAP = 80000;                          // ~80k-char context budget (safety valve; real RAG would retrieve instead)
+      const CAP = 300000;                         // ~300k-char (~75k-token) grounding budget; safely within the
+                                                  // model's 200k-token window. Real RAG would retrieve instead
+                                                  // of stuffing everything in.
       let text = ""; let included = 0;
       for (const d of data) {
         const block = `=== ${d.name} ===\n${d.content_text}`;

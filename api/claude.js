@@ -24,7 +24,16 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 2000,
-        system,
+        // PROMPT CACHING on the system prompt. Station Q&A stuffs every department SOP into it, so
+        // the same very large block is re-sent on every turn of a conversation; cached, it is read
+        // back cheaply instead of re-billed as input each time.
+        //
+        // Backward compatible on purpose: only a non-empty STRING system is wrapped in the block
+        // form. Callers that pass an array (already block-shaped) or nothing at all fall through
+        // untouched, so the drill planner and every other caller behave exactly as before.
+        system: typeof system === "string" && system.trim()
+          ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+          : system,
         messages: Array.isArray(messages) && messages.length ? messages : [{ role: "user", content: user }],   // multi-turn if `messages` given; else the existing single-shot path
       }),
     });
