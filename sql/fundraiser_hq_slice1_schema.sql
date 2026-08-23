@@ -23,6 +23,60 @@
 
 BEGIN;
 
+/* ---------------------------------------------------------------------
+   0. A LEGACY `fundraisers` TABLE IS ALREADY THERE, and it broke the first run of this migration.
+
+   It is empty (0 rows), unreferenced by any application code, and shaped
+   (id, department_id, name, date, amount, created_at) — a stub superseded by fundraiser_log, which
+   is what the app actually writes fundraiser proceeds to.
+
+   The first attempt used CREATE TABLE IF NOT EXISTS, which silently skipped it and then failed
+   three statements later with "no unique constraint matching given keys" when the sponsor FK found
+   no (id, department_id) pair to reference. That is the wrong failure: IF NOT EXISTS turned "this
+   already exists, stop and think" into a skip. Hence the guard below rather than a second
+   IF NOT EXISTS.
+
+   THE GUARD REFUSES RATHER THAN ASSUMES. It only drops the table if it is BOTH empty AND
+   unreferenced; either condition failing raises and rolls the whole migration back. And it does
+   nothing at all if the table already carries the new composite UNIQUE — so re-running this file
+   after a successful apply is a no-op rather than a destructive one.
+   ------------------------------------------------------------------ */
+DO $do$
+DECLARE
+  v_rows     bigint;
+  v_has_uniq boolean;
+  v_refs     text;
+BEGIN
+  IF to_regclass('public.fundraisers') IS NULL THEN
+    RETURN;                                    -- nothing there; the CREATE below does the work
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'public.fundraisers'::regclass AND contype = 'u'
+       AND pg_get_constraintdef(oid) ILIKE '%(id, department_id)%'
+  ) INTO v_has_uniq;
+  IF v_has_uniq THEN
+    RAISE NOTICE 'fundraisers already has the composite UNIQUE — leaving it alone (re-run, not first run).';
+    RETURN;
+  END IF;
+
+  EXECUTE 'SELECT count(*) FROM public.fundraisers' INTO v_rows;
+  IF v_rows > 0 THEN
+    RAISE EXCEPTION 'The existing fundraisers table holds % row(s). It was expected to be an empty legacy stub. Nothing was changed — inspect it before this migration runs.', v_rows;
+  END IF;
+
+  SELECT string_agg(conrelid::regclass::text || '.' || conname, ', ')
+    INTO v_refs FROM pg_constraint WHERE confrelid = 'public.fundraisers'::regclass;
+  IF v_refs IS NOT NULL THEN
+    RAISE EXCEPTION 'Something references the existing fundraisers table: %. Dropping it would break that. Nothing was changed.', v_refs;
+  END IF;
+
+  RAISE NOTICE 'Dropping the empty, unreferenced legacy fundraisers stub (columns: name/date/amount).';
+  DROP TABLE public.fundraisers;
+END
+$do$;
+
 -- ---------------------------------------------------------------------
 -- 1. fundraisers
 -- ---------------------------------------------------------------------
@@ -208,6 +262,13 @@ NOTIFY pgrst, 'reload schema';
 -- SELECT c.relname AS tbl, p.polname, p.polcmd
 --   FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
 --  WHERE c.relname IN ('action_items','funding_events') ORDER BY c.relname, p.polname;
+--
+-- -- 6b. THE LEGACY STUB IS GONE and the new shape is in place. The old table had
+-- --     (name, date, amount); the new one has status, goal_amount, campaign_id, proceeds.
+-- --     Expect 'date' and 'amount' to be ABSENT and the new columns present.
+-- SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) AS columns
+--   FROM information_schema.columns
+--  WHERE table_schema='public' AND table_name='fundraisers';
 --
 -- -- 7. INERT PROOF. Expect 0, 0, and 0 rows carrying a tag.
 -- SELECT (SELECT count(*) FROM public.fundraisers)                                  AS fundraisers,
