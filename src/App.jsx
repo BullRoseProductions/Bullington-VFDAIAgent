@@ -10499,23 +10499,67 @@ const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "
 // optional — a department that doesn't track this leaves them blank and nothing is written. Plain
 // numbers on input (currency formatting is for display only); DA/Officer gate comes from the caller,
 // since both mount points already sit behind canManage.
+/* THE DEFAULT RATE LIVES HERE, in one place, because three things need to agree on it: the add
+   form's prefill, the preview below, and the report's projection in 4b. A rate typed as 0 is a
+   REAL answer ("we assume no inflation") and must not fall back — so this is only ever reached
+   when the field is genuinely blank. Note that rules out `rate || CAPITAL_DEFAULT_RATE`, which
+   would silently turn an explicit 0 into 3. */
+const CAPITAL_DEFAULT_RATE = 3;
+const projectCost = (currentCost, rate, replaceYear, thisYear) => {
+  // Explicit null/blank checks BEFORE Number(): Number(null) is 0 and Number("") is 0, both of
+  // which pass Number.isFinite. Without this a rig with a cost and no replacement year projects
+  // "in " with a blank year rather than showing nothing.
+  const blank = (x) => x === null || x === undefined || x === "";
+  if (blank(currentCost) || blank(replaceYear)) return null;
+  const c = Number(currentCost);
+  if (!Number.isFinite(c) || c <= 0) return null;
+  const y = Number(replaceYear);
+  if (!Number.isFinite(y)) return null;
+  const r = (rate === null || rate === undefined || rate === "" || !Number.isFinite(Number(rate)))
+    ? CAPITAL_DEFAULT_RATE : Number(rate);
+  // max(0, …): a replacement year in the past projects to today's cost rather than deflating
+  // backwards. A rig that was due in 2019 and is still here does not get cheaper.
+  const years = Math.max(0, y - thisYear);
+  return c * Math.pow(1 + r / 100, years);
+};
 function CapitalFields({ S, v, set }) {
-  const f = (label, key, ph) => (
-    <label style={{ ...S.field, flex: 1, minWidth: 128 }}>
+  const f = (label, key, ph, hint) => (
+    <label style={{ ...S.field, minWidth: 0 }}>
       <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
-      <input style={FS.input} value={v[key] ?? ""} placeholder={ph} inputMode="numeric" onChange={(e) => set(key, e.target.value)} />
+      <input style={FS.input} value={v[key] ?? ""} placeholder={ph} inputMode="decimal" onChange={(e) => set(key, e.target.value)} />
+      {hint && <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.4 }}>{hint}</span>}
     </label>
   );
+  // Live, and deliberately not gated on a save: this is the moment the department SEES that it no
+  // longer has to guess a 2034 number, so it has to react while they are still typing.
+  const thisYear = new Date().getFullYear();
+  const num = (x) => { const t = String(x ?? "").replace(/[$,%\s]/g, "").trim(); return t === "" ? null : Number(t); };
+  const projected = projectCost(num(v.currentCost), num(v.inflationRate), num(v.replaceYear), thisYear);
+  const overridden = num(v.replaceCost) != null;
   return (
     <div style={{ flexBasis: "100%", borderTop: `0.5px solid ${FIRE.hairline}`, marginTop: 4, paddingTop: 10 }}>
       <div style={{ ...FS.kicker, marginBottom: 2 }}>CAPITAL PLANNING (OPTIONAL)</div>
-      <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 6 }}>What it cost and when it's due to be replaced — feeds the Capital Replacement Plan report.</div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 6 }}>What it cost, what it costs today, and when it's due — the app projects the replacement figure. Feeds the Capital Replacement Plan report.</div>
+      {/* GRID, not a wrapping flex row. Six fields with hints of different heights left the inputs
+          stepping up and down as labels wrapped; even columns keep them on one baseline at every
+          width, and auto-fit means it degrades to 2-up then 1-up on a phone without a breakpoint. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 10, alignItems: "start" }}>
         {f("Purchase year", "purchaseYear", "e.g. 2014")}
         {f("Purchase cost", "purchaseCost", "e.g. 350000")}
+        {f("Cost today ($)", "currentCost", "e.g. 550000", "What one would cost now.")}
+        {f("Inflation rate (%/yr)", "inflationRate", "3", "Blank uses 3%.")}
         {f("Planned replacement year", "replaceYear", "e.g. 2034")}
-        {f("Est. replacement cost", "replaceCost", "e.g. 750000")}
+        {f("Replacement cost — override (optional)", "replaceCost", "e.g. 750000", "Leave blank to use the projection; enter a figure to override it.")}
       </div>
+      {projected != null && (
+        <div style={{ marginTop: 8, fontSize: 12.5, color: overridden ? FIRE.textMuted : FIRE.amberText, lineHeight: 1.5 }}>
+          &asymp; <b style={{ ...FS.num }}>${Math.round(projected).toLocaleString("en-US")}</b> in {num(v.replaceYear)}
+          <span style={{ color: FIRE.textMuted }}>
+            {" "}&mdash; {num(v.currentCost)?.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })} today at {num(v.inflationRate) ?? CAPITAL_DEFAULT_RATE}%/yr
+            {overridden ? ", but the override above will be used instead." : "."}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -10560,19 +10604,28 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
   const [svc, setSvc] = useState("In service"); const [svcReason, setSvcReason] = useState("");   // initial availability on create
   const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
-  const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper", purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" });
-  const [cap, setCap] = useState({ purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" });   // add-form capital fields
+  const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper", purchaseYear: "", purchaseCost: "", currentCost: "", inflationRate: "", replaceYear: "", replaceCost: "" });
+  // A NEW rig prefills the default rate; an EXISTING one shows whatever is stored, blank included.
+  // Prefilling the edit buffer would write 3% onto every rig somebody opens to fix a typo on.
+  const CAP_BLANK = { purchaseYear: "", purchaseCost: "", currentCost: "", inflationRate: String(CAPITAL_DEFAULT_RATE), replaceYear: "", replaceCost: "" };
+  const [cap, setCap] = useState(CAP_BLANK);   // add-form capital fields
   // Blank → null (never 0, never NaN); anything non-numeric → NaN so the caller can refuse the save.
   // Costs accept "$180,000" style input — strip the formatting rather than reject it.
   const capNum = (v) => { const s = String(v ?? "").replace(/[$,\s]/g, "").trim(); return s === "" ? null : (Number.isFinite(Number(s)) ? Number(s) : NaN); };
   // Returns the payload, or null after notifying — years sane, costs non-negative.
   function capPayload(src) {
     const py = capNum(src.purchaseYear), pc = capNum(src.purchaseCost), ry = capNum(src.replaceYear), rc = capNum(src.replaceCost);
+    const cc = capNum(src.currentCost), ir = capNum(src.inflationRate);
     const badYear = (v) => v !== null && (Number.isNaN(v) || v < 1900 || v > 2200 || !Number.isInteger(v));
     const badCost = (v) => v !== null && (Number.isNaN(v) || v < 0);
+    // 0 is allowed — "we assume no inflation" is a position a board can take. 100%/yr is not a
+    // typo anyone means, and the upper bound is what stops a stray "3000" from projecting a
+    // number with more digits than the county budget.
+    const badRate = (v) => v !== null && (Number.isNaN(v) || v < 0 || v > 100);
     if (badYear(py) || badYear(ry)) { notify({ kind: "error", title: "Check the years", text: "Purchase and replacement year should be a whole year like 2018." }); return null; }
-    if (badCost(pc) || badCost(rc)) { notify({ kind: "error", title: "Check the costs", text: "Costs should be a number — leave blank if you don't have it." }); return null; }
-    return { purchase_year: py, purchase_cost: pc, replace_year: ry, replace_cost: rc };
+    if (badCost(pc) || badCost(rc) || badCost(cc)) { notify({ kind: "error", title: "Check the costs", text: "Costs should be a number — leave blank if you don't have it." }); return null; }
+    if (badRate(ir)) { notify({ kind: "error", title: "Check the inflation rate", text: "Enter a percent per year between 0 and 100 — or leave it blank to use 3%." }); return null; }
+    return { purchase_year: py, purchase_cost: pc, current_cost: cc, inflation_rate: ir, replace_year: ry, replace_cost: rc };
   }
   const fmtMoney = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
   const [editMode, setEditMode] = useState(false);   // false = clean cards; true = reveal Add + per-rig Edit/Remove. Service/Start-Check stay at rest (daily ops).
@@ -10581,14 +10634,16 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const [loadErr, setLoadErr] = useState(false);
   const loadRigs = () => {
     supabase.from("apparatus")
-      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, replace_year, replace_cost")
+      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost")
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false);
         setRigs(data.map((r) => ({
           id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false,
-          purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null, replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
+          purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null,
+          currentCost: r.current_cost ?? null, inflationRate: r.inflation_rate ?? null,
+          replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
           lastCheck: r.last_check_at ? new Date(r.last_check_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
           by: r.checked_by ? (nameById.get(r.checked_by) || "A member") : "—",
         })));
@@ -10600,7 +10655,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const ready = inServiceRigs.filter((r) => r.status === "Pass").length;
   const flagged = inServiceRigs.filter((r) => r.status !== "Pass").length;   // computed directly on in-service rigs, NOT total − ready
   const outOfServiceCount = rigs.length - inServiceRigs.length;
-  function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper", purchaseYear: r.purchaseYear ?? "", purchaseCost: r.purchaseCost ?? "", replaceYear: r.replaceYear ?? "", replaceCost: r.replaceCost ?? "" }); }
+  function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper", purchaseYear: r.purchaseYear ?? "", purchaseCost: r.purchaseCost ?? "", currentCost: r.currentCost ?? "", inflationRate: r.inflationRate ?? "", replaceYear: r.replaceYear ?? "", replaceCost: r.replaceCost ?? "" }); }
   async function saveEditRig(id) {
     if (!rigBuf.name.trim()) return;
     const capital = capPayload(rigBuf);
@@ -10623,7 +10678,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       const { error: svcErr } = await supabase.rpc("take_apparatus_out_of_service", { p_apparatus_id: created.id, p_reason: svcReason.trim() });
       if (svcErr) { notify({ kind: "error", title: "Added, but couldn't mark out of service", text: "The rig was added in service — take it out of service from its card.", details: svcErr.message }); }
     }
-    setNm(""); setTp("Pumper"); setRd("Ready"); setSvc("In service"); setSvcReason(""); setCap({ purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" }); setAdding(false); loadRigs();
+    setNm(""); setTp("Pumper"); setRd("Ready"); setSvc("In service"); setSvcReason(""); setCap(CAP_BLANK); setAdding(false); loadRigs();
   }
   async function removeRig(id, name) {
     if (!window.confirm(`Take "${name}" out of the station? This removes it from the apparatus list.`)) return;
@@ -10661,7 +10716,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           {svc === "Out of service" && <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Reason (required)</span><input style={FS.input} value={svcReason} placeholder="e.g. at the shop" onChange={(e) => setSvcReason(e.target.value)} /></label>}
           <CapitalFields S={S} v={cap} set={(k, val) => setCap((c) => ({ ...c, [k]: val }))} />
           <button style={FS.btnPrimary} onClick={addRig}><Plus size={15} /> Add to station</button>
-          <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); setCap({ purchaseYear: "", purchaseCost: "", replaceYear: "", replaceCost: "" }); }}>Cancel</button>
+          <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); setCap(CAP_BLANK); }}>Cancel</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
       {rigs.length === 0 ? (
