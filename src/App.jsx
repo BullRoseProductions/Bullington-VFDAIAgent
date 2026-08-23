@@ -5733,17 +5733,68 @@ function Funding({ S, role, notify, dept, meId, members }) {
 /* ---------------- Donations — campaigns list (slice 3) ----------------
    The pipeline lives one level down (donors, gifts); this screen is just the funds themselves.
 
-   ARCHIVE, NEVER DELETE. donation_donors and donation_activity both cascade from campaign_id, so a
-   Delete button here would take every donor record and the department's entire giving history with
-   it, irreversibly, from one click on a list. Archiving is reversible, keeps the money history, and
-   is what `status` exists for. Real deletion stays in the SQL editor, where somebody has to mean it.
+   ARCHIVE, NEVER DELETE — and the reason CHANGED with the business-centric reshape, so read this
+   rather than assuming. It used to be that donors and activity both cascaded from campaign_id, and
+   deleting a fund destroyed the giving history outright. That is no longer true: donors are
+   department-level now, and a gift's campaign_id is ON DELETE SET NULL, so the money survives.
+
+   What deleting a fund now does is silently UNTAG every gift that pointed at it — "raised for the
+   new engine" quietly becomes unattributed money, with no record that the fund ever existed to
+   explain the gap. Less catastrophic, still lossy, still not something a list-screen button should
+   do. Archiving keeps the name and the attribution. Real deletion stays in the SQL editor, where
+   somebody has to mean it.
 
    And archiving is only honest if it is VISIBLE: the toggle below shows archived funds and offers
    Unarchive, so "archive" is a drawer rather than a hole things vanish into.
 
    department_id comes from the my_department_id() RPC at write time, not from the `dept` prop —
    that prop's select does not include id. Same as every other insert in this file. */
+/* ---------------- Donations ----------------
+   Two views of one concern, so they share a tile rather than scattering across the Funding hub:
+
+     BUSINESSES — the people and firms the department has a relationship with. Department-level, not
+                  per-fund: the hardware store gives to the engine fund this year and gear next, and
+                  it is one entry with one history either way.
+     FUNDS       — what you are raising FOR. Set up rarely, edited rarely.
+
+   Businesses is the default because it is the daily work; funds are configuration you touch when a
+   drive starts. */
 function Donations({ S, role, notify, dept, meId, members, back }) {
+  const [tab, setTab] = useState("businesses");
+
+  const pill = (key, label) => (
+    <button key={key} onClick={() => setTab(key)}
+      style={{ fontSize: 12.5, padding: "6px 14px", borderRadius: 999, cursor: "pointer", fontWeight: tab === key ? 700 : 500,
+               border: `0.5px solid ${tab === key ? FIRE.red : FIRE.hairline}`,
+               background: tab === key ? "rgba(200,96,106,.14)" : "transparent",
+               color: tab === key ? FIRE.textPrimary : FIRE.textSecondary }}>{label}</button>
+  );
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
+      <div style={{ marginBottom: 14 }}>
+        <div style={FS.kicker}>DONATIONS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Who gives, and what you're raising for</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Keep track of the businesses and people who support the department, and the funds you're asking them to help with.</div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {pill("businesses", "Businesses")}
+        {pill("funds", "Funds")}
+      </div>
+
+      {tab === "businesses"
+        ? <DonationBusinesses S={S} notify={notify} meId={meId} members={members} />
+        : <DonationFunds S={S} notify={notify} meId={meId} members={members} />}
+    </div>
+  );
+}
+
+/* The funds list, relocated from the top level of Donations when the Businesses view arrived.
+   Body unchanged — same load, same add/edit, same archive-not-delete, same empty states. It renders
+   only its own content now; the page wrapper, back button and header belong to Donations above. */
+function DonationFunds({ S, notify, meId, members }) {
   const BLANK = { name: "", tagline: "", description: "", goal_amount: "", external_url: "", point_person_id: "", status: "active" };
   const [rows, setRows] = useState(null);          // null = first load; [] = genuinely none
   const [loadErr, setLoadErr] = useState(false);
@@ -5851,15 +5902,8 @@ function Donations({ S, role, notify, dept, meId, members, back }) {
   );
 
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+    <>
       {loadErr && <OfflineNotice onRetry={load} what="donations" />}
-      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>DONATIONS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>The funds you're raising for</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A fund is whatever you're asking the community to help with — an engine, turnout gear, the building. Open one and you can track who's pledged, who has given, and where each conversation stands.</div>
-      </div>
-
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fund</button>}
         {/* Archived stays one click away, and says how many — so archiving reads as "put away"
@@ -5908,7 +5952,201 @@ function Donations({ S, role, notify, dept, meId, members, back }) {
           ))}
         </div>
       )}
+    </>
+  );
+}
+
+/* ---------------- Donations · Businesses ----------------
+   The department's master list of supporters — one entry per business or person, however many funds
+   they end up giving to. Slice 5 adds the detail view and the contact/gift timeline; this screen is
+   the roster and the pipeline stage.
+
+   RETIRE, NOT DELETE — the same rule the funds list follows, and here it is enforced by the
+   database as well as the UI: donation_activity's donor FK is NO ACTION, so a business that has
+   given cannot be deleted out from under its own money. `active` is how a relationship ends.
+
+   NO last-contacted COLUMN. It is derived from the contact rows in the timeline, which arrive in
+   slice 5 — a stored copy would drift the moment somebody logs a call and forgets to update it. */
+const DONOR_STAGES = [
+  { v: "prospect",  label: "Prospect",  hint: "Not approached yet" },
+  { v: "talking",   label: "Talking",   hint: "Conversation started" },
+  { v: "committed", label: "Committed", hint: "Said yes, money not in yet" },
+  { v: "gave",      label: "Gave",      hint: "Has given" },
+  { v: "declined",  label: "Declined",  hint: "Not this time" },
+];
+const stageMeta = (v) => DONOR_STAGES.find((s) => s.v === v) || DONOR_STAGES[0];
+const stageColor = (v) => ({ prospect: FIRE.textMuted, talking: FIRE.blueText, committed: FIRE.amberText, gave: FIRE.greenText, declined: FIRE.textMuted2 }[v] || FIRE.textMuted);
+
+function DonationBusinesses({ S, notify, meId, members }) {
+  const BLANK = { name: "", organization: "", role: "Donor", phone: "", email: "", amount_committed: "", stage: "prospect", next_follow_up: "", relationship_notes: "" };
+  const [rows, setRows] = useState(null);        // null = first load; [] = genuinely none
+  const [loadErr, setLoadErr] = useState(false);
+  const [showRetired, setShowRetired] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [f, setF] = useState(BLANK);
+  const [busy, setBusy] = useState(false);
+
+  // Dept-scoped AND leadership-gated by RLS — no client-side filter, which is how the two would
+  // drift apart. Ordered by sort then name so a department can pin its big supporters to the top.
+  function load() {
+    supabase.from("donation_donors")
+      .select("id, name, organization, role, phone, email, amount_committed, stage, next_follow_up, relationship_notes, active, sort")
+      .order("sort", { ascending: true }).order("name", { ascending: true })
+      .then(({ data, error }) => {
+        // A failed read is not an empty roster — keep the last-known list rather than telling a
+        // department it has no supporters because the network dropped.
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false); setRows(data);
+      });
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useReconnect(() => { if (loadErr) load(); });
+
+  const activeRows = (rows || []).filter((d) => d.active);
+  const retiredRows = (rows || []).filter((d) => !d.active);
+  const shown = showRetired ? retiredRows : activeRows;
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  function startAdd() { setF(BLANK); setEditingId(null); setAdding(true); }
+  function startEdit(d) {
+    setF({
+      name: d.name || "", organization: d.organization || "", role: d.role || "Donor",
+      phone: d.phone || "", email: d.email || "",
+      amount_committed: d.amount_committed ?? "", stage: d.stage || "prospect",
+      next_follow_up: d.next_follow_up || "", relationship_notes: d.relationship_notes || "",
+    });
+    setAdding(false); setEditingId(d.id);
+  }
+  function cancel() { setAdding(false); setEditingId(null); setF(BLANK); }
+
+  async function save() {
+    const name = f.name.trim();
+    if (!name) { notify({ kind: "error", title: "Give it a name", text: "A supporter needs a name before you can save it." }); return; }
+    setBusy(true);
+    // "" -> null throughout: a blank pledge is "nothing pledged", which is a different fact from a
+    // pledge of zero, and an empty string would be rejected by the date column outright.
+    const patch = {
+      name,
+      organization: f.organization.trim() || null,
+      role: f.role.trim() || "Donor",
+      phone: f.phone.trim() || null,
+      email: f.email.trim() || null,
+      amount_committed: f.amount_committed === "" || f.amount_committed == null ? null : Number(String(f.amount_committed).replace(/[^0-9.]/g, "")) || null,
+      stage: f.stage,
+      next_follow_up: f.next_follow_up || null,
+      relationship_notes: f.relationship_notes.trim() || null,
+    };
+
+    if (editingId) {
+      const { error } = await supabase.from("donation_donors").update(patch).eq("id", editingId);
+      setBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't save that supporter", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    } else {
+      const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+      if (deptErr || !deptId) { setBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+      const { error } = await supabase.from("donation_donors").insert({ ...patch, department_id: deptId });
+      setBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't add that supporter", text: "Something went wrong adding it. Please try again.", details: error.message }); return; }
+    }
+    cancel(); load();
+  }
+
+  async function setActive(d, next) {
+    const { error } = await supabase.from("donation_donors").update({ active: next }).eq("id", d.id);
+    if (error) { notify({ kind: "error", title: next ? "Couldn't restore that" : "Couldn't retire that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    load();
+  }
+
+  const form = (
+    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
+        <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="Dale Harris" /></label>
+      <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Business</span>
+        <input style={FS.input} value={f.organization} onChange={(e) => setF((x) => ({ ...x, organization: e.target.value }))} placeholder="Harris Hardware" /></label>
+      <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>They are a</span>
+        <input style={FS.input} value={f.role} onChange={(e) => setF((x) => ({ ...x, role: e.target.value }))} placeholder="Donor" /></label>
+      <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span>
+        <input style={FS.input} value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} placeholder="(817) 555-0100" /></label>
+      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span>
+        <input style={FS.input} type="email" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} placeholder="dale@harrishardware.com" /></label>
+      <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Where it stands</span>
+        <select style={FS.input} value={f.stage} onChange={(e) => setF((x) => ({ ...x, stage: e.target.value }))}>
+          {DONOR_STAGES.map((s) => <option key={s.v} value={s.v}>{s.label} — {s.hint}</option>)}
+        </select></label>
+      <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Pledged ($)</span>
+        <input style={FS.input} value={f.amount_committed} onChange={(e) => setF((x) => ({ ...x, amount_committed: e.target.value }))} placeholder="500" inputMode="numeric" /></label>
+      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Reach out again on</span>
+        <input style={FS.input} type="date" value={f.next_follow_up} onChange={(e) => setF((x) => ({ ...x, next_follow_up: e.target.value }))} /></label>
+      <label style={{ ...S.field, flex: "1 1 100%" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What to remember about them</span>
+        <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={f.relationship_notes} onChange={(e) => setF((x) => ({ ...x, relationship_notes: e.target.value }))} placeholder="Prefers a phone call. Sponsored the boot drive two years running. Ask after the new store." /></label>
+      <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={save}>
+        <Plus size={15} /> {busy ? "Saving…" : editingId ? "Save changes" : "Add supporter"}
+      </button>
+      <button style={FS.btn} onClick={cancel} disabled={busy}>Cancel</button>
     </div>
+  );
+
+  return (
+    <>
+      {loadErr && <OfflineNotice onRetry={load} what="supporters" />}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a supporter</button>}
+        <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={() => setShowRetired((v) => !v)}>
+          {showRetired ? `Current (${activeRows.length})` : `Retired (${retiredRows.length})`}
+        </button>
+      </div>
+
+      {(adding || editingId) && form}
+
+      {rows === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
+      ) : shown.length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+          {showRetired
+            ? "Nobody retired. Supporters you stop working with wait here, with their giving history intact."
+            : "No supporters yet. Add the businesses and people you'd ask — the hardware store, the feed store, the family that always turns up. You can note where each conversation stands and when to check back."}
+        </div>
+      ) : (
+        <div>
+          {shown.map((d) => {
+            const st = stageMeta(d.stage);
+            // A follow-up date that has arrived is the whole point of storing one, so it earns a
+            // colour. Only for current supporters — chasing a retired one is not a to-do.
+            const due = d.active && d.next_follow_up && d.next_follow_up <= todayISO;
+            return (
+              <div key={d.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: d.active ? 1 : 0.72 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <HeartHandshake size={17} color={stageColor(d.stage)} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>
+                      {d.organization || d.name}
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: stageColor(d.stage), marginLeft: 8 }}>{st.label.toUpperCase()}</span>
+                    </div>
+                    {d.organization && d.name && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>{d.name}{d.role && d.role !== "Donor" ? ` · ${d.role}` : ""}</div>}
+                    <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {d.phone && <span>{d.phone}</span>}
+                      {d.email && <span>{d.email}</span>}
+                      {d.amount_committed != null && <span>Pledged ${Number(d.amount_committed).toLocaleString()}</span>}
+                      {d.next_follow_up && <span style={{ color: due ? FIRE.amberText : FIRE.textMuted, fontWeight: due ? 700 : 400 }}>
+                        {due ? "Follow up — due " : "Follow up "}{d.next_follow_up}
+                      </span>}
+                    </div>
+                    {d.relationship_notes && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>{d.relationship_notes}</div>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => startEdit(d)}><Pencil size={13} /> Edit</button>
+                    {d.active
+                      ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setActive(d, false)}>Retire</button>
+                      : <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setActive(d, true)}><RotateCcw size={13} /> Restore</button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
