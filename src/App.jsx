@@ -5506,6 +5506,12 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
   const [dGen, setDGen] = useState(false);
   const [dSave, setDSave] = useState(false);
   const [dErr, setDErr] = useState("");
+  const [adding, setAdding] = useState(false);               // "Add a plan" panel
+  const [aTitle, setATitle] = useState("");
+  const [aText, setAText] = useState("");                    // the ONE source of truth for what gets saved
+  const [aReading, setAReading] = useState(false);
+  const [aBusy, setABusy] = useState(false);
+  const [aErr, setAErr] = useState("");
   const [loadErr, setLoadErr] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -5661,6 +5667,57 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
     if (error) { notify({ kind: "error", title: "Couldn't save that document", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
     notify({ kind: "success", title: "Saved", text: `"${title}" is filed under this fundraiser.` });
     cancelDraft();
+    load();
+  }
+
+  /* ADD A PLAN — a plan the department already has, pasted or uploaded.
+
+     ONE TEXTAREA, TWO SOURCES. An upload does not save anything directly; it fills the textarea and
+     stops. That is deliberate: PDF extraction is frequently messy — running headers, page numbers,
+     columns collapsed into each other — and the extracted text is what the extractor will later read
+     as the plan. Letting it land unseen would mean the first sight of a garbled plan is a garbled
+     task list. One field, reviewed before it is saved, and a single save path for both sources.
+
+     TEXT ONLY, no storage bucket. ai_text is all the viewer and the extractor need; keeping the
+     original file would mean a bucket path, a storage policy, and a new RLS surface for no capability
+     anyone has asked for. Minutes DOES keep originals — that is a records-retention obligation, and
+     this is not the same thing. Easy to add later if it ever is. */
+  function startAddPlan() { setATitle(""); setAText(""); setAErr(""); setAdding(true); }
+  function cancelAddPlan() { setAdding(false); setATitle(""); setAText(""); setAErr(""); }
+
+  async function readPlanFile(file) {
+    if (!file) return;
+    setAReading(true); setAErr("");
+    try {
+      const text = (await extractMinutesFileText(file)).trim();
+      if (!text) {
+        // A scan or an image-only PDF parses fine and yields nothing. Saying "couldn't read it" would
+        // be wrong — it read it, there was no text in it — and the fix is different.
+        setAErr("That file opened but had no text in it — it may be a scan or an image. Paste the text instead.");
+      } else {
+        setAText(text);
+        if (!aTitle.trim()) setATitle((file.name || "").replace(/\.[^.]+$/, "").slice(0, 120));
+      }
+    } catch {
+      setAErr("Couldn't read that file — try a .pdf, .docx, or .txt, or paste the text instead.");
+    } finally { setAReading(false); }
+  }
+
+  async function savePlan() {
+    const title = aTitle.trim(), text = aText.trim();
+    if (!title) { setAErr("Give it a title before saving."); return; }
+    if (!text) { setAErr("Paste the plan text, or upload a file to fill it in."); return; }
+    setABusy(true); setAErr("");
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setABusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { error } = await supabase.from("ai_outputs").insert({
+      department_id: deptId, feature: "fundraiser", title,
+      ai_text: text, fundraiser_id: fundraiser.id, created_by: meId,
+    });
+    setABusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save that plan", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Plan added", text: `"${title}" is filed under this fundraiser.` });
+    cancelAddPlan();
     load();
   }
 
@@ -5924,7 +5981,45 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
           <button style={{ ...FS.btnPrimary, opacity: (tdBusy || !tdInput) ? 0.6 : 1 }} disabled={tdBusy || !tdInput} onClick={saveTargetDate}>{tdBusy ? "Saving…" : "Set target date"}</button>
         </div>
       )}
-      {!drafting && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={startDraft}><Sparkles size={15} /> Draft a document</button>}
+      {!drafting && !adding && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <button style={FS.btn} onClick={startDraft}><Sparkles size={15} /> Draft a document</button>
+          {/* Sibling, not a sub-option of drafting: a department that already HAS a plan should not
+              have to go through a "generate" door to bring it in. */}
+          <button style={FS.btn} onClick={startAddPlan}><Upload size={15} /> Add a plan</button>
+        </div>
+      )}
+      {adding && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, borderLeft: `3px solid ${FIRE.blueText}` }}>
+          <div style={{ ...FS.kicker, marginBottom: 3 }}>ADD A PLAN</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10, lineHeight: 1.55 }}>
+            Paste a plan you already have, or upload a file to pull the text out of it. Either way you can tidy it up below before it&rsquo;s saved.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
+            <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
+              <input style={FS.input} value={aTitle} onChange={(e) => setATitle(e.target.value)} placeholder="e.g. Fall BBQ run sheet (2025)" /></label>
+            <label style={{ ...S.field, minWidth: 210 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Upload a file (optional)</span>
+              {/* value reset so picking the SAME file twice still fires onChange — otherwise a
+                  failed read cannot be retried without choosing a different file first. */}
+              <input type="file" accept=".txt,.md,.pdf,.docx" disabled={aReading || aBusy}
+                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; readPlanFile(f); }}
+                     style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
+          </div>
+          {aReading && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }}><Loader2 size={14} className="spin" /> Reading the file…</div>}
+          <label style={{ ...S.field, marginBottom: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Plan text</span>
+            <textarea style={{ ...FS.input, minHeight: 190, resize: "vertical", fontFamily: "inherit" }} value={aText} onChange={(e) => setAText(e.target.value)}
+                      placeholder="Paste the plan here — or upload a file above and it will fill this in." /></label>
+          {aErr && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginBottom: 10 }}>{aErr}</div>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button style={{ ...FS.btnPrimary, opacity: (aBusy || aReading || !aTitle.trim() || !aText.trim()) ? 0.6 : 1 }}
+                    disabled={aBusy || aReading || !aTitle.trim() || !aText.trim()} onClick={savePlan}>
+              {aBusy ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save to this fundraiser</>}
+            </button>
+            <button style={FS.btn} onClick={cancelAddPlan} disabled={aBusy || aReading}>Cancel</button>
+            {aText.trim() && <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{aText.trim().length.toLocaleString()} characters</span>}
+          </div>
+        </div>
+      )}
       {drafting && (
         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, borderLeft: `3px solid ${FIRE.red}` }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}>DRAFT A DOCUMENT</div>
