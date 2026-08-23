@@ -6024,12 +6024,10 @@ function DonationFunds({ S, notify, meId, members }) {
                           <span style={{ color: FIRE.textMuted }}>· {pct}%</span>
                         </div>
 
-                        {/* THE BAR IS THE FOCAL POINT. A dark track so the fill reads as light against
-                            it, fully rounded so even a 1% sliver keeps its shape instead of becoming a
-                            square nub, and a deep-red-to-orange gradient sized to the TRACK rather than
-                            to the fill — so a small amount shows the dark end of the gradient and the
-                            colour genuinely travels as the fund grows, instead of every fund showing
-                            the same squashed rainbow. */}
+                        {/* THE BAR IS THE FOCAL POINT. A dark inset track so the fill reads as lit
+                            against it, and fully rounded ends so even a 1% sliver keeps its shape
+                            instead of collapsing into a square nub. The gradient itself belongs to
+                            the fill — see the note on the inner div. */}
                         <div aria-hidden="true" style={{ position: "relative", height: 11, borderRadius: 999, background: "rgba(255,255,255,.06)", marginTop: 8, overflow: "hidden", boxShadow: "inset 0 1px 2px rgba(0,0,0,.45)" }}>
                           <div style={{
                             width: `${pct}%`, height: "100%", borderRadius: 999,
