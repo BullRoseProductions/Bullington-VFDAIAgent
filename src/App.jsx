@@ -5694,6 +5694,9 @@ function Funding({ S, role, notify, dept, meId, members }) {
   if (view === "fundraisers") {
     return <Fundraisers S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} back={() => setView(null)} />;
   }
+  if (view === "donations") {
+    return <Donations S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} back={() => setView(null)} />;
+  }
 
   const shell = (node) => <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>{node}</div>;
   const card = (key, Icon, title, desc) => (
@@ -5717,8 +5720,196 @@ function Funding({ S, role, notify, dept, meId, members }) {
     </div>
     <div style={S.opGrid}>
       {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
+      {/* GATED ON canManage, not on the nav's LEADERSHIP role. The two differ by exactly one role:
+          LEADERSHIP includes Project Admin, is_canmanage() does not — so a PA can reach the Funding
+          page but the donations RLS returns them nothing. Showing the tile anyway would open a
+          screen that is permanently, inexplicably empty. The mismatch is deliberate on both sides
+          (donor PII is department business), so the tile follows the DATA rule, not the nav rule. */}
+      {canManage(role) && card("donations", HeartHandshake, "Donations", "Track who gives — pledges, gifts received, and where each conversation stands.")}
     </div>
   </>);
+}
+
+/* ---------------- Donations — campaigns list (slice 3) ----------------
+   The pipeline lives one level down (donors, gifts); this screen is just the funds themselves.
+
+   ARCHIVE, NEVER DELETE. donation_donors and donation_activity both cascade from campaign_id, so a
+   Delete button here would take every donor record and the department's entire giving history with
+   it, irreversibly, from one click on a list. Archiving is reversible, keeps the money history, and
+   is what `status` exists for. Real deletion stays in the SQL editor, where somebody has to mean it.
+
+   And archiving is only honest if it is VISIBLE: the toggle below shows archived funds and offers
+   Unarchive, so "archive" is a drawer rather than a hole things vanish into.
+
+   department_id comes from the my_department_id() RPC at write time, not from the `dept` prop —
+   that prop's select does not include id. Same as every other insert in this file. */
+function Donations({ S, role, notify, dept, meId, members, back }) {
+  const BLANK = { name: "", tagline: "", description: "", goal_amount: "", external_url: "", point_person_id: "", status: "active" };
+  const [rows, setRows] = useState(null);          // null = first load; [] = genuinely none
+  const [loadErr, setLoadErr] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [f, setF] = useState(BLANK);
+  const [busy, setBusy] = useState(false);
+
+  // Dept-scoped AND leadership-gated by RLS, so no filter here — duplicating the rule in the client
+  // is how the two drift apart. A plain member cannot reach this screen anyway; a Project Admin can,
+  // and correctly sees nothing.
+  function load() {
+    supabase.from("donation_campaigns")
+      .select("id, name, tagline, description, status, goal_amount, external_url, point_person_id, sort, created_at")
+      .order("sort", { ascending: true }).order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        // A failed read is not an empty department. Keep whatever was last known rather than
+        // rendering the "no funds yet" empty state at somebody whose funds simply did not load.
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false); setRows(data);
+      });
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useReconnect(() => { if (loadErr) load(); });
+
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const active = (rows || []).filter((c) => c.status !== "archived");
+  const archived = (rows || []).filter((c) => c.status === "archived");
+  const shown = showArchived ? archived : active;
+
+  function startAdd() { setF(BLANK); setEditingId(null); setAdding(true); }
+  function startEdit(c) {
+    setF({
+      name: c.name || "", tagline: c.tagline || "", description: c.description || "",
+      goal_amount: c.goal_amount ?? "", external_url: c.external_url || "",
+      point_person_id: c.point_person_id || "", status: c.status || "active",
+    });
+    setAdding(false); setEditingId(c.id);
+  }
+  function cancel() { setAdding(false); setEditingId(null); setF(BLANK); }
+
+  async function save() {
+    const name = f.name.trim();
+    if (!name) { notify({ kind: "error", title: "Give it a name", text: "A fund needs a name before you can save it." }); return; }
+    setBusy(true);
+    // "" -> null, never 0 or an empty string: a blank goal means "no goal set", which is a different
+    // fact from a goal of zero, and an empty uuid string would fail the point_person foreign key.
+    const patch = {
+      name,
+      tagline: f.tagline.trim() || null,
+      description: f.description.trim() || null,
+      goal_amount: f.goal_amount === "" || f.goal_amount == null ? null : Number(String(f.goal_amount).replace(/[^0-9.]/g, "")) || null,
+      external_url: f.external_url.trim() || null,
+      point_person_id: f.point_person_id || null,
+      status: f.status,
+    };
+
+    if (editingId) {
+      const { error } = await supabase.from("donation_campaigns").update(patch).eq("id", editingId);
+      setBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't save that fund", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    } else {
+      const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+      if (deptErr || !deptId) { setBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+      const { error } = await supabase.from("donation_campaigns").insert({ ...patch, department_id: deptId, created_by: meId || null });
+      setBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't add that fund", text: "Something went wrong adding it. Please try again.", details: error.message }); return; }
+    }
+    cancel(); load();
+  }
+
+  async function setStatus(c, next) {
+    const { error } = await supabase.from("donation_campaigns").update({ status: next }).eq("id", c.id);
+    if (error) { notify({ kind: "error", title: next === "archived" ? "Couldn't archive that" : "Couldn't restore that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    load();
+  }
+
+  const form = (
+    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Fund name *</span>
+        <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="New Engine Fund" /></label>
+      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Short line</span>
+        <input style={FS.input} value={f.tagline} onChange={(e) => setF((x) => ({ ...x, tagline: e.target.value }))} placeholder="Replacing Engine 2 by 2028" /></label>
+      <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Goal ($)</span>
+        <input style={FS.input} value={f.goal_amount} onChange={(e) => setF((x) => ({ ...x, goal_amount: e.target.value }))} placeholder="50000" inputMode="numeric" /></label>
+      <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Point person</span>
+        <select style={FS.input} value={f.point_person_id} onChange={(e) => setF((x) => ({ ...x, point_person_id: e.target.value }))}>
+          <option value="">— nobody yet —</option>
+          {(members || []).filter((m) => m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select></label>
+      <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Donate link</span>
+        <input style={FS.input} value={f.external_url} onChange={(e) => setF((x) => ({ ...x, external_url: e.target.value }))} placeholder="https://…" /></label>
+      <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span>
+        <select style={FS.input} value={f.status} onChange={(e) => setF((x) => ({ ...x, status: e.target.value }))}>
+          <option value="active">Active</option><option value="archived">Archived</option>
+        </select></label>
+      <label style={{ ...S.field, flex: "1 1 100%" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What it's for</span>
+        <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical" }} value={f.description} onChange={(e) => setF((x) => ({ ...x, description: e.target.value }))} placeholder="What the money pays for, and why it matters." /></label>
+      <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={save}>
+        <Plus size={15} /> {busy ? "Saving…" : editingId ? "Save changes" : "Add fund"}
+      </button>
+      <button style={FS.btn} onClick={cancel} disabled={busy}>Cancel</button>
+    </div>
+  );
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {loadErr && <OfflineNotice onRetry={load} what="donations" />}
+      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>DONATIONS</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>The funds you're raising for</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>A fund is whatever you're asking the community to help with — an engine, turnout gear, the building. Open one and you can track who's pledged, who has given, and where each conversation stands.</div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fund</button>}
+        {/* Archived stays one click away, and says how many — so archiving reads as "put away"
+            rather than "deleted", and nobody has to wonder where a fund went. */}
+        <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={() => setShowArchived((v) => !v)}>
+          {showArchived ? `Active funds (${active.length})` : `Archived (${archived.length})`}
+        </button>
+      </div>
+
+      {(adding || editingId) && form}
+
+      {rows === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
+      ) : shown.length === 0 ? (
+        /* UNFORCED. A department that never runs a donation drive is not behind on anything, so the
+           empty state invites rather than nags — and the archived view gets its own wording so it
+           does not read as "you have no funds" when active ones exist. */
+        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+          {showArchived
+            ? "Nothing archived. Funds you put away will wait here, with their giving history intact."
+            : "No funds yet — add one whenever you're ready. Plenty of departments run for years without one; it's here for when you're raising for something specific and want to keep track of who helped."}
+        </div>
+      ) : (
+        <div>
+          {shown.map((c) => (
+            <div key={c.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: c.status === "archived" ? 0.75 : 1 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <HeartHandshake size={17} color={FIRE.greenText} style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{c.name}</div>
+                  {c.tagline && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>{c.tagline}</div>}
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    {c.goal_amount != null && <span>Goal ${Number(c.goal_amount).toLocaleString()}</span>}
+                    {c.point_person_id && <span>Led by {nameById.get(c.point_person_id) || "a member"}</span>}
+                    {c.external_url && <a href={c.external_url} target="_blank" rel="noopener noreferrer" style={{ color: FIRE.blueText, textDecoration: "none" }}>Donate link <ExternalLink size={11} style={{ verticalAlign: "-1px" }} /></a>}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => startEdit(c)}><Pencil size={13} /> Edit</button>
+                  {c.status === "archived"
+                    ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setStatus(c, "active")}><RotateCcw size={13} /> Unarchive</button>
+                    : <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setStatus(c, "archived")}>Archive</button>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ---------------- Roster & Operations ---------------- */
