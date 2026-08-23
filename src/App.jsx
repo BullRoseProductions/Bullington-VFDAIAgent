@@ -5750,43 +5750,40 @@ function Funding({ S, role, notify, dept, meId, members }) {
    department_id comes from the my_department_id() RPC at write time, not from the `dept` prop —
    that prop's select does not include id. Same as every other insert in this file. */
 /* ---------------- Donations ----------------
-   Two views of one concern, so they share a tile rather than scattering across the Funding hub:
+   One page, two stacked sections:
 
-     BUSINESSES — the people and firms the department has a relationship with. Department-level, not
-                  per-fund: the hardware store gives to the engine fund this year and gear next, and
-                  it is one entry with one history either way.
-     FUNDS       — what you are raising FOR. Set up rarely, edited rarely.
+     FUNDS   — what you are raising FOR, on top. Each carries a target, a donate link and a bar that
+               fills from gifts tagged to it, so the page opens on the reason for every ask.
+     TRACKER — the people and firms who give or might, below. Department-level, not per-fund: the
+               hardware store gives to the engine fund this year and gear next, and it is one entry
+               with one history either way.
 
-   Businesses is the default because it is the daily work; funds are configuration you touch when a
-   drive starts. */
+   STACKED RATHER THAN TABBED. They answer different questions — "what are we raising for" and "who
+   do we ask" — and a leader working a drive needs both at once. A toggle put half the picture one
+   click away and made a single job read as two features sharing a tile.
+
+   The whole page is behind the canManage gate on the Funding hub, because the tracker holds donor
+   names, phone numbers and giving history. If funds alone should ever be member-visible, that is an
+   RLS change on donation_campaigns and a split of this page — not a client-side condition. */
 function Donations({ S, role, notify, dept, meId, members, back }) {
-  const [tab, setTab] = useState("businesses");
-
-  const pill = (key, label) => (
-    <button key={key} onClick={() => setTab(key)}
-      style={{ fontSize: 12.5, padding: "6px 14px", borderRadius: 999, cursor: "pointer", fontWeight: tab === key ? 700 : 500,
-               border: `0.5px solid ${tab === key ? FIRE.red : FIRE.hairline}`,
-               background: tab === key ? "rgba(200,96,106,.14)" : "transparent",
-               color: tab === key ? FIRE.textPrimary : FIRE.textSecondary }}>{label}</button>
-  );
-
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
       <div style={{ marginBottom: 14 }}>
         <div style={FS.kicker}>DONATIONS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Who gives, and what you're raising for</h1>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>What you're raising for, and who gives</h1>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Keep track of the businesses and people who support the department, and the funds you're asking them to help with.</div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {pill("businesses", "Businesses")}
-        {pill("funds", "Funds")}
-      </div>
+      {/* STACKED, not tabbed. The two answer different questions — "what are we raising for" and
+          "who gives" — and a leader working a drive needs both in view: the funds give the asks
+          their reason, the tracker is who to ask. A toggle hid half the picture behind a click and
+          made the page feel like two features sharing a tile. */}
+      <DonationFunds S={S} notify={notify} meId={meId} members={members} />
 
-      {tab === "businesses"
-        ? <DonationBusinesses S={S} notify={notify} meId={meId} members={members} />
-        : <DonationFunds S={S} notify={notify} meId={meId} members={members} />}
+      <div style={{ marginTop: 28, paddingTop: 20, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+        <DonationBusinesses S={S} notify={notify} meId={meId} members={members} />
+      </div>
     </div>
   );
 }
@@ -5807,6 +5804,18 @@ function DonationFunds({ S, notify, meId, members }) {
   // Dept-scoped AND leadership-gated by RLS, so no filter here — duplicating the rule in the client
   // is how the two drift apart. A plain member cannot reach this screen anyway; a Project Admin can,
   // and correctly sees nothing.
+  /* WHAT EACH FUND HAS ACTUALLY RAISED, summed from the ledger rather than stored on the campaign.
+     Same single-source rule the whole feature runs on: a stored total drifts the moment a gift is
+     edited, and a fund quietly claiming money it never took is the one error here that matters.
+
+     Gifts with campaign_id NULL — bucket collections, untagged cheques — count toward the
+     department but toward NO fund, which is correct: they were not given for anything in
+     particular. So the fund bars can legitimately sum to less than the year's total.
+
+     Summed client-side because the row count is a department's gifts, not a warehouse. If that ever
+     stops being true the fix is a view or an RPC, not a stored column. */
+  const [raised, setRaised] = useState({});
+
   function load() {
     supabase.from("donation_campaigns")
       .select("id, name, tagline, description, status, goal_amount, external_url, point_person_id, sort, created_at")
@@ -5816,6 +5825,18 @@ function DonationFunds({ S, notify, meId, members }) {
         // rendering the "no funds yet" empty state at somebody whose funds simply did not load.
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false); setRows(data);
+      });
+    supabase.from("donation_activity")
+      .select("campaign_id, amount")
+      .eq("kind", "contribution")
+      .not("campaign_id", "is", null)
+      .then(({ data, error }) => {
+        // A failed totals read must not render every bar at zero — that reads as "we've raised
+        // nothing", which is a worse lie than showing no bar at all. Keep the last-known map.
+        if (error || !data) return;
+        const m = {};
+        for (const r of data) m[r.campaign_id] = (m[r.campaign_id] || 0) + (Number(r.amount) || 0);
+        setRaised(m);
       });
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
@@ -5904,6 +5925,8 @@ function DonationFunds({ S, notify, meId, members }) {
   return (
     <>
       {loadErr && <OfflineNotice onRetry={load} what="donations" />}
+      <div style={{ ...FS.kicker, marginBottom: 4 }}>FUNDS</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>What you're raising for. Each one can carry a donate link and a target, and fills up as gifts are logged against it.</p>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fund</button>}
         {/* Archived stays one click away, and says how many — so archiving reads as "put away"
@@ -5935,11 +5958,46 @@ function DonationFunds({ S, notify, meId, members }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{c.name}</div>
                   {c.tagline && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>{c.tagline}</div>}
+                  {c.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 5, lineHeight: 1.5 }}>{c.description}</div>}
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                    {c.goal_amount != null && <span>Goal ${Number(c.goal_amount).toLocaleString()}</span>}
                     {c.point_person_id && <span>Led by {nameById.get(c.point_person_id) || "a member"}</span>}
-                    {c.external_url && <a href={c.external_url} target="_blank" rel="noopener noreferrer" style={{ color: FIRE.blueText, textDecoration: "none" }}>Donate link <ExternalLink size={11} style={{ verticalAlign: "-1px" }} /></a>}
                   </div>
+
+                  {/* PROGRESS, only when there is a goal to progress toward. A bar with no target is
+                      a decoration; the raised figure alone is the honest render in that case.
+                      Capped at 100% width so an over-target fund does not overflow the card — the
+                      number beside it still says how far over, which is the part worth celebrating. */}
+                  {(() => {
+                    const got = raised[c.id] || 0;
+                    const goal = c.goal_amount != null ? Number(c.goal_amount) : null;
+                    if (!goal && !got) return null;
+                    const pct = goal ? Math.min(100, Math.round((got / goal) * 100)) : null;
+                    return (
+                      <div style={{ marginTop: 9 }}>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
+                          <span style={{ fontWeight: 700, color: FIRE.greenText, ...FS.num }}>${got.toLocaleString()}</span>
+                          {goal ? <span style={{ color: FIRE.textMuted }}>of ${goal.toLocaleString()}{pct != null ? ` · ${pct}%` : ""}</span>
+                                : <span style={{ color: FIRE.textMuted }}>raised — no target set</span>}
+                        </div>
+                        {goal != null && (
+                          <div aria-hidden="true" style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", marginTop: 6, overflow: "hidden" }}>
+                            <div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: pct >= 100 ? FIRE.greenText : FIRE.red, transition: "width .3s" }} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* The donate link is the one thing on this page a member might act on RIGHT NOW —
+                      forwarding it to a business, putting it on a flyer — so it is an action, not a
+                      footnote. rel=noopener because target=_blank without it hands the opened page a
+                      handle back to this one. */}
+                  {c.external_url && (
+                    <a href={c.external_url} target="_blank" rel="noopener noreferrer"
+                       style={{ ...FS.btn, textDecoration: "none", display: "inline-flex", marginTop: 10, padding: "6px 12px", fontSize: 12.5, color: FIRE.blueText, borderColor: "rgba(120,160,220,.35)" }}>
+                      <ExternalLink size={13} /> Donate page
+                    </a>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => startEdit(c)}><Pencil size={13} /> Edit</button>
@@ -6090,6 +6148,8 @@ function DonationBusinesses({ S, notify, meId, members }) {
   return (
     <>
       {loadErr && <OfflineNotice onRetry={load} what="supporters" />}
+      <div style={{ ...FS.kicker, marginBottom: 4 }}>DONATION TRACKER</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Everyone who gives or might — businesses and individuals alike. Note where each conversation stands and when to check back.</p>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a supporter</button>}
         <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={() => setShowRetired((v) => !v)}>
