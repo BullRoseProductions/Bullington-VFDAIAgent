@@ -4637,6 +4637,25 @@ const POST_THEMES = [
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const CATEGORY_COLORS = ["#B11E2A", "#1F4E79", "#0E6B62", "#9A6B12", "#54506B", "#2E7D52", "#C15512", "#3A4A5A"];
+
+/* A fundraiser's colour, with a derived fallback so NULL is never a blank.
+   fundraisers.color is nullable and un-backfilled on purpose (sql/fundraiser_color.sql): NULL means
+   "nobody chose", and hashing the id gives those rows a colour that is STABLE — the same fundraiser
+   is the same colour on every device, every session, with no write and no coordination. Sorting or
+   filtering the list cannot shuffle the palette, which an index-into-the-visible-array scheme would.
+
+   The hash is a plain char-code sum, not a good hash. It does not need to be: the job is to spread
+   ~8 buckets over uuids, and collisions are cosmetic — two fundraisers sharing a colour is untidy,
+   never wrong. Deliberately NOT crypto or seeded, so it stays trivially reproducible by eye.
+
+   An explicit stored colour always wins, which is what makes the picker meaningful. */
+const stableIndex = (id, n) => {
+  const s = String(id || "");
+  let sum = 0;
+  for (let i = 0; i < s.length; i++) sum += s.charCodeAt(i);
+  return sum % n;
+};
+const frColor = (fr) => fr?.color || CATEGORY_COLORS[stableIndex(fr?.id, CATEGORY_COLORS.length)];
 const TIER_STYLES = {
   bar:  { fontSize: 10.5, fontWeight: 700, padding: "3px 6px", borderRadius: 5 },
   pill: { fontSize: 9.5,  fontWeight: 600, padding: "2px 5px", borderRadius: 999 },
@@ -4973,7 +4992,7 @@ function FundingCalendar({ S, role, notify }) {
      rather than breaking — the Map lookup is guarded below. */
   const [frs, setFrs] = useState([]);
   const loadFundraisers = () => {
-    supabase.from("fundraisers").select("id, name, target_date").neq("status", "archived")
+    supabase.from("fundraisers").select("id, name, target_date, color").neq("status", "archived")
       .then(({ data }) => {
         if (!data) return;
         setFrs(data.slice().sort((a, b) =>
@@ -5005,6 +5024,10 @@ function FundingCalendar({ S, role, notify }) {
   const [color, setColor] = useState(CATEGORY_COLORS[0]);
   const [evFr, setEvFr] = useState("");                       // "" = not part of a fundraiser
   const frName = new Map(frs.map((f) => [f.id, f.name]));
+  /* Resolved LIVE from the fundraiser, not from the event's stored colour. Recolouring a fundraiser
+     then repaints all of its dates at once, with no migration of the funding_events rows behind it —
+     the stored colour on a tagged event is a cache, and this is the source of truth. */
+  const frColorMap = new Map(frs.map((f) => [f.id, frColor(f)]));
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
@@ -5045,7 +5068,7 @@ function FundingCalendar({ S, role, notify }) {
               that colour-codes by something else can override it. Choosing None deliberately does
               NOT put the colour back — by that point it may be a choice, not a leftover default. */}
           <label style={{ ...S.field, minWidth: 175 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Part of a fundraiser</span>
-            <select style={FS.input} value={evFr} onChange={(e) => { setEvFr(e.target.value); if (e.target.value) setColor(CATEGORY_COLORS[3]); }}>
+            <select style={FS.input} value={evFr} onChange={(e) => { setEvFr(e.target.value); const c = frColorMap.get(e.target.value); if (c) setColor(c); }}>
               <option value="">None</option>
               {frs.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select></label>
@@ -5069,7 +5092,10 @@ function FundingCalendar({ S, role, notify }) {
            wide, and appending an event name would push the thing you are actually looking for out
            of sight. Guarded on frName having it — an archived fundraiser is absent from that Map,
            and a tooltip reading "— undefined" is worse than no suffix at all. */
-        renderChip={(it) => ({ color: it.c, label: it.title,
+        /* A tagged event takes its fundraiser's colour; an untagged one keeps its own. The
+           `|| it.c` matters for a date whose fundraiser was since archived — it is absent from the
+           map, so it falls back to what it was stored with rather than rendering colourless. */
+        renderChip={(it) => ({ color: it.fundraiserId ? (frColorMap.get(it.fundraiserId) || it.c) : it.c, label: it.title,
           title: `${it.title}${it.fundraiserId && frName.get(it.fundraiserId) ? ` — ${frName.get(it.fundraiserId)}` : ""}${canEdit ? " (tap to remove)" : ""}`,
           onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#9A6B12"
@@ -5526,11 +5552,13 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
     setDBusy(true);
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setDBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    // Funding gold, always, for dates created here: they are a fundraiser's dates by definition, so
-    // there is no choice to offer. The calendar's own form is where a colour gets picked.
+    // The FUNDRAISER's colour, not a fixed gold: dates created here belong to this event by
+    // definition, so there is no colour to offer a choice about. The calendar resolves a tagged
+    // event's colour live from the fundraiser anyway — storing the same value keeps the row honest
+    // on its own, and correct for anything that reads funding_events without joining.
     const { error } = await supabase.from("funding_events").insert({
       department_id: deptId, title, date: df.date,
-      color: CATEGORY_COLORS[3], fundraiser_id: fundraiser.id,
+      color: frColor(fundraiser), fundraiser_id: fundraiser.id,
     });
     setDBusy(false);
     if (error) { notify({ kind: "error", title: "Couldn't add that date", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
@@ -5628,9 +5656,13 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
       {/* ---- 1. Overview ---- */}
       <div style={{ ...S.opCard, ...FS.card, marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-          <PartyPopper size={20} color={st.color()} style={{ flexShrink: 0, marginTop: 3 }} />
+          {/* The fundraiser's OWN colour here, not the status colour: this is the identity accent,
+              and it is what ties the page to the chips on the calendar. Status is still legible —
+              it has its own coloured label beside the name. */}
+          <PartyPopper size={20} color={frColor(fundraiser)} style={{ flexShrink: 0, marginTop: 3 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary }}>
+            <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ width: 10, height: 10, borderRadius: 999, background: frColor(fundraiser), flexShrink: 0, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
               {fundraiser.name}
               <span style={{ fontSize: 11, fontWeight: 700, color: st.color(), marginLeft: 9 }}>{st.label.toUpperCase()}</span>
             </div>
@@ -5792,7 +5824,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
 }
 
 function FundraiserIndex({ S, notify, meId, members }) {
-  const BLANK = { name: "", description: "", target_date: "", goal_amount: "", point_person_id: "", campaign_id: "", status: "planning" };
+  const BLANK = { name: "", description: "", target_date: "", goal_amount: "", point_person_id: "", campaign_id: "", status: "planning", color: "" };
   const [rows, setRows] = useState(null);        // null = first load; [] = genuinely none
   const [loadErr, setLoadErr] = useState(false);
   const [funds, setFunds] = useState([]);
@@ -5807,7 +5839,7 @@ function FundraiserIndex({ S, notify, meId, members }) {
   // Dept-scoped AND leadership-gated by RLS — no client-side filter, which is how the two drift.
   function load() {
     supabase.from("fundraisers")
-      .select("id, name, description, target_date, goal_amount, status, point_person_id, campaign_id, proceeds, sort")
+      .select("id, name, description, target_date, goal_amount, status, point_person_id, campaign_id, proceeds, sort, color")
       .then(({ data, error }) => {
         // A failed read is not an empty department: keep the last-known list rather than telling a
         // department it runs no fundraisers because the network dropped.
@@ -5831,12 +5863,26 @@ function FundraiserIndex({ S, notify, meId, members }) {
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const fundById = new Map(funds.map((x) => [x.id, x.name]));
 
-  function startAdd() { setF(BLANK); setEditingId(null); setAdding(true); }
+  /* Auto-assign the first colour no ACTIVE fundraiser is using, so two things running at the same
+     time never open with the same colour — which is the only case where a clash actually costs you
+     anything on the calendar. Done and archived rows are ignored on purpose: their colours are free
+     to reuse, and counting them would exhaust an 8-colour palette after one busy year.
+     If everything is taken, fall back to a rotation rather than leaving it blank. */
+  function nextColor() {
+    const used = new Set(open.map((r) => frColor(r)));
+    return CATEGORY_COLORS.find((c) => !used.has(c)) || CATEGORY_COLORS[open.length % CATEGORY_COLORS.length];
+  }
+  function startAdd() { setF({ ...BLANK, color: nextColor() }); setEditingId(null); setAdding(true); }
   function startEdit(r) {
     setF({
       name: r.name || "", description: r.description || "", target_date: r.target_date || "",
       goal_amount: r.goal_amount ?? "", point_person_id: r.point_person_id || "",
       campaign_id: r.campaign_id || "", status: r.status === "archived" ? "planning" : (r.status || "planning"),
+      // frColor, not r.color: a row that never had one is already SHOWN in its derived colour, so
+      // preselecting blank would make the picker disagree with the swatch on screen. Opening the
+      // form and saving therefore also pins that derived colour, which is the honest reading of
+      // "I looked at this and kept it".
+      color: frColor(r),
     });
     setAdding(false); setEditingId(r.id);
   }
@@ -5865,6 +5911,7 @@ function FundraiserIndex({ S, notify, meId, members }) {
       // column yet, deliberately.
       campaign_id: f.campaign_id || null,
       status: orig?.status === "archived" ? "archived" : f.status,
+      color: f.color || null,
     };
 
     if (editingId) {
@@ -5921,6 +5968,18 @@ function FundraiserIndex({ S, notify, meId, members }) {
         <select style={FS.input} value={f.status} onChange={(e) => setF((x) => ({ ...x, status: e.target.value }))}>
           {FR_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
         </select></label>
+      {/* Same swatch markup as the funding calendar's add-event form, so the control that picks a
+          colour looks identical wherever you meet it. Prefilled by nextColor() on add and by the
+          fundraiser's current colour on edit — never blank, because "no colour" is not a state this
+          UI should let you aim for when the calendar has to draw something regardless. */}
+      <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Calendar color</span>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+          {CATEGORY_COLORS.map((col) => (
+            <button key={col} title={col} onClick={() => setF((x) => ({ ...x, color: col }))}
+              style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: f.color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+          ))}
+        </div>
+      </div>
       <label style={{ ...S.field, flex: "1 1 100%" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What it's for</span>
         <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={f.description} onChange={(e) => setF((x) => ({ ...x, description: e.target.value }))} placeholder="Breakfast at the station — proceeds toward the new engine." /></label>
       <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={save}>
