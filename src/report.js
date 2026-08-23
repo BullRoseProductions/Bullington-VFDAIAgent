@@ -366,8 +366,18 @@ export function buildReportDoc(data) {
 /* ---------------- Capital Replacement Plan ----------------
    The artifact a chief hands the selectboard: what the fleet cost, when each rig is planned for
    replacement, and what that costs by year. Same banner/table styling as the department report.
-   `data` = { deptName, station, groups: [{ year, rows, subtotal }], unplanned: [rows], grandTotal }
-   where each row is { name, type, purchaseYear, purchaseCost, replaceYear, replaceCost }. */
+   `data` = { deptName, station, groups: [{ year, rows, subtotal }], unplanned: [rows], grandTotal,
+              recommendedAnnual }
+   where each PLANNED row is { name, type, purchaseYear, purchaseCost, replaceYear, replaceCost,
+   finalCost, isProjected, annualSetAside } and each UNPLANNED row carries only the first four.
+
+   finalCost IS ALREADY RESOLVED by the caller — an entered replaceCost if there is one, otherwise
+   the projection from today's cost. The projection is NOT recomputed here, deliberately: this
+   module is imported BY App.jsx, so importing the helper back would be circular, and more to the
+   point a printed figure that disagreed with the screen it was generated from would be the exact
+   failure a board report cannot have. subtotal, grandTotal and recommendedAnnual are likewise
+   passed in rather than re-derived. isProjected says which of the two a row got, and is printed —
+   a reader is entitled to know which numbers the department stated and which were computed. */
 export function downloadCapitalPlan(data) {
   const { doc, slug } = buildCapitalPlanDoc(data);
   doc.save(slug);
@@ -418,7 +428,7 @@ export function buildCapitalPlanDoc(data) {
   if (groups.length === 0) {
     para("No apparatus has a planned replacement year on record yet.", GRAY);
   } else {
-    table(["Replacement year", "Apparatus", "Estimated cost"],
+    table(["Replacement year", "Apparatus", "Replacement cost"],
       groups.map((g) => [String(g.year), String(g.rows.length), money(g.subtotal)]),
       { columnStyles: { 1: { halign: "center" }, 2: { halign: "right" } } });
     doc.setFillColor(...PANEL); ensure(30);
@@ -427,15 +437,38 @@ export function buildCapitalPlanDoc(data) {
     doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
     doc.text("Total planned replacement cost", M + 12, y + 17);
     doc.text(money(data.grandTotal), M + CW - 12, y + 17, { align: "right" });
-    y += 26 + 16;
+    y += 26 + 6;
+    // THE NUMBER THAT GOES IN A BUDGET LINE. The grand total says what the fleet costs eventually;
+    // this says what to do about it this year, which is the question a selectboard is actually
+    // asking. Rendered as its own banded row so it survives being skim-read.
+    if (data.recommendedAnnual != null) {
+      ensure(30);
+      doc.setFillColor(...PANEL); doc.rect(M, y, CW, 26, "F");
+      doc.setFillColor(...RED); doc.rect(M, y, 3, 26, "F");
+      doc.setTextColor(...SLATE); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+      doc.text("Recommended set-aside", M + 12, y + 17);
+      doc.text(`${money(data.recommendedAnnual)} / year`, M + CW - 12, y + 17, { align: "right" });
+      y += 26 + 4;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+      doc.setTextColor(...GRAY);
+      doc.text("Set this aside each year to stay on track to fund every planned replacement.", M + 12, y + 8);
+      y += 18;
+    }
+    y += 10;
   }
 
   // ---------- detail by year ----------
   groups.forEach((g) => {
     header(`${g.year} — ${money(g.subtotal)}`);
-    table(["Apparatus", "Type", "Purchased", "Purchase cost", "Est. replacement"],
-      g.rows.map((r) => [r.name, r.type || "—", r.purchaseYear == null ? "—" : String(r.purchaseYear), money(r.purchaseCost), money(r.replaceCost)]),
-      { columnStyles: { 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" } } });
+    table(["Apparatus", "Type", "Purchased", "Purchase cost", "Replacement cost", "Set aside / yr"],
+      g.rows.map((r) => [
+        r.name, r.type || "—",
+        r.purchaseYear == null ? "—" : String(r.purchaseYear),
+        money(r.purchaseCost),
+        money(r.finalCost) + (r.isProjected ? " (projected)" : ""),
+        money(r.annualSetAside),
+      ]),
+      { columnStyles: { 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } } });
   });
 
   // ---------- not yet planned ----------
@@ -448,16 +481,24 @@ export function buildCapitalPlanDoc(data) {
   }
 
   // ---------- provenance ----------
-  ensure(50);
-  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 44, "F");
-  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   const prov = doc.splitTextToSize(
-    "Figures are the department’s own recorded purchase and replacement estimates, not appraisals or bids. "
-    + "Estimated replacement costs are planning figures entered by department leadership and should be "
-    + "re-validated against current pricing before any funding request.", CW - 24);
+    "Figures are the department’s own records, not appraisals or bids. Replacement costs marked "
+    + "“(projected)” are computed from a present-day cost carried forward at the department’s stated "
+    + "inflation assumption; the rest were entered directly by leadership. The recommended set-aside "
+    + "spreads each unit’s cost evenly over the years remaining until its planned replacement and "
+    + "assumes no interest, grant or trade-in. All figures should be re-validated against current "
+    + "pricing before any funding request.", CW - 24);
+  // Box sized FROM the text, not a fixed 44pt. The note grew when the projection had to be
+  // explained, and a hardcoded height silently prints the last two lines outside the grey panel —
+  // the kind of defect that only shows up on the page somebody hands to a selectboard.
+  const provH = prov.length * 10 + 16;
+  ensure(provH + 6);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, provH, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   let py = y + 13;
   prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
-  y += 44 + 10;
+  y += provH + 10;
 
   // ---------- footers ----------
   const n = doc.getNumberOfPages();

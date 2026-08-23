@@ -9673,25 +9673,47 @@ function CapitalPlanReport({ S, dept, back }) {
   const [err, setErr] = useState("");   // a failed read is not "no capital plan" — never show an empty plan as fact
   const load = () => {
     setErr("");
-    supabase.from("apparatus").select("id, name, type, purchase_year, purchase_cost, replace_year, replace_cost").order("name", { ascending: true })
+    supabase.from("apparatus").select("id, name, type, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost").order("name", { ascending: true })
       .then(({ data, error }) => {
         setLoaded(true);
         if (error) { setErr(error.message || "Please try again."); return; }
-        setRigs((data || []).map((r) => ({ id: r.id, name: r.name, type: r.type, purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null, replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null })));
+        setRigs((data || []).map((r) => ({ id: r.id, name: r.name, type: r.type, purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null, currentCost: r.current_cost ?? null, inflationRate: r.inflation_rate ?? null, replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null })));
       });
   };
   useEffect(() => { load(); }, []);
   const money = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
   // Planned = has a replacement year. Everything else falls to "Not yet planned" — including rigs with no
   // capital data at all, because an unplanned rig is exactly what leadership needs to see.
-  const planned = rigs.filter((r) => r.replaceYear != null);
+  const thisYear = new Date().getFullYear();
+  /* ONE COST PER RIG, resolved here and used everywhere below — the tables, the totals, the
+     set-aside and the PDF all read finalCost, so there is no path by which a screen figure and a
+     printed figure can disagree.
+
+     THE OVERRIDE WINS. An entered replace_cost is a human's number — a dealer quote, a
+     board-adopted figure — and a projection must never quietly replace it. isProjected records
+     which of the two a row got, because a leadership team reading a funding request is entitled to
+     know which numbers the department stated and which the app computed. */
+  const withCosts = (r) => {
+    const finalCost = r.replaceCost != null
+      ? Number(r.replaceCost)
+      : projectCost(r.currentCost, r.inflationRate, r.replaceYear, thisYear);
+    // max(1, …): a rig due THIS year (or overdue) would divide by zero or a negative. One year is
+    // the honest floor — it says "fund this within a year", which is what being due now means.
+    const yearsLeft = Math.max(1, Number(r.replaceYear) - thisYear);
+    return { ...r, finalCost, isProjected: r.replaceCost == null && finalCost != null,
+             annualSetAside: finalCost != null ? finalCost / yearsLeft : null };
+  };
+  const planned = rigs.filter((r) => r.replaceYear != null).map(withCosts);
   const unplanned = rigs.filter((r) => r.replaceYear == null);
   const groups = [...new Set(planned.map((r) => r.replaceYear))].sort((a, b) => a - b).map((year) => {
     const rows = planned.filter((r) => r.replaceYear === year).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    return { year, rows, subtotal: rows.reduce((a, r) => a + (Number(r.replaceCost) || 0), 0) };
+    return { year, rows, subtotal: rows.reduce((a, r) => a + (Number(r.finalCost) || 0), 0) };
   });
   const grandTotal = groups.reduce((a, g) => a + g.subtotal, 0);
-  const anyCost = planned.some((r) => r.replaceCost != null);
+  const anyCost = planned.some((r) => r.finalCost != null);
+  // null, not 0, when nothing is costed — money() renders "—". A confident "$0 / year" on a plan
+  // with no figures in it would read as "you need to save nothing", which is the opposite of true.
+  const recommendedAnnual = anyCost ? planned.reduce((a, r) => a + (Number(r.annualSetAside) || 0), 0) : null;
   const TH = { textAlign: "left", padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" };
   const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
   return (
@@ -9704,7 +9726,7 @@ function CapitalPlanReport({ S, dept, back }) {
           <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>What the fleet cost, when each unit is due for replacement, and what that adds up to by year.</div>
         </div>
         {loaded && !err && (planned.length > 0 || unplanned.length > 0) && (
-          <button style={FS.btn} onClick={() => downloadCapitalPlan({ deptName: dept?.name || "Department", station: dept?.station || "", groups, unplanned, grandTotal })}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
+          <button style={FS.btn} onClick={() => downloadCapitalPlan({ deptName: dept?.name || "Department", station: dept?.station || "", groups, unplanned, grandTotal, recommendedAnnual })}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
         )}
       </div>
       {err && (
@@ -9723,6 +9745,23 @@ function CapitalPlanReport({ S, dept, back }) {
           <div>No apparatus on record yet.</div>
         </div>
       ) : (<>
+        {/* THE HEADLINE DELIVERABLE. A total replacement cost tells a board what the fleet will
+            cost eventually; it does not tell them what to do on Monday. The per-year set-aside
+            does — it is the number that goes in a budget line. Above the forecast because it is
+            the answer, and the tables below it are the working. */}
+        {groups.length > 0 && (
+          <div style={{ ...FS.card, padding: "16px 18px", marginBottom: 14, borderLeft: `3px solid ${FIRE.red}` }}>
+            <div style={{ ...FS.kicker, marginBottom: 6 }}>RECOMMENDED SET-ASIDE</div>
+            <div style={{ fontSize: 30, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.05 }}>
+              {money(recommendedAnnual)}{recommendedAnnual != null && <span style={{ fontSize: 16, fontWeight: 700, color: FIRE.textSecondary }}> / year</span>}
+            </div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
+              {recommendedAnnual == null
+                ? "No replacement costs recorded yet — add a cost today or an override on the Apparatus page to get this figure."
+                : "Set this aside each year to stay on track to fund every planned replacement."}
+            </div>
+          </div>
+        )}
         {/* forecast */}
         <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
           <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>FORECAST BY YEAR</div>
@@ -9730,7 +9769,7 @@ function CapitalPlanReport({ S, dept, back }) {
             <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No apparatus has a planned replacement year yet. Add one from the Apparatus page.</div>
           ) : (<>
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
-              <thead><tr><th style={TH}>Year</th><th style={{ ...TH, textAlign: "right" }}>Units</th><th style={{ ...TH, textAlign: "right" }}>Estimated cost</th></tr></thead>
+              <thead><tr><th style={TH}>Year</th><th style={{ ...TH, textAlign: "right" }}>Units</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th></tr></thead>
               <tbody>
                 {groups.map((g) => (
                   <tr key={g.year} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
@@ -9746,7 +9785,7 @@ function CapitalPlanReport({ S, dept, back }) {
                 </tr>
               </tbody>
             </table>
-            {!anyCost && <div style={{ fontSize: 11.5, color: FIRE.amberText, padding: "8px 12px 4px" }}>No estimated replacement costs recorded yet — the totals above are $0 until those are filled in.</div>}
+            {!anyCost && <div style={{ fontSize: 11.5, color: FIRE.amberText, padding: "8px 12px 4px" }}>No replacement costs recorded yet — the totals above are $0 until a cost today or an override is filled in on the Apparatus page.</div>}
           </>)}
         </div>
         {/* per-year detail */}
@@ -9754,7 +9793,7 @@ function CapitalPlanReport({ S, dept, back }) {
           <div key={g.year} style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
             <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>{g.year} — {money(g.subtotal)}</div>
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
-              <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={{ ...TH, textAlign: "right" }}>Est. replacement</th></tr></thead>
+              <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th><th style={{ ...TH, textAlign: "right" }}>Set aside / yr</th></tr></thead>
               <tbody>
                 {g.rows.map((r) => (
                   <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
@@ -9762,7 +9801,14 @@ function CapitalPlanReport({ S, dept, back }) {
                     <td style={TD}>{r.type || "—"}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num }}>{money(r.purchaseCost)}</td>
-                    <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(r.replaceCost)}</td>
+                    {/* "(projected)" is not decoration. This table goes in front of a selectboard,
+                        and a reader is entitled to know which figures the department stated and
+                        which the app computed from today's cost. */}
+                    <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>
+                      {money(r.finalCost)}
+                      {r.isProjected && <span style={{ color: FIRE.textMuted, fontWeight: 400 }}> (projected)</span>}
+                    </td>
+                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{money(r.annualSetAside)}</td>
                   </tr>
                 ))}
               </tbody>
