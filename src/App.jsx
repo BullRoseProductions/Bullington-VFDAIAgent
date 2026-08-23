@@ -4909,9 +4909,23 @@ function FundingCalendar({ S, role, notify }) {
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
+  /* Non-archived fundraisers, for the picker and for turning a tag back into a name. Archived ones
+     are left out on purpose: you should not be able to file a NEW date under something already put
+     away. An existing date whose fundraiser was since archived simply loses its tooltip suffix
+     rather than breaking — the Map lookup is guarded below. */
+  const [frs, setFrs] = useState([]);
+  const loadFundraisers = () => {
+    supabase.from("fundraisers").select("id, name, target_date").neq("status", "archived")
+      .then(({ data }) => {
+        if (!data) return;
+        setFrs(data.slice().sort((a, b) =>
+          (a.target_date || "9999-12-31").localeCompare(b.target_date || "9999-12-31")
+          || (a.name || "").localeCompare(b.name || "")));
+      });
+  };
   const loadItems = () => {
     supabase.from("funding_events")
-      .select("id, date, title, color, notes")
+      .select("id, date, title, color, notes, fundraiser_id")
       .then(({ data, error }) => {
         if (error || !data) {   // a failed READ is not "zero events" — keep last-known, log, offer retry (never blank on error)
           console.error("[loadItems] funding_events read failed — keeping last-known events:", error);
@@ -4921,16 +4935,18 @@ function FundingCalendar({ S, role, notify }) {
         setItems(
           data.filter((r) => r.date).map((r) => {
             const [yy, mm, dd] = r.date.split("-").map(Number);
-            return { id: r.id, y: yy, m: (mm || 1) - 1, d: dd, title: r.title, c: r.color, notes: r.notes || "" };
+            return { id: r.id, y: yy, m: (mm || 1) - 1, d: dd, title: r.title, c: r.color, notes: r.notes || "", fundraiserId: r.fundraiser_id || null };
           })
         );
       });
   };
-  useEffect(() => { loadItems(); }, []);
+  useEffect(() => { loadItems(); loadFundraisers(); }, []);
   const [show, setShow] = useState(false);
   const [fd, setFd] = useState(today.getDate());
   const [evTitle, setEvTitle] = useState("");
   const [color, setColor] = useState(CATEGORY_COLORS[0]);
+  const [evFr, setEvFr] = useState("");                       // "" = not part of a fundraiser
+  const frName = new Map(frs.map((f) => [f.id, f.name]));
 
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
@@ -4946,9 +4962,10 @@ function FundingCalendar({ S, role, notify }) {
       title: t,
       date: toISO(new Date(cur.y, cur.m, Number(fd))),
       color,
+      fundraiser_id: evFr || null,
     });
     if (error) { notify({ kind: "error", title: "Couldn't add the event", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }   // keep form open on error
-    setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); loadItems();
+    setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); loadItems();
   }
   async function removeEvent(id, title) {
     if (!window.confirm(`Remove “${title}” from the funding calendar?`)) return;
@@ -4965,6 +4982,15 @@ function FundingCalendar({ S, role, notify }) {
             <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Pancake breakfast at Station 20" /></label>
           <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
             <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+          {/* Picking a fundraiser NUDGES the colour to the funding gold so a fundraiser's dates read
+              as a set on a busy month. Only a nudge: the swatches below stay live, so a department
+              that colour-codes by something else can override it. Choosing None deliberately does
+              NOT put the colour back — by that point it may be a choice, not a leftover default. */}
+          <label style={{ ...S.field, minWidth: 175 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Part of a fundraiser</span>
+            <select style={FS.input} value={evFr} onChange={(e) => { setEvFr(e.target.value); if (e.target.value) setColor(CATEGORY_COLORS[3]); }}>
+              <option value="">None</option>
+              {frs.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select></label>
           <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
@@ -4981,11 +5007,17 @@ function FundingCalendar({ S, role, notify }) {
       <MonthCalendar
         cur={cur} setCur={setCur} dark
         items={monthItems}
-        renderChip={(it) => ({ color: it.c, label: it.title, title: canEdit ? `${it.title} (tap to remove)` : it.title, onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
+        /* The fundraiser goes in the TOOLTIP, never the label: a month cell is a few characters
+           wide, and appending an event name would push the thing you are actually looking for out
+           of sight. Guarded on frName having it — an archived fundraiser is absent from that Map,
+           and a tooltip reading "— undefined" is worse than no suffix at all. */
+        renderChip={(it) => ({ color: it.c, label: it.title,
+          title: `${it.title}${it.fundraiserId && frName.get(it.fundraiserId) ? ` — ${frName.get(it.fundraiserId)}` : ""}${canEdit ? " (tap to remove)" : ""}`,
+          onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#9A6B12"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
@@ -5311,7 +5343,8 @@ function frWhen(iso, todayISO) {
 
 /* ---------------- Fundraiser HQ · one event ----------------
    Everything about a single fundraiser in one place: what it is, the jobs it needs doing, and who
-   is backing it. Calendar dates arrive in slice 4.
+   is backing it, plus the dates it turns on — which are rows in funding_events, so they show
+   on the funding calendar rather than living only here.
 
    THE ACTION ITEMS ARE THE REAL ONES. Not a private task list — rows in action_items, tagged with
    fundraiser_id, which means they show up in the member's own "my open items", they fire the
@@ -5327,12 +5360,18 @@ function frWhen(iso, todayISO) {
 function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) {
   const [items, setItems] = useState(null);
   const [sponsors, setSponsors] = useState(null);
+  const [dates, setDates] = useState(null);        // null = first load; [] = genuinely none
   const [loadErr, setLoadErr] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
 
   const [addingTask, setAddingTask] = useState(false);
   const [tf, setTf] = useState({ text: "", assigned_to: "", due_date: "" });
   const [tBusy, setTBusy] = useState(false);
+
+  const DT_BLANK = { title: "", date: "" };
+  const [addingDate, setAddingDate] = useState(false);
+  const [df, setDf] = useState(DT_BLANK);
+  const [dBusy, setDBusy] = useState(false);
 
   const SP_BLANK = { name: "", package: "", whats_included: "", what_they_gave: "", notes: "" };
   const [addingSponsor, setAddingSponsor] = useState(false);
@@ -5352,6 +5391,11 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
     supabase.from("fundraiser_sponsors").select("*").eq("fundraiser_id", fundraiser.id)
       .order("sort", { ascending: true }).order("created_at", { ascending: true })
       .then(({ data, error }) => { if (!error && data) setSponsors(data); });
+    // The SAME rows the funding calendar draws — this is a filtered view of funding_events, not a
+    // second store of dates. Adding one here makes it appear on the calendar and vice versa.
+    supabase.from("funding_events").select("id, date, title").eq("fundraiser_id", fundraiser.id)
+      .order("date", { ascending: true })
+      .then(({ data, error }) => { if (!error && data) setDates(data); });
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [fundraiser.id]);
   useReconnect(() => { if (loadErr) load(); });
@@ -5414,6 +5458,32 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
     const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });
     if (error) { notify({ kind: "error", title: "Couldn't cancel that", text: "Something went wrong. Please try again.", details: error.message }); return; }
     notify({ kind: "success", title: "Marked no longer needed", text: `"${it.text}" was cancelled.` });
+    load();
+  }
+
+  async function addDate() {
+    const title = df.title.trim();
+    if (!title) { notify({ kind: "error", title: "What is the date for?", text: "Give it a short title — \u201cSetup\u201d, \u201cEvent day\u201d, \u201cPermit deadline\u201d." }); return; }
+    if (!df.date) { notify({ kind: "error", title: "Pick a day", text: "A key date needs a day before you can save it." }); return; }
+    setDBusy(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setDBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    // Funding gold, always, for dates created here: they are a fundraiser's dates by definition, so
+    // there is no choice to offer. The calendar's own form is where a colour gets picked.
+    const { error } = await supabase.from("funding_events").insert({
+      department_id: deptId, title, date: df.date,
+      color: CATEGORY_COLORS[3], fundraiser_id: fundraiser.id,
+    });
+    setDBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't add that date", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    setAddingDate(false); setDf(DT_BLANK); load();
+  }
+  async function removeDate(d) {
+    // Same wording as the funding calendar's own remove, because it is the same row and removing it
+    // here removes it from the calendar too — the confirm should not imply a smaller blast radius.
+    if (!window.confirm(`Remove \u201c${d.title}\u201d from the funding calendar?`)) return;
+    const { error } = await supabase.from("funding_events").delete().eq("id", d.id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove that date", text: "Something went wrong removing it. Please try again.", details: error.message }); return; }
     load();
   }
 
@@ -5525,7 +5595,49 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
         {fundraiser.target_date && stat("When", when || "—", fundraiser.target_date, FIRE.textSecondary)}
       </div>
 
-      {/* ---- 2. Action items ---- */}
+      {/* ---- 2. Key dates ----
+           Placed above the jobs on purpose: "when is it" is the question that reorders everything
+           else, and a job list read without the setup day next to it is how the tables get booked
+           for the wrong afternoon. */}
+      <div style={{ ...FS.kicker, marginBottom: 4 }}>KEY DATES</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>These land on the funding calendar, so anything added here is visible to everyone who looks at the month.</p>
+      {!addingDate && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={() => { setDf(DT_BLANK); setAddingDate(true); }}><Plus size={15} /> Add a date</button>}
+      {addingDate && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What is it</span>
+            <input style={FS.input} value={df.title} onChange={(e) => setDf({ ...df, title: e.target.value })} placeholder="e.g. Setup and table drop-off" /></label>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+            <input type="date" style={FS.input} value={df.date} onChange={(e) => setDf({ ...df, date: e.target.value })} /></label>
+          <button style={FS.btnPrimary} disabled={dBusy} onClick={addDate}>{dBusy ? "Saving\u2026" : "Add date"}</button>
+          <button style={FS.btn} disabled={dBusy} onClick={() => { setAddingDate(false); setDf(DT_BLANK); }}>Cancel</button>
+        </div>
+      )}
+      {dates === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginBottom: 16 }}>Loading…</div>
+      ) : (dates || []).length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 16, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+          No dates yet — add the event day, setup, and any deadlines so they show on the funding calendar.
+        </div>
+      ) : (
+        <div style={{ marginBottom: 16 }}>
+          {(dates || []).map((d) => {
+            const rel = frWhen(d.date, todayISO);
+            const past = d.date < todayISO;
+            return (
+              <div key={d.id} style={{ ...S.opCard, ...FS.card, marginBottom: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <Calendar size={16} color={past ? FIRE.textMuted : FIRE.amberText} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: past ? FIRE.textMuted : FIRE.textPrimary }}>{d.title}</div>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{d.date}{rel ? ` \u00b7 ${rel}` : ""}</div>
+                </div>
+                <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => removeDate(d)}><Trash2 size={13} /> Remove</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ---- 3. Action items ---- */}
       <div style={{ ...FS.kicker, marginBottom: 4 }}>JOBS TO DO</div>
       <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Real action items — assigning one notifies that member, and it shows up in their own list too.</p>
       {!addingTask && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={() => setAddingTask(true)}><Plus size={15} /> Add a job</button>}
@@ -5562,7 +5674,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
         </div>
       )}
 
-      {/* ---- 3. Sponsors ---- */}
+      {/* ---- 4. Sponsors ---- */}
       <div style={{ ...FS.kicker, marginBottom: 4 }}>SPONSORS</div>
       <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Who's backing it, what you promised them, and whether you've delivered it yet.</p>
       {!addingSponsor && !editingSponsorId && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={startSponsorAdd}><Plus size={15} /> Add a sponsor</button>}
