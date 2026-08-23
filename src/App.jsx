@@ -5815,6 +5815,10 @@ function DonationFunds({ S, notify, meId, members }) {
      Summed client-side because the row count is a department's gifts, not a warehouse. If that ever
      stops being true the fix is a view or an RPC, not a stored column. */
   const [raised, setRaised] = useState({});
+  const [donors, setDonors] = useState([]);          // for the "who gave" picker
+  const [giftFor, setGiftFor] = useState(null);      // campaign id whose gift form is open
+  const [gf, setGf] = useState({ amount: "", occurred_on: "", donor_id: "", note: "" });
+  const [gBusy, setGBusy] = useState(false);
 
   function load() {
     supabase.from("donation_campaigns")
@@ -5838,6 +5842,11 @@ function DonationFunds({ S, notify, meId, members }) {
         for (const r of data) m[r.campaign_id] = (m[r.campaign_id] || 0) + (Number(r.amount) || 0);
         setRaised(m);
       });
+    // Current supporters only — you cannot attribute a new gift to a retired relationship, and a
+    // long dropdown of people the department no longer works with makes the live ones harder to find.
+    supabase.from("donation_donors").select("id, name, organization, active").eq("active", true)
+      .order("name", { ascending: true })
+      .then(({ data }) => { if (data) setDonors(data); });
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   useReconnect(() => { if (loadErr) load(); });
@@ -5886,6 +5895,26 @@ function DonationFunds({ S, notify, meId, members }) {
       if (error) { notify({ kind: "error", title: "Couldn't add that fund", text: "Something went wrong adding it. Please try again.", details: error.message }); return; }
     }
     cancel(); load();
+  }
+
+  function openGift(c) {
+    // Today by default: most gifts are logged the day they arrive, and a required date field with
+    // no sensible default is friction on the commonest path.
+    setGf({ amount: "", occurred_on: new Date().toISOString().slice(0, 10), donor_id: "", note: "" });
+    setGiftFor(c.id);
+  }
+
+  async function saveGift(c) {
+    const amt = Number(String(gf.amount).replace(/[^0-9.]/g, ""));
+    if (!amt) { notify({ kind: "error", title: "How much was it?", text: "A gift needs an amount before you can log it." }); return; }
+    if (!gf.occurred_on) { notify({ kind: "error", title: "When did it arrive?", text: "A gift needs a date — it's what the yearly total counts on." }); return; }
+    setGBusy(true);
+    const { error } = await recordGift({ campaignId: c.id, donorId: gf.donor_id, amount: amt, occurredOn: gf.occurred_on, note: gf.note });
+    setGBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't log that gift", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    setGiftFor(null);
+    notify({ kind: "success", title: "Gift logged", text: `$${amt.toLocaleString()} recorded for ${c.name}.` });
+    load();                              // re-sums the bar from the ledger
   }
 
   async function setStatus(c, next) {
@@ -5969,21 +5998,55 @@ function DonationFunds({ S, notify, meId, members }) {
                       number beside it still says how far over, which is the part worth celebrating. */}
                   {(() => {
                     const got = raised[c.id] || 0;
-                    const goal = c.goal_amount != null ? Number(c.goal_amount) : null;
+                    const goal = c.goal_amount != null && Number(c.goal_amount) > 0 ? Number(c.goal_amount) : null;
                     if (!goal && !got) return null;
                     const pct = goal ? Math.min(100, Math.round((got / goal) * 100)) : null;
-                    return (
-                      <div style={{ marginTop: 9 }}>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
-                          <span style={{ fontWeight: 700, color: FIRE.greenText, ...FS.num }}>${got.toLocaleString()}</span>
-                          {goal ? <span style={{ color: FIRE.textMuted }}>of ${goal.toLocaleString()}{pct != null ? ` · ${pct}%` : ""}</span>
-                                : <span style={{ color: FIRE.textMuted }}>raised — no target set</span>}
+                    const toGo = goal ? Math.max(0, goal - got) : null;
+                    const met = goal != null && got >= goal;
+
+                    /* NO TARGET, NO BAR. A fund without a goal gets the raised figure alone — an
+                       empty track and a "0%" would report a shortfall against a number nobody set,
+                       which is a made-up failure. */
+                    if (!goal) {
+                      return (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.1 }}>${got.toLocaleString()}</div>
+                          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>raised · no target set</div>
                         </div>
-                        {goal != null && (
-                          <div aria-hidden="true" style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", marginTop: 6, overflow: "hidden" }}>
-                            <div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: pct >= 100 ? FIRE.greenText : FIRE.red, transition: "width .3s" }} />
-                          </div>
-                        )}
+                      );
+                    }
+
+                    return (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap", fontSize: 13 }}>
+                          <span style={{ fontWeight: 800, color: FIRE.red, fontSize: 17, ...FS.num }}>${got.toLocaleString()}</span>
+                          <span style={{ color: FIRE.textMuted }}>of ${goal.toLocaleString()}</span>
+                          <span style={{ color: FIRE.textMuted }}>· {pct}%</span>
+                        </div>
+
+                        {/* THE BAR IS THE FOCAL POINT. A dark track so the fill reads as light against
+                            it, fully rounded so even a 1% sliver keeps its shape instead of becoming a
+                            square nub, and a deep-red-to-orange gradient sized to the TRACK rather than
+                            to the fill — so a small amount shows the dark end of the gradient and the
+                            colour genuinely travels as the fund grows, instead of every fund showing
+                            the same squashed rainbow. */}
+                        <div aria-hidden="true" style={{ position: "relative", height: 11, borderRadius: 999, background: "rgba(255,255,255,.06)", marginTop: 8, overflow: "hidden", boxShadow: "inset 0 1px 2px rgba(0,0,0,.45)" }}>
+                          <div style={{
+                            width: `${pct}%`, height: "100%", borderRadius: 999,
+                            // The gradient spans the FILL, not the track: a 6% sliver still runs deep
+                            // red to orange across its own width and reads as lit, where scaling it to
+                            // the track would leave every small fund a flat dark nub.
+                            backgroundImage: "linear-gradient(90deg, #b91c1c 0%, #f97316 100%)",
+                            boxShadow: pct > 0 ? "0 0 10px rgba(249,115,22,.35)" : "none",
+                            transition: "width .35s ease",
+                          }} />
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 5 }}>
+                          {met
+                            ? <span style={{ fontSize: 11.5, fontWeight: 700, color: FIRE.greenText }}>Goal met</span>
+                            : <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>${toGo.toLocaleString()} to go</span>}
+                        </div>
                       </div>
                     );
                   })()}
@@ -5992,11 +6055,36 @@ function DonationFunds({ S, notify, meId, members }) {
                       forwarding it to a business, putting it on a flyer — so it is an action, not a
                       footnote. rel=noopener because target=_blank without it hands the opened page a
                       handle back to this one. */}
-                  {c.external_url && (
-                    <a href={c.external_url} target="_blank" rel="noopener noreferrer"
-                       style={{ ...FS.btn, textDecoration: "none", display: "inline-flex", marginTop: 10, padding: "6px 12px", fontSize: 12.5, color: FIRE.blueText, borderColor: "rgba(120,160,220,.35)" }}>
-                      <ExternalLink size={13} /> Donate page
-                    </a>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => (giftFor === c.id ? setGiftFor(null) : openGift(c))}>
+                      <Plus size={13} /> Record a gift
+                    </button>
+                    {c.external_url && (
+                      <a href={c.external_url} target="_blank" rel="noopener noreferrer"
+                         style={{ ...FS.btn, textDecoration: "none", display: "inline-flex", padding: "6px 12px", fontSize: 12.5, color: FIRE.blueText, borderColor: "rgba(120,160,220,.35)" }}>
+                        <ExternalLink size={13} /> Donate page
+                      </a>
+                    )}
+                  </div>
+
+                  {giftFor === c.id && (
+                    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "rgba(255,255,255,.03)", border: `0.5px solid ${FIRE.hairline}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Amount ($) *</span>
+                        <input style={FS.input} value={gf.amount} onChange={(e) => setGf((x) => ({ ...x, amount: e.target.value }))} placeholder="250" inputMode="numeric" autoFocus /></label>
+                      <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date received *</span>
+                        <input style={FS.input} type="date" value={gf.occurred_on} onChange={(e) => setGf((x) => ({ ...x, occurred_on: e.target.value }))} /></label>
+                      {/* Anonymous is the FIRST option, not an afterthought: bucket collections and
+                          cash envelopes are ordinary, and a gift with no name still counts. */}
+                      <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who gave</span>
+                        <select style={FS.input} value={gf.donor_id} onChange={(e) => setGf((x) => ({ ...x, donor_id: e.target.value }))}>
+                          <option value="">Anonymous / not tracked</option>
+                          {donors.map((d) => <option key={d.id} value={d.id}>{d.organization || d.name}</option>)}
+                        </select></label>
+                      <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note</span>
+                        <input style={FS.input} value={gf.note} onChange={(e) => setGf((x) => ({ ...x, note: e.target.value }))} placeholder="Cheque handed in at the station" /></label>
+                      <button style={{ ...FS.btnPrimary, opacity: gBusy ? 0.6 : 1 }} disabled={gBusy} onClick={() => saveGift(c)}>{gBusy ? "Saving…" : "Log gift"}</button>
+                      <button style={FS.btn} onClick={() => setGiftFor(null)} disabled={gBusy}>Cancel</button>
+                    </div>
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -6025,6 +6113,29 @@ function DonationFunds({ S, notify, meId, members }) {
 
    NO last-contacted COLUMN. It is derived from the contact rows in the timeline, which arrive in
    slice 5 — a stored copy would drift the moment somebody logs a call and forgets to update it. */
+/* ONE WRITER FOR A LOGGED GIFT, shared by the fund card and (slice 5) the tracker's timeline.
+   Both produce the same row: a kind='contribution' activity. Written once because the CHECK
+   constraint requires amount AND occurred_on together, and two call sites enforcing that
+   separately is how one of them ends up not enforcing it.
+
+   campaignId null = a gift for no particular fund; donorId null = a genuinely anonymous gift
+   (bucket, cash). Both are legitimate and neither blocks the other. */
+async function recordGift({ campaignId, donorId, amount, occurredOn, note }) {
+  const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+  if (deptErr || !deptId) return { error: deptErr || new Error("no department") };
+  const { error } = await supabase.from("donation_activity").insert({
+    department_id: deptId,
+    campaign_id: campaignId || null,
+    donor_id: donorId || null,
+    kind: "contribution",
+    label: null,                       // the amount and date are the record; a headline is optional
+    amount: Number(amount),
+    occurred_on: occurredOn,
+    note: (note || "").trim() || null,
+  });
+  return { error };
+}
+
 const DONOR_STAGES = [
   { v: "prospect",  label: "Prospect",  hint: "Not approached yet" },
   { v: "talking",   label: "Talking",   hint: "Conversation started" },
