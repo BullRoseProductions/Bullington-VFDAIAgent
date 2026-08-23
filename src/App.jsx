@@ -85,6 +85,54 @@ const FS = {
   rowActions: { display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginLeft: "auto" },
 };
 
+/* ---------------- ErrorBoundary ----------------
+   WHY THIS EXISTS. Twice now a single render-time TypeError has taken the entire app to a white
+   screen — once from a stale lucide import, once from calling a boolean (`canManage(role)` where
+   `canManage` was shadowed by a local const). Both were one wrong token in one component, and both
+   cost the whole product, because an uncaught throw during render unmounts the tree.
+
+   The lint gate added after the first one CANNOT catch the second class: no-undef checks that a
+   name is DEFINED, not that it holds the type you are about to use it as. `canManage(role)` is
+   perfectly well-defined and still throws. So the answer is containment, not another linter.
+
+   BOUNDARIES MUST BE CLASSES. There is no hook equivalent — getDerivedStateFromError and
+   componentDidCatch exist only on class components. This is the one class in the file, on purpose.
+
+   WHAT IT DOES NOT CATCH, so nobody trusts it further than it goes: event handlers, async work
+   (promise rejections, setTimeout), and errors thrown during SSR. React only routes errors raised
+   in the render/lifecycle path here. A crash inside an onClick still goes to window.onerror. */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) {
+    // The component stack is the part that actually locates the bug — it names the component that
+    // threw, which the message alone does not. Kept on console.error so it lands in Vercel logs
+    // and in whatever the member's browser console captures for a bug report.
+    console.error("[ErrorBoundary]", error, info?.componentStack);
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div style={{ ...FS.card, padding: "22px 24px", borderLeft: `3px solid ${FIRE.red}`, maxWidth: 620 }}>
+        <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary, marginBottom: 8 }}>Something went wrong on this page.</div>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.55, marginBottom: 16 }}>
+          This section hit an unexpected error. Your data is safe. Try reloading, or pick another section from the menu.
+        </div>
+        <button style={FS.btnPrimary} onClick={() => window.location.reload()}>Reload</button>
+        {/* Collapsed, not hidden. A member does not need to read a stack trace, but "it says
+            something about canManage" is the single most useful thing they can put in a bug
+            report — so it stays one tap away rather than console-only. */}
+        <details style={{ marginTop: 14 }}>
+          <summary style={{ fontSize: 12, color: FIRE.textMuted, cursor: "pointer" }}>Technical details</summary>
+          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", wordBreak: "break-word" }}>
+            {String(this.state.error?.message || this.state.error)}
+          </div>
+        </details>
+      </div>
+    );
+  }
+}
+
 /* Role vocabulary now lives in shared/roles.js so api/pulse.js reads the SAME definitions rather
    than a copy — a copy it kept, and which drifted before it ever ran. Values are unchanged;
    isBoard's inline ['Board Member'] became the named BOARD constant. */
@@ -1614,7 +1662,16 @@ export default function App() {
           </div>
         </header>
 
+        {/* key={screen} is load-bearing, not decoration: React remounts the boundary when the key
+            changes, so a member who lands on a broken page can pick anything else from the menu and
+            the error clears itself. Without it the fallback would persist across navigation and the
+            only way out would be a reload — which is precisely the trap this replaces.
+
+            Scoped to <main> ONLY. The sidebar and topbar stay outside, so when a page breaks the
+            menu it takes to escape is still rendered. A boundary that swallows its own escape
+            hatch is a white screen with extra steps. */}
         <main style={S.content}>
+          <ErrorBoundary key={screen}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
@@ -1642,6 +1699,7 @@ export default function App() {
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} />}
           {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} />}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

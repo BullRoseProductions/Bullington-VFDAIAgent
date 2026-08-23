@@ -163,8 +163,46 @@ function Root() {
   return <App />;
 }
 
+/* LAST RESORT, below the per-screen boundary in App.jsx.
+   That one keeps the nav alive when a single screen throws, which covers the common case. It
+   cannot help if the throw is in the shell ITSELF — the sidebar, the topbar, the auth gate above —
+   because those render outside it. This catches that, and deliberately offers only a reload: there
+   is no menu left to navigate with, so pretending otherwise would be a dead end.
+
+   Styles are inline literals rather than the FIRE tokens: those live in App.jsx, and importing
+   them here would mean this fallback depends on the very module most likely to be the thing that
+   just failed to evaluate. A last resort should have no interesting dependencies. */
+class RootBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("[RootBoundary]", error, info?.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "#0E1014", color: "#F7F8FA", fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif" }}>
+        <div style={{ maxWidth: 460 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>B4C couldn't load.</div>
+          <div style={{ fontSize: 14, color: "#A8B0BC", lineHeight: 1.55, marginBottom: 16 }}>
+            Something went wrong starting the app. Your data is safe. Reloading usually clears it.
+          </div>
+          <button onClick={() => window.location.reload()}
+                  style={{ background: "#B11E2A", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Reload</button>
+          <details style={{ marginTop: 14 }}>
+            <summary style={{ fontSize: 12, color: "#7C8798", cursor: "pointer" }}>Technical details</summary>
+            <div style={{ fontSize: 12, color: "#7C8798", marginTop: 6, fontFamily: "ui-monospace, Menlo, monospace", wordBreak: "break-word" }}>
+              {String(this.state.error?.message || this.state.error)}
+            </div>
+          </details>
+        </div>
+      </div>
+    );
+  }
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <Root />
+    <RootBoundary>
+      <Root />
+    </RootBoundary>
   </React.StrictMode>
 );
