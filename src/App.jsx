@@ -5279,7 +5279,7 @@ function parsePlanWork(raw) {
 }
 // The full "Plan a fundraiser" system prompt — reused by generate() (CTA/letter path keeps its own) and buildPlan() (step 2 of the two-step flow).
 const PLAN_SYS = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town. CRITICAL — the timeline/checklist MUST start from today's date (given in the details) and fit inside the actual window between today and the target date: do NOT schedule any task in the past or before today, and compress the schedule to the real time available — if only a few weeks or months remain until the event, plan for that window, not a full year.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
-function Funding({ S, role, notify, dept, meId, members }) {
+function Fundraisers({ S, role, notify, dept, meId, members, back }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [ideasOpen, setIdeasOpen] = useState(false);   // Event Ideas collapsed by default
   const [plannerOpen, setPlannerOpen] = useState(true);   // Fundraiser Planner — expanded by default
@@ -5465,8 +5465,9 @@ function Funding({ S, role, notify, dept, meId, members }) {
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}
+      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
       <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>FUNDING</div>
+        <div style={FS.kicker}>FUNDRAISERS</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident.</div>
       </div>
@@ -5670,6 +5671,54 @@ function Funding({ S, role, notify, dept, meId, members }) {
       )}
     </div>
   );
+}
+
+/* ---------------- Funding hub ----------------
+   Funding used to BE the fundraiser page. It is now a hub of sub-pages, so donations (and grants
+   later) have somewhere to live that is not another collapsible section on an already-long screen.
+
+   The fundraiser page itself was RELOCATED, not rewritten: Fundraisers above is the previous
+   Funding component with its body untouched — same AI planner, same two-step brainstorm→plan flow,
+   same operationalize path that writes action_items + funding_events, same fundingReloadKey remount
+   that makes newly-inserted events appear in the calendar. Only the signature and the page header
+   changed. That component carries ~20 pieces of state and a multi-stage async flow; untangling any
+   of it to "tidy up" is how a working page breaks.
+
+   Mirrors SettingsHub's hub pattern (shell / backBtn / card) rather than inventing a third one.
+
+   NO GRANTS TILE. A tile that opens nothing teaches people the app is broken. When grants exist it
+   is one more `if (view === ...)` line and one more card. */
+function Funding({ S, role, notify, dept, meId, members }) {
+  const [view, setView] = useState(null);   // null = hub tiles
+
+  if (view === "fundraisers") {
+    return <Fundraisers S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} back={() => setView(null)} />;
+  }
+
+  const shell = (node) => <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>{node}</div>;
+  const card = (key, Icon, title, desc) => (
+    <div key={key} style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+        <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
+      </div>
+      <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{desc}</div>
+      <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
+        <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+      </div>
+    </div>
+  );
+
+  return shell(<>
+    <div style={{ marginBottom: 16 }}>
+      <div style={FS.kicker}>FUNDING</div>
+      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Money in, and where it came from</h1>
+      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Plan and run fundraisers, and keep track of the people and businesses who give.</div>
+    </div>
+    <div style={S.opGrid}>
+      {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
+    </div>
+  </>);
 }
 
 /* ---------------- Roster & Operations ---------------- */
