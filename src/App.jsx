@@ -5309,6 +5309,318 @@ function frWhen(iso, todayISO) {
   return days > 0 ? `in ${days} days` : `${Math.abs(days)} days ago`;
 }
 
+/* ---------------- Fundraiser HQ · one event ----------------
+   Everything about a single fundraiser in one place: what it is, the jobs it needs doing, and who
+   is backing it. Calendar dates arrive in slice 4.
+
+   THE ACTION ITEMS ARE THE REAL ONES. Not a private task list — rows in action_items, tagged with
+   fundraiser_id, which means they show up in the member's own "my open items", they fire the
+   assignment push trigger, and completing one here completes it everywhere. A second, parallel
+   to-do system would be the thing people forget to look at.
+
+   Writes go through the SAME RPCs the governance list uses — complete_action_item,
+   cancel_action_item, reopen_action_item — because action_items has NO UPDATE policy: every
+   mutation is a SECURITY DEFINER RPC that server-stamps completed_at/completed_by and snapshots
+   assignee_name. A client .update() here would be silently refused by RLS, and even if it were
+   allowed it would skip the stamping. Creation is a direct insert, which the insert policy permits
+   and which the rest of this file already does. */
+function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) {
+  const [items, setItems] = useState(null);
+  const [sponsors, setSponsors] = useState(null);
+  const [loadErr, setLoadErr] = useState(false);
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  const [addingTask, setAddingTask] = useState(false);
+  const [tf, setTf] = useState({ text: "", assigned_to: "", due_date: "" });
+  const [tBusy, setTBusy] = useState(false);
+
+  const SP_BLANK = { name: "", package: "", whats_included: "", what_they_gave: "", notes: "" };
+  const [addingSponsor, setAddingSponsor] = useState(false);
+  const [editingSponsorId, setEditingSponsorId] = useState(null);
+  const [sf, setSf] = useState(SP_BLANK);
+  const [sBusy, setSBusy] = useState(false);
+
+  // No client-side department filter on either query — RLS scopes both to the department and to
+  // leadership, and a second copy of that rule is how the two drift apart.
+  function load() {
+    supabase.from("action_items").select("*").eq("fundraiser_id", fundraiser.id)
+      .then(({ data, error }) => {
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false);
+        setItems(data.slice().sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99")));
+      });
+    supabase.from("fundraiser_sponsors").select("*").eq("fundraiser_id", fundraiser.id)
+      .order("sort", { ascending: true }).order("created_at", { ascending: true })
+      .then(({ data, error }) => { if (!error && data) setSponsors(data); });
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [fundraiser.id]);
+  useReconnect(() => { if (loadErr) load(); });
+
+  const list = items || [];
+  const open = list.filter((i) => i.status === "open");
+  const resolved = list.filter((i) => i.status !== "open");
+  // "X of Y done" counts only work that still counts — a cancelled task is not outstanding AND not
+  // an achievement, so it belongs in neither side of the ratio.
+  const counted = list.filter((i) => i.status !== "cancelled");
+  const doneCount = counted.filter((i) => i.status === "done").length;
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const st = frStatusMeta(fundraiser.status);
+  const when = frWhen(fundraiser.target_date, todayISO);
+  const spList = sponsors || [];
+
+  async function addTask() {
+    const text = tf.text.trim();
+    if (!text) { notify({ kind: "error", title: "What needs doing?", text: "A job needs a description before you can add it." }); return; }
+    setTBusy(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setTBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { error } = await supabase.from("action_items").insert({
+      department_id: deptId,
+      text,
+      assigned_to: tf.assigned_to || null,
+      due_date: tf.due_date || null,
+      fundraiser_id: fundraiser.id,
+      // Carries the event's name into every surface that shows action items, so a task read on the
+      // dashboard says where it came from without needing to resolve the tag.
+      source_label: fundraiser.name,
+    });
+    setTBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't add that job", text: "Something went wrong adding it. Please try again.", details: error.message }); return; }
+    setTf({ text: "", assigned_to: "", due_date: "" }); setAddingTask(false); load();
+  }
+
+  async function completeItem(it) {
+    const { error } = await supabase.rpc("complete_action_item", { p_id: it.id });
+    if (error) { notify({ kind: "error", title: "Couldn't update that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    load();
+  }
+  async function reopenItem(it) {
+    const { error } = await supabase.rpc("reopen_action_item", { p_id: it.id });
+    if (error) {
+      // The RPC refuses once an item is 14+ days resolved. That is an archive rule, not a fault —
+      // say so rather than showing "something went wrong" at somebody who did nothing wrong.
+      const locked = /14 days|archived/i.test(error.message || "");
+      notify({ kind: "error", title: locked ? "Item is archived" : "Couldn't reopen that",
+               text: locked ? "This item was resolved more than 14 days ago and can't be reopened." : "Something went wrong. Please try again.",
+               details: error.message });
+      return;
+    }
+    load();
+  }
+  async function cancelItem(it) {
+    const reason = window.prompt(`Why is "${it.text}" no longer needed? (a reason is required)`);
+    if (reason === null) return;
+    if (!reason.trim()) { notify({ kind: "error", title: "Reason required", text: "Please give a reason for cancelling this item." }); return; }
+    const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });
+    if (error) { notify({ kind: "error", title: "Couldn't cancel that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Marked no longer needed", text: `"${it.text}" was cancelled.` });
+    load();
+  }
+
+  function startSponsorAdd() { setSf(SP_BLANK); setEditingSponsorId(null); setAddingSponsor(true); }
+  function startSponsorEdit(sp) {
+    setSf({ name: sp.name || "", package: sp.package || "", whats_included: sp.whats_included || "", what_they_gave: sp.what_they_gave || "", notes: sp.notes || "" });
+    setAddingSponsor(false); setEditingSponsorId(sp.id);
+  }
+  function cancelSponsor() { setAddingSponsor(false); setEditingSponsorId(null); setSf(SP_BLANK); }
+
+  async function saveSponsor() {
+    const name = sf.name.trim();
+    if (!name) { notify({ kind: "error", title: "Who is it?", text: "A sponsor needs a name before you can save it." }); return; }
+    setSBusy(true);
+    const patch = {
+      name,
+      package: sf.package.trim() || null,
+      whats_included: sf.whats_included.trim() || null,
+      what_they_gave: sf.what_they_gave.trim() || null,
+      notes: sf.notes.trim() || null,
+    };
+    if (editingSponsorId) {
+      const { error } = await supabase.from("fundraiser_sponsors").update(patch).eq("id", editingSponsorId);
+      setSBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't save that sponsor", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    } else {
+      const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+      if (deptErr || !deptId) { setSBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+      const { error } = await supabase.from("fundraiser_sponsors").insert({ ...patch, fundraiser_id: fundraiser.id, department_id: deptId });
+      setSBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't add that sponsor", text: "Something went wrong adding it. Please try again.", details: error.message }); return; }
+    }
+    cancelSponsor(); load();
+  }
+
+  async function setDelivered(sp, next) {
+    const { error } = await supabase.from("fundraiser_sponsors").update({ delivered: next }).eq("id", sp.id);
+    if (error) { notify({ kind: "error", title: "Couldn't update that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    load();
+  }
+
+  const stat = (label, value, sub, color) => (
+    <div style={{ ...FS.card, padding: 13, flex: "1 1 150px", minWidth: 130 }}>
+      <div style={{ ...FS.kicker, marginBottom: 5 }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 800, color: color || FIRE.textPrimary, ...FS.num, lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  const taskRow = (it) => {
+    const overdue = it.status === "open" && it.due_date && it.due_date < todayISO;
+    const done = it.status === "done";
+    return (
+      <div key={it.id} style={{ display: "flex", gap: 10, padding: "10px 2px", borderTop: `0.5px solid ${FIRE.hairline}`, alignItems: "flex-start" }}>
+        <div style={{ paddingTop: 2, color: done ? FIRE.greenText : it.status === "cancelled" ? FIRE.textMuted2 : FIRE.btnIcon }}>
+          {done ? <CheckCircle2 size={15} /> : <ClipboardCheck size={15} />}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: done || it.status === "cancelled" ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: it.status === "cancelled" ? "line-through" : "none" }}>{it.text}</div>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <span>{it.assigned_to ? (nameById.get(it.assigned_to) || "a member") : "Unassigned"}</span>
+            {it.due_date && <span style={{ color: overdue ? FIRE.redText : FIRE.textMuted, fontWeight: overdue ? 700 : 400 }}>{overdue ? "Overdue " : "Due "}{it.due_date}</span>}
+            {it.status === "cancelled" && <span>Cancelled</span>}
+            {done && <span style={{ color: FIRE.greenText }}>Done</span>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {it.status === "open" ? (<>
+            <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => completeItem(it)}><CheckCircle2 size={12} /> Done</button>
+            <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => cancelItem(it)}>Not needed</button>
+          </>) : (
+            <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => reopenItem(it)}><RotateCcw size={12} /> Reopen</button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      {loadErr && <OfflineNotice onRetry={load} what="this fundraiser" />}
+      <button style={{ ...FS.btn, marginBottom: 12 }} onClick={onBack}><ArrowLeft size={15} /> All fundraisers</button>
+
+      {/* ---- 1. Overview ---- */}
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <PartyPopper size={20} color={st.color()} style={{ flexShrink: 0, marginTop: 3 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary }}>
+              {fundraiser.name}
+              <span style={{ fontSize: 11, fontWeight: 700, color: st.color(), marginLeft: 9 }}>{st.label.toUpperCase()}</span>
+            </div>
+            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {fundraiser.target_date && <span>{fundraiser.target_date}{when ? ` · ${when}` : ""}</span>}
+              {fundraiser.point_person_id && <span>Led by {nameById.get(fundraiser.point_person_id) || "a member"}</span>}
+            </div>
+            {fundraiser.description && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 8, lineHeight: 1.55 }}>{fundraiser.description}</div>}
+          </div>
+          <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => onEdit(fundraiser)}><Pencil size={13} /> Edit</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+        {fundraiser.goal_amount != null && stat("Goal", `$${Number(fundraiser.goal_amount).toLocaleString()}`, "target for the night", FIRE.textSecondary)}
+        {/* Proceeds only once there IS one. A $0 before the event has happened would read as a
+            result rather than an absence. It is set at "done" — slice 6. */}
+        {fundraiser.proceeds != null && stat("Raised", `$${Number(fundraiser.proceeds).toLocaleString()}`, "logged for this event", FIRE.red)}
+        {stat("Jobs", `${doneCount}/${counted.length}`, counted.length ? "done" : "nothing added yet", counted.length && doneCount === counted.length ? FIRE.greenText : FIRE.textSecondary)}
+        {fundraiser.target_date && stat("When", when || "—", fundraiser.target_date, FIRE.textSecondary)}
+      </div>
+
+      {/* ---- 2. Action items ---- */}
+      <div style={{ ...FS.kicker, marginBottom: 4 }}>JOBS TO DO</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Real action items — assigning one notifies that member, and it shows up in their own list too.</p>
+      {!addingTask && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={() => setAddingTask(true)}><Plus size={15} /> Add a job</button>}
+      {addingTask && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 210 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What needs doing *</span>
+            <input style={FS.input} value={tf.text} onChange={(e) => setTf((x) => ({ ...x, text: e.target.value }))} placeholder="Pick up the griddle from the community centre" autoFocus /></label>
+          <label style={{ ...S.field, minWidth: 165 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who's doing it</span>
+            <select style={FS.input} value={tf.assigned_to} onChange={(e) => setTf((x) => ({ ...x, assigned_to: e.target.value }))}>
+              <option value="">Nobody yet</option>
+              {(members || []).filter((m) => m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select></label>
+          <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span>
+            <input style={FS.input} type="date" value={tf.due_date} onChange={(e) => setTf((x) => ({ ...x, due_date: e.target.value }))} /></label>
+          <button style={{ ...FS.btnPrimary, opacity: tBusy ? 0.6 : 1 }} disabled={tBusy} onClick={addTask}>{tBusy ? "Adding…" : "Add job"}</button>
+          <button style={FS.btn} onClick={() => setAddingTask(false)} disabled={tBusy}>Cancel</button>
+        </div>
+      )}
+      {items === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginBottom: 18 }}>Loading…</div>
+      ) : list.length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6, marginBottom: 18 }}>
+          Nothing to do yet. Add the jobs this event needs — who's bringing what, who's setting up, who's on the griddle.
+        </div>
+      ) : (
+        <div style={{ marginBottom: 18 }}>
+          {open.map(taskRow)}
+          {resolved.length > 0 && (
+            <div style={{ marginTop: open.length ? 10 : 0, paddingTop: open.length ? 6 : 0 }}>
+              <div style={{ ...FS.kicker, fontSize: 10.5, marginBottom: 2 }}>FINISHED</div>
+              {resolved.map(taskRow)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- 3. Sponsors ---- */}
+      <div style={{ ...FS.kicker, marginBottom: 4 }}>SPONSORS</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Who's backing it, what you promised them, and whether you've delivered it yet.</p>
+      {!addingSponsor && !editingSponsorId && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={startSponsorAdd}><Plus size={15} /> Add a sponsor</button>}
+      {(addingSponsor || editingSponsorId) && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Sponsor *</span>
+            <input style={FS.input} value={sf.name} onChange={(e) => setSf((x) => ({ ...x, name: e.target.value }))} placeholder="Harris Hardware" /></label>
+          <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Package</span>
+            <input style={FS.input} value={sf.package} onChange={(e) => setSf((x) => ({ ...x, package: e.target.value }))} placeholder="Gold / In-kind" /></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What we promised</span>
+            <input style={FS.input} value={sf.whats_included} onChange={(e) => setSf((x) => ({ ...x, whats_included: e.target.value }))} placeholder="Banner at the door, logo on the flyer" /></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What they gave</span>
+            <input style={FS.input} value={sf.what_they_gave} onChange={(e) => setSf((x) => ({ ...x, what_they_gave: e.target.value }))} placeholder="$500, or 20lb of sausage" /></label>
+          <label style={{ ...S.field, flex: "1 1 100%" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Notes</span>
+            <input style={FS.input} value={sf.notes} onChange={(e) => setSf((x) => ({ ...x, notes: e.target.value }))} placeholder="Wants the banner back afterwards" /></label>
+          <button style={{ ...FS.btnPrimary, opacity: sBusy ? 0.6 : 1 }} disabled={sBusy} onClick={saveSponsor}>{sBusy ? "Saving…" : editingSponsorId ? "Save changes" : "Add sponsor"}</button>
+          <button style={FS.btn} onClick={cancelSponsor} disabled={sBusy}>Cancel</button>
+        </div>
+      )}
+      {sponsors === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
+      ) : spList.length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+          No sponsors yet. Add the businesses backing this one and what you've promised them, so nothing gets forgotten on the day.
+        </div>
+      ) : (
+        <div>
+          {spList.map((sp) => (
+            <div key={sp.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <HeartHandshake size={16} color={sp.delivered ? FIRE.greenText : FIRE.amberText} style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 700, color: FIRE.textPrimary }}>
+                    {sp.name}
+                    {sp.package && <span style={{ fontSize: 11.5, color: FIRE.textMuted, marginLeft: 8 }}>{sp.package}</span>}
+                  </div>
+                  {sp.whats_included && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3 }}>We promised: {sp.whats_included}</div>}
+                  {sp.what_they_gave && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 2 }}>They gave: {sp.what_they_gave}</div>}
+                  {sp.notes && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>{sp.notes}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  {/* The repeated question is "have we done their banner yet", so it is one tap on
+                      the card rather than a trip through the edit form. */}
+                  <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, color: sp.delivered ? FIRE.greenText : FIRE.textSecondary, borderColor: sp.delivered ? "rgba(118,201,141,.4)" : undefined }}
+                          onClick={() => setDelivered(sp, !sp.delivered)}>
+                    <CheckCircle2 size={13} /> {sp.delivered ? "Delivered" : "Mark delivered"}
+                  </button>
+                  <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => startSponsorEdit(sp)}><Pencil size={13} /> Edit</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function FundraiserIndex({ S, notify, meId, members }) {
   const BLANK = { name: "", description: "", target_date: "", goal_amount: "", point_person_id: "", campaign_id: "", status: "planning" };
   const [rows, setRows] = useState(null);        // null = first load; [] = genuinely none
@@ -5319,6 +5631,7 @@ function FundraiserIndex({ S, notify, meId, members }) {
   const [editingId, setEditingId] = useState(null);
   const [f, setF] = useState(BLANK);
   const [busy, setBusy] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);   // in-component detail; no router change
   const todayISO = new Date().toISOString().slice(0, 10);
 
   // Dept-scoped AND leadership-gated by RLS — no client-side filter, which is how the two drift.
@@ -5404,6 +5717,18 @@ function FundraiserIndex({ S, notify, meId, members }) {
     load();
   }
 
+  /* Placed after every hook above — an early return higher up would change the hook call order
+     between renders and React would throw. Reads the fundraiser from the already-loaded rows rather
+     than re-fetching, so the page cannot show something the list disagrees with; a stale id (just
+     archived, or filtered out of the current view) falls through to the list instead of rendering
+     a blank screen. */
+  const selected = selectedId ? all.find((r) => r.id === selectedId) : null;
+  if (selected) {
+    return <FundraiserHQ S={S} notify={notify} fundraiser={selected} members={members} meId={meId}
+                         onBack={() => { setSelectedId(null); load(); }}
+                         onEdit={(r) => { setSelectedId(null); startEdit(r); }} />;
+  }
+
   const form = (
     <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 190 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
@@ -5471,7 +5796,8 @@ function FundraiserIndex({ S, notify, meId, members }) {
             const when = frWhen(r.target_date, todayISO);
             const soon = r.target_date && r.target_date >= todayISO && r.status !== "done";
             return (
-              <div key={r.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: r.status === "archived" ? 0.72 : 1 }}>
+              <div key={r.id} onClick={() => setSelectedId(r.id)}
+                   style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: r.status === "archived" ? 0.72 : 1, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <PartyPopper size={17} color={st.color()} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -5490,6 +5816,9 @@ function FundraiserIndex({ S, notify, meId, members }) {
                   {/* stopPropagation now, so slice 3 can make the whole card tappable without these
                       also firing the navigation. */}
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {/* Explicit View next to the whole-card click: tappability is discoverable only
+                        by trying it, and Edit/Archive sit inside the same card. */}
+                    <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); setSelectedId(r.id); }}>View</button>
                     <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); startEdit(r); }}><Pencil size={13} /> Edit</button>
                     {r.status === "archived"
                       ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); setStatus(r, "planning"); }}><RotateCcw size={13} /> Restore</button>
