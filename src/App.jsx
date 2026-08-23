@@ -5429,6 +5429,13 @@ function parsePlanWork(raw) {
   return { action_items, calendar_events };                            // both [] is valid; null only on parse failure
 }
 // The full "Plan a fundraiser" system prompt — reused by generate() (CTA/letter path keeps its own) and buildPlan() (step 2 of the two-step flow).
+/* The two short-form prompts, lifted VERBATIM out of the planner's generate() so the HQ's
+   "Draft a document" produces the SAME copy the planner does. Extracted, not rewritten: the moment
+   there are two wordings there are two voices, and a department that generated an appeal in one
+   place and a letter in the other would get documents that do not read like the same organisation.
+   PLAN_SYS is left where it is — only these two are shared. */
+const CTA_SYS = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
+const LETTER_SYS = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
 const PLAN_SYS = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town. CRITICAL — the timeline/checklist MUST start from today's date (given in the details) and fit inside the actual window between today and the target date: do NOT schedule any task in the past or before today, and compress the schedule to the real time available — if only a few weeks or months remain until the event, plan for that window, not a full year.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
 /* ---------------- Fundraiser HQ · the index ----------------
    The department's fundraiser events, and the organising unit this page is built around: a plan, a
@@ -5476,7 +5483,7 @@ function frWhen(iso, todayISO) {
    assignee_name. A client .update() here would be silently refused by RLS, and even if it were
    allowed it would skip the stamping. Creation is a direct insert, which the insert policy permits
    and which the rest of this file already does. */
-function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, onOpenDoc, onWorkAdded, onFundraiserChanged }) {
+function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEdit, onOpenDoc, onWorkAdded, onFundraiserChanged }) {
   const [items, setItems] = useState(null);
   const [sponsors, setSponsors] = useState(null);
   const [dates, setDates] = useState(null);        // null = first load; [] = genuinely none
@@ -5487,6 +5494,18 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
   const [exErr, setExErr] = useState("");
   const [tdInput, setTdInput] = useState("");       // inline "set a target date" fix
   const [tdBusy, setTdBusy] = useState(false);
+  const DOC_TYPES = [
+    { v: "cta",    label: "Community call-to-action", sys: CTA_SYS,    hint: "Short and warm — for social or a flyer." },
+    { v: "letter", label: "Donation-request letter",  sys: LETTER_SYS, hint: "For a local business or community member." },
+  ];
+  const [drafting, setDrafting] = useState(false);           // form open
+  const [dType, setDType] = useState("cta");
+  const [dDetails, setDDetails] = useState("");
+  const [dTitle, setDTitle] = useState("");
+  const [dOut, setDOut] = useState("");                      // generated text, not yet saved
+  const [dGen, setDGen] = useState(false);
+  const [dSave, setDSave] = useState(false);
+  const [dErr, setDErr] = useState("");
   const [loadErr, setLoadErr] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -5591,6 +5610,57 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
     const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });
     if (error) { notify({ kind: "error", title: "Couldn't cancel that", text: "Something went wrong. Please try again.", details: error.message }); return; }
     notify({ kind: "success", title: "Marked no longer needed", text: `"${it.text}" was cancelled.` });
+    load();
+  }
+
+  /* DRAFT A DOCUMENT — the appeal or letter for THIS fundraiser, saved tagged to it rather than
+     landing in the planner's shared drafts pile where it loses its connection to the event.
+
+     Generate and save are two steps ON PURPOSE. The generated text is held in local state and shown
+     first; nothing reaches ai_outputs until a human reads it and presses Save. These documents go
+     out to businesses and the public over the department's name — an auto-saved draft is one
+     unreviewed sentence away from being sent. */
+  function startDraft() {
+    setDType("cta");
+    // Prefilled from the fundraiser's own description because that is already the answer to "what
+    // is this for" — retyping it is the kind of small friction that stops the feature being used.
+    setDDetails(fundraiser.description || "");
+    setDTitle(""); setDOut(""); setDErr(""); setDrafting(true);
+  }
+  function cancelDraft() { setDrafting(false); setDOut(""); setDErr(""); setDTitle(""); }
+
+  async function generateDoc() {
+    const t = DOC_TYPES.find((x) => x.v === dType);
+    const details = dDetails.trim();
+    if (!details) { setDErr("Say what it's for first — one or two lines is enough."); return; }
+    setDGen(true); setDErr(""); setDOut("");
+    try {
+      const text = await callClaude(t.sys, `Department: ${dept?.name || "our department"}. Fundraiser: ${fundraiser.name}. Details: ${details}`);
+      setDOut(text);
+      // Default title now rather than at save: it is editable, and a field that fills itself the
+      // instant there is something to name is one less thing to remember at the end.
+      setDTitle(`${t.label} — ${fundraiser.name}`.slice(0, 120));
+    } catch { setDErr("Couldn't draft that just now. Try again."); }
+    finally { setDGen(false); }
+  }
+
+  async function saveDoc() {
+    if (!dOut.trim()) return;
+    const title = dTitle.trim();
+    if (!title) { setDErr("Give it a title before saving."); return; }
+    setDSave(true); setDErr("");
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setDSave(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    // ai_text is the pristine original; edits afterwards go to current_text through the shared
+    // viewer, which is the same rule the planner's drafts follow.
+    const { error } = await supabase.from("ai_outputs").insert({
+      department_id: deptId, feature: "fundraiser", title,
+      ai_text: dOut, fundraiser_id: fundraiser.id, created_by: meId,
+    });
+    setDSave(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save that document", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", title: "Saved", text: `"${title}" is filed under this fundraiser.` });
+    cancelDraft();
     load();
   }
 
@@ -5854,6 +5924,39 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
           <button style={{ ...FS.btnPrimary, opacity: (tdBusy || !tdInput) ? 0.6 : 1 }} disabled={tdBusy || !tdInput} onClick={saveTargetDate}>{tdBusy ? "Saving…" : "Set target date"}</button>
         </div>
       )}
+      {!drafting && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={startDraft}><Sparkles size={15} /> Draft a document</button>}
+      {drafting && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, borderLeft: `3px solid ${FIRE.red}` }}>
+          <div style={{ ...FS.kicker, marginBottom: 8 }}>DRAFT A DOCUMENT</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
+            <label style={{ ...S.field, minWidth: 210 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span>
+              <select style={FS.input} value={dType} onChange={(e) => { setDType(e.target.value); setDOut(""); }}>
+                {DOC_TYPES.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
+              </select></label>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, paddingBottom: 11 }}>{DOC_TYPES.find((t) => t.v === dType)?.hint}</div>
+          </div>
+          <label style={{ ...S.field, marginBottom: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What it&rsquo;s for</span>
+            <textarea style={{ ...FS.input, minHeight: 68, resize: "vertical" }} value={dDetails} onChange={(e) => setDDetails(e.target.value)}
+                      placeholder="Breakfast at the station — proceeds toward the new engine." /></label>
+          {dErr && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginBottom: 10 }}>{dErr}</div>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={{ ...FS.btnPrimary, opacity: dGen ? 0.7 : 1 }} onClick={generateDoc} disabled={dGen}>{dGen ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> {dOut ? "Draft again" : "Generate"}</>}</button>
+            <button style={FS.btn} onClick={cancelDraft} disabled={dGen || dSave}>Cancel</button>
+          </div>
+          {/* PREVIEW BEFORE SAVE. Same RichOutput the planner renders with, so what you read here is
+              what the saved document will look like when it is reopened. */}
+          {dOut && (
+            <div style={{ marginTop: 14 }}>
+              <RichOutput S={S} text={dOut} dark />
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
+                <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span>
+                  <input style={FS.input} value={dTitle} onChange={(e) => setDTitle(e.target.value)} /></label>
+                <button style={{ ...FS.btnPrimary, opacity: (dSave || !dTitle.trim()) ? 0.6 : 1 }} onClick={saveDoc} disabled={dSave || !dTitle.trim()}>{dSave ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save to this fundraiser</>}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {docs === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginBottom: 16 }}>Loading…</div>
       ) : (docs || []).length === 0 ? (
@@ -6074,7 +6177,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
   );
 }
 
-function FundraiserIndex({ S, notify, meId, members, focusId, reloadKey, onFocusHandled, onOpenDoc, onWorkAdded }) {
+function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, onFocusHandled, onOpenDoc, onWorkAdded }) {
   const BLANK = { name: "", description: "", target_date: "", goal_amount: "", point_person_id: "", campaign_id: "", status: "planning", color: "" };
   const [rows, setRows] = useState(null);        // null = first load; [] = genuinely none
   const [loadErr, setLoadErr] = useState(false);
@@ -6211,7 +6314,7 @@ function FundraiserIndex({ S, notify, meId, members, focusId, reloadKey, onFocus
                          onBack={() => { setSelectedId(null); load(); }}
                          onEdit={(r) => { setSelectedId(null); startEdit(r); }}
                          onOpenDoc={onOpenDoc} onWorkAdded={onWorkAdded}
-                         onFundraiserChanged={load} />;
+                         onFundraiserChanged={load} dept={dept} />;
   }
 
   const form = (
@@ -6471,8 +6574,8 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
     setLoading(true); setErr(""); setOut("");
     let sys;
     if (mode === "Plan a fundraiser") sys = PLAN_SYS;
-    else if (mode === "Community call-to-action") sys = "You write a short, warm community call-to-action for a volunteer fire/EMS department's fundraiser — for social or a flyer. Lead with purpose, make the ask clear, tie dollars to a concrete outcome. Under 90 words. Return only the text.";
-    else sys = "You format a clear, warm donation-request letter for a volunteer fire/EMS department to send to a local business or community member. Proper letter structure, a specific ask, dollars tied to outcomes, gracious close. Use [BRACKETED] placeholders for names and amounts. Under 250 words.";
+    else if (mode === "Community call-to-action") sys = CTA_SYS;
+    else sys = LETTER_SYS;
     try { const t = await callClaude(sys, `Department: ${dept?.name || "our department"}\nDetails: ${detail}`); setOut(t); setSaveTitle(detail.trim().slice(0, 60) || `${mode} · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
     catch { setErr("Couldn't generate that just now. Try again."); } finally { setLoading(false); }
   }
@@ -6520,7 +6623,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
           list of what the department is actually running is what you come back to, so it opens the
           page. Gated on canManage rather than the nav's LEADERSHIP: fundraisers is is_canmanage()
           by RLS, so a Project Admin would otherwise get an empty list with no explanation. */}
-      {canManage && <FundraiserIndex S={S} notify={notify} meId={meId} members={members}
+      {canManage && <FundraiserIndex S={S} notify={notify} meId={meId} members={members} dept={dept}
                                      focusId={focusFr} reloadKey={frReload} onFocusHandled={() => setFocusFr(null)}
                                      onOpenDoc={reopen} onWorkAdded={() => setFundingReloadKey((k) => k + 1)} />}
 
