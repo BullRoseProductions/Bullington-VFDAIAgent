@@ -5383,9 +5383,19 @@ function matchOwnerId(name, members) {
   if (tok.length === 1) return tok[0].id;
   return "";
 }
-// Lifted VERBATIM from the planner's extractPlanWork — not retyped. The guardrails in here are the
-// reason the extraction does not invent owners or dates, and a paraphrase is a different prompt.
-const OPERATIONALIZE_SYS = "You convert a volunteer fire department's fundraiser plan into trackable work: a list of action items and a list of calendar events. Respond with ONLY one valid JSON object, no markdown, no code fences, no commentary before or after. Schema: {\"action_items\":[{\"task\":string,\"suggested_owner\":string|null,\"suggested_due_date\":\"YYYY-MM-DD\"|null}],\"calendar_events\":[{\"title\":string,\"date\":\"YYYY-MM-DD\"}]}.\n\nDATES: You are given today's date and the event's target date. Resolve EVERY relative timing in the plan (for example '~3 weeks before the event', 'the week of', 'two months out', 'day of') into a real YYYY-MM-DD that falls on or between today and the target date. Never output a date before today or after the target date. RULE: sponsor outreach and sponsor confirmation must land 3-4 weeks BEFORE the target date. The fundraiser event itself is a calendar_event on the target date; also add calendar_events for the major milestones (kickoff, sponsor deadline, setup/day-before) with real dates. calendar_events must be ONLY the 3-5 most important dates (the event itself plus key milestones), NOT one per task — the detailed to-dos belong in action_items, not on the calendar.\n\n- action_items.task: the concrete task, stated concisely.\n- suggested_owner: a person's name ONLY if the plan explicitly names who is responsible; otherwise null. Do NOT guess or infer an owner.\n- suggested_due_date: a real YYYY-MM-DD (resolved as above) for when the task should be done; use null only if it genuinely cannot be placed.\n\nCRITICAL — TRUTH GUARDRAIL: These become REAL assigned work and REAL calendar entries. NEVER invent an owner the plan did not name — leave suggested_owner null for a human to fill in. Do not fabricate tasks or events that are not in the plan. It is always better to leave an owner or date null than to guess. Return ONLY the JSON object.";
+/* Lifted from the planner's extractPlanWork in 5b, then EXTENDED — the "verbatim" claim that used to
+   sit here is no longer true and is not worth preserving as a comforting fiction.
+
+   WHAT CHANGED AND WHY: the extractor anchors relative timings to the target date, so a fundraiser
+   with none produced ZERO calendar events and no explanation. Two rules were added — use absolute
+   dates the plan states regardless of any anchor, and when there is no anchor still return every
+   task rather than degrading to nothing.
+
+   THE TRUTH GUARDRAIL PARAGRAPH IS UNCHANGED, byte for byte, and must stay that way. It is the only
+   thing standing between this and inventing owners and due dates for real people. The additions are
+   deliberately phrased to REINFORCE it ("a guessed date is a wrong date on a real calendar") rather
+   than carve out an exception to it. */
+const OPERATIONALIZE_SYS = "You convert a volunteer fire department's fundraiser plan into trackable work: a list of action items and a list of calendar events. Respond with ONLY one valid JSON object, no markdown, no code fences, no commentary before or after. Schema: {\"action_items\":[{\"task\":string,\"suggested_owner\":string|null,\"suggested_due_date\":\"YYYY-MM-DD\"|null}],\"calendar_events\":[{\"title\":string,\"date\":\"YYYY-MM-DD\"}]}.\n\nDATES: You are given today's date and the event's target date (the target date may be absent or 'flexible'). Resolve EVERY relative timing in the plan (for example '~3 weeks before the event', 'the week of', 'two months out', 'day of') into a real YYYY-MM-DD that falls on or between today and the target date. Never output a date before today, or after the target date when one is given. RULE: when a target date is given, sponsor outreach and sponsor confirmation must land 3-4 weeks BEFORE it. When a target date is given, the fundraiser event itself is a calendar_event on that date, and also add calendar_events for the major milestones (kickoff, sponsor deadline, setup/day-before) with real dates. calendar_events must be ONLY the 3-5 most important dates (the event itself plus key milestones), NOT one per task — the detailed to-dos belong in action_items, not on the calendar.\n\nABSOLUTE DATES: if the plan states a specific calendar date for something (for example 'June 14, 2026', 'Saturday the 14th', 'the first Saturday in May'), output it as a calendar_event with that date resolved to a real YYYY-MM-DD — REGARDLESS of the target date, and regardless of whether a target date was given at all. A date stated in the plan is a fact from the plan, not a relative timing that needs an anchor.\n\nNO TARGET DATE: if the target date is absent or 'flexible', do NOT fabricate relative dates — you have no anchor, and a guessed date is a wrong date on a real calendar. In that case still output EVERY action_item (with suggested_due_date null wherever it cannot be resolved), and still output any ABSOLUTE dates the plan states. Returning zero calendar_events is correct ONLY when the plan states no absolute date at all. Never return an empty action_items list because the target date was missing — the tasks do not depend on it.\n\n- action_items.task: the concrete task, stated concisely.\n- suggested_owner: a person's name ONLY if the plan explicitly names who is responsible; otherwise null. Do NOT guess or infer an owner.\n- suggested_due_date: a real YYYY-MM-DD (resolved as above) for when the task should be done; use null only if it genuinely cannot be placed.\n\nCRITICAL — TRUTH GUARDRAIL: These become REAL assigned work and REAL calendar entries. NEVER invent an owner the plan did not name — leave suggested_owner null for a human to fill in. Do not fabricate tasks or events that are not in the plan. It is always better to leave an owner or date null than to guess. Return ONLY the JSON object.";
 
 // Parse the operationalize response into { action_items:[{task,suggested_owner,suggested_due_date}], calendar_events:[{title,date}] }.
 // Same robust fence-strip → JSON.parse (with {…} fallback) → per-item sanitize → never-throw as parseActionItems; null ONLY on parse failure.
@@ -5466,7 +5476,7 @@ function frWhen(iso, todayISO) {
    assignee_name. A client .update() here would be silently refused by RLS, and even if it were
    allowed it would skip the stamping. Creation is a direct insert, which the insert policy permits
    and which the rest of this file already does. */
-function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, onOpenDoc, onWorkAdded }) {
+function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, onOpenDoc, onWorkAdded, onFundraiserChanged }) {
   const [items, setItems] = useState(null);
   const [sponsors, setSponsors] = useState(null);
   const [dates, setDates] = useState(null);        // null = first load; [] = genuinely none
@@ -5475,6 +5485,8 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
   const [planReview, setPlanReview] = useState(null);       // { docTitle, actionItems[], calendarEvents[] }
   const [addingWork, setAddingWork] = useState(false);
   const [exErr, setExErr] = useState("");
+  const [tdInput, setTdInput] = useState("");       // inline "set a target date" fix
+  const [tdBusy, setTdBusy] = useState(false);
   const [loadErr, setLoadErr] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -5582,6 +5594,22 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
     load();
   }
 
+  /* Set the target date without leaving the page. Routing to Edit would work and is already wired,
+     but it unmounts the HQ mid-task — you came here to extract a plan, and being thrown back to the
+     index to fix a prerequisite loses your place. The parent's load() refreshes rows, and `selected`
+     is derived from them, so this component re-renders with the new date and no local shadow copy
+     of it (which would be a second source of truth for something the row already owns). */
+  async function saveTargetDate() {
+    if (!tdInput) { notify({ kind: "error", title: "Pick a day", text: "Choose the date the fundraiser happens." }); return; }
+    setTdBusy(true);
+    const { error } = await supabase.from("fundraisers").update({ target_date: tdInput }).eq("id", fundraiser.id);
+    setTdBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save that date", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: "Target date set." });
+    setTdInput("");
+    onFundraiserChanged?.();
+  }
+
   /* EXTRACT — turn a saved plan into tracked work, tagged to THIS fundraiser.
      This is the flow that used to live in the planner. Moving it here is the point of the slice:
      it used to produce loose action_items and funding_events in two shared pools with nothing tying
@@ -5598,12 +5626,15 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
       if (!parsed) {
         // Parse failure is NOT a dead end: open the review empty so the work can still be entered
         // by hand. Mirrors the planner's old fallback and the same rule in Minutes.
-        setPlanReview({ docTitle: d.title || "the plan", actionItems: [], calendarEvents: [] });
+        setPlanReview({ docTitle: d.title || "the plan", noAnchor: !fundraiser.target_date, actionItems: [], calendarEvents: [] });
         setExErr("Auto-extraction didn't work — add the tasks and dates manually below.");
         setExtractingId(null); return;
       }
       setPlanReview({
         docTitle: d.title || "the plan",
+        // Remembered from the moment of extraction, not read live: if the date is set afterwards the
+        // note would vanish and silently misdescribe the list sitting on screen.
+        noAnchor: !fundraiser.target_date,
         actionItems: parsed.action_items.map((it, i) => ({ id: Date.now() + i, task: it.task, ownerId: matchOwnerId(it.suggested_owner, members), due: normalizeDate(it.suggested_due_date), keep: true })),
         calendarEvents: parsed.calendar_events.map((ev, i) => ({ id: Date.now() + 5000 + i, title: ev.title, date: normalizeDate(ev.date), keep: true })),
       });
@@ -5802,6 +5833,27 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
            place for that rule to drift. */}
       <div style={{ ...FS.kicker, marginBottom: 4 }}>PLAN &amp; DOCUMENTS</div>
       <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The plan this fundraiser was built from, and anything else generated for it.</p>
+      {/* THE ANCHOR PROBLEM, said out loud. A plan's timeline is nearly all relative — "3 weeks
+          before", "the week of" — and those resolve against the target date. With no target date the
+          extractor has nothing to count back from, so it used to return zero dates and no reason
+          why, which reads as a broken feature rather than a missing prerequisite.
+
+          This is a NUDGE, never a block: Extract still works and still returns the tasks plus any
+          date the plan states outright. Refusing to run would be the worse failure — the tasks are
+          most of the value and they do not need an anchor at all. */}
+      {!fundraiser.target_date && (docs || []).length > 0 && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>No target date set</div>
+            <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.55 }}>
+              The plan&rsquo;s relative timeline (&ldquo;three weeks before&rdquo;, &ldquo;the week of&rdquo;) can&rsquo;t be placed on the calendar without a day to count back from. Set one to get those dates. Extracting without it still brings over the tasks and any date the plan states outright.
+            </div>
+          </div>
+          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Target date</span>
+            <input type="date" style={FS.input} value={tdInput} onChange={(e) => setTdInput(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, opacity: (tdBusy || !tdInput) ? 0.6 : 1 }} disabled={tdBusy || !tdInput} onClick={saveTargetDate}>{tdBusy ? "Saving…" : "Set target date"}</button>
+        </div>
+      )}
       {docs === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginBottom: 16 }}>Loading…</div>
       ) : (docs || []).length === 0 ? (
@@ -5841,6 +5893,14 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, on
         <div style={{ ...FS.card, padding: "12px 16px", marginBottom: 16, borderLeft: `3px solid ${FIRE.amberText}` }}>
           <div style={{ ...FS.kicker, marginBottom: 3 }}>REVIEW &amp; CONFIRM — what to add to this fundraiser</div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 12 }}>From: <b style={{ color: FIRE.textSecondary }}>{planReview.docTitle}</b></div>
+          {/* Repeated here on purpose. By the time you are looking at a short DATES list, the notice
+              further up the page has scrolled away, and "why are there only two dates" is exactly
+              the question this answers. */}
+          {planReview.noAnchor && (
+            <div style={{ fontSize: 12.5, color: FIRE.amberText, marginBottom: 12, lineHeight: 1.55 }}>
+              No target date was set, so the plan&rsquo;s relative timings were skipped — only dates it states outright are below. Set a target date and extract again to place the rest.
+            </div>
+          )}
 
           <div style={{ ...FS.kicker, fontSize: 11, marginBottom: 4 }}>TASKS</div>
           {planReview.actionItems.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "6px 0" }}>None — add them below.</div>}
@@ -6150,7 +6210,8 @@ function FundraiserIndex({ S, notify, meId, members, focusId, reloadKey, onFocus
     return <FundraiserHQ S={S} notify={notify} fundraiser={selected} members={members} meId={meId}
                          onBack={() => { setSelectedId(null); load(); }}
                          onEdit={(r) => { setSelectedId(null); startEdit(r); }}
-                         onOpenDoc={onOpenDoc} onWorkAdded={onWorkAdded} />;
+                         onOpenDoc={onOpenDoc} onWorkAdded={onWorkAdded}
+                         onFundraiserChanged={load} />;
   }
 
   const form = (
