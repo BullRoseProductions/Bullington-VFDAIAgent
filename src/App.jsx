@@ -5279,6 +5279,232 @@ function parsePlanWork(raw) {
 }
 // The full "Plan a fundraiser" system prompt — reused by generate() (CTA/letter path keeps its own) and buildPlan() (step 2 of the two-step flow).
 const PLAN_SYS = "You help a volunteer fire/EMS department plan a fundraiser. Given their event idea, return a practical, plain-text plan a small volunteer crew can actually run: a one-line goal, a simple timeline/checklist, the roles/volunteers needed, a few promotion steps, and a realistic money target for a small town. CRITICAL — the timeline/checklist MUST start from today's date (given in the details) and fit inside the actual window between today and the target date: do NOT schedule any task in the past or before today, and compress the schedule to the real time available — if only a few weeks or months remain until the event, plan for that window, not a full year.\n\nThen the most important part — an in-depth 'Sponsorship Packages' section tailored to THIS specific event:\n1) Three or four headline tiers (such as Title/Presenting, Gold, Silver, Bronze), each with a suggested dollar amount and exactly what that sponsor gets (logo placement, banner, event shirt, program, PA shout-outs, social posts, top billing).\n2) An 'A la carte sponsorships' list of individual items that fit THIS event, each with a suggested price and what the sponsor gets. Pick the ones that make sense for the event from options like: event title, booth/vendor space, printed banner, PA/radio announcements, beverage/drink station, food/meal, dessert, coffee & water station, event t-shirt, swag bag, photo booth, kids' zone/bounce house, trophy/award, hole sponsor (for golf), raffle prize, parking, tent/shade, fire apparatus display, social media shout-out, live stream, yard signs, program ad, and in-kind goods/services. Aim for 8-12 relevant items.\n3) One short, ready-to-send outreach line the department can text or email to a local business.\n\nKeep dollar amounts realistic for a small community. Use clear short headings and simple dash bullet lines (no markdown symbols like # or *). Aim for 450-650 words.";
+/* ---------------- Fundraiser HQ · the index ----------------
+   The department's fundraiser events, and the organising unit this page is built around: a plan, a
+   set of dates, sponsors and tasks all hang off one of these (slices 3-5).
+
+   ARCHIVE, NOT DELETE, matching the funds list and the donor list. An event that happened is a
+   record of what the department ran and what it brought in; the status column exists for putting it
+   away. Real deletion stays in the SQL editor.
+
+   STATUS IS A LIFECYCLE, not a filter: planning -> active -> done. `archived` is deliberately NOT
+   in the dropdown — it is reached by the Archive button and left by Restore, so nobody archives an
+   event by mistake while meaning to mark it finished. */
+const FR_STATUSES = [
+  { v: "planning", label: "Planning", color: () => FIRE.blueText },
+  { v: "active",   label: "Active",   color: () => FIRE.amberText },
+  { v: "done",     label: "Done",     color: () => FIRE.greenText },
+];
+const frStatusMeta = (v) => FR_STATUSES.find((s) => s.v === v) || { label: "Archived", color: () => FIRE.textMuted2 };
+
+/* "in 6 days" / "3 days ago" / "today". A bare date makes a reader do the arithmetic; the thing
+   they actually want to know is how close it is. Both parsed as plain dates — no timezone maths,
+   because target_date is a calendar day, not an instant. */
+function frWhen(iso, todayISO) {
+  if (!iso) return null;
+  const days = Math.round((Date.parse(iso + "T00:00:00") - Date.parse(todayISO + "T00:00:00")) / 86400000);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days === -1) return "yesterday";
+  return days > 0 ? `in ${days} days` : `${Math.abs(days)} days ago`;
+}
+
+function FundraiserIndex({ S, notify, meId, members }) {
+  const BLANK = { name: "", description: "", target_date: "", goal_amount: "", point_person_id: "", campaign_id: "", status: "planning" };
+  const [rows, setRows] = useState(null);        // null = first load; [] = genuinely none
+  const [loadErr, setLoadErr] = useState(false);
+  const [funds, setFunds] = useState([]);
+  const [view, setView] = useState("open");      // "open" (planning+active) | "done" | "archived"
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [f, setF] = useState(BLANK);
+  const [busy, setBusy] = useState(false);
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  // Dept-scoped AND leadership-gated by RLS — no client-side filter, which is how the two drift.
+  function load() {
+    supabase.from("fundraisers")
+      .select("id, name, description, target_date, goal_amount, status, point_person_id, campaign_id, proceeds, sort")
+      .then(({ data, error }) => {
+        // A failed read is not an empty department: keep the last-known list rather than telling a
+        // department it runs no fundraisers because the network dropped.
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false); setRows(data);
+      });
+    supabase.from("donation_campaigns").select("id, name").eq("status", "active").order("sort").order("name")
+      .then(({ data }) => { if (data) setFunds(data); });
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useReconnect(() => { if (loadErr) load(); });
+
+  const all = rows || [];
+  const open = all.filter((r) => r.status === "planning" || r.status === "active");
+  const done = all.filter((r) => r.status === "done");
+  const archived = all.filter((r) => r.status === "archived");
+  // Soonest first, UNDATED LAST — an event with no date yet is not urgent, it is unplanned, and
+  // sorting it to the top would push the thing happening on Saturday below it.
+  const byDate = (a, b) => (a.target_date || "9999-12-31").localeCompare(b.target_date || "9999-12-31");
+  const shown = (view === "done" ? done : view === "archived" ? archived : open).slice().sort(byDate);
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const fundById = new Map(funds.map((x) => [x.id, x.name]));
+
+  function startAdd() { setF(BLANK); setEditingId(null); setAdding(true); }
+  function startEdit(r) {
+    setF({
+      name: r.name || "", description: r.description || "", target_date: r.target_date || "",
+      goal_amount: r.goal_amount ?? "", point_person_id: r.point_person_id || "",
+      campaign_id: r.campaign_id || "", status: r.status === "archived" ? "planning" : (r.status || "planning"),
+    });
+    setAdding(false); setEditingId(r.id);
+  }
+  function cancel() { setAdding(false); setEditingId(null); setF(BLANK); }
+
+  async function save() {
+    const name = f.name.trim();
+    if (!name) { notify({ kind: "error", title: "Give it a name", text: "A fundraiser needs a name before you can save it." }); return; }
+    setBusy(true);
+    /* PRESERVE ARCHIVED. `archived` is not in the status dropdown — it is reached by the Archive
+       button and left by Restore — so startEdit has to show archived rows as something the select
+       can represent, and it picks "planning". Writing that back would silently un-archive a
+       fundraiser as a side effect of fixing a typo in its name. Restore stays the one explicit way
+       out of the archive. */
+    const orig = editingId ? all.find((r) => r.id === editingId) : null;
+    // "" -> null throughout: a blank goal means "no target", which is a different fact from a goal
+    // of zero, and an empty string would be rejected outright by the date and uuid columns.
+    const patch = {
+      name,
+      description: f.description.trim() || null,
+      target_date: f.target_date || null,
+      goal_amount: f.goal_amount === "" || f.goal_amount == null ? null : Number(String(f.goal_amount).replace(/[^0-9.]/g, "")) || null,
+      point_person_id: f.point_person_id || null,
+      // Set now, inert now. Whether a linked fund's contributions and this event's typed proceeds
+      // can both count is the double-count question deferred to slice 6 — nothing computes off this
+      // column yet, deliberately.
+      campaign_id: f.campaign_id || null,
+      status: orig?.status === "archived" ? "archived" : f.status,
+    };
+
+    if (editingId) {
+      const { error } = await supabase.from("fundraisers").update(patch).eq("id", editingId);
+      setBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't save that fundraiser", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    } else {
+      const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+      if (deptErr || !deptId) { setBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+      const { error } = await supabase.from("fundraisers").insert({ ...patch, department_id: deptId, created_by: meId || null });
+      setBusy(false);
+      if (error) { notify({ kind: "error", title: "Couldn't add that fundraiser", text: "Something went wrong adding it. Please try again.", details: error.message }); return; }
+    }
+    cancel(); load();
+  }
+
+  async function setStatus(r, next) {
+    const { error } = await supabase.from("fundraisers").update({ status: next }).eq("id", r.id);
+    if (error) { notify({ kind: "error", title: next === "archived" ? "Couldn't archive that" : "Couldn't restore that", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    load();
+  }
+
+  const form = (
+    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label style={{ ...S.field, flex: 1, minWidth: 190 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
+        <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="Pancake Breakfast 2026" /></label>
+      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Target date</span>
+        <input style={FS.input} type="date" value={f.target_date} onChange={(e) => setF((x) => ({ ...x, target_date: e.target.value }))} /></label>
+      <label style={{ ...S.field, minWidth: 125 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Goal ($)</span>
+        <input style={FS.input} value={f.goal_amount} onChange={(e) => setF((x) => ({ ...x, goal_amount: e.target.value }))} placeholder="4000" inputMode="numeric" /></label>
+      <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Led by</span>
+        <select style={FS.input} value={f.point_person_id} onChange={(e) => setF((x) => ({ ...x, point_person_id: e.target.value }))}>
+          <option value="">— nobody yet —</option>
+          {(members || []).filter((m) => m.status === "Active").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select></label>
+      <label style={{ ...S.field, minWidth: 175 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Raising for (optional)</span>
+        <select style={FS.input} value={f.campaign_id} onChange={(e) => setF((x) => ({ ...x, campaign_id: e.target.value }))}>
+          <option value="">No particular fund</option>
+          {funds.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select></label>
+      <label style={{ ...S.field, minWidth: 135 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Status</span>
+        <select style={FS.input} value={f.status} onChange={(e) => setF((x) => ({ ...x, status: e.target.value }))}>
+          {FR_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+        </select></label>
+      <label style={{ ...S.field, flex: "1 1 100%" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What it's for</span>
+        <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={f.description} onChange={(e) => setF((x) => ({ ...x, description: e.target.value }))} placeholder="Breakfast at the station — proceeds toward the new engine." /></label>
+      <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={save}>
+        <Plus size={15} /> {busy ? "Saving…" : editingId ? "Save changes" : "Add fundraiser"}
+      </button>
+      <button style={FS.btn} onClick={cancel} disabled={busy}>Cancel</button>
+    </div>
+  );
+
+  return (
+    <div style={{ marginBottom: 22 }}>
+      {loadErr && <OfflineNotice onRetry={load} what="fundraisers" />}
+      <div style={{ ...FS.kicker, marginBottom: 4 }}>FUNDRAISERS</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The events you're running. Each one becomes the home for its plan, dates, sponsors and jobs.</p>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fundraiser</button>}
+        <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+          {[["open", `Open (${open.length})`], ["done", `Done (${done.length})`], ["archived", `Archived (${archived.length})`]].map(([k, label]) => (
+            <button key={k} onClick={() => setView(k)}
+              style={{ ...FS.btn, padding: "5px 11px", fontSize: 12,
+                       borderColor: view === k ? FIRE.red : undefined,
+                       color: view === k ? FIRE.textPrimary : FIRE.textSecondary,
+                       fontWeight: view === k ? 700 : 500 }}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {(adding || editingId) && form}
+
+      {rows === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
+      ) : shown.length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+          {view === "done" ? "Nothing finished yet. Fundraisers you mark Done will collect here."
+           : view === "archived" ? "Nothing archived. Events you put away wait here, with what they raised."
+           : "No fundraisers yet. Add one — a pancake breakfast, a boot drive — and you'll be able to hang its plan, dates, sponsors, and tasks off it."}
+        </div>
+      ) : (
+        <div>
+          {shown.map((r) => {
+            const st = frStatusMeta(r.status);
+            const when = frWhen(r.target_date, todayISO);
+            const soon = r.target_date && r.target_date >= todayISO && r.status !== "done";
+            return (
+              <div key={r.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: r.status === "archived" ? 0.72 : 1 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <PartyPopper size={17} color={st.color()} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>
+                      {r.name}
+                      <span style={{ fontSize: 11, fontWeight: 700, color: st.color(), marginLeft: 8 }}>{st.label.toUpperCase()}</span>
+                    </div>
+                    {r.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.5 }}>{r.description}</div>}
+                    <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {r.target_date && <span style={{ color: soon ? FIRE.amberText : FIRE.textMuted }}>{r.target_date}{when ? ` · ${when}` : ""}</span>}
+                      {r.goal_amount != null && <span>Goal ${Number(r.goal_amount).toLocaleString()}</span>}
+                      {r.point_person_id && <span>Led by {nameById.get(r.point_person_id) || "a member"}</span>}
+                      {r.campaign_id && <span>For {fundById.get(r.campaign_id) || "a fund"}</span>}
+                    </div>
+                  </div>
+                  {/* stopPropagation now, so slice 3 can make the whole card tappable without these
+                      also firing the navigation. */}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); startEdit(r); }}><Pencil size={13} /> Edit</button>
+                    {r.status === "archived"
+                      ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); setStatus(r, "planning"); }}><RotateCcw size={13} /> Restore</button>
+                      : <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); setStatus(r, "archived"); }}>Archive</button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Fundraisers({ S, role, notify, dept, meId, members, back }) {
   const [mode, setMode] = useState("Plan a fundraiser");
   const [ideasOpen, setIdeasOpen] = useState(false);   // Event Ideas collapsed by default
@@ -5471,6 +5697,12 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident.</div>
       </div>
+
+      {/* THE EVENTS THEMSELVES, above the planner. The planner is a tool you reach for once; the
+          list of what the department is actually running is what you come back to, so it opens the
+          page. Gated on canManage rather than the nav's LEADERSHIP: fundraisers is is_canmanage()
+          by RLS, so a Project Admin would otherwise get an empty list with no explanation. */}
+      {canManage(role) && <FundraiserIndex S={S} notify={notify} meId={meId} members={members} />}
 
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
