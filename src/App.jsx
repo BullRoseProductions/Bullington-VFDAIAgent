@@ -6134,6 +6134,33 @@ async function recordGift({ campaignId, donorId, amount, occurredOn, note }) {
   return { error };
 }
 
+/* THE CONTACT WRITER, parallel to recordGift and shared for the same reason: the
+   donation_activity_contact_complete CHECK requires a date AND a non-blank note together, and two
+   call sites enforcing that separately is how one of them ends up not enforcing it.
+
+   It validates rather than letting Postgres reject: a constraint violation surfaces as a wall of
+   SQL, and "new row violates check constraint" is not something to put in front of somebody who
+   forgot to type what was said. Callers check first for the friendly message; this is the backstop
+   that makes the rule true regardless of which form calls it. */
+async function recordContact({ donorId, occurredOn, note }) {
+  const clean = (note || "").trim();
+  if (!occurredOn) return { error: new Error("A contact needs a date.") };
+  if (!clean) return { error: new Error("A contact needs a note.") };
+  const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+  if (deptErr || !deptId) return { error: deptErr || new Error("no department") };
+  const { error } = await supabase.from("donation_activity").insert({
+    department_id: deptId,
+    donor_id: donorId || null,
+    campaign_id: null,              // a conversation is not money, so it is never tagged to a fund
+    kind: "contact",
+    label: null,
+    amount: null,
+    occurred_on: occurredOn,
+    note: clean,
+  });
+  return { error };
+}
+
 const DONOR_STAGES = [
   { v: "prospect",  label: "Prospect",  hint: "Not approached yet" },
   { v: "talking",   label: "Talking",   hint: "Conversation started" },
@@ -6144,6 +6171,210 @@ const DONOR_STAGES = [
 const stageMeta = (v) => DONOR_STAGES.find((s) => s.v === v) || DONOR_STAGES[0];
 const stageColor = (v) => ({ prospect: FIRE.textMuted, talking: FIRE.blueText, committed: FIRE.amberText, gave: FIRE.greenText, declined: FIRE.textMuted2 }[v] || FIRE.textMuted);
 
+/* ---------------- Donations · one business ----------------
+   The relationship in full: who they are, what they have pledged, what has actually arrived, and
+   every conversation and gift in date order.
+
+   TWO NUMBERS THAT ARE ALLOWED TO DISAGREE. Pledged is what somebody said they would give — a
+   claim about the future, typed by hand. Received is arithmetic over the timeline. A business that
+   pledged $500 and gave $500 shows both; one that gave without ever pledging shows a received
+   figure and no pledge; one that pledged and has not paid shows the gap. Nothing reconciles them,
+   because the gap IS the useful information.
+
+   LAST CONTACTED IS DERIVED — max(occurred_on) over kind='contact' rows, never a stored column.
+   That column existed once and was removed in the reshape precisely because it drifted the moment
+   somebody logged a call and forgot to also update the field.
+
+   AND A GIFT NEVER MOVES THE STAGE. Stage is a human's read of where the conversation stands; a
+   logged gift is bookkeeping. Auto-advancing to 'gave' would overwrite the first with the second —
+   a business that gave last year and is being asked again is legitimately 'talking'.
+
+   APPEND-ONLY for v1: no editing or deleting timeline rows. A mistaken entry is a rare correction,
+   and shipping the read-and-add path clean beats shipping a half-considered edit path with it. */
+const ACTIVITY_META = {
+  contribution: { label: "Gift",    Icon: DollarSign },
+  contact:      { label: "Contact", Icon: Phone },
+  update:       { label: "Update",  Icon: FileText },
+  outcome:      { label: "Outcome", Icon: CheckCircle2 },
+};
+
+function DonorDetail({ S, notify, donor, onBack, onEdit }) {
+  const [rows, setRows] = useState(null);       // null = loading; [] = genuinely no history
+  const [loadErr, setLoadErr] = useState(false);
+  const [funds, setFunds] = useState([]);
+  const [openForm, setOpenForm] = useState(null);   // "touch" | "gift" | null
+  const [busy, setBusy] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const [tf, setTf] = useState({ occurred_on: today, note: "" });
+  const [gf, setGf] = useState({ amount: "", occurred_on: today, campaign_id: "", note: "" });
+
+  /* No .eq("department_id") — RLS already scopes this to the department AND to leadership, and a
+     second copy of that rule in the client is how the two drift apart. */
+  function load() {
+    supabase.from("donation_activity")
+      .select("id, kind, label, amount, occurred_on, note, campaign_id, created_at")
+      .eq("donor_id", donor.id)
+      .order("occurred_on", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        // A failed read is not an empty history. Keep what was last known rather than showing
+        // "no history yet" — and a $0 received figure — to somebody whose network dropped.
+        if (error || !data) { setLoadErr(true); return; }
+        setLoadErr(false); setRows(data);
+      });
+    supabase.from("donation_campaigns").select("id, name").eq("status", "active")
+      .order("sort").order("name")
+      .then(({ data }) => { if (data) setFunds(data); });
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [donor.id]);
+  useReconnect(() => { if (loadErr) load(); });
+
+  const list = rows || [];
+  const received = list.filter((r) => r.kind === "contribution").reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const contactDates = list.filter((r) => r.kind === "contact" && r.occurred_on).map((r) => r.occurred_on);
+  const lastContact = contactDates.length ? contactDates.reduce((a, b) => (a > b ? a : b)) : null;
+  const pledged = donor.amount_committed != null ? Number(donor.amount_committed) : null;
+  const st = stageMeta(donor.stage);
+  const fundName = new Map(funds.map((f) => [f.id, f.name]));
+
+  async function saveTouch() {
+    if (!tf.occurred_on) { notify({ kind: "error", title: "When was this?", text: "A contact needs a date so it can sit in the timeline." }); return; }
+    if (!tf.note.trim())  { notify({ kind: "error", title: "What was said?", text: "A contact needs a note — recording that somebody was called, without what came of it, is the part that turns out to be useless later." }); return; }
+    setBusy(true);
+    const { error } = await recordContact({ donorId: donor.id, occurredOn: tf.occurred_on, note: tf.note });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't log that", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    setTf({ occurred_on: today, note: "" }); setOpenForm(null); load();
+  }
+
+  async function saveGift() {
+    const amt = Number(String(gf.amount).replace(/[^0-9.]/g, ""));
+    if (!amt) { notify({ kind: "error", title: "How much was it?", text: "A gift needs an amount before you can log it." }); return; }
+    if (!gf.occurred_on) { notify({ kind: "error", title: "When did it arrive?", text: "A gift needs a date — it's what the yearly total counts on." }); return; }
+    setBusy(true);
+    const { error } = await recordGift({ campaignId: gf.campaign_id, donorId: donor.id, amount: amt, occurredOn: gf.occurred_on, note: gf.note });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't log that gift", text: "Something went wrong saving it. Please try again.", details: error.message }); return; }
+    setGf({ amount: "", occurred_on: today, campaign_id: "", note: "" }); setOpenForm(null);
+    notify({ kind: "success", title: "Gift logged", text: `$${amt.toLocaleString()} recorded for ${donor.organization || donor.name}.` });
+    load();
+  }
+
+  const stat = (label, value, sub, color) => (
+    <div style={{ ...FS.card, padding: 14, flex: "1 1 180px", minWidth: 150 }}>
+      <div style={{ ...FS.kicker, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 21, fontWeight: 800, color: color || FIRE.textPrimary, ...FS.num, lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <>
+      {loadErr && <OfflineNotice onRetry={load} what="this history" />}
+      <button style={{ ...FS.btn, marginBottom: 12 }} onClick={onBack}><ArrowLeft size={15} /> All supporters</button>
+
+      <div style={{ ...S.opCard, ...FS.card, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <HeartHandshake size={20} color={stageColor(donor.stage)} style={{ flexShrink: 0, marginTop: 3 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary }}>{donor.organization || donor.name}</div>
+            {donor.organization && donor.name && <div style={{ fontSize: 13.5, color: FIRE.textSecondary, marginTop: 2 }}>{donor.name}{donor.role ? ` · ${donor.role}` : ""}</div>}
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8, fontSize: 12.5, color: FIRE.textMuted }}>
+              {donor.phone && <span><Phone size={12} style={{ verticalAlign: "-1px" }} /> {donor.phone}</span>}
+              {donor.email && <span><Mail size={12} style={{ verticalAlign: "-1px" }} /> {donor.email}</span>}
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: stageColor(donor.stage), border: `1px solid ${stageColor(donor.stage)}55`, borderRadius: 999, padding: "3px 10px" }}>{st.label.toUpperCase()}</span>
+              <span style={{ fontSize: 12, color: FIRE.textMuted }}>{st.hint}</span>
+              {donor.next_follow_up && (
+                <span style={{ fontSize: 12, fontWeight: donor.next_follow_up <= today ? 700 : 400, color: donor.next_follow_up <= today ? FIRE.amberText : FIRE.textMuted }}>
+                  {donor.next_follow_up <= today ? "Follow up — due " : "Follow up "}{donor.next_follow_up}
+                </span>
+              )}
+            </div>
+          </div>
+          <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => onEdit(donor)}><Pencil size={13} /> Edit</button>
+        </div>
+        {donor.relationship_notes && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 10, lineHeight: 1.55, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}` }}>{donor.relationship_notes}</div>}
+      </div>
+
+      {/* Pledged and Received side by side, never reconciled — see the note above the component. */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {stat("Pledged", pledged != null ? `$${pledged.toLocaleString()}` : "—", pledged != null ? "as entered" : "nothing pledged", FIRE.textSecondary)}
+        {stat("Received", `$${received.toLocaleString()}`, "summed from gifts below", FIRE.red)}
+        {stat("Last contacted", lastContact || "—", lastContact ? "most recent logged contact" : "no contact logged yet", FIRE.textSecondary)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <button style={FS.btn} onClick={() => setOpenForm(openForm === "touch" ? null : "touch")}><Phone size={14} /> Log a touch</button>
+        <button style={FS.btn} onClick={() => setOpenForm(openForm === "gift" ? null : "gift")}><DollarSign size={14} /> Log a gift</button>
+      </div>
+
+      {openForm === "touch" && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>When *</span>
+            <input style={FS.input} type="date" value={tf.occurred_on} onChange={(e) => setTf((x) => ({ ...x, occurred_on: e.target.value }))} /></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 220 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What came of it *</span>
+            <input style={FS.input} value={tf.note} onChange={(e) => setTf((x) => ({ ...x, note: e.target.value }))} placeholder="Called Dale — wants to sponsor the boot drive again, ring back after the 15th" autoFocus /></label>
+          <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={saveTouch}>{busy ? "Saving…" : "Log it"}</button>
+          <button style={FS.btn} onClick={() => setOpenForm(null)} disabled={busy}>Cancel</button>
+        </div>
+      )}
+
+      {openForm === "gift" && (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Amount ($) *</span>
+            <input style={FS.input} value={gf.amount} onChange={(e) => setGf((x) => ({ ...x, amount: e.target.value }))} placeholder="250" inputMode="numeric" autoFocus /></label>
+          <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date received *</span>
+            <input style={FS.input} type="date" value={gf.occurred_on} onChange={(e) => setGf((x) => ({ ...x, occurred_on: e.target.value }))} /></label>
+          {/* Optional: a gift may be for a particular fund, or just a gift. Untagged money still
+              counts for the department — it simply does not fill any one fund's bar. */}
+          <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>For a fund?</span>
+            <select style={FS.input} value={gf.campaign_id} onChange={(e) => setGf((x) => ({ ...x, campaign_id: e.target.value }))}>
+              <option value="">No particular fund</option>
+              {funds.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select></label>
+          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note</span>
+            <input style={FS.input} value={gf.note} onChange={(e) => setGf((x) => ({ ...x, note: e.target.value }))} placeholder="Cheque handed in at the station" /></label>
+          <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={saveGift}>{busy ? "Saving…" : "Log gift"}</button>
+          <button style={FS.btn} onClick={() => setOpenForm(null)} disabled={busy}>Cancel</button>
+        </div>
+      )}
+
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>HISTORY</div>
+      {rows === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
+      ) : list.length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+          No history yet — log a call, a visit, or a gift.
+        </div>
+      ) : (
+        <div>
+          {list.map((r) => {
+            const meta = ACTIVITY_META[r.kind] || ACTIVITY_META.update;
+            const Icon = meta.Icon;
+            const isGift = r.kind === "contribution";
+            return (
+              <div key={r.id} style={{ display: "flex", gap: 11, padding: "11px 2px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ paddingTop: 2, color: isGift ? FIRE.red : FIRE.textMuted }}><Icon size={15} /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.label || meta.label}</span>
+                    {isGift && r.amount != null && <span style={{ fontSize: 14, fontWeight: 800, color: FIRE.red, ...FS.num }}>${Number(r.amount).toLocaleString()}</span>}
+                    {isGift && r.campaign_id && <span style={{ fontSize: 11.5, color: FIRE.textMuted, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "1px 8px" }}>{fundName.get(r.campaign_id) || "a fund"}</span>}
+                  </div>
+                  {r.note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>{r.note}</div>}
+                </div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, whiteSpace: "nowrap", ...FS.num }}>{r.occurred_on || "—"}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 function DonationBusinesses({ S, notify, meId, members }) {
   const BLANK = { name: "", organization: "", role: "Donor", phone: "", email: "", amount_committed: "", stage: "prospect", next_follow_up: "", relationship_notes: "" };
   const [rows, setRows] = useState(null);        // null = first load; [] = genuinely none
@@ -6153,6 +6384,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
   const [editingId, setEditingId] = useState(null);
   const [f, setF] = useState(BLANK);
   const [busy, setBusy] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);   // in-component detail; no router change
 
   // Dept-scoped AND leadership-gated by RLS — no client-side filter, which is how the two would
   // drift apart. Ordered by sort then name so a department can pin its big supporters to the top.
@@ -6225,6 +6457,18 @@ function DonationBusinesses({ S, notify, meId, members }) {
     load();
   }
 
+  /* Rendered after every hook above — an early return placed higher would change the hook call
+     order between renders and React would throw. Reads the donor from the loaded list rather than
+     re-fetching, so the detail cannot show something the list disagrees with; if the id is not
+     found (retired-and-filtered, or a stale click) it falls through to the list rather than
+     rendering a blank screen. */
+  const selected = selectedId ? (rows || []).find((d) => d.id === selectedId) : null;
+  if (selected) {
+    return <DonorDetail S={S} notify={notify} donor={selected}
+                        onBack={() => setSelectedId(null)}
+                        onEdit={(d) => { setSelectedId(null); startEdit(d); }} />;
+  }
+
   const form = (
     <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
@@ -6284,7 +6528,8 @@ function DonationBusinesses({ S, notify, meId, members }) {
             // colour. Only for current supporters — chasing a retired one is not a to-do.
             const due = d.active && d.next_follow_up && d.next_follow_up <= todayISO;
             return (
-              <div key={d.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: d.active ? 1 : 0.72 }}>
+              <div key={d.id} onClick={() => setSelectedId(d.id)}
+                   style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: d.active ? 1 : 0.72, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <HeartHandshake size={17} color={stageColor(d.stage)} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -6304,10 +6549,14 @@ function DonationBusinesses({ S, notify, meId, members }) {
                     {d.relationship_notes && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>{d.relationship_notes}</div>}
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => startEdit(d)}><Pencil size={13} /> Edit</button>
+                    {/* An explicit View alongside the whole-card click: the card being tappable is
+                        discoverable only by trying it, and Edit/Retire sit inside that same card —
+                        so without a visible affordance the safe action is the invisible one. */}
+                    <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); setSelectedId(d.id); }}>View</button>
+                    <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); startEdit(d); }}><Pencil size={13} /> Edit</button>
                     {d.active
-                      ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setActive(d, false)}>Retire</button>
-                      : <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setActive(d, true)}><RotateCcw size={13} /> Restore</button>}
+                      ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); setActive(d, false); }}>Retire</button>
+                      : <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); setActive(d, true); }}><RotateCcw size={13} /> Restore</button>}
                   </div>
                 </div>
               </div>
