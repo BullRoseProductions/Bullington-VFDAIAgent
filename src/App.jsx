@@ -5441,10 +5441,11 @@ function frWhen(iso, todayISO) {
    assignee_name. A client .update() here would be silently refused by RLS, and even if it were
    allowed it would skip the stamping. Creation is a direct insert, which the insert policy permits
    and which the rest of this file already does. */
-function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) {
+function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit, onOpenDoc }) {
   const [items, setItems] = useState(null);
   const [sponsors, setSponsors] = useState(null);
   const [dates, setDates] = useState(null);        // null = first load; [] = genuinely none
+  const [docs, setDocs] = useState(null);          // null = first load; [] = genuinely none
   const [loadErr, setLoadErr] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -5475,6 +5476,13 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
     supabase.from("fundraiser_sponsors").select("*").eq("fundraiser_id", fundraiser.id)
       .order("sort", { ascending: true }).order("created_at", { ascending: true })
       .then(({ data, error }) => { if (!error && data) setSponsors(data); });
+    /* The plan and anything generated for this fundraiser later. deleted_at IS NULL because
+       ai_outputs is SOFT-deleted — without the filter a "deleted" plan would reappear here, which
+       is the whole failure the soft-delete design exists to avoid. */
+    supabase.from("ai_outputs").select("id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by")
+      .eq("fundraiser_id", fundraiser.id).is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => { if (!error && data) setDocs(data); });
     // The SAME rows the funding calendar draws — this is a filtered view of funding_events, not a
     // second store of dates. Adding one here makes it appear on the calendar and vice versa.
     supabase.from("funding_events").select("id, date, title").eq("fundraiser_id", fundraiser.id)
@@ -5685,7 +5693,43 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
         {fundraiser.target_date && stat("When", when || "—", fundraiser.target_date, FIRE.textSecondary)}
       </div>
 
-      {/* ---- 2. Key dates ----
+      {/* ---- 2. Plan & documents ----
+           Directly under the overview because the plan is the thing that explains everything below
+           it — the jobs and the dates are what the plan decomposes into, and reading them without
+           it available is reading the answer without the question.
+
+           The viewer is the planner's OWN modal, passed down as onOpenDoc rather than rebuilt here.
+           It already handles reading, editing, and the ai_text/current_text distinction (the
+           original stays pristine; edits live in current_text), and a second copy would be a second
+           place for that rule to drift. */}
+      <div style={{ ...FS.kicker, marginBottom: 4 }}>PLAN &amp; DOCUMENTS</div>
+      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The plan this fundraiser was built from, and anything else generated for it.</p>
+      {docs === null && !loadErr ? (
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginBottom: 16 }}>Loading…</div>
+      ) : (docs || []).length === 0 ? (
+        <div style={{ ...S.opCard, ...FS.card, marginBottom: 16, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+          No plan or documents yet.
+        </div>
+      ) : (
+        <div style={{ marginBottom: 16 }}>
+          {(docs || []).map((d) => {
+            const when = new Date(d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+            const eName = d.edited_by ? (nameById.get(d.edited_by) || "someone") : null;
+            return (
+              <div key={d.id} style={{ ...S.opCard, ...FS.card, marginBottom: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <FileText size={16} color={FIRE.blueText} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{d.title || "Untitled"}</div>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>generated {when}{eName ? ` · edited by ${eName}` : ""}</div>
+                </div>
+                <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => onOpenDoc?.(d)}>Open</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ---- 3. Key dates ----
            Placed above the jobs on purpose: "when is it" is the question that reorders everything
            else, and a job list read without the setup day next to it is how the tables get booked
            for the wrong afternoon. */}
@@ -5727,7 +5771,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
         </div>
       )}
 
-      {/* ---- 3. Action items ---- */}
+      {/* ---- 4. Action items ---- */}
       <div style={{ ...FS.kicker, marginBottom: 4 }}>JOBS TO DO</div>
       <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Real action items — assigning one notifies that member, and it shows up in their own list too.</p>
       {!addingTask && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={() => setAddingTask(true)}><Plus size={15} /> Add a job</button>}
@@ -5764,7 +5808,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
         </div>
       )}
 
-      {/* ---- 4. Sponsors ---- */}
+      {/* ---- 5. Sponsors ---- */}
       <div style={{ ...FS.kicker, marginBottom: 4 }}>SPONSORS</div>
       <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Who's backing it, what you promised them, and whether you've delivered it yet.</p>
       {!addingSponsor && !editingSponsorId && <button style={{ ...FS.btn, marginBottom: 10 }} onClick={startSponsorAdd}><Plus size={15} /> Add a sponsor</button>}
@@ -5823,7 +5867,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, onBack, onEdit }) 
   );
 }
 
-function FundraiserIndex({ S, notify, meId, members }) {
+function FundraiserIndex({ S, notify, meId, members, focusId, reloadKey, onFocusHandled, onOpenDoc }) {
   const BLANK = { name: "", description: "", target_date: "", goal_amount: "", point_person_id: "", campaign_id: "", status: "planning", color: "" };
   const [rows, setRows] = useState(null);        // null = first load; [] = genuinely none
   const [loadErr, setLoadErr] = useState(false);
@@ -5849,8 +5893,23 @@ function FundraiserIndex({ S, notify, meId, members }) {
     supabase.from("donation_campaigns").select("id, name").eq("status", "active").order("sort").order("name")
       .then(({ data }) => { if (data) setFunds(data); });
   }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // reloadKey in the deps is what lets a caller say "re-read, something changed" — the planner
+  // bumps it after creating a fundraiser so the row exists before focusId tries to open it.
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [reloadKey]);
   useReconnect(() => { if (loadErr) load(); });
+
+  /* Consume the parent's "open this one" intent. Cleared through onFocusHandled immediately so the
+     HQ can be backed out of — otherwise focusId would still be set and re-select the same row on
+     the next render, trapping the user on the page they just tried to leave.
+
+     This runs BEFORE the early return below. Every hook in this component has to, or the hook order
+     changes between the list and detail renders and React throws. */
+  useEffect(() => {
+    if (!focusId) return;
+    setSelectedId(focusId);
+    onFocusHandled?.();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [focusId]);
 
   const all = rows || [];
   const open = all.filter((r) => r.status === "planning" || r.status === "active");
@@ -5943,7 +6002,8 @@ function FundraiserIndex({ S, notify, meId, members }) {
   if (selected) {
     return <FundraiserHQ S={S} notify={notify} fundraiser={selected} members={members} meId={meId}
                          onBack={() => { setSelectedId(null); load(); }}
-                         onEdit={(r) => { setSelectedId(null); startEdit(r); }} />;
+                         onEdit={(r) => { setSelectedId(null); startEdit(r); }}
+                         onOpenDoc={onOpenDoc} />;
   }
 
   const form = (
@@ -6071,6 +6131,13 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
   const [goalAmt, setGoalAmt] = useState(""); const [communityType, setCommunityType] = useState("Small town"); const [effortLevel, setEffortLevel] = useState("Medium"); const [targetDate, setTargetDate] = useState("");   // Plan-a-fundraiser inputs
   const [phase, setPhase] = useState("input"); const [ideas, setIdeas] = useState([]); const [chosenIdea, setChosenIdea] = useState(null); const [loadingLabel, setLoadingLabel] = useState("Working…"); const [rawIdeas, setRawIdeas] = useState("");   // two-step brainstorm→plan flow (Plan mode only)
   const [planReview, setPlanReview] = useState(null); const [operationalizing, setOperationalizing] = useState(false);   // Build 2: { sourceLabel, actionItems[], calendarEvents[] } — operationalize the plan into tracked work
+  /* NAV LIFT. The index owns "which fundraiser is open", but two things outside it now need to
+     open one: tapping a card (as always) and creating one from a plan. Rather than give the planner
+     its own copy of the HQ, the parent holds an intent — focusFr — and the index consumes it.
+     frReload is separate on purpose: the index has to RE-READ before it can focus a row that did
+     not exist when it last loaded. */
+  const [focusFr, setFocusFr] = useState(null); const [frReload, setFrReload] = useState(0);
+  const [creatingFr, setCreatingFr] = useState(false); const [frName, setFrName] = useState("");
   const [addingToApp, setAddingToApp] = useState(false); const [fundingReloadKey, setFundingReloadKey] = useState(0);   // Stage 3: dual-insert loading + a key that remounts FundingCalendar so newly-inserted events show
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Funding)
@@ -6124,7 +6191,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
     finally { setLoading(false); }
   }
   async function chooseIdea(idea) {
-    setChosenIdea(idea); setErr(""); setPhase("plan");
+    setChosenIdea(idea); setErr(""); setPhase("plan"); setFrName(idea?.name || "");
     await buildPlan(idea);
   }
   async function buildPlan(idea) {
@@ -6138,7 +6205,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
   }
   function backToIdeas() { setPhase("ideas"); setOut(""); setErr(""); }
   function startOver() {
-    setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setOut(""); setErr(""); setPlanReview(null);
+    setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setOut(""); setErr(""); setPlanReview(null); setFrName("");
   }
   // cloned from Minutes: a suggested owner NAME → member id (exact match, then single-token), else "" (unassigned).
   function matchOwnerId(name) {
@@ -6174,6 +6241,57 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
     } catch { setErr("Couldn't turn the plan into tracked work just now. Try again."); }
     finally { setOperationalizing(false); }
   }
+  /* CREATE FUNDRAISER — the plan stops being a draft and becomes a thing the department is doing.
+     ORDER MATTERS, and the failure handling is the point: the fundraiser is inserted FIRST and its
+     id checked before anything else is written, so there is never a document tagged to a fundraiser
+     that does not exist. If the document insert then fails, the fundraiser still stands and we say
+     so plainly rather than rolling back work the user can see — a half-success reported as a
+     failure is how people end up creating the same fundraiser twice.
+
+     color is left unset on purpose: NULL means "nobody chose", and frColor() derives a stable one
+     from the id. An explicit colour is a decision to make in the HQ, not a side effect of planning. */
+  async function createFundraiser() {
+    const name = frName.trim();
+    if (!name) { notify({ kind: "error", title: "Give it a name", text: "A fundraiser needs a name before you can create it." }); return; }
+    if (!out.trim()) { notify({ kind: "error", title: "No plan yet", text: "Build the plan first — it gets saved with the fundraiser." }); return; }
+    setCreatingFr(true); setErr("");
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setCreatingFr(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+
+    const { data: fr, error: frErr } = await supabase.from("fundraisers").insert({
+      department_id: deptId,
+      name,
+      description: detail.trim() || chosenIdea?.pitch || null,
+      target_date: normalizeDate(targetDate) || null,
+      goal_amount: goalAmt === "" || goalAmt == null ? null : Number(String(goalAmt).replace(/[^0-9.]/g, "")) || null,
+      status: "planning",
+      created_by: meId,
+    }).select("id").single();
+    if (frErr || !fr?.id) {
+      setCreatingFr(false);
+      notify({ kind: "error", title: "Couldn't create the fundraiser", text: "Nothing was saved. Please try again.", details: frErr?.message });
+      return;   // nothing else is written — no orphan document
+    }
+
+    // The plan itself, filed under the new fundraiser. A failure here is NOT fatal: the fundraiser
+    // exists and opening it is still the right next step, so this reports and continues.
+    const { error: docErr } = await supabase.from("ai_outputs").insert({
+      department_id: deptId, feature: "fundraiser", title: name,
+      ai_text: out, fundraiser_id: fr.id, created_by: meId,
+    });
+
+    setCreatingFr(false);
+    if (docErr) {
+      notify({ kind: "error", title: "Fundraiser created — the plan didn't save", text: `"${name}" was created, but the plan document failed to attach. You can save it from the planner and re-generate later.`, details: docErr.message });
+    } else {
+      notify({ kind: "success", title: "Fundraiser created", text: `Created "${name}" — opening its HQ.` });
+    }
+    loadDrafts();
+    startOver();                                   // the planner is done; its state would only go stale
+    setFocusFr(fr.id); setFrReload((k) => k + 1);  // index re-reads, then opens on the new row
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function addToApp() {
     if (!planReview) return;
     const src = planReview.sourceLabel;
@@ -6260,7 +6378,9 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
           list of what the department is actually running is what you come back to, so it opens the
           page. Gated on canManage rather than the nav's LEADERSHIP: fundraisers is is_canmanage()
           by RLS, so a Project Admin would otherwise get an empty list with no explanation. */}
-      {canManage && <FundraiserIndex S={S} notify={notify} meId={meId} members={members} />}
+      {canManage && <FundraiserIndex S={S} notify={notify} meId={meId} members={members}
+                                     focusId={focusFr} reloadKey={frReload} onFocusHandled={() => setFocusFr(null)}
+                                     onOpenDoc={reopen} />}
 
       <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
@@ -6315,13 +6435,25 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
             </div>
           )}
           {mode === "Plan a fundraiser" && phase === "plan" && (
-            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              {out && canManage && <button style={{ ...FS.btnPrimary, opacity: operationalizing ? 0.7 : 1 }} onClick={extractPlanWork} disabled={operationalizing}>{operationalizing ? <><Loader2 size={16} className="spin" /> Turning the plan into tracked work…</> : <><ClipboardList size={16} /> Turn this plan into tasks &amp; calendar</>}</button>}
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+              {/* The plan's one primary action is now CREATE, not extract. Turning a plan straight
+                  into loose tasks and calendar rows scattered them across two shared pools with
+                  nothing tying them together; the fundraiser is that something. Extraction still
+                  happens — it moves inside the HQ in 5b, where the tasks have a home to land in. */}
+              {out && canManage && (
+                <label style={{ ...S.field, minWidth: 190 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Fundraiser name</span>
+                  <input style={FS.input} value={frName} onChange={(e) => setFrName(e.target.value)} placeholder="Pancake Breakfast 2026" /></label>
+              )}
+              {out && canManage && <button style={{ ...FS.btnPrimary, opacity: (creatingFr || !frName.trim()) ? 0.6 : 1 }} onClick={createFundraiser} disabled={creatingFr || !frName.trim()}>{creatingFr ? <><Loader2 size={16} className="spin" /> Creating…</> : <><PartyPopper size={16} /> Create fundraiser</>}</button>}
               {!loading && err && <button style={FS.btn} onClick={() => buildPlan(chosenIdea)}><Sparkles size={15} /> Rebuild plan</button>}
               <button style={FS.btn} onClick={backToIdeas}><ArrowLeft size={14} /> Back to ideas</button>
               <button style={FS.btn} onClick={startOver}>Start over</button>
             </div>
           )}
+          {/* UNREACHABLE from 5a on: nothing sets phase="operationalize" any more. Kept rather than
+              deleted because 5b relocates this exact review UI into the HQ, where the extracted
+              tasks and dates get tagged to the fundraiser instead of scattering. Deleting it now
+              would mean rewriting it from scratch next slice. */}
           {mode === "Plan a fundraiser" && phase === "operationalize" && planReview && (
             <div style={{ ...FS.card, padding: "12px 16px", marginTop: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
               <div style={{ ...FS.kicker, marginBottom: 3 }}>REVIEW &amp; CONFIRM — turn the plan into tracked work</div>
