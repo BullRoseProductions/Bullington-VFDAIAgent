@@ -34,14 +34,34 @@
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>B4C records arrivals and departures at your department's approved locations, even when the app is closed, so your station and duty hours are logged automatically. It does not track your routes and your location is never sold.</string>
 
-	<!-- NSMotionUsageDescription is DELIBERATELY ABSENT. We run with
-	     disableMotionActivityUpdates:true, mirroring the Android decision to strip
-	     ACTIVITY_RECOGNITION: a member who agreed the app may notice they are at the station
-	     has not agreed to report what their body is doing. The SDK never touches
-	     CMMotionActivityManager with that flag set, so no prompt is raised and no string is
-	     needed. If motion is ever re-enabled this key must be added FIRST — iOS terminates the
-	     app on first access to a protected API whose usage string is missing, with no dialog
-	     and no catchable error. -->
+	<!-- NSMotionUsageDescription. THIS COMMENT USED TO SAY THE KEY WAS DELIBERATELY ABSENT, and
+	     that reasoning was sound right up until App Store Connect rejected the upload:
+
+	         ITMS-90683: Missing purpose string in Info.plist (NSMotionUsageDescription)
+
+	     Apple's check is STATIC — it reads the linked binary, not the runtime configuration.
+	     TSLocationManager.xcframework links CoreMotion, so the string is required whether or not
+	     we ever call into it. There is no build setting that opts out; the only alternatives are
+	     to supply the string or to drop the geolocation SDK.
+
+	     WHAT IS STILL TRUE: we run with disableMotionActivityUpdates:true (src/geofence.js), so
+	     CMMotionActivityManager is never queried and iOS raises no motion prompt at runtime. The
+	     Android side still strips ACTIVITY_RECOGNITION for the same reason — a member who agreed
+	     the app may notice they are at the station has not agreed to report what their body is
+	     doing. Adding this key does not change that; it satisfies a packaging check.
+
+	     THE STRING SAYS SO PLAINLY rather than inventing a motion feature to justify the key.
+	     An earlier draft claimed B4C used motion to detect arrivals; it does not, and a
+	     member-facing permission string that overstates collection is the kind of thing that has
+	     to match the App Privacy answers on the listing. This one states the truth: the framework
+	     includes the APIs, the app does not use them.
+
+	     THE HAZARD IS NOW INVERTED, so read this before changing the geofence config. While
+	     disableMotionActivityUpdates stays true the string is accurate. Set it FALSE and the
+	     string becomes a false statement to the member — it must be rewritten in the same change,
+	     and the App Privacy answers updated with it. -->
+	<key>NSMotionUsageDescription</key>
+	<string>B4C's location features are built on a framework that includes Apple's motion APIs. B4C does not collect or use motion data — station arrivals and departures are detected from location alone.</string>
 
 	<!-- Background execution. "location" ONLY.
 	     iOS wakes a terminated app for a region transition through CLLocationManager, which is
