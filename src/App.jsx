@@ -1143,6 +1143,66 @@ const moduleEnabled = (key, disabled) => {
 };
 
 /* ================================================================== */
+/* ---------------- Station switcher (multi-station Phase 1) ----------------
+   SHOWS NOTHING for the overwhelming majority of users, and that is the point. A login whose
+   email maps to one department — everyone, today — renders null and sees no change at all. Only
+   an email on two or more departments gets a control.
+
+   The label comes from my_department_id() ITSELF, asked directly — not from local state and not
+   from the loaded `dept` object (which does not even fetch id). That function is what every RLS
+   policy scopes by, so it is the only source that cannot disagree with what the server is serving.
+   A switcher displaying a remembered choice while the database scoped elsewhere would be worse
+   than no switcher at all.
+
+   FULL RELOAD ON SWITCH, deliberately for v1. Changing station changes the answer to nearly every
+   query in the app — roster, hours, documents, reports, the sidebar crest. Re-plumbing all of that
+   to re-fetch in place is Phase 2's problem; a reload is honest, cheap, and cannot leave one
+   screen showing the old station's data. */
+function StationSwitcher({ S }) {
+  const [list, setList] = useState(null);       // null = not loaded; <=1 entry = render nothing
+  const [activeId, setActiveId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let off = false;
+    /* BOTH answers come from the DATABASE, not from local state or the loaded `dept` object.
+       my_department_id() is the function every RLS policy scopes by, so asking it directly is the
+       only way the label is guaranteed to name the station the server is actually serving. (It is
+       also why this does not read dept.id — the departments select does not fetch id at all.) */
+    supabase.rpc("my_departments").then(({ data, error }) => {
+      // A failed read renders NOTHING rather than a wrong or empty switcher: being unable to list
+      // stations is not the same as having one, and a mislabelled station is worse than no control.
+      if (off || error || !Array.isArray(data)) return;
+      setList(data);
+    });
+    supabase.rpc("my_department_id").then(({ data, error }) => {
+      if (off || error) return;
+      setActiveId(data || null);
+    });
+    return () => { off = true; };
+  }, []);
+  const rows = list || [];
+  if (rows.length <= 1) return null;            // single-department users: no control, no change
+  async function choose(id) {
+    if (!id || id === activeId || busy) return;
+    setBusy(true);
+    const { error } = await supabase.rpc("set_active_department", { p_department_id: id });
+    if (error) { setBusy(false); window.alert("Couldn't switch station: " + (error.message || "please try again.")); return; }
+    if (typeof window !== "undefined") window.location.reload();
+  }
+  const label = (r) => (r.station ? `${r.name} \u00b7 ${r.station}` : r.name);
+  return (
+    <div style={S.viewAs}>
+      <span style={S.viewAsLabel}>Station</span>
+      <select value={activeId || ""} disabled={busy || !activeId} onChange={(e) => choose(e.target.value)} style={S.select}>
+        {/* Until my_department_id() answers there is no honest thing to show as selected, so the
+            control stays disabled with a neutral placeholder rather than pre-selecting a guess. */}
+        {!activeId && <option value="">Loading…</option>}
+        {rows.map((r) => <option key={r.department_id} value={r.department_id}>{label(r)}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function Notification({ S, kind, title, text, details, action, onClose }) {
   const [showDetails, setShowDetails] = useState(false);
   const isErr = kind === "error";
@@ -1649,6 +1709,7 @@ export default function App() {
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={{ flex: 1 }} />
           <NotificationBell meId={myMemberId} onOpen={() => go("notifications")} />
+          <StationSwitcher S={S} />
           <div style={S.viewAs}>
             {isLeader(realRole) && realRole.length > 1 && (
               <>
