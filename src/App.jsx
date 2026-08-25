@@ -1203,6 +1203,95 @@ function StationSwitcher({ S }) {
   );
 }
 
+/* ---------------- My Stations roll-up (multi-station Phase 2) ----------------
+   Every station this login belongs to, side by side, with the counts worth acting on. Gated the
+   same way the switcher is: a login on one department renders NOTHING, so the overwhelming
+   majority of users never see it.
+
+   THE FIGURES ARE THE PA RADAR'S FIGURES. my_department_rollup() is a scoped copy of
+   pa_department_radar() with the gate swapped for an own-memberships filter and nothing else
+   changed, so a health verdict here cannot disagree with the same verdict on the Program
+   overview. Same arithmetic, different rows.
+
+   IT DOUBLES AS A LAUNCHER. "Go to this station" is set_active_department() + reload — the same
+   call the switcher makes — so noticing a problem and going to fix it is one action, not two.
+   The card for the station you are ALREADY in says so instead, rather than offering a switch
+   that would do nothing but cost a page load. */
+function MyStationsRollup({ S }) {
+  const [rows, setRows] = useState(null);      // null = loading; [] = none/failed
+  const [activeId, setActiveId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let off = false;
+    supabase.rpc("my_department_rollup").then(({ data, error }) => {
+      if (off) return;
+      // A failed read shows an error, never an empty roll-up. "You belong to no stations" and
+      // "we couldn't ask" look identical on screen and mean opposite things.
+      if (error) { setErr(error.message || "Please try again."); setRows([]); return; }
+      setRows(Array.isArray(data) ? data : []);
+    });
+    supabase.rpc("my_department_id").then(({ data, error }) => { if (!off && !error) setActiveId(data || null); });
+    return () => { off = true; };
+  }, []);
+  const list = rows || [];
+  // Single-station users see nothing at all — same gate as the switcher, and the reason this can
+  // ship to everyone without changing anything for almost everyone.
+  if (rows !== null && list.length <= 1 && !err) return null;
+  async function goTo(id) {
+    if (!id || id === activeId || busyId) return;
+    setBusyId(id);
+    const { error } = await supabase.rpc("set_active_department", { p_department_id: id });
+    if (error) { setBusyId(null); notifyFallback(error.message); return; }
+    if (typeof window !== "undefined") window.location.reload();
+  }
+  function notifyFallback(msg) { window.alert("Couldn't switch station: " + (msg || "please try again.")); }
+  const healthColor = (h) => (h === "GREEN" ? FIRE.green : h === "YELLOW" ? FIRE.amberText : FIRE.redText);
+  const healthLabel = (h) => (h === "GREEN" ? "Healthy" : h === "YELLOW" ? "Slowing" : "Needs attention");
+  const stat = (n, label, tone) => (
+    <div key={label} style={{ minWidth: 74 }}>
+      <div style={{ fontSize: 17, fontWeight: 800, color: tone || FIRE.textPrimary, ...FS.num, lineHeight: 1.1 }}>{n}</div>
+      <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.3 }}>{label}</div>
+    </div>
+  );
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>MY STATIONS</div>
+      {err && <div style={{ ...FS.card, padding: "12px 16px", borderLeft: `3px solid ${FIRE.red}`, color: FIRE.redText, fontSize: 13 }}>Couldn't load your stations: {err}</div>}
+      {rows === null && !err && <div style={{ ...FS.card, padding: 18, color: FIRE.textMuted, fontSize: 13.5 }}>Loading…</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
+        {list.map((d) => {
+          const here = d.department_id === activeId;
+          return (
+            <div key={d.department_id} style={{ ...S.opCard, ...FS.card, borderLeft: `3px solid ${healthColor(d.health)}` }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{d.department_name}{d.station ? ` · ${d.station}` : ""}</div>
+                  <div style={{ fontSize: 11.5, color: healthColor(d.health), fontWeight: 700, marginTop: 2 }}>{healthLabel(d.health)}</div>
+                </div>
+                {here && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>YOU'RE HERE</span>}
+              </div>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12 }}>
+                {stat(d.member_count, "members")}
+                {stat(d.expiring_certs_count, "certs expiring", d.expiring_certs_count > 0 ? FIRE.amberText : undefined)}
+                {stat(d.expired_certs_count, "expired", d.expired_certs_count > 0 ? FIRE.redText : undefined)}
+                {stat(d.overdue_duties_count, "overdue duties", d.overdue_duties_count > 0 ? FIRE.amberText : undefined)}
+                {stat(d.open_action_items_count, "open items")}
+              </div>
+              {!here && (
+                <button style={{ ...FS.btn, marginTop: 12, padding: "6px 11px", fontSize: 12.5, opacity: busyId ? 0.6 : 1 }}
+                        disabled={!!busyId} onClick={() => goTo(d.department_id)}>
+                  {busyId === d.department_id ? "Switching…" : "Go to this station"}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Notification({ S, kind, title, text, details, action, onClose }) {
   const [showDetails, setShowDetails] = useState(false);
   const isErr = kind === "error";
@@ -1733,6 +1822,9 @@ export default function App() {
             hatch is a white screen with extra steps. */}
         <main style={S.content}>
           <ErrorBoundary key={screen}>
+          {/* Above the dashboard, not on every screen: it answers "which of my stations needs me
+              today", which is a landing question. Renders null for single-station logins. */}
+          {screen === "dashboard" && <MyStationsRollup S={S} />}
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
