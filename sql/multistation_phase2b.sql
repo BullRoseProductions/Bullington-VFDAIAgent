@@ -49,6 +49,27 @@
 
 BEGIN;
 
+-- DROP FIRST — REQUIRED, not tidiness. Postgres cannot change a function's
+-- RETURNS TABLE via CREATE OR REPLACE ("cannot change return type of existing
+-- function"), and this adds 12 columns to Phase 2's 21. The same constraint is
+-- why sql/pa_department_radar.sql says that function must be dropped to add
+-- columns.
+--
+-- SAFE HERE, and worth saying why rather than assuming: nothing depends on this
+-- function. No view selects from it, no RLS policy calls it, no other function
+-- references it — the only caller is the client, over PostgREST. Dropping a
+-- function that policies depended on would be a very different and much worse
+-- operation.
+--
+-- INSIDE THE TRANSACTION, so no other session ever observes the window where the
+-- function does not exist, and a failure anywhere below rolls the DROP back with
+-- everything else — the Phase 2 version survives intact.
+--
+-- DROP DISCARDS THE GRANTS. That is why the REVOKE/GRANT pair below the function
+-- is not optional bookkeeping: without it the recreated function would carry
+-- Postgres's default EXECUTE-to-PUBLIC and anon would inherit it.
+DROP FUNCTION IF EXISTS public.my_department_rollup();
+
 CREATE OR REPLACE FUNCTION public.my_department_rollup()
  RETURNS TABLE(
    -- ---- always returned: enough to render a card header for any station you belong to
