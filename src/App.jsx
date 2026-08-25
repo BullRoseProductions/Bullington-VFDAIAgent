@@ -301,6 +301,9 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {/* Stations sit above the department profile because adding one is the thing that makes a
+          department multi-station at all — without it the picker can never appear. */}
+      <StationsAdmin S={S} />
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>DEPARTMENT SETTINGS</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Department details</h1>
@@ -1340,6 +1343,156 @@ function MyStationsRollup({ S }) {
   );
 }
 
+/* ---------------- Stations admin (multi-station Phase B1) ----------------
+   Add a station. This is what lets a department BECOME multi-station — without it the picker can
+   never appear, because my_stations() would always return one row.
+
+   NO CLIENT ROLE GATE, deliberately. The stations write policy is
+   is_dept_admin() AND department_id = my_department_id(), so a non-admin's insert is refused by
+   the database. Adding a second, client-side check would be a copy of that rule in a place that
+   cannot enforce it and would drift — the form simply reports what the database says. It lives on
+   Department Settings, which is already an admin destination.
+
+   department_id is NOT sent: the RLS WITH CHECK requires it to equal my_department_id() anyway,
+   and letting the client name a department invites the one mistake the policy exists to prevent.
+   Instead it is read from my_department_id() so the row is explicit and the policy agrees. */
+function StationsAdmin({ S }) {
+  const [rows, setRows] = useState(null);          // null = loading
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState({ name: "", label: "", address: "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = () => {
+    supabase.rpc("my_stations").then(({ data, error }) => {
+      // A failed read keeps the last-known list rather than claiming the department has none.
+      if (error) { setErr(error.message || "Please try again."); return; }
+      setErr(""); setRows(Array.isArray(data) ? data : []);
+    });
+  };
+  useEffect(() => { load(); }, []);
+  async function add() {
+    const name = f.name.trim();
+    if (!name) { setErr("Give the station a name."); return; }
+    setBusy(true); setErr("");
+    const { data: deptId, error: dErr } = await supabase.rpc("my_department_id");
+    if (dErr || !deptId) { setBusy(false); setErr("Couldn't determine your department. Please try again."); return; }
+    const { error } = await supabase.from("stations").insert({
+      department_id: deptId, name,
+      label:   f.label.trim()   || null,
+      address: f.address.trim() || null,
+      is_default: false, is_active: true,
+    });
+    setBusy(false);
+    // A permission failure surfaces as an RLS error here. Saying so plainly beats a generic
+    // "couldn't save", because the fix is "ask a department admin", not "try again".
+    if (error) { setErr(/row-level|policy|violat/i.test(error.message || "") ? "Only a Department Admin can add a station." : (error.message || "Please try again.")); return; }
+    setF({ name: "", label: "", address: "" }); setAdding(false); load();
+  }
+  const list = rows || [];
+  return (
+    <div style={{ ...FS.card, padding: 18, marginBottom: 14, maxWidth: 460 }}>
+      <div style={FS.kicker}>STATIONS</div>
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 10px", lineHeight: 1.5 }}>
+        The houses in this department. Apparatus, gear and duties belong to one of them.
+      </div>
+      {rows === null && !err && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
+      {list.map((r) => (
+        <div key={r.station_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
+            {r.label && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6 }}>{r.label}</span>}
+          </div>
+          {r.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2 }}>DEFAULT</span>}
+          {r.is_active === false && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.amberText, marginLeft: 6 }}>RETIRED</span>}
+        </div>
+      ))}
+      {err && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+      {!adding ? (
+        <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => { setAdding(true); setErr(""); }}><Plus size={15} /> Add a station</button>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
+            <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. Station 50" /></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Label (optional)</span>
+            <input style={FS.input} value={f.label} onChange={(e) => setF((x) => ({ ...x, label: e.target.value }))} placeholder="e.g. North house" /></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address (optional)</span>
+            <input style={FS.input} value={f.address} onChange={(e) => setF((x) => ({ ...x, address: e.target.value }))} /></label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={{ ...FS.btnPrimary, opacity: (busy || !f.name.trim()) ? 0.6 : 1 }} disabled={busy || !f.name.trim()} onClick={add}>{busy ? "Adding…" : "Add station"}</button>
+            <button style={FS.btn} onClick={() => { setAdding(false); setErr(""); }} disabled={busy}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* The active station, for screens that scope by it.
+   RETURNS undefined WHILE LOADING, so a caller can hold its query until the answer is in rather
+   than fetching unfiltered and then re-fetching. null means "no station / lookup failed", and the
+   callers below deliberately DO NOT FILTER in that case: showing zero rows because a lookup failed
+   would tell a department it owns no apparatus, which is the never-blank-on-error rule. An
+   unfiltered list is the honest degradation — it is what the screen showed before B1. */
+function useActiveStation() {
+  const [stationId, setStationId] = useState(undefined);
+  useEffect(() => {
+    let off = false;
+    supabase.rpc("my_active_station_id").then(({ data, error }) => {
+      if (!off) setStationId(error ? null : (data || null));
+    });
+    return () => { off = true; };
+  }, []);
+  return stationId;
+}
+
+/* ---------------- Station picker (multi-station Phase B1) ----------------
+   The active STATION within the current department. Distinct from StationSwitcher above, which
+   picks the DEPARTMENT — that one is Model A and stays dormant until the cleanup pass.
+
+   HIDDEN AT <= 1 STATION, which is every department today. That gate is what makes B1 invisible:
+   one station means no picker, my_active_station_id() returns the default, Phase A stamped every
+   row with that default, and the .eq(station_id) filters below match everything. A single-station
+   department sees exactly what it saw yesterday, by construction rather than by luck.
+
+   FULL RELOAD ON SWITCH, same reasoning as the department switcher: station changes the answer on
+   apparatus, equipment and duties at once, and a reload cannot leave one screen showing the
+   previous station's rows. */
+function StationPicker({ S, notify }) {
+  const [list, setList] = useState(null);
+  const [activeId, setActiveId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let off = false;
+    // Both answers come from the database. The label must name the station the SERVER is
+    // filtering by, not a remembered choice that could disagree with it.
+    supabase.rpc("my_stations").then(({ data, error }) => {
+      if (off || error || !Array.isArray(data)) return;   // a failed read renders nothing, never a wrong picker
+      setList(data);
+    });
+    supabase.rpc("my_active_station_id").then(({ data, error }) => { if (!off && !error) setActiveId(data || null); });
+    return () => { off = true; };
+  }, []);
+  const rows = list || [];
+  if (rows.length <= 1) return null;
+  async function choose(id) {
+    if (!id || id === activeId || busy) return;
+    setBusy(true);
+    const { error } = await supabase.rpc("set_active_station", { p_station_id: id });
+    if (error) { setBusy(false); notify?.({ kind: "error", title: "Couldn't switch station", text: error.message || "Please try again." }); return; }
+    if (typeof window !== "undefined") window.location.reload();
+  }
+  const label = (r) => `${r.name}${r.label ? ` · ${r.label}` : ""}${r.is_active === false ? " (retired)" : ""}`;
+  return (
+    <div style={S.viewAs}>
+      <span style={S.viewAsLabel}>Station</span>
+      <select value={activeId || ""} disabled={busy || !activeId} onChange={(e) => choose(e.target.value)} style={S.select}>
+        {!activeId && <option value="">Loading…</option>}
+        {rows.map((r) => <option key={r.station_id} value={r.station_id}>{label(r)}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function Notification({ S, kind, title, text, details, action, onClose }) {
   const [showDetails, setShowDetails] = useState(false);
   const isErr = kind === "error";
@@ -1847,6 +2000,7 @@ export default function App() {
           <div style={{ flex: 1 }} />
           <NotificationBell meId={myMemberId} onOpen={() => go("notifications")} />
           <StationSwitcher S={S} />
+          <StationPicker S={S} notify={notify} />
           <div style={S.viewAs}>
             {isLeader(realRole) && realRole.length > 1 && (
               <>
@@ -10842,6 +10996,7 @@ function CapitalFields({ S, v, set }) {
 // name and station, and this screen never needed them before. It is not read anywhere else
 // here, and the button that uses it is gated on it being present.
 function Apparatus({ S, role, members, meId, notify, dept }) {
+  const activeStationId = useActiveStation();   // undefined = still loading
   const [rigs, setRigs] = useState([]);
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
   const me = members.find((m) => m.id === meId) || null;
@@ -10908,10 +11063,12 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [loadErr, setLoadErr] = useState(false);
   const loadRigs = () => {
-    supabase.from("apparatus")
+    // Scoped to the active station. NOT filtered when the id is unknown — see useActiveStation.
+    let q = supabase.from("apparatus")
       .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost")
-      .order("created_at", { ascending: true })
-      .then(({ data, error }) => {
+      .order("created_at", { ascending: true });
+    if (activeStationId) q = q.eq("station_id", activeStationId);
+    q.then(({ data, error }) => {
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false);
         setRigs(data.map((r) => ({
@@ -10924,7 +11081,9 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         })));
       });
   };
-  useEffect(() => { loadRigs(); }, [members]);   // reload once members resolves so checked_by → name populates
+  // Waits for the station id before the first fetch, so the list is never briefly unfiltered
+  // and then re-filtered. Re-runs if the station changes.
+  useEffect(() => { if (activeStationId !== undefined) loadRigs(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [members, activeStationId]);
   useReconnect(() => { if (loadErr) loadRigs(); });
   const inServiceRigs = rigs.filter((r) => r.inService);   // out-of-service rigs excluded from readiness stats
   const ready = inServiceRigs.filter((r) => r.status === "Pass").length;
@@ -10947,7 +11106,9 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
     const capital = capPayload(cap);
     if (!capital) return;   // validation already notified
-    const { data: created, error } = await supabase.from("apparatus").insert({ department_id: deptId, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null, ...capital }).select("id").single();
+    // station_id explicitly, so a rig added while viewing Station B belongs to B. The Phase B1
+    // trigger would stamp the active station anyway; this makes the intent visible at the call site.
+    const { data: created, error } = await supabase.from("apparatus").insert({ department_id: deptId, station_id: activeStationId || undefined, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null, ...capital }).select("id").single();
     if (error || !created) { notify({ kind: "error", title: "Couldn't add the apparatus", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
     if (outOfService) {   // reuse the RPC so an open service period is recorded (no separate insert path)
       const { error: svcErr } = await supabase.rpc("take_apparatus_out_of_service", { p_apparatus_id: created.id, p_reason: svcReason.trim() });
@@ -13053,6 +13214,7 @@ function StationHours({ S, dept, notify }) {
   );
 }
 function Equipment({ S, role, members, meId, notify }) {
+  const activeStationId = useActiveStation();   // undefined = still loading
   const [types, setTypes] = useState([]);
   // NOTE: canManage is defined further down, right after isManager — it now depends on it. Registry
   // writes are DA/PA + assigned equipment manager (officers OUT), matching the RLS on equipment,
@@ -13100,9 +13262,14 @@ function Equipment({ S, role, members, meId, notify }) {
   }
   const [loadErr, setLoadErr] = useState(false);
   const loadEquipment = async () => {
+    // Scoped to the active station; unfiltered when the id is unknown — see useActiveStation.
+    let unitsQ = supabase.from("equipment")
+      .select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, current_holder_name, notes, created_at")
+      .order("created_at", { ascending: true });
+    if (activeStationId) unitsQ = unitsQ.eq("station_id", activeStationId);
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
-      supabase.from("equipment").select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, current_holder_name, notes, created_at").order("created_at", { ascending: true }),
+      unitsQ,
     ]);
     if (tErr || !tData) { setLoadErr(true); return; }   // keep last-known on a flaky read (mirrors loadRigs)
     setLoadErr(false);
@@ -13150,7 +13317,8 @@ function Equipment({ S, role, members, meId, notify }) {
     if (error || !data) { notify({ kind: "error", title: "Couldn't remove manager", text: error?.message || "Please try again." }); return; }
     loadManagers();
   }
-  useEffect(() => { loadEquipment(); loadManagers(); loadPending(); }, [members]);
+  // Holds the first fetch until the station id is known, so the list is never briefly unfiltered.
+  useEffect(() => { if (activeStationId !== undefined) { loadEquipment(); loadManagers(); loadPending(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [members, activeStationId]);
   useReconnect(() => { if (loadErr) { loadEquipment(); loadManagers(); loadPending(); } });
   const allUnits = types.flatMap((t) => t.units);
   const totalUnits = allUnits.length;
@@ -13194,7 +13362,9 @@ function Equipment({ S, role, members, meId, notify }) {
     }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    const payload = rows.map((r) => ({ department_id: deptId, equipment_type_id: typeId, created_by: meId, ...r }));   // status NOT set — defaults; ledger owns it
+    // station_id explicit: gear added while viewing Station B belongs to B. The trigger would
+    // stamp the active station anyway; this makes the intent visible at the call site.
+    const payload = rows.map((r) => ({ department_id: deptId, station_id: activeStationId || undefined, equipment_type_id: typeId, created_by: meId, ...r }));   // status NOT set — defaults; ledger owns it
     const { data, error } = await supabase.from("equipment").insert(payload).select("id");   // single array = atomic, all-or-nothing
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the units", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
     notify({ kind: "success", title: "Units added", text: `Added ${data.length} unit${data.length === 1 ? "" : "s"} to ${typeName}.` });
@@ -16097,6 +16267,7 @@ const DUTY_SEED = [
   { id: 15, duty: "Update run & incident logs", category: "Admin", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
 ];
 function StationDuties({ S, role, members, meId, notify }) {
+  const activeStationId = useActiveStation();   // undefined = still loading
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES); // assign/manage duties — ops only (DA/Officer, excludes Board + PA)
   const canCreate = hasAny(role, CANMANAGE_OPS_ROLES); // create duty — ops only (DA/Officer, excludes Board + PA)
   const me = members.find((m) => m.id === meId);
@@ -16116,7 +16287,10 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [weekOffset, setWeekOffset] = useState(0);              // 0 = most recent week with entries
   const [loadErr, setLoadErr] = useState(false);
   function loadDuties() {
-    supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids, assigned_to, due_date").then(({ data, error }) => {
+    // Scoped to the active station; unfiltered when the id is unknown — see useActiveStation.
+    let q = supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids, assigned_to, due_date");
+    if (activeStationId) q = q.eq("station_id", activeStationId);
+    q.then(({ data, error }) => {
       if (error || !data) { setLoadErr(true); return; }
       setLoadErr(false);
       setDuties(data.map((d) => ({
@@ -16133,7 +16307,10 @@ function StationDuties({ S, role, members, meId, notify }) {
       })));
     });
   }
-  useEffect(() => { loadDuties(); }, []);
+  // Holds the first fetch until the station id is known. NOTE duties are created through the
+  // create_duty() RPC, which cannot take a station — the upgraded Phase B1 trigger is what stamps
+  // a new duty with the ACTIVE station, so there is no explicit write change here to match.
+  useEffect(() => { if (activeStationId !== undefined) loadDuties(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeStationId]);
   const loadStationLog = () => {
     supabase.from("station_log")
       .select("id, what, done_by, done_by_member_id, done_at, created_by")
