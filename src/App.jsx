@@ -16121,8 +16121,10 @@ function StationDuties({ S, role, members, meId, notify }) {
        than showing the whole department's work regardless of the picker.
        NOT filtered when the station id is unknown — same rule as B1: an unfiltered list is the
        honest degradation, an empty one would claim no work was ever logged.
-       NOTE this is only the ad-hoc work log. station_log ALSO holds station-hours shifts, and
-       those lists are deliberately left alone — they are B3. */
+       NOTE this is the ad-hoc work log and nothing else. An earlier version of this comment said
+       station_log "ALSO holds station-hours shifts" — it does not, and B3's discovery corrected it.
+       Shifts live in station_presence, written by station_check_in and geofence_arrive. This table
+       has exactly one reader, which is right here. */
     let q = supabase.from("station_log")
       .select("id, what, done_by, done_by_member_id, done_at, created_by")
       .order("done_at", { ascending: false });
