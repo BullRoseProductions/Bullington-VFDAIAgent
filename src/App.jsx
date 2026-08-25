@@ -1262,21 +1262,69 @@ function MyStationsRollup({ S }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
         {list.map((d) => {
           const here = d.department_id === activeId;
+          /* TWO CARDS, ONE SIZE. can_manage is decided per DEPARTMENT by the RPC, so the same
+             login can get a leadership card for one station and a personal card for the next.
+             The leadership branch is byte-for-byte what shipped in Phase 2 — this is a gate
+             added around it, not a redesign of it. */
+          if (d.can_manage) {
+            return (
+              <div key={d.department_id} style={{ ...S.opCard, ...FS.card, borderLeft: `3px solid ${healthColor(d.health)}` }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{d.department_name}{d.station ? ` · ${d.station}` : ""}</div>
+                    <div style={{ fontSize: 11.5, color: healthColor(d.health), fontWeight: 700, marginTop: 2 }}>{healthLabel(d.health)}</div>
+                  </div>
+                  {here && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>YOU'RE HERE</span>}
+                </div>
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12 }}>
+                  {stat(d.member_count, "members")}
+                  {stat(d.expiring_certs_count, "certs expiring", d.expiring_certs_count > 0 ? FIRE.amberText : undefined)}
+                  {stat(d.expired_certs_count, "expired", d.expired_certs_count > 0 ? FIRE.redText : undefined)}
+                  {stat(d.overdue_duties_count, "overdue duties", d.overdue_duties_count > 0 ? FIRE.amberText : undefined)}
+                  {stat(d.open_action_items_count, "open items")}
+                </div>
+                {!here && (
+                  <button style={{ ...FS.btn, marginTop: 12, padding: "6px 11px", fontSize: 12.5, opacity: busyId ? 0.6 : 1 }}
+                          disabled={!!busyId} onClick={() => goTo(d.department_id)}>
+                    {busyId === d.department_id ? "Switching…" : "Go to this station"}
+                  </button>
+                )}
+              </div>
+            );
+          }
+          /* MEMBER CARD. The edge colour comes from the caller's OWN standing here — an expired
+             cert of theirs, or a duty of theirs gone overdue — not from station health, which
+             they are not being told and could not act on anyway. */
+          const mineRed   = (d.my_certs_expired || 0) > 0 || (d.my_overdue_duties || 0) > 0;
+          const mineAmber = (d.my_certs_expiring || 0) > 0;
+          const edge = mineRed ? FIRE.redText : mineAmber ? FIRE.amberText : FIRE.green;
+          const certLine = (d.my_certs_expired || 0) > 0 || (d.my_certs_expiring || 0) > 0
+            ? [ (d.my_certs_expired  || 0) > 0 ? `${d.my_certs_expired} expired`   : null,
+                (d.my_certs_expiring || 0) > 0 ? `${d.my_certs_expiring} expiring` : null ].filter(Boolean).join(" · ")
+            : "All current";
           return (
-            <div key={d.department_id} style={{ ...S.opCard, ...FS.card, borderLeft: `3px solid ${healthColor(d.health)}` }}>
+            <div key={d.department_id} style={{ ...S.opCard, ...FS.card, borderLeft: `3px solid ${edge}` }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{d.department_name}{d.station ? ` · ${d.station}` : ""}</div>
-                  <div style={{ fontSize: 11.5, color: healthColor(d.health), fontWeight: 700, marginTop: 2 }}>{healthLabel(d.health)}</div>
+                  {/* Next thing on, or an honest "nothing" — never a blank line that reads as a
+                      failure to load. */}
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>
+                    {d.my_next_event_date
+                      ? <>Next: <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{d.my_next_event_date}</b>{d.my_next_event_title ? ` · ${d.my_next_event_title}` : ""}</>
+                      : "Nothing scheduled"}
+                  </div>
                 </div>
                 {here && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>YOU'RE HERE</span>}
               </div>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12 }}>
-                {stat(d.member_count, "members")}
-                {stat(d.expiring_certs_count, "certs expiring", d.expiring_certs_count > 0 ? FIRE.amberText : undefined)}
-                {stat(d.expired_certs_count, "expired", d.expired_certs_count > 0 ? FIRE.redText : undefined)}
-                {stat(d.overdue_duties_count, "overdue duties", d.overdue_duties_count > 0 ? FIRE.amberText : undefined)}
-                {stat(d.open_action_items_count, "open items")}
+                {/* null pct means the month held no qualifying drills — that is "no drills yet",
+                    which is a different fact from attending none of them. Never render it as 0%. */}
+                {d.my_attendance_pct == null
+                  ? stat("—", "no drills yet")
+                  : stat(`${d.my_attendance_pct}%`, "attendance this month")}
+                {stat(certLine, "my certs", mineRed ? FIRE.redText : mineAmber ? FIRE.amberText : undefined)}
+                {(d.my_open_duties || 0) > 0 && stat(d.my_open_duties, "duties due", (d.my_overdue_duties || 0) > 0 ? FIRE.redText : undefined)}
               </div>
               {!here && (
                 <button style={{ ...FS.btn, marginTop: 12, padding: "6px 11px", fontSize: 12.5, opacity: busyId ? 0.6 : 1 }}
