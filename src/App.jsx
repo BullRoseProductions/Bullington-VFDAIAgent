@@ -1146,202 +1146,7 @@ const moduleEnabled = (key, disabled) => {
 };
 
 /* ================================================================== */
-/* ---------------- Station switcher (multi-station Phase 1) ----------------
-   SHOWS NOTHING for the overwhelming majority of users, and that is the point. A login whose
-   email maps to one department — everyone, today — renders null and sees no change at all. Only
-   an email on two or more departments gets a control.
 
-   The label comes from my_department_id() ITSELF, asked directly — not from local state and not
-   from the loaded `dept` object (which does not even fetch id). That function is what every RLS
-   policy scopes by, so it is the only source that cannot disagree with what the server is serving.
-   A switcher displaying a remembered choice while the database scoped elsewhere would be worse
-   than no switcher at all.
-
-   FULL RELOAD ON SWITCH, deliberately for v1. Changing station changes the answer to nearly every
-   query in the app — roster, hours, documents, reports, the sidebar crest. Re-plumbing all of that
-   to re-fetch in place is Phase 2's problem; a reload is honest, cheap, and cannot leave one
-   screen showing the old station's data. */
-function StationSwitcher({ S }) {
-  const [list, setList] = useState(null);       // null = not loaded; <=1 entry = render nothing
-  const [activeId, setActiveId] = useState(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    let off = false;
-    /* BOTH answers come from the DATABASE, not from local state or the loaded `dept` object.
-       my_department_id() is the function every RLS policy scopes by, so asking it directly is the
-       only way the label is guaranteed to name the station the server is actually serving. (It is
-       also why this does not read dept.id — the departments select does not fetch id at all.) */
-    supabase.rpc("my_departments").then(({ data, error }) => {
-      // A failed read renders NOTHING rather than a wrong or empty switcher: being unable to list
-      // stations is not the same as having one, and a mislabelled station is worse than no control.
-      if (off || error || !Array.isArray(data)) return;
-      setList(data);
-    });
-    supabase.rpc("my_department_id").then(({ data, error }) => {
-      if (off || error) return;
-      setActiveId(data || null);
-    });
-    return () => { off = true; };
-  }, []);
-  const rows = list || [];
-  if (rows.length <= 1) return null;            // single-department users: no control, no change
-  async function choose(id) {
-    if (!id || id === activeId || busy) return;
-    setBusy(true);
-    const { error } = await supabase.rpc("set_active_department", { p_department_id: id });
-    if (error) { setBusy(false); window.alert("Couldn't switch station: " + (error.message || "please try again.")); return; }
-    if (typeof window !== "undefined") window.location.reload();
-  }
-  const label = (r) => (r.station ? `${r.name} \u00b7 ${r.station}` : r.name);
-  return (
-    <div style={S.viewAs}>
-      <span style={S.viewAsLabel}>Station</span>
-      <select value={activeId || ""} disabled={busy || !activeId} onChange={(e) => choose(e.target.value)} style={S.select}>
-        {/* Until my_department_id() answers there is no honest thing to show as selected, so the
-            control stays disabled with a neutral placeholder rather than pre-selecting a guess. */}
-        {!activeId && <option value="">Loading…</option>}
-        {rows.map((r) => <option key={r.department_id} value={r.department_id}>{label(r)}</option>)}
-      </select>
-    </div>
-  );
-}
-
-/* ---------------- My Stations roll-up (multi-station Phase 2) ----------------
-   Every station this login belongs to, side by side, with the counts worth acting on. Gated the
-   same way the switcher is: a login on one department renders NOTHING, so the overwhelming
-   majority of users never see it.
-
-   THE FIGURES ARE THE PA RADAR'S FIGURES. my_department_rollup() is a scoped copy of
-   pa_department_radar() with the gate swapped for an own-memberships filter and nothing else
-   changed, so a health verdict here cannot disagree with the same verdict on the Program
-   overview. Same arithmetic, different rows.
-
-   IT DOUBLES AS A LAUNCHER. "Go to this station" is set_active_department() + reload — the same
-   call the switcher makes — so noticing a problem and going to fix it is one action, not two.
-   The card for the station you are ALREADY in says so instead, rather than offering a switch
-   that would do nothing but cost a page load. */
-function MyStationsRollup({ S }) {
-  const [rows, setRows] = useState(null);      // null = loading; [] = none/failed
-  const [activeId, setActiveId] = useState(null);
-  const [busyId, setBusyId] = useState(null);
-  const [err, setErr] = useState("");
-  useEffect(() => {
-    let off = false;
-    supabase.rpc("my_department_rollup").then(({ data, error }) => {
-      if (off) return;
-      // A failed read shows an error, never an empty roll-up. "You belong to no stations" and
-      // "we couldn't ask" look identical on screen and mean opposite things.
-      if (error) { setErr(error.message || "Please try again."); setRows([]); return; }
-      setRows(Array.isArray(data) ? data : []);
-    });
-    supabase.rpc("my_department_id").then(({ data, error }) => { if (!off && !error) setActiveId(data || null); });
-    return () => { off = true; };
-  }, []);
-  const list = rows || [];
-  // Single-station users see nothing at all — same gate as the switcher, and the reason this can
-  // ship to everyone without changing anything for almost everyone.
-  if (rows !== null && list.length <= 1 && !err) return null;
-  async function goTo(id) {
-    if (!id || id === activeId || busyId) return;
-    setBusyId(id);
-    const { error } = await supabase.rpc("set_active_department", { p_department_id: id });
-    if (error) { setBusyId(null); notifyFallback(error.message); return; }
-    if (typeof window !== "undefined") window.location.reload();
-  }
-  function notifyFallback(msg) { window.alert("Couldn't switch station: " + (msg || "please try again.")); }
-  const healthColor = (h) => (h === "GREEN" ? FIRE.green : h === "YELLOW" ? FIRE.amberText : FIRE.redText);
-  const healthLabel = (h) => (h === "GREEN" ? "Healthy" : h === "YELLOW" ? "Slowing" : "Needs attention");
-  const stat = (n, label, tone) => (
-    <div key={label} style={{ minWidth: 74 }}>
-      <div style={{ fontSize: 17, fontWeight: 800, color: tone || FIRE.textPrimary, ...FS.num, lineHeight: 1.1 }}>{n}</div>
-      <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.3 }}>{label}</div>
-    </div>
-  );
-  return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>MY STATIONS</div>
-      {err && <div style={{ ...FS.card, padding: "12px 16px", borderLeft: `3px solid ${FIRE.red}`, color: FIRE.redText, fontSize: 13 }}>Couldn't load your stations: {err}</div>}
-      {rows === null && !err && <div style={{ ...FS.card, padding: 18, color: FIRE.textMuted, fontSize: 13.5 }}>Loading…</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
-        {list.map((d) => {
-          const here = d.department_id === activeId;
-          /* TWO CARDS, ONE SIZE. can_manage is decided per DEPARTMENT by the RPC, so the same
-             login can get a leadership card for one station and a personal card for the next.
-             The leadership branch is byte-for-byte what shipped in Phase 2 — this is a gate
-             added around it, not a redesign of it. */
-          if (d.can_manage) {
-            return (
-              <div key={d.department_id} style={{ ...S.opCard, ...FS.card, borderLeft: `3px solid ${healthColor(d.health)}` }}>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{d.department_name}{d.station ? ` · ${d.station}` : ""}</div>
-                    <div style={{ fontSize: 11.5, color: healthColor(d.health), fontWeight: 700, marginTop: 2 }}>{healthLabel(d.health)}</div>
-                  </div>
-                  {here && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>YOU'RE HERE</span>}
-                </div>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12 }}>
-                  {stat(d.member_count, "members")}
-                  {stat(d.expiring_certs_count, "certs expiring", d.expiring_certs_count > 0 ? FIRE.amberText : undefined)}
-                  {stat(d.expired_certs_count, "expired", d.expired_certs_count > 0 ? FIRE.redText : undefined)}
-                  {stat(d.overdue_duties_count, "overdue duties", d.overdue_duties_count > 0 ? FIRE.amberText : undefined)}
-                  {stat(d.open_action_items_count, "open items")}
-                </div>
-                {!here && (
-                  <button style={{ ...FS.btn, marginTop: 12, padding: "6px 11px", fontSize: 12.5, opacity: busyId ? 0.6 : 1 }}
-                          disabled={!!busyId} onClick={() => goTo(d.department_id)}>
-                    {busyId === d.department_id ? "Switching…" : "Go to this station"}
-                  </button>
-                )}
-              </div>
-            );
-          }
-          /* MEMBER CARD. The edge colour comes from the caller's OWN standing here — an expired
-             cert of theirs, or a duty of theirs gone overdue — not from station health, which
-             they are not being told and could not act on anyway. */
-          const mineRed   = (d.my_certs_expired || 0) > 0 || (d.my_overdue_duties || 0) > 0;
-          const mineAmber = (d.my_certs_expiring || 0) > 0;
-          const edge = mineRed ? FIRE.redText : mineAmber ? FIRE.amberText : FIRE.green;
-          const certLine = (d.my_certs_expired || 0) > 0 || (d.my_certs_expiring || 0) > 0
-            ? [ (d.my_certs_expired  || 0) > 0 ? `${d.my_certs_expired} expired`   : null,
-                (d.my_certs_expiring || 0) > 0 ? `${d.my_certs_expiring} expiring` : null ].filter(Boolean).join(" · ")
-            : "All current";
-          return (
-            <div key={d.department_id} style={{ ...S.opCard, ...FS.card, borderLeft: `3px solid ${edge}` }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{d.department_name}{d.station ? ` · ${d.station}` : ""}</div>
-                  {/* Next thing on, or an honest "nothing" — never a blank line that reads as a
-                      failure to load. */}
-                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>
-                    {d.my_next_event_date
-                      ? <>Next: <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{d.my_next_event_date}</b>{d.my_next_event_title ? ` · ${d.my_next_event_title}` : ""}</>
-                      : "Nothing scheduled"}
-                  </div>
-                </div>
-                {here && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>YOU'RE HERE</span>}
-              </div>
-              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12 }}>
-                {/* null pct means the month held no qualifying drills — that is "no drills yet",
-                    which is a different fact from attending none of them. Never render it as 0%. */}
-                {d.my_attendance_pct == null
-                  ? stat("—", "no drills yet")
-                  : stat(`${d.my_attendance_pct}%`, "attendance this month")}
-                {stat(certLine, "my certs", mineRed ? FIRE.redText : mineAmber ? FIRE.amberText : undefined)}
-                {(d.my_open_duties || 0) > 0 && stat(d.my_open_duties, "duties due", (d.my_overdue_duties || 0) > 0 ? FIRE.redText : undefined)}
-              </div>
-              {!here && (
-                <button style={{ ...FS.btn, marginTop: 12, padding: "6px 11px", fontSize: 12.5, opacity: busyId ? 0.6 : 1 }}
-                        disabled={!!busyId} onClick={() => goTo(d.department_id)}>
-                  {busyId === d.department_id ? "Switching…" : "Go to this station"}
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 /* ---------------- Stations admin (multi-station Phase B1) ----------------
    Add a station. This is what lets a department BECOME multi-station — without it the picker can
@@ -1446,8 +1251,12 @@ function useActiveStation() {
 }
 
 /* ---------------- Station picker (multi-station Phase B1) ----------------
-   The active STATION within the current department. Distinct from StationSwitcher above, which
-   picks the DEPARTMENT — that one is Model A and stays dormant until the cleanup pass.
+   The active STATION within the current department. There used to be a sibling here that picked
+   the DEPARTMENT (Model A); it was removed in B2 once Model B proved out, because departments are
+   single-department under the new model and it only ever surfaced on legacy multi-membership test
+   accounts. Its SQL — my_departments, my_department_rollup, set_active_department,
+   member_active_department — is deliberately left in place: unused and harmless, and
+   my_department_id() still reads member_active_department, which simply stays empty.
 
    HIDDEN AT <= 1 STATION, which is every department today. That gate is what makes B1 invisible:
    one station means no picker, my_active_station_id() returns the default, Phase A stamped every
@@ -1999,7 +1808,6 @@ export default function App() {
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={{ flex: 1 }} />
           <NotificationBell meId={myMemberId} onOpen={() => go("notifications")} />
-          <StationSwitcher S={S} />
           <StationPicker S={S} notify={notify} />
           <div style={S.viewAs}>
             {isLeader(realRole) && realRole.length > 1 && (
@@ -2024,9 +1832,6 @@ export default function App() {
             hatch is a white screen with extra steps. */}
         <main style={S.content}>
           <ErrorBoundary key={screen}>
-          {/* Above the dashboard, not on every screen: it answers "which of my stations needs me
-              today", which is a landing question. Renders null for single-station logins. */}
-          {screen === "dashboard" && <MyStationsRollup S={S} />}
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
@@ -16312,16 +16117,24 @@ function StationDuties({ S, role, members, meId, notify }) {
   // a new duty with the ACTIVE station, so there is no explicit write change here to match.
   useEffect(() => { if (activeStationId !== undefined) loadDuties(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeStationId]);
   const loadStationLog = () => {
-    supabase.from("station_log")
+    /* Scoped to the active station, so "Other work logged" matches the checklist above it rather
+       than showing the whole department's work regardless of the picker.
+       NOT filtered when the station id is unknown — same rule as B1: an unfiltered list is the
+       honest degradation, an empty one would claim no work was ever logged.
+       NOTE this is only the ad-hoc work log. station_log ALSO holds station-hours shifts, and
+       those lists are deliberately left alone — they are B3. */
+    let q = supabase.from("station_log")
       .select("id, what, done_by, done_by_member_id, done_at, created_by")
-      .order("done_at", { ascending: false })
-      .then(({ data, error }) => {
+      .order("done_at", { ascending: false });
+    if (activeStationId) q = q.eq("station_id", activeStationId);
+    q.then(({ data, error }) => {
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false);
         setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, whoId: e.done_by_member_id ?? null, when: fmtDoneAt(e.done_at), doneAt: e.done_at, createdBy: e.created_by })));   // doneAt kept raw: the formatted string can't be bucketed by week
       });
   };
-  useEffect(() => { loadStationLog(); }, []);
+  // Holds the first fetch until the station id is known, so the log is never briefly unfiltered.
+  useEffect(() => { if (activeStationId !== undefined) loadStationLog(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeStationId]);
   const [resumeTick, setResumeTick] = useState(0);   // bumping this re-renders → the week boundary is recomputed
   useReconnect(() => {
     setResumeTick((t) => t + 1);                     // app resumed / network back: re-slice the current week (no timer)
@@ -17110,6 +16923,13 @@ function DepartmentAdmin({ S, role, target, notify }) {
   const [addonErr, setAddonErr] = useState(null);
   const [savingAddons, setSavingAddons] = useState(false);
   const [addonSaveState, setAddonSaveState] = useState("");   // "" | "ok" | "err"
+  // PA-side stations for THIS department. Read through pa_department_stations is not a thing —
+  // the PA is not a member here, so my_stations() would answer for their OWN department. The list
+  // is therefore intentionally write-only from this screen: add, then confirm in the department.
+  const [stAdding, setStAdding] = useState(false);
+  const [stF, setStF] = useState({ name: "", label: "", address: "" });
+  const [stBusy, setStBusy] = useState(false);
+  const [stMsg, setStMsg] = useState("");
   useEffect(() => {
     if (!isPA || !deptId) return;
     supabase.rpc("pa_get_disabled_modules", { p_department_id: deptId }).then(({ data, error }) => {
@@ -17131,6 +16951,22 @@ function DepartmentAdmin({ S, role, target, notify }) {
     if (error) { setSaveState("err"); notify?.({ kind: "error", title: "Couldn't save module visibility", text: error.message || "Please try again." }); return; }
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
+  async function addStation() {
+    const name = stF.name.trim();
+    if (!name) { setStMsg("Give the station a name."); return; }
+    setStBusy(true); setStMsg("");
+    const { error } = await supabase.rpc("pa_add_station", {
+      p_department_id: deptId,
+      p_name: name,
+      p_label:   stF.label.trim()   || null,
+      p_address: stF.address.trim() || null,
+    });
+    setStBusy(false);
+    if (error) { setStMsg(error.message || "Couldn't add that station. Please try again."); return; }
+    setStMsg(`Added "${name}" to ${deptName || "this department"}.`);
+    setStF({ name: "", label: "", address: "" }); setStAdding(false);
+  }
+
   async function saveAddons() {
     setSavingAddons(true); setAddonSaveState("");
     const { error } = await supabase.rpc("pa_set_geofence_enabled", { p_department_id: deptId, p_enabled: !!geofenceOn });
@@ -17175,6 +17011,41 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </div>
         </div>
       )}
+
+      {/* ---- STATIONS (PA-side) ----
+           A second entry point to the same stations table as the department's own Settings form.
+           It exists because a Project Admin standing up a customer's houses is NOT a Department
+           Admin there, so the B1 form's policy — is_dept_admin() AND department_id =
+           my_department_id() — correctly refuses them. pa_add_station() takes the department
+           explicitly and gates on is_project_admin() instead.
+
+           NO LIST HERE, deliberately. my_stations() answers for the CALLER's department, which is
+           not this one, so it would show the PA their own stations under someone else's heading —
+           worse than showing nothing. Confirmation is by opening the department. */}
+      <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
+        <div style={FS.kicker}>STATIONS</div>
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 8px", lineHeight: 1.5 }}>
+          Add a house to {deptName || "this department"}. Once it has two or more, its members get a station picker.
+        </div>
+        {!stAdding ? (
+          <button style={{ ...FS.btn, alignSelf: "flex-start" }} onClick={() => { setStAdding(true); setStMsg(""); }}><Plus size={15} /> Add a station</button>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
+              <input style={FS.input} value={stF.name} onChange={(e) => setStF((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. Station 3" /></label>
+            {/* label carries the station number until Phase C's onboarding gives it a real field. */}
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Number / label (optional)</span>
+              <input style={FS.input} value={stF.label} onChange={(e) => setStF((x) => ({ ...x, label: e.target.value }))} placeholder="e.g. 3" /></label>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address (optional)</span>
+              <input style={FS.input} value={stF.address} onChange={(e) => setStF((x) => ({ ...x, address: e.target.value }))} /></label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button style={{ ...FS.btnPrimary, opacity: (stBusy || !stF.name.trim()) ? 0.6 : 1 }} disabled={stBusy || !stF.name.trim()} onClick={addStation}>{stBusy ? "Adding…" : "Add station"}</button>
+              <button style={FS.btn} onClick={() => { setStAdding(false); setStMsg(""); }} disabled={stBusy}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {stMsg && <div style={{ fontSize: 12.5, color: /Added/.test(stMsg) ? FIRE.greenText : FIRE.redText, marginTop: 8 }}>{stMsg}</div>}
+      </div>
 
       {/* ---- PER-STATION ADD-ONS ----
            THIS CARD CHANGES REAL BEHAVIOUR, which is what separates it from the one above. Module
