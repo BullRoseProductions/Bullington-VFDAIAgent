@@ -1167,14 +1167,48 @@ function StationsAdmin({ S }) {
   const [f, setF] = useState({ name: "", label: "", address: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const load = () => {
-    supabase.rpc("my_stations").then(({ data, error }) => {
-      // A failed read keeps the last-known list rather than claiming the department has none.
-      if (error) { setErr(error.message || "Please try again."); return; }
-      setErr(""); setRows(Array.isArray(data) ? data : []);
-    });
+  const [editId, setEditId] = useState(null);      // the station being edited, or null
+  const [ef, setEf] = useState({ name: "", label: "", address: "" });
+  const [eBusy, setEBusy] = useState(false);
+  /* READS THE TABLE, NOT my_stations(). The RPC returns no address, and this list has to show
+     one. The stations SELECT policy is department_id = my_department_id(), so a member reads
+     their own department's rows and nothing else — the same boundary the RPC was relying on,
+     applied one layer down. my_stations() is deliberately left untouched: the picker uses it,
+     and widening a function four screens depend on to serve one list would be the larger change.
+
+     NOTE the shape difference this introduces: my_stations() returns `station_id`, the table
+     returns `id`. Every reference below uses r.id. */
+  const load = async () => {
+    // Belt-and-braces only: the SELECT policy already scopes this to my_department_id(). So a
+    // failure to resolve the id does NOT block the list — RLS is the boundary either way, and
+    // refusing to render over a redundant filter would break never-blank-on-error for nothing.
+    const { data: deptId } = await supabase.rpc("my_department_id");
+    let q = supabase.from("stations").select("id, name, label, address, is_default, is_active");
+    if (deptId) q = q.eq("department_id", deptId);
+    const { data, error } = await q.order("is_default", { ascending: false }).order("name");
+    // A failed read keeps the last-known list rather than claiming the department has none.
+    if (error) { setErr(error.message || "Please try again."); return; }
+    setErr(""); setRows(Array.isArray(data) ? data : []);
   };
   useEffect(() => { load(); }, []);
+  async function saveEdit(id) {
+    const name = ef.name.trim();
+    if (!name) { setErr("Give the station a name."); return; }
+    setEBusy(true); setErr("");
+    // is_default and department_id are deliberately NOT in this update: which house is "the"
+    // default, and which department a station belongs to, are not edits — changing either would
+    // silently re-point rows already stamped with a station.
+    // .select() so a 0-row RLS block is DETECTABLE — same guard as DeptSettings.save. Without it
+    // a non-admin's refused update comes back with no error and would render as "saved".
+    const { data, error } = await supabase.from("stations")
+      .update({ name, label: ef.label.trim() || null, address: ef.address.trim() || null })
+      .eq("id", id).select();
+    setEBusy(false);
+    const denied = "Only a Department Admin can edit a station.";
+    if (error) { setErr(/row-level|policy|violat/i.test(error.message || "") ? denied : (error.message || "Please try again.")); return; }
+    if (!data || data.length === 0) { setErr(denied); return; }   // 0 rows = RLS blocked, never a false "saved"
+    setEditId(null); load();
+  }
   async function add() {
     const name = f.name.trim();
     if (!name) { setErr("Give the station a name."); return; }
@@ -1202,13 +1236,36 @@ function StationsAdmin({ S }) {
       </div>
       {rows === null && !err && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
       {list.map((r) => (
-        <div key={r.station_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
-            {r.label && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6 }}>{r.label}</span>}
-          </div>
-          {r.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2 }}>DEFAULT</span>}
-          {r.is_active === false && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.amberText, marginLeft: 6 }}>RETIRED</span>}
+        <div key={r.id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          {editId === r.id ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0 6px" }}>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
+                <input style={FS.input} value={ef.name} onChange={(e) => setEf((x) => ({ ...x, name: e.target.value }))} /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Label (optional)</span>
+                <input style={FS.input} value={ef.label} onChange={(e) => setEf((x) => ({ ...x, label: e.target.value }))} /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address (optional)</span>
+                <input style={FS.input} value={ef.address} onChange={(e) => setEf((x) => ({ ...x, address: e.target.value }))} /></label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button style={{ ...FS.btnPrimary, opacity: (eBusy || !ef.name.trim()) ? 0.6 : 1 }} disabled={eBusy || !ef.name.trim()} onClick={() => saveEdit(r.id)}>{eBusy ? "Saving…" : "Save changes"}</button>
+                <button style={FS.btn} onClick={() => { setEditId(null); setErr(""); }} disabled={eBusy}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
+                  {r.label && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6 }}>{r.label}</span>}
+                </div>
+                {/* Says "no address yet" rather than rendering an empty line, so a missing address
+                    reads as something to fill in instead of a layout gap. */}
+                <div style={{ fontSize: 12, color: r.address ? FIRE.textMuted : FIRE.textMuted2, marginTop: 2, fontStyle: r.address ? "normal" : "italic" }}>{r.address || "No address yet"}</div>
+              </div>
+              {r.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>DEFAULT</span>}
+              {r.is_active === false && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.amberText, flexShrink: 0 }}>RETIRED</span>}
+              <button title="Edit station" style={{ ...FS.btn, padding: "5px 9px", flexShrink: 0 }} onClick={() => { setEditId(r.id); setEf({ name: r.name || "", label: r.label || "", address: r.address || "" }); setErr(""); }}><Pencil size={13} color={FIRE.btnIcon} /></button>
+            </div>
+          )}
         </div>
       ))}
       {err && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
@@ -16957,13 +17014,28 @@ function DepartmentAdmin({ S, role, target, notify }) {
   const [addonErr, setAddonErr] = useState(null);
   const [savingAddons, setSavingAddons] = useState(false);
   const [addonSaveState, setAddonSaveState] = useState("");   // "" | "ok" | "err"
-  // PA-side stations for THIS department. Read through pa_department_stations is not a thing —
-  // the PA is not a member here, so my_stations() would answer for their OWN department. The list
-  // is therefore intentionally write-only from this screen: add, then confirm in the department.
+  // PA-side stations for THIS department, read through pa_department_stations(deptId) — which
+  // takes the department explicitly and gates on is_project_admin(). my_stations() still cannot
+  // be used here: it answers for the CALLER's department, so it would show the PA their own
+  // houses under someone else's heading.
+  const [stRows, setStRows] = useState(null);       // null = loading, [] = loaded and empty
+  const [stListErr, setStListErr] = useState("");   // a failed read falls back to "confirm in the department"
   const [stAdding, setStAdding] = useState(false);
   const [stF, setStF] = useState({ name: "", label: "", address: "" });
   const [stBusy, setStBusy] = useState(false);
   const [stMsg, setStMsg] = useState("");
+  const [stEditId, setStEditId] = useState(null);
+  const [stEf, setStEf] = useState({ name: "", label: "", address: "" });
+  const [stEBusy, setStEBusy] = useState(false);
+  const loadStations = (id) => {
+    if (!id) return;
+    supabase.rpc("pa_department_stations", { p_department_id: id }).then(({ data, error }) => {
+      // Never a silent empty: on failure keep the last-known list and say so, so the screen falls
+      // back to "add, then confirm in the department" rather than asserting there are no houses.
+      if (error) { setStListErr(error.message || "Please try again."); return; }
+      setStListErr(""); setStRows(Array.isArray(data) ? data : []);
+    });
+  };
   useEffect(() => {
     if (!isPA || !deptId) return;
     supabase.rpc("pa_get_disabled_modules", { p_department_id: deptId }).then(({ data, error }) => {
@@ -16976,6 +17048,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
       if (error) { setAddonErr(error.message); setGeofenceOn(false); return; }
       setAddonErr(null); setGeofenceOn(!!data);
     });
+    loadStations(deptId);
   }, [deptId]);
   const setModule = (key, on) => setDisabled((ds) => on ? (ds || []).filter((k) => k !== key) : [...(ds || []), key]);
   async function save() {
@@ -16999,6 +17072,24 @@ function DepartmentAdmin({ S, role, target, notify }) {
     if (error) { setStMsg(error.message || "Couldn't add that station. Please try again."); return; }
     setStMsg(`Added "${name}" to ${deptName || "this department"}.`);
     setStF({ name: "", label: "", address: "" }); setStAdding(false);
+    loadStations(deptId);   // the list is the confirmation now — refetch rather than patch locally
+  }
+  async function saveStation(id) {
+    const name = stEf.name.trim();
+    if (!name) { setStMsg("Give the station a name."); return; }
+    setStEBusy(true); setStMsg("");
+    // pa_update_station changes name/label/address ONLY — it cannot re-point is_default or move a
+    // station between departments, so an edit can never invalidate an existing station stamp.
+    const { error } = await supabase.rpc("pa_update_station", {
+      p_station_id: id,
+      p_name: name,
+      p_label:   stEf.label.trim()   || null,
+      p_address: stEf.address.trim() || null,
+    });
+    setStEBusy(false);
+    if (error) { setStMsg(error.message || "Couldn't save that station. Please try again."); return; }
+    setStMsg(`Saved "${name}".`);
+    setStEditId(null); loadStations(deptId);
   }
 
   async function saveAddons() {
@@ -17053,14 +17144,56 @@ function DepartmentAdmin({ S, role, target, notify }) {
            my_department_id() — correctly refuses them. pa_add_station() takes the department
            explicitly and gates on is_project_admin() instead.
 
-           NO LIST HERE, deliberately. my_stations() answers for the CALLER's department, which is
-           not this one, so it would show the PA their own stations under someone else's heading —
-           worse than showing nothing. Confirmation is by opening the department. */}
+           THE LIST READS pa_department_stations(deptId), for the same reason: my_stations()
+           answers for the CALLER's department, which is not this one, so it would show the PA
+           their own stations under someone else's heading — worse than showing nothing. If that
+           read fails the screen falls back to what it did before: add, then confirm by opening
+           the department. It never renders an empty list it cannot vouch for. */}
       <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
         <div style={FS.kicker}>STATIONS</div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 8px", lineHeight: 1.5 }}>
-          Add a house to {deptName || "this department"}. Once it has two or more, its members get a station picker.
+          The houses in {deptName || "this department"}. Once it has two or more, its members get a station picker.
         </div>
+        {stRows === null && !stListErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 6px" }}>Loading…</div>}
+        {stListErr && (
+          <div style={{ fontSize: 12.5, color: FIRE.amberText, padding: "2px 0 6px", lineHeight: 1.45 }}>
+            Couldn&rsquo;t load this department&rsquo;s stations ({stListErr}). You can still add one below, then confirm by opening the department.
+          </div>
+        )}
+        {(stRows || []).map((r) => (
+          <div key={r.station_id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            {stEditId === r.station_id ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0 6px" }}>
+                <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
+                  <input style={FS.input} value={stEf.name} onChange={(e) => setStEf((x) => ({ ...x, name: e.target.value }))} /></label>
+                <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Number / label (optional)</span>
+                  <input style={FS.input} value={stEf.label} onChange={(e) => setStEf((x) => ({ ...x, label: e.target.value }))} /></label>
+                <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address (optional)</span>
+                  <input style={FS.input} value={stEf.address} onChange={(e) => setStEf((x) => ({ ...x, address: e.target.value }))} /></label>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button style={{ ...FS.btnPrimary, opacity: (stEBusy || !stEf.name.trim()) ? 0.6 : 1 }} disabled={stEBusy || !stEf.name.trim()} onClick={() => saveStation(r.station_id)}>{stEBusy ? "Saving…" : "Save changes"}</button>
+                  <button style={FS.btn} onClick={() => { setStEditId(null); setStMsg(""); }} disabled={stEBusy}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
+                    {r.label && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6 }}>{r.label}</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: r.address ? FIRE.textMuted : FIRE.textMuted2, marginTop: 2, fontStyle: r.address ? "normal" : "italic" }}>{r.address || "No address yet"}</div>
+                </div>
+                {r.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>DEFAULT</span>}
+                {r.is_active === false && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.amberText, flexShrink: 0 }}>RETIRED</span>}
+                <button title="Edit station" style={{ ...FS.btn, padding: "5px 9px", flexShrink: 0 }} onClick={() => { setStEditId(r.station_id); setStEf({ name: r.name || "", label: r.label || "", address: r.address || "" }); setStMsg(""); }}><Pencil size={13} color={FIRE.btnIcon} /></button>
+              </div>
+            )}
+          </div>
+        ))}
+        {stRows !== null && stRows.length === 0 && !stListErr && (
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "2px 0 6px" }}>No stations yet.</div>
+        )}
         {!stAdding ? (
           <button style={{ ...FS.btn, alignSelf: "flex-start" }} onClick={() => { setStAdding(true); setStMsg(""); }}><Plus size={15} /> Add a station</button>
         ) : (
@@ -17078,7 +17211,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
             </div>
           </div>
         )}
-        {stMsg && <div style={{ fontSize: 12.5, color: /Added/.test(stMsg) ? FIRE.greenText : FIRE.redText, marginTop: 8 }}>{stMsg}</div>}
+        {stMsg && <div style={{ fontSize: 12.5, color: /^(Added|Saved)/.test(stMsg) ? FIRE.greenText : FIRE.redText, marginTop: 8 }}>{stMsg}</div>}
       </div>
 
       {/* ---- PER-STATION ADD-ONS ----
