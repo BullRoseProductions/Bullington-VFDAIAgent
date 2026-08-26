@@ -12813,6 +12813,11 @@ function StationHours({ S, dept, notify }) {
   const [geoNote, setGeoNote] = useState("");   // location refused/unavailable — the punch still lands, just unverified
   const [now, setNow] = useState(() => Date.now());
   // ---- my hours (own state, own fetch — my_station_shifts scopes to the caller like the other three) ----
+  // DEPARTMENT-WIDE ON PURPOSE (B3b): my_station_shifts returns the caller's shifts at EVERY
+  // house, and is never filtered to the active station. The total is the credited LOSAP
+  // figure; scoping it to one house would under-report the member's year and read as lost
+  // hours. The station rides along as a label so the list can name the house and the
+  // breakdown can split it — that is all it is for.
   const [rangeKey, setRangeKey] = useState("month");
   const [myShifts, setMyShifts] = useState([]);
   const [hoursLoaded, setHoursLoaded] = useState(false);
@@ -12887,6 +12892,20 @@ function StationHours({ S, dept, notify }) {
   const myTraining = vShifts.filter((s) => s.kind === "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
   const myTotal    = myStandby + myTraining;
   const myUnverified = myShifts.filter((s) => !s.verified).reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  // ---- which house (B3b) ---- a label on the same rows, never a filter on them
+  const stationOf = (s) => s.station_name || "Unassigned";
+  // ONE house — the single-station department, and the member who only worked one — means the
+  // breakdown would be a single line restating the headline and every row would carry the same
+  // label. Say nothing instead, exactly as the station picker hides itself at one station.
+  const multiStation = new Set(myShifts.map(stationOf)).size > 1;
+  // VERIFIED-only, so these lines sum EXACTLY to the headline they sit under. Splitting all
+  // shifts would print a set of numbers that don't add up to the figure above them, on the one
+  // screen where the credited number has to be unambiguous. Unverified stays its own amber line.
+  const byStation = !multiStation ? [] : (() => {
+    const m = new Map();
+    vShifts.forEach((s) => { const k = stationOf(s); m.set(k, (m.get(k) || 0) + (Number(s.hours) || 0)); });
+    return Array.from(m, ([name, hours]) => ({ name, hours })).sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name));
+  })();
   const h1n = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);   // hours, 1 decimal — matches the report
   const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   const fmtHm2 = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
@@ -12984,6 +13003,19 @@ function StationHours({ S, dept, notify }) {
                 </div>
               </div>
               <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.45 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
+              {/* Only rendered when there IS more than one house. These lines sum to the
+                  headline above — same verified-only set — so the two can never disagree. */}
+              {byStation.length > 0 && (
+                <div style={{ marginTop: 12, paddingTop: 11, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginBottom: 7 }}>Verified hours by station</div>
+                  {byStation.map((b) => (
+                    <div key={b.name} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "3px 0" }}>
+                      <span style={{ fontSize: 12.5, color: FIRE.textSecondary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                      <span style={{ ...FS.num, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, flexShrink: 0 }}>{h1n(b.hours)} h</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {myShifts.length === 0 ? (
                 <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12 }}>No shifts in this range.</div>
               ) : (
@@ -12992,7 +13024,7 @@ function StationHours({ S, dept, notify }) {
                     <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, padding: "9px 2px" }}>
                       <div style={FS.rowTitle}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{fmtDay(s.checked_in_at)}</div>
-                        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}</div>
+                        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}{multiStation ? ` · ${stationOf(s)}` : ""}</div>
                       </div>
                       <div style={{ ...FS.rowActions, gap: 10 }}>
                         <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(s.hours)} h</span>
