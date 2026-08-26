@@ -1295,16 +1295,98 @@ function StationsAdmin({ S }) {
    callers below deliberately DO NOT FILTER in that case: showing zero rows because a lookup failed
    would tell a department it owns no apparatus, which is the never-blank-on-error rule. An
    unfiltered list is the honest degradation — it is what the screen showed before B1. */
+/* "All stations" is a VIEW, not an active station.
+
+   set_active_station() stores a real house, and it stays whatever it was — there is deliberately
+   no server-side notion of "all". This sentinel lives only in the client, so the three screens can
+   agree to drop their station filter without anything being written.
+
+   sessionStorage rather than component state because the picker RELOADS the page on every switch
+   (see StationPicker) — the choice has to survive that one reload, and nothing else. It dies with
+   the tab, which is the right lifetime for a view preference and means it can never be mistaken
+   for a stored setting. */
+const ALL_STATIONS = "__all__";
+const allStationsMode = () => { try { return sessionStorage.getItem("b4c.stations.all") === "1"; } catch { return false; } };
+const setAllStationsMode = (on) => {
+  try { if (on) sessionStorage.setItem("b4c.stations.all", "1"); else sessionStorage.removeItem("b4c.stations.all"); } catch { /* private mode — the view just won't persist */ }
+};
+
 function useActiveStation() {
   const [stationId, setStationId] = useState(undefined);
   useEffect(() => {
     let off = false;
+    // The view wins over the stored station, and costs no round trip.
+    if (allStationsMode()) { setStationId(ALL_STATIONS); return () => { off = true; }; }
     supabase.rpc("my_active_station_id").then(({ data, error }) => {
       if (!off) setStationId(error ? null : (data || null));
     });
     return () => { off = true; };
   }, []);
   return stationId;
+}
+
+/* The department's stations, for screens that need to GROUP by house. Fetched only in all-houses
+   mode, so a single-station department never makes this call. my_stations() already orders
+   is_default first then by name — the picker's order — so grouping inherits it for free.
+
+   null means unknown (loading, or a failed read). Callers treat that as "don't group": an
+   ungrouped list is the honest degradation, exactly as useActiveStation treats a null id. */
+function useStationList(enabled) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let off = false;
+    supabase.rpc("my_stations").then(({ data, error }) => {
+      if (!off && !error && Array.isArray(data)) setRows(data);
+    });
+    return () => { off = true; };
+  }, [enabled]);
+  return rows;
+}
+
+/* One house's heading inside an all-houses list, with the way back into that house.
+
+   ADDING STAYS PER-HOUSE. All-houses mode is a read/scan view: "Go to this station" calls the
+   ordinary set_active_station() and reloads into the normal single-station screen, where add and
+   edit already work and are already proven. That reuse is the point — it means no add-in-all-mode
+   path exists to get station attribution wrong, and it sidesteps create_duty() not taking a
+   station at all. */
+function StationSectionHead({ station, notify }) {
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    if (busy) return;
+    setBusy(true);
+    const { error } = await supabase.rpc("set_active_station", { p_station_id: station.station_id });
+    if (error) { setBusy(false); notify?.({ kind: "error", title: "Couldn't switch station", text: error.message || "Please try again." }); return; }
+    setAllStationsMode(false);   // leaving the view; the stored station is now this house
+    if (typeof window !== "undefined") window.location.reload();
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "16px 0 7px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textPrimary }}>{station.name}</div>
+      {station.label && <span style={{ fontSize: 12, color: FIRE.textMuted }}>{station.label}</span>}
+      {station.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2 }}>DEFAULT</span>}
+      <button onClick={go} disabled={busy} style={{ ...FS.btn, marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, opacity: busy ? 0.6 : 1 }}>{busy ? "Switching…" : "Go to this station"}</button>
+    </div>
+  );
+}
+
+/* Turn a flat row set into one section per house, in the picker's order.
+
+   EMPTY HOUSES ARE KEPT, deliberately: a station with nothing in it still gets its heading and a
+   quiet "nothing here yet". Dropping it would hide that the house exists, which is the same
+   dishonesty as rendering an empty list for a failed read.
+
+   Rows whose station_id matches no known station (a retired house, a row stamped before a station
+   was removed) are gathered into a trailing "Unassigned" section rather than vanishing — the
+   never-silently-drop rule applied to grouping. */
+function groupByStation(rows, stations) {
+  const list = rows || [];
+  const sections = (stations || []).map((st) => ({ key: st.station_id, station: st, rows: list.filter((r) => r.station_id === st.station_id) }));
+  const known = new Set((stations || []).map((st) => st.station_id));
+  const orphans = list.filter((r) => !known.has(r.station_id));
+  if (orphans.length) sections.push({ key: "__orphan__", station: { station_id: null, name: "Unassigned", label: "", is_default: false }, rows: orphans });
+  return sections;
 }
 
 /* ---------------- Station picker (multi-station Phase B1) ----------------
@@ -1334,26 +1416,38 @@ function StationPicker({ S, notify }) {
     supabase.rpc("my_stations").then(({ data, error }) => {
       if (off || error || !Array.isArray(data)) return;   // a failed read renders nothing, never a wrong picker
       setList(data);
+      // Self-heal: a department that drops back to one house must not be left stuck in a view it
+      // can no longer offer. Clearing here means the next reload is the ordinary single view.
+      if (data.length <= 1) setAllStationsMode(false);
     });
     supabase.rpc("my_active_station_id").then(({ data, error }) => { if (!off && !error) setActiveId(data || null); });
     return () => { off = true; };
   }, []);
   const rows = list || [];
   if (rows.length <= 1) return null;
+  // The stored station is still a real house while the view is "all" — it is what "Go to this
+  // station" and every write path use. Only the SELECT shows ALL_STATIONS.
+  const shownValue = allStationsMode() ? ALL_STATIONS : (activeId || "");
   async function choose(id) {
-    if (!id || id === activeId || busy) return;
+    if (!id || id === shownValue || busy) return;
     setBusy(true);
+    // ALL_STATIONS is never written to the server — set_active_station takes a real station id,
+    // and passing a sentinel would be rejected as a bad uuid. Flip the view and reload instead.
+    if (id === ALL_STATIONS) { setAllStationsMode(true); if (typeof window !== "undefined") window.location.reload(); return; }
     const { error } = await supabase.rpc("set_active_station", { p_station_id: id });
     if (error) { setBusy(false); notify?.({ kind: "error", title: "Couldn't switch station", text: error.message || "Please try again." }); return; }
+    setAllStationsMode(false);   // picking a real house leaves the view
     if (typeof window !== "undefined") window.location.reload();
   }
   const label = (r) => `${r.name}${r.label ? ` · ${r.label}` : ""}${r.is_active === false ? " (retired)" : ""}`;
   return (
     <div style={S.viewAs}>
       <span style={S.viewAsLabel}>Station</span>
-      <select value={activeId || ""} disabled={busy || !activeId} onChange={(e) => choose(e.target.value)} style={S.select}>
+      <select value={shownValue} disabled={busy || !activeId} onChange={(e) => choose(e.target.value)} style={S.select}>
         {!activeId && <option value="">Loading…</option>}
         {rows.map((r) => <option key={r.station_id} value={r.station_id}>{label(r)}</option>)}
+        {/* Only ever reachable at 2+ stations — this whole component returns null below that. */}
+        <option value={ALL_STATIONS}>All stations</option>
       </select>
     </div>
   );
@@ -10927,14 +11021,16 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const loadRigs = () => {
     // Scoped to the active station. NOT filtered when the id is unknown — see useActiveStation.
     let q = supabase.from("apparatus")
-      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost")
+      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost, station_id")
       .order("created_at", { ascending: true });
-    if (activeStationId) q = q.eq("station_id", activeStationId);
+    // ALL_STATIONS drops the filter: RLS still scopes to the department, so this returns every
+    // house's rigs and the render groups them. It is the same query the screen ran before B1.
+    if (activeStationId && activeStationId !== ALL_STATIONS) q = q.eq("station_id", activeStationId);
     q.then(({ data, error }) => {
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false);
         setRigs(data.map((r) => ({
-          id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false,
+          id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false, station_id: r.station_id,
           purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null,
           currentCost: r.current_cost ?? null, inflationRate: r.inflation_rate ?? null,
           replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
@@ -10970,7 +11066,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     if (!capital) return;   // validation already notified
     // station_id explicitly, so a rig added while viewing Station B belongs to B. The Phase B1
     // trigger would stamp the active station anyway; this makes the intent visible at the call site.
-    const { data: created, error } = await supabase.from("apparatus").insert({ department_id: deptId, station_id: activeStationId || undefined, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null, ...capital }).select("id").single();
+    const { data: created, error } = await supabase.from("apparatus").insert({ department_id: deptId, station_id: (activeStationId && activeStationId !== ALL_STATIONS) ? activeStationId : undefined, name: nm.trim(), type: tp, status: rd === "Ready" ? "Pass" : "Needs attention", note: rd === "Ready" ? "" : "Newly added — needs a check", last_check_at: null, checked_by: null, ...capital }).select("id").single();
     if (error || !created) { notify({ kind: "error", title: "Couldn't add the apparatus", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
     if (outOfService) {   // reuse the RPC so an open service period is recorded (no separate insert path)
       const { error: svcErr } = await supabase.rpc("take_apparatus_out_of_service", { p_apparatus_id: created.id, p_reason: svcReason.trim() });
@@ -10984,6 +11080,72 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     if (error) { notify({ kind: "error", title: "Couldn't remove the apparatus", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadRigs();   // refetch — UI matches true DB state
   }
+  /* All-houses view. `grouped` requires the station list to have actually arrived AND to hold more
+     than one house: a single-station department renders exactly as it always has, by construction
+     rather than by luck, and a failed my_stations() read degrades to one ungrouped list instead of
+     a wall of empty headers. Same rule as the picker and the B3b hours breakdown. */
+  const allMode = activeStationId === ALL_STATIONS;
+  const stations = useStationList(allMode);
+  const grouped = allMode && (stations || []).length > 1;
+  const stationSections = grouped ? groupByStation(rigs, stations) : [];
+  /* One rig card. Extracted from the list so it can be rendered once per house in all-stations
+     mode without duplicating 50 lines of card. The card itself is unchanged. */
+  const renderRig = (r) => {
+    const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
+    const outOfService = !r.inService;   // availability dimension (separate from Pass/Needs-attention readiness)
+    return (
+      <div key={r.id} style={{ ...S.opCard, ...FS.card, opacity: outOfService ? 0.68 : 1 }}>
+        <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
+          <Truck size={20} color={outOfService ? FIRE.textMuted2 : FIRE.btnIcon} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
+          {outOfService
+            ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
+            : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
+          {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
+          {canManage && editMode && <button title="Remove from station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
+        </div>
+        {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
+        {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
+        <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 11 }}>Last check: {r.lastCheck} · {r.by}</div>
+        {/* ACTION ROW. Start Check leads and is allowed to take the full width on a narrow card.
+            It previously sat LAST inside a nested flex row that had no flexWrap, pinned right with
+            marginLeft:auto — so on a phone-width apparatus card "Take out of service" consumed the
+            line and the primary action was pushed past the card edge. The whole point of the
+            screen is running a check; it must never be the thing that gets squeezed out.
+            Gate is unchanged (canCheck), and it still renders DISABLED rather than hidden when the
+            rig is out of service, so the reason stays visible via the tooltip. The empty-checklist
+            case is still handled inside CheckRunModal, which explains how to add items. */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 10 }}>
+          {canCheck && <button disabled={outOfService} title={outOfService ? "Return to service to run a check" : "Start a check"} style={{ ...FS.btnPrimary, padding: "9px 14px", fontSize: 13, flex: "1 1 auto", minWidth: 150, opacity: outOfService ? 0.5 : 1 }} onClick={() => { if (!outOfService) setCheckingRig(r); }}><ClipboardCheck size={15} /> Start Check</button>}
+          {canManage && (outOfService
+            ? <button disabled={serviceBusy === r.id} title="Return to service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0 }} onClick={() => returnToService(r.id, r.name)}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} color={FIRE.green} />} Return to service</button>
+            : <button title="Take out of service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0 }} onClick={() => { setServiceFor(r.id); setServiceReason(""); }}><Wrench size={13} color={FIRE.textSecondary} /> Take out of service</button>)}
+        </div>
+        {canManage && serviceFor === r.id && !outOfService && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
+            <input autoFocus value={serviceReason} placeholder="Why out of service? (required)" onChange={(e) => setServiceReason(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") takeOutOfService(r.id); if (e.key === "Escape") { setServiceFor(null); setServiceReason(""); } }}
+              style={{ ...FS.input, flex: 1, minWidth: 0, fontSize: 12.5, padding: "6px 8px" }} />
+            <button disabled={serviceBusy === r.id || !serviceReason.trim()} onClick={() => takeOutOfService(r.id)} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: (serviceBusy === r.id || !serviceReason.trim()) ? 0.5 : 1 }}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : "Confirm"}</button>
+            <button onClick={() => { setServiceFor(null); setServiceReason(""); }} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+          </div>
+        )}
+        {editingRigId === r.id && (
+          <div style={{ ...FS.card, padding: 14, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={rigBuf.name} onChange={(e) => setRigBuf((b) => ({ ...b, name: e.target.value }))} /></label>
+            <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={rigBuf.type} onChange={(e) => setRigBuf((b) => ({ ...b, type: e.target.value }))}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
+            <CapitalFields S={S} v={rigBuf} set={(k, val) => setRigBuf((b) => ({ ...b, [k]: val }))} />
+            <button style={FS.btnPrimary} onClick={() => saveEditRig(r.id)}><CheckCircle2 size={15} /> Save</button>
+            <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
+          </div>
+        )}
+        {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
+        {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
+        <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
+        <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
+      </div>
+    );
+  };
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />}
@@ -10998,14 +11160,17 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         <Stat S={S} dark n={String(rigs.length)} label="Apparatus in station" />
       </div>
       {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
-      {canManage && rigs.length > 0 && (
+      {/* Add and edit are hidden in all-houses mode: it is a read/scan view, and "Go to this
+          station" is the way into the house where both already work. That also removes any
+          path by which a new rig could be created without a real station. */}
+      {canManage && !allMode && rigs.length > 0 && (
         <div style={{ display: "flex", marginBottom: 12 }}>
           <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
             {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit apparatus</>}
           </button>
         </div>
       )}
-      {canManage && (editMode || rigs.length === 0) && (adding ? (
+      {canManage && !allMode && (editMode || rigs.length === 0) && (adding ? (
         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name / unit</span><input style={FS.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={tp} onChange={(e) => setTp(e.target.value)}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
@@ -11017,70 +11182,24 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); setCap(CAP_BLANK); }}>Cancel</button>
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
-      {rigs.length === 0 ? (
+      {grouped ? (
+        /* One section per house. The global empty state is skipped here on purpose: with houses
+           to show, "no apparatus" belongs under the house it is true of, not over the whole page. */
+        stationSections.map((sec) => (
+          <div key={sec.key}>
+            <StationSectionHead station={sec.station} notify={notify} />
+            {sec.rows.length === 0
+              ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 10px" }}>Nothing here yet.</div>
+              : <div style={S.opGrid}>{sec.rows.map(renderRig)}</div>}
+          </div>
+        ))
+      ) : rigs.length === 0 ? (
         <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus in the station yet.{canManage ? " Use “Add apparatus” to build your list." : ""}</div>
         </div>
       ) : (
-      <div style={S.opGrid}>
-        {rigs.map((r) => {
-          const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
-          const outOfService = !r.inService;   // availability dimension (separate from Pass/Needs-attention readiness)
-          return (
-            <div key={r.id} style={{ ...S.opCard, ...FS.card, opacity: outOfService ? 0.68 : 1 }}>
-              <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-                <Truck size={20} color={outOfService ? FIRE.textMuted2 : FIRE.btnIcon} style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
-                {outOfService
-                  ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
-                  : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
-                {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-                {canManage && editMode && <button title="Remove from station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
-              </div>
-              {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
-              {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
-              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 11 }}>Last check: {r.lastCheck} · {r.by}</div>
-              {/* ACTION ROW. Start Check leads and is allowed to take the full width on a narrow card.
-                  It previously sat LAST inside a nested flex row that had no flexWrap, pinned right with
-                  marginLeft:auto — so on a phone-width apparatus card "Take out of service" consumed the
-                  line and the primary action was pushed past the card edge. The whole point of the
-                  screen is running a check; it must never be the thing that gets squeezed out.
-                  Gate is unchanged (canCheck), and it still renders DISABLED rather than hidden when the
-                  rig is out of service, so the reason stays visible via the tooltip. The empty-checklist
-                  case is still handled inside CheckRunModal, which explains how to add items. */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 10 }}>
-                {canCheck && <button disabled={outOfService} title={outOfService ? "Return to service to run a check" : "Start a check"} style={{ ...FS.btnPrimary, padding: "9px 14px", fontSize: 13, flex: "1 1 auto", minWidth: 150, opacity: outOfService ? 0.5 : 1 }} onClick={() => { if (!outOfService) setCheckingRig(r); }}><ClipboardCheck size={15} /> Start Check</button>}
-                {canManage && (outOfService
-                  ? <button disabled={serviceBusy === r.id} title="Return to service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0 }} onClick={() => returnToService(r.id, r.name)}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} color={FIRE.green} />} Return to service</button>
-                  : <button title="Take out of service" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0 }} onClick={() => { setServiceFor(r.id); setServiceReason(""); }}><Wrench size={13} color={FIRE.textSecondary} /> Take out of service</button>)}
-              </div>
-              {canManage && serviceFor === r.id && !outOfService && (
-                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
-                  <input autoFocus value={serviceReason} placeholder="Why out of service? (required)" onChange={(e) => setServiceReason(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") takeOutOfService(r.id); if (e.key === "Escape") { setServiceFor(null); setServiceReason(""); } }}
-                    style={{ ...FS.input, flex: 1, minWidth: 0, fontSize: 12.5, padding: "6px 8px" }} />
-                  <button disabled={serviceBusy === r.id || !serviceReason.trim()} onClick={() => takeOutOfService(r.id)} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: (serviceBusy === r.id || !serviceReason.trim()) ? 0.5 : 1 }}>{serviceBusy === r.id ? <Loader2 size={13} className="spin" /> : "Confirm"}</button>
-                  <button onClick={() => { setServiceFor(null); setServiceReason(""); }} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
-                </div>
-              )}
-              {editingRigId === r.id && (
-                <div style={{ ...FS.card, padding: 14, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                  <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={rigBuf.name} onChange={(e) => setRigBuf((b) => ({ ...b, name: e.target.value }))} /></label>
-                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type</span><select style={FS.input} value={rigBuf.type} onChange={(e) => setRigBuf((b) => ({ ...b, type: e.target.value }))}>{APPARATUS_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
-                  <CapitalFields S={S} v={rigBuf} set={(k, val) => setRigBuf((b) => ({ ...b, [k]: val }))} />
-                  <button style={FS.btnPrimary} onClick={() => saveEditRig(r.id)}><CheckCircle2 size={15} /> Save</button>
-                  <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
-                </div>
-              )}
-              {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
-              {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
-              <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
-              <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
-            </div>
-          );
-        })}
-      </div>
+        <div style={S.opGrid}>{rigs.map(renderRig)}</div>
       )}
       <MaintenancePanel S={S} role={role} rigs={rigs} meId={meId} members={members} notify={notify} />
       {checkingRig && <CheckRunModal S={S} rig={checkingRig} meId={meId} notify={notify} canManage={canManage} onClose={() => setCheckingRig(null)} onFinalized={() => { loadRigs(); setHistoryKey((k) => k + 1); }} />}
@@ -13158,9 +13277,11 @@ function Equipment({ S, role, members, meId, notify }) {
   const loadEquipment = async () => {
     // Scoped to the active station; unfiltered when the id is unknown — see useActiveStation.
     let unitsQ = supabase.from("equipment")
-      .select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, current_holder_name, notes, created_at")
+      .select("id, equipment_type_id, serial_number, asset_number, manufacturer, model, size, manufacture_date, status, condition, current_holder_name, notes, created_at, station_id")
       .order("created_at", { ascending: true });
-    if (activeStationId) unitsQ = unitsQ.eq("station_id", activeStationId);
+    // ALL_STATIONS drops the filter — RLS still scopes to the department, and the render groups
+    // the result by house. Units carry station_id so types can be rebuilt per house.
+    if (activeStationId && activeStationId !== ALL_STATIONS) unitsQ = unitsQ.eq("station_id", activeStationId);
     const [{ data: tData, error: tErr }, { data: uData, error: uErr }] = await Promise.all([
       supabase.from("equipment_type").select("id, category, name, service_life_years, returnable, sort_order, active").eq("active", true).order("sort_order", { ascending: true }).order("name", { ascending: true }),
       unitsQ,
@@ -13172,7 +13293,7 @@ function Equipment({ S, role, members, meId, notify }) {
     units.forEach((u) => { (byType[u.equipment_type_id] = byType[u.equipment_type_id] || []).push(u); });
     setTypes(tData.map((t) => {
       const list = (byType[t.id] || []).map((u) => ({
-        id: u.id, serial: u.serial_number || "", asset: u.asset_number || "", condition: u.condition || "Serviceable", status: u.status, holderName: u.current_holder_name || "",
+        id: u.id, serial: u.serial_number || "", asset: u.asset_number || "", condition: u.condition || "Serviceable", status: u.status, holderName: u.current_holder_name || "", station_id: u.station_id,
         manufacturer: u.manufacturer || "", model: u.model || "", size: u.size || "", manufactureDate: u.manufacture_date || "", notes: u.notes || "",
       }));
       return { id: t.id, category: t.category, name: t.name, returnable: t.returnable !== false, serviceLifeYears: t.service_life_years,
@@ -13258,7 +13379,7 @@ function Equipment({ S, role, members, meId, notify }) {
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
     // station_id explicit: gear added while viewing Station B belongs to B. The trigger would
     // stamp the active station anyway; this makes the intent visible at the call site.
-    const payload = rows.map((r) => ({ department_id: deptId, station_id: activeStationId || undefined, equipment_type_id: typeId, created_by: meId, ...r }));   // status NOT set — defaults; ledger owns it
+    const payload = rows.map((r) => ({ department_id: deptId, station_id: (activeStationId && activeStationId !== ALL_STATIONS) ? activeStationId : undefined, equipment_type_id: typeId, created_by: meId, ...r }));   // status NOT set — defaults; ledger owns it
     const { data, error } = await supabase.from("equipment").insert(payload).select("id");   // single array = atomic, all-or-nothing
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't add the units", text: "Something went wrong saving that. Please try again.", details: error?.message }); return; }
     notify({ kind: "success", title: "Units added", text: `Added ${data.length} unit${data.length === 1 ? "" : "s"} to ${typeName}.` });
@@ -13315,9 +13436,152 @@ function Equipment({ S, role, members, meId, notify }) {
     if (!data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the type", text: "Something went wrong removing that. Please try again." }); return; }
     loadEquipment();
   }
-  const groups = {};
-  types.forEach((t) => { (groups[t.category || "Uncategorized"] = groups[t.category || "Uncategorized"] || []).push(t); });
-  const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));   // types already ordered sort_order,name → preserved within each group
+  /* All-houses view — same rule as Apparatus: grouped only once the station list has arrived AND
+     holds more than one house, so a single-station department is untouched and a failed read
+     degrades to one ungrouped list. */
+  const allMode = activeStationId === ALL_STATIONS;
+  const stations = useStationList(allMode);
+  const grouped = allMode && (stations || []).length > 1;
+  /* Sections are built from the flattened UNITS, not from an empty list, so groupByStation's
+     orphan bucket actually catches a unit whose station is unknown. Grouping must not be the thing
+     that loses a piece of gear. (allUnits is the flattened set the summary counts already use.) */
+  const stationSections = grouped ? groupByStation(allUnits, stations) : [];
+  /* Rebuild the type list from ONE section's units. Totals and availability are recomputed from
+     just those units, so a section's counts describe that house and not the department — the
+     numbers have to agree with the rows printed underneath them. */
+  const typesOf = (unitRows) => {
+    const ids = new Set(unitRows.map((u) => u.id));
+    return types
+      .map((t) => { const units = t.units.filter((u) => ids.has(u.id));
+                    return { ...t, units, total: units.length, available: units.filter((x) => x.status === "in_inventory").length }; })
+      .filter((t) => t.units.length > 0);
+  };
+  /* The type-grouped equipment list for ONE scope. Extracted so all-houses mode can render it
+     once per house; the markup inside is unchanged. Groups are computed from the list passed in
+     rather than the component-wide `types`, which is what makes a per-house call correct. */
+  const renderTypes = (typeList) => {
+    const groups = {};
+    typeList.forEach((t) => { (groups[t.category || "Uncategorized"] = groups[t.category || "Uncategorized"] || []).push(t); });
+    const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));   // types already ordered sort_order,name → preserved within each group
+    return (
+      <div style={{ ...FS.card, padding: "2px 16px" }}>
+      {groupNames.map((cat, gi) => (
+        <div key={cat}>
+          <div style={{ ...FS.kicker, padding: gi === 0 ? "12px 0 6px" : "18px 0 6px" }}>{cat}</div>
+          {groups[cat].map((t, ti) => {
+            const open = expanded === t.id;
+            const lastRow = gi === groupNames.length - 1 && ti === groups[cat].length - 1;
+            return (
+              <div key={t.id} style={{ borderBottom: lastRow ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 44 }}>
+                  <button onClick={() => toggleExpand(t.id)} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, minHeight: 44, background: "none", border: "none", padding: "6px 0", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}{!t.returnable && <span style={{ fontWeight: 400, fontSize: 11.5, color: FIRE.textMuted }}> · consumable</span>}</div>
+                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.green : FIRE.textMuted }}>{t.available} available</span></div>
+                    <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronDown size={16} color={FIRE.textMuted} /> : <ChevronRight size={16} color={FIRE.textMuted} />}</span>
+                  </button>
+                  {canManage && editMode && <button title="Edit type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEditType(t)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
+                  {canManage && editMode && <button title="Remove type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeType(t)}><X size={13} color={FIRE.deleteRed} /></button>}
+                </div>
+                {editingTypeId === t.id && (
+                  <div style={{ ...FS.card, padding: 12, margin: "2px 0 10px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={tb.name} onChange={(e) => setTb((b) => ({ ...b, name: e.target.value }))} /></label>
+                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={tb.catSel} onChange={(e) => setTb((b) => ({ ...b, catSel: e.target.value }))}>{categories.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">New category…</option></select></label>
+                    {tb.catSel === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category</span><input style={FS.input} value={tb.catNew} onChange={(e) => setTb((b) => ({ ...b, catNew: e.target.value }))} /></label>}
+                    <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Returnable</span><select style={FS.input} value={tb.returnable ? "yes" : "no"} onChange={(e) => setTb((b) => ({ ...b, returnable: e.target.value === "yes" }))}><option value="yes">Returnable</option><option value="no">Consumable</option></select></label>
+                    <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Service life (years)</span><input style={FS.input} value={tb.life ?? ""} placeholder="optional — e.g. 10" inputMode="numeric" onChange={(e) => setTb((b) => ({ ...b, life: e.target.value }))} /></label>
+                    <button style={FS.btnPrimary} onClick={() => saveEditType(t.id)}><CheckCircle2 size={15} /> Save</button>
+                    <button style={FS.btn} onClick={() => setEditingTypeId(null)}>Cancel</button>
+                  </div>
+                )}
+                {open && (
+                  <div style={{ margin: "2px 0 12px" }}>
+                {t.units.length === 0 ? (
+                  <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 8px" }}>No units yet.</div>
+                ) : t.units.map((u, i) => {
+                  const badge = u.status === "held"        ? { label: "Checked out",    color: FIRE.blueText }
+                              : u.status === "maintenance" ? { label: "In maintenance", color: FIRE.amberText }
+                              : u.status === "retired"     ? { label: "Retired",        color: FIRE.textMuted2 }
+                              : u.status === "lost"        ? { label: "Lost",           color: FIRE.redBright }
+                              : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright };
+                  const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
+                  const gear = gearStatus(u.manufactureDate, t.serviceLifeYears);   // this unit's date + its TYPE's service life
+                  // NFPA retirement is mandatory by AGE regardless of condition, so a past-life unit is not
+                  // serviceable for duty. A green "Serviceable" pill beside RETIRE tells a firefighter to grab
+                  // something that has to come off the truck — suppress it so RETIRE stands alone. Only the
+                  // green/positive condition is hidden: "Needs attention" and "Out of service" AGREE with
+                  // RETIRE and still render. DISPLAY ONLY — the stored condition value is never changed, since
+                  // someone may have legitimately recorded the item as physically sound for the record.
+                  const isConditionBadge = !["held", "maintenance", "retired", "lost"].includes(u.status);   // otherwise the pill is a custody/status word, not a condition claim
+                  const hideServiceable = gear.rank === 0 && isConditionBadge && u.condition === "Serviceable";
+                  return (
+                    <div key={u.id}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
+                          {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
+                          {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
+                        </div>
+                        {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
+                        {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
+                        {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
+                        {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
+                        {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
+                        {(isManager || isDA) && editMode && u.status === "held" && <button title="Mark lost" disabled={lostId === u.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5, color: FIRE.deleteRed, opacity: lostId === u.id ? 0.6 : 1 }} onClick={() => markLost(u, idLabel)}>Lost</button>}
+                      </div>
+                      {editingId === u.id && (
+                        <div style={{ ...FS.card, padding: 12, margin: "2px 0 8px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Serial number</span><input style={FS.input} value={buf.serial_number} onChange={(ev) => setBuf((b) => ({ ...b, serial_number: ev.target.value }))} /></label>
+                          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Asset number</span><input style={FS.input} value={buf.asset_number} onChange={(ev) => setBuf((b) => ({ ...b, asset_number: ev.target.value }))} /></label>
+                          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={buf.condition} onChange={(ev) => setBuf((b) => ({ ...b, condition: ev.target.value }))}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
+                          <button style={FS.btnPrimary} onClick={() => saveEdit(u.id)}><CheckCircle2 size={15} /> Save</button>
+                          <button style={FS.btn} onClick={() => setEditingId(null)}>Cancel</button>
+                        </div>
+                      )}
+                      <EquipmentUnitPhotos unit={u} canManage={canManage} meId={meId} notify={notify} />
+                    </div>
+                  );
+                })}
+                {canManage && (addingFor === t.id ? (
+                  <div style={{ ...FS.card, padding: 12, marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, minHeight: 44 }}>
+                      {[["ids", "Enter IDs"], ["qty", "Just a quantity"]].map(([val, lbl], i) => { const on = bulkMode === val; return <button key={val} type="button" onClick={() => setBulkMode(val)} style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
+                    </div>
+                    {bulkMode === "ids" ? (
+                      <div style={{ ...S.field, flex: 1, minWidth: 240 }}>
+                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, marginBottom: 6, alignSelf: "flex-start" }}>
+                          {[["serial", "These are serial numbers"], ["asset", "These are asset numbers"]].map(([val, lbl], i) => { const on = bulkIdKind === val; return <button key={val} type="button" onClick={() => setBulkIdKind(val)} style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
+                        </div>
+                        <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={4} placeholder={`One ${bulkIdKind} number per line`} style={{ ...FS.input, minHeight: 88, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+                      </div>
+                    ) : (
+                      <div style={{ ...S.field, minWidth: 170 }}>
+                        <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How many (1–50)</span>
+                        <input type="number" min="1" max="50" value={bulkQty} onChange={(e) => setBulkQty(e.target.value)} style={{ ...FS.input, minHeight: 44 }} />
+                        <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.4 }}>Units without an ID can't be told apart. You can add serials later.</span>
+                      </div>
+                    )}
+                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
+                    {more && (<>
+                      <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacturer</span><input style={FS.input} value={uMfr} onChange={(e) => setUMfr(e.target.value)} /></label>
+                      <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Model</span><input style={FS.input} value={uModel} onChange={(e) => setUModel(e.target.value)} /></label>
+                      <label style={{ ...S.field, minWidth: 100 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Size</span><input style={FS.input} value={uSize} onChange={(e) => setUSize(e.target.value)} /></label>
+                      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacture date</span><input type="date" style={FS.input} value={uMfg} onChange={(e) => setUMfg(e.target.value)} /></label>
+                    </>)}
+                    <button style={FS.btn} onClick={() => setMore((v) => !v)}>{more ? "Less detail" : "More detail"}</button>
+                    <button style={{ ...FS.btnPrimary, minHeight: 44 }} onClick={() => addUnit(t.id, t.name)}><Plus size={15} /> Add units</button>
+                    <button style={FS.btn} onClick={resetAddUnit}>Cancel</button>
+                  </div>
+                ) : <button style={{ ...FS.btn, marginTop: 8, minHeight: 44 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add units</button>)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      </div>
+    );
+  };
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />}
@@ -13405,129 +13669,27 @@ function Equipment({ S, role, members, meId, notify }) {
           <button style={FS.btn} onClick={resetAddType}>Cancel</button>
         </div>
       )}
-      {types.length === 0 ? (
+      {grouped ? (
+        /* One section per house. A type with no units at that house is dropped from ITS section —
+           repeating the whole catalogue under every house would bury the units that actually
+           exist. A house with nothing at all still gets its heading and says so. */
+        stationSections.map((sec) => {
+          const at = typesOf(sec.rows);
+          return (
+            <div key={sec.key}>
+              <StationSectionHead station={sec.station} notify={notify} />
+              {at.length === 0
+                ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 10px" }}>Nothing here yet.</div>
+                : renderTypes(at)}
+            </div>
+          );
+        })
+      ) : types.length === 0 ? (
         <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Briefcase size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No equipment types yet.{canManage ? " Use “Add type” to create one." : ""}</div>
         </div>
-      ) : (
-        <div style={{ ...FS.card, padding: "2px 16px" }}>
-          {groupNames.map((cat, gi) => (
-            <div key={cat}>
-              <div style={{ ...FS.kicker, padding: gi === 0 ? "12px 0 6px" : "18px 0 6px" }}>{cat}</div>
-              {groups[cat].map((t, ti) => {
-                const open = expanded === t.id;
-                const lastRow = gi === groupNames.length - 1 && ti === groups[cat].length - 1;
-                return (
-                  <div key={t.id} style={{ borderBottom: lastRow ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 44 }}>
-                      <button onClick={() => toggleExpand(t.id)} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, minHeight: 44, background: "none", border: "none", padding: "6px 0", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                        <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}{!t.returnable && <span style={{ fontWeight: 400, fontSize: 11.5, color: FIRE.textMuted }}> · consumable</span>}</div>
-                        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.green : FIRE.textMuted }}>{t.available} available</span></div>
-                        <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronDown size={16} color={FIRE.textMuted} /> : <ChevronRight size={16} color={FIRE.textMuted} />}</span>
-                      </button>
-                      {canManage && editMode && <button title="Edit type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEditType(t)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
-                      {canManage && editMode && <button title="Remove type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeType(t)}><X size={13} color={FIRE.deleteRed} /></button>}
-                    </div>
-                    {editingTypeId === t.id && (
-                      <div style={{ ...FS.card, padding: 12, margin: "2px 0 10px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                        <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={tb.name} onChange={(e) => setTb((b) => ({ ...b, name: e.target.value }))} /></label>
-                        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={tb.catSel} onChange={(e) => setTb((b) => ({ ...b, catSel: e.target.value }))}>{categories.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">New category…</option></select></label>
-                        {tb.catSel === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category</span><input style={FS.input} value={tb.catNew} onChange={(e) => setTb((b) => ({ ...b, catNew: e.target.value }))} /></label>}
-                        <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Returnable</span><select style={FS.input} value={tb.returnable ? "yes" : "no"} onChange={(e) => setTb((b) => ({ ...b, returnable: e.target.value === "yes" }))}><option value="yes">Returnable</option><option value="no">Consumable</option></select></label>
-                        <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Service life (years)</span><input style={FS.input} value={tb.life ?? ""} placeholder="optional — e.g. 10" inputMode="numeric" onChange={(e) => setTb((b) => ({ ...b, life: e.target.value }))} /></label>
-                        <button style={FS.btnPrimary} onClick={() => saveEditType(t.id)}><CheckCircle2 size={15} /> Save</button>
-                        <button style={FS.btn} onClick={() => setEditingTypeId(null)}>Cancel</button>
-                      </div>
-                    )}
-                    {open && (
-                      <div style={{ margin: "2px 0 12px" }}>
-                    {t.units.length === 0 ? (
-                      <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 8px" }}>No units yet.</div>
-                    ) : t.units.map((u, i) => {
-                      const badge = u.status === "held"        ? { label: "Checked out",    color: FIRE.blueText }
-                                  : u.status === "maintenance" ? { label: "In maintenance", color: FIRE.amberText }
-                                  : u.status === "retired"     ? { label: "Retired",        color: FIRE.textMuted2 }
-                                  : u.status === "lost"        ? { label: "Lost",           color: FIRE.redBright }
-                                  : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright };
-                      const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
-                      const gear = gearStatus(u.manufactureDate, t.serviceLifeYears);   // this unit's date + its TYPE's service life
-                      // NFPA retirement is mandatory by AGE regardless of condition, so a past-life unit is not
-                      // serviceable for duty. A green "Serviceable" pill beside RETIRE tells a firefighter to grab
-                      // something that has to come off the truck — suppress it so RETIRE stands alone. Only the
-                      // green/positive condition is hidden: "Needs attention" and "Out of service" AGREE with
-                      // RETIRE and still render. DISPLAY ONLY — the stored condition value is never changed, since
-                      // someone may have legitimately recorded the item as physically sound for the record.
-                      const isConditionBadge = !["held", "maintenance", "retired", "lost"].includes(u.status);   // otherwise the pill is a custody/status word, not a condition claim
-                      const hideServiceable = gear.rank === 0 && isConditionBadge && u.condition === "Serviceable";
-                      return (
-                        <div key={u.id}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
-                              {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
-                              {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
-                            </div>
-                            {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
-                            {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
-                            {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
-                            {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
-                            {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
-                            {(isManager || isDA) && editMode && u.status === "held" && <button title="Mark lost" disabled={lostId === u.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5, color: FIRE.deleteRed, opacity: lostId === u.id ? 0.6 : 1 }} onClick={() => markLost(u, idLabel)}>Lost</button>}
-                          </div>
-                          {editingId === u.id && (
-                            <div style={{ ...FS.card, padding: 12, margin: "2px 0 8px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                              <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Serial number</span><input style={FS.input} value={buf.serial_number} onChange={(ev) => setBuf((b) => ({ ...b, serial_number: ev.target.value }))} /></label>
-                              <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Asset number</span><input style={FS.input} value={buf.asset_number} onChange={(ev) => setBuf((b) => ({ ...b, asset_number: ev.target.value }))} /></label>
-                              <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={buf.condition} onChange={(ev) => setBuf((b) => ({ ...b, condition: ev.target.value }))}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
-                              <button style={FS.btnPrimary} onClick={() => saveEdit(u.id)}><CheckCircle2 size={15} /> Save</button>
-                              <button style={FS.btn} onClick={() => setEditingId(null)}>Cancel</button>
-                            </div>
-                          )}
-                          <EquipmentUnitPhotos unit={u} canManage={canManage} meId={meId} notify={notify} />
-                        </div>
-                      );
-                    })}
-                    {canManage && (addingFor === t.id ? (
-                      <div style={{ ...FS.card, padding: 12, marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, minHeight: 44 }}>
-                          {[["ids", "Enter IDs"], ["qty", "Just a quantity"]].map(([val, lbl], i) => { const on = bulkMode === val; return <button key={val} type="button" onClick={() => setBulkMode(val)} style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
-                        </div>
-                        {bulkMode === "ids" ? (
-                          <div style={{ ...S.field, flex: 1, minWidth: 240 }}>
-                            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, marginBottom: 6, alignSelf: "flex-start" }}>
-                              {[["serial", "These are serial numbers"], ["asset", "These are asset numbers"]].map(([val, lbl], i) => { const on = bulkIdKind === val; return <button key={val} type="button" onClick={() => setBulkIdKind(val)} style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
-                            </div>
-                            <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={4} placeholder={`One ${bulkIdKind} number per line`} style={{ ...FS.input, minHeight: 88, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
-                          </div>
-                        ) : (
-                          <div style={{ ...S.field, minWidth: 170 }}>
-                            <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How many (1–50)</span>
-                            <input type="number" min="1" max="50" value={bulkQty} onChange={(e) => setBulkQty(e.target.value)} style={{ ...FS.input, minHeight: 44 }} />
-                            <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.4 }}>Units without an ID can't be told apart. You can add serials later.</span>
-                          </div>
-                        )}
-                        <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
-                        {more && (<>
-                          <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacturer</span><input style={FS.input} value={uMfr} onChange={(e) => setUMfr(e.target.value)} /></label>
-                          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Model</span><input style={FS.input} value={uModel} onChange={(e) => setUModel(e.target.value)} /></label>
-                          <label style={{ ...S.field, minWidth: 100 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Size</span><input style={FS.input} value={uSize} onChange={(e) => setUSize(e.target.value)} /></label>
-                          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacture date</span><input type="date" style={FS.input} value={uMfg} onChange={(e) => setUMfg(e.target.value)} /></label>
-                        </>)}
-                        <button style={FS.btn} onClick={() => setMore((v) => !v)}>{more ? "Less detail" : "More detail"}</button>
-                        <button style={{ ...FS.btnPrimary, minHeight: 44 }} onClick={() => addUnit(t.id, t.name)}><Plus size={15} /> Add units</button>
-                        <button style={FS.btn} onClick={resetAddUnit}>Cancel</button>
-                      </div>
-                    ) : <button style={{ ...FS.btn, marginTop: 8, minHeight: 44 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add units</button>)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      )}
+      ) : renderTypes(types)}
       {issuing && (
         <IssueEquipmentModal
           S={S} availableUnits={availableUnits} members={members} managers={managers} meId={meId}
@@ -16182,13 +16344,14 @@ function StationDuties({ S, role, members, meId, notify }) {
   const [loadErr, setLoadErr] = useState(false);
   function loadDuties() {
     // Scoped to the active station; unfiltered when the id is unknown — see useActiveStation.
-    let q = supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids, assigned_to, due_date");
-    if (activeStationId) q = q.eq("station_id", activeStationId);
+    let q = supabase.from("duties").select("id, duty, category, recurrence, done, done_by, done_at, helper_ids, assigned_to, due_date, station_id");
+    if (activeStationId && activeStationId !== ALL_STATIONS) q = q.eq("station_id", activeStationId);   // ALL_STATIONS drops the filter; RLS still scopes to the department
     q.then(({ data, error }) => {
       if (error || !data) { setLoadErr(true); return; }
       setLoadErr(false);
       setDuties(data.map((d) => ({
         id: d.id,
+        station_id: d.station_id,   // for the all-houses grouping only; never a filter
         duty: d.duty,
         category: d.category,
         recurrence: d.recurrence,
@@ -16215,13 +16378,13 @@ function StationDuties({ S, role, members, meId, notify }) {
        Shifts live in station_presence, written by station_check_in and geofence_arrive. This table
        has exactly one reader, which is right here. */
     let q = supabase.from("station_log")
-      .select("id, what, done_by, done_by_member_id, done_at, created_by")
+      .select("id, what, done_by, done_by_member_id, done_at, created_by, station_id")
       .order("done_at", { ascending: false });
-    if (activeStationId) q = q.eq("station_id", activeStationId);
+    if (activeStationId && activeStationId !== ALL_STATIONS) q = q.eq("station_id", activeStationId);   // ALL_STATIONS drops the filter; RLS still scopes to the department
     q.then(({ data, error }) => {
         if (error || !data) { setLoadErr(true); return; }
         setLoadErr(false);
-        setLog(data.map((e) => ({ id: e.id, what: e.what, who: e.done_by, whoId: e.done_by_member_id ?? null, when: fmtDoneAt(e.done_at), doneAt: e.done_at, createdBy: e.created_by })));   // doneAt kept raw: the formatted string can't be bucketed by week
+        setLog(data.map((e) => ({ id: e.id, station_id: e.station_id, what: e.what, who: e.done_by, whoId: e.done_by_member_id ?? null, when: fmtDoneAt(e.done_at), doneAt: e.done_at, createdBy: e.created_by })));   // doneAt kept raw: the formatted string can't be bucketed by week
       });
   };
   // Holds the first fetch until the station id is known, so the log is never briefly unfiltered.
@@ -16310,7 +16473,6 @@ function StationDuties({ S, role, members, meId, notify }) {
   // isDoneThisPeriod() derives the answer at read time instead, so a rollover needs no timer, no
   // sweep, and survives a reload.
   const fmtWeek = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const categories = [...DUTY_CATEGORIES.filter((c) => duties.some((d) => d.category === c)), ...[...new Set(duties.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
   const allCats = [...new Set([...DUTY_CATEGORIES, ...duties.map((d) => d.category)])];
   function openPicker(id) {
     setEditingDutyId(null);   // close the inline edit card if it's open (mutually exclusive with the completion picker)
@@ -16456,6 +16618,108 @@ function StationDuties({ S, role, members, meId, notify }) {
     a.click();
     URL.revokeObjectURL(url);
   }
+  /* All-houses view — same rule as Apparatus and Equipment. */
+  const allMode = activeStationId === ALL_STATIONS;
+  const stations = useStationList(allMode);
+  const dutiesGrouped = allMode && (stations || []).length > 1;
+  const dutySections = dutiesGrouped ? groupByStation(periodDuties, stations) : [];
+  /* The work log is a flat, week-bucketed list rather than a grouped one — splitting a short
+     "what happened this week" feed by house would fragment it more than it would clarify. Each
+     row names its house instead. Unknown ids read "Unassigned", never blank. */
+  const stationNameOf = (id) => ((stations || []).find((st) => st.station_id === id) || {}).name || "Unassigned";
+  /* The category-grouped duty list for ONE scope. Extracted so all-houses mode can render it once
+     per house; the rows inside are unchanged. Categories are derived from the set passed in, not
+     from the component-wide `categories`, so a house only shows categories it actually has. */
+  const renderDutyCategories = (dutySet) => {
+    const cats = [...DUTY_CATEGORIES.filter((c) => dutySet.some((d) => d.category === c)), ...[...new Set(dutySet.map((d) => d.category))].filter((c) => !DUTY_CATEGORIES.includes(c))];
+    return cats.map((cat) => {
+      const items = dutySet.filter((d) => d.category === cat);
+      if (!items.length) return null;
+      const dn = items.filter((d) => d.done).length;
+      return (
+        <div key={cat} style={{ marginBottom: 16 }}>
+          <div style={{ ...FS.kicker, display: "flex", alignItems: "center", marginBottom: 8 }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary }}>{dn}/{items.length}</span></div>
+          {items.map((a) => {
+            const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
+            return (
+            <div key={a.id}>
+              <div style={FS.row}>
+                {(() => {
+                  const canUncheck = canManage || a.doneBy === me?.id;
+                  const canCompleteThis = a.assignedTo == null || a.assignedTo === me?.id || canManage;
+                  if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color={FIRE.green} /></span>;
+                  if (!a.done && !canCompleteThis) return <span title={`Assigned to ${nameById.get(a.assignedTo) ?? "a member"} — only they or a leader can complete this`} style={{ display: "inline-flex", flexShrink: 0 }}><span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block", opacity: 0.5 }} /></span>;
+                  return (
+                    <button onClick={() => a.done ? uncompleteDuty(a.id) : openPicker(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
+                      {a.done ? <CheckCircle2 size={22} color={FIRE.green} /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
+                    </button>
+                  );
+                })()}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
+                  {a.done && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
+                </div>
+                {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
+                {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
+                  const d = new Date(a.dueDate + "T00:00:00");
+                  const t = new Date(); t.setHours(0, 0, 0, 0);
+                  const days = Math.round((d - t) / 86400000);
+                  const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted
+                  const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                  return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                })()}
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
+                {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
+              </div>
+              {pickerForDutyId === a.id && (
+                <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  {pickerStage === "ask" ? (<>
+                    <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Did you have help?</span>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> No, just me</button>
+                      <button style={FS.btn} onClick={() => setPickerStage("pick")}>Yes</button>
+                      <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                    </div>
+                  </>) : (<>
+                    <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Who helped?</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {members.filter((m) => m.id !== me?.id && isAssignable(m)).map((m) => {
+                        const sel = selectedHelpers.includes(m.id);
+                        return (
+                          <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
+                            style={{ ...FS.btn, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: FIRE.greenText, border: `0.5px solid ${FIRE.greenText}` } : {}) }}>
+                            {m.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
+                      <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
+                    </div>
+                  </>)}
+                </div>
+              )}
+              {editingDutyId === a.id && (
+                <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Duty</span><input style={FS.input} value={editBuf.title} onChange={(e) => setEditBuf((b) => ({ ...b, title: e.target.value }))} /></label>
+                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={editBuf.category} onChange={(e) => setEditBuf((b) => ({ ...b, category: e.target.value }))}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
+                  {editBuf.category === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={editBuf.catNew} onChange={(e) => setEditBuf((b) => ({ ...b, catNew: e.target.value }))} /></label>}
+                  <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={editBuf.recurrence} onChange={(e) => setEditBuf((b) => ({ ...b, recurrence: e.target.value }))}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
+                  <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={editBuf.assignee} onChange={(e) => setEditBuf((b) => ({ ...b, assignee: e.target.value }))}><option value="">Station-wide (everyone)</option>{members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+                  <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={editBuf.due} onChange={(e) => setEditBuf((b) => ({ ...b, due: e.target.value }))} /></label>
+                  <button style={FS.btnPrimary} onClick={() => saveEditDuty(a.id)}><CheckCircle2 size={15} /> Save</button>
+                  <button style={FS.btn} onClick={() => setEditingDutyId(null)}>Cancel</button>
+                </div>
+              )}
+            </div>
+            );
+          })}
+        </div>
+      );
+    });
+  };
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {loadErr && <OfflineNotice onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />}
@@ -16482,9 +16746,12 @@ function StationDuties({ S, role, members, meId, notify }) {
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 4, ...FS.num }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: FIRE.textPrimary }}>{doneCount}</b> of {duties.length} done</span></div>
             <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color={FIRE.green} track={FIRE.track} />
           </div>
-          {canManage && <button disabled={clearingAll} style={{ ...FS.btn, opacity: clearingAll ? 0.6 : 1 }} onClick={clearAllCheckmarks}>{clearingAll ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} color={FIRE.btnIcon} />} Clear all checkmarks now</button>}
-          {(canManage || canCreate) && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
-          {canCreate && (editMode || duties.length === 0) && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
+          {/* Hidden in all-houses mode: it is a read/scan view, and create_duty() cannot take a
+              station — a duty added here would land in the STORED house, silently and wrongly.
+              "Go to this station" is the way in. */}
+          {canManage && !allMode && <button disabled={clearingAll} style={{ ...FS.btn, opacity: clearingAll ? 0.6 : 1 }} onClick={clearAllCheckmarks}>{clearingAll ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} color={FIRE.btnIcon} />} Clear all checkmarks now</button>}
+          {(canManage || canCreate) && !allMode && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
+          {canCreate && !allMode && (editMode || duties.length === 0) && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
           <RefreshCw size={13} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -16497,7 +16764,7 @@ function StationDuties({ S, role, members, meId, notify }) {
         </div>
       </div>
 
-      {canCreate && addingA && (
+      {canCreate && !allMode && addingA && (
         <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Duty</span><input style={FS.input} value={ad} placeholder="e.g. Ladder & tool checks" onChange={(e) => setAd(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
@@ -16511,97 +16778,24 @@ function StationDuties({ S, role, members, meId, notify }) {
       )}
       {canCreate && <p style={{ ...S.helpP, marginTop: -2, color: FIRE.textMuted }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
-      {categories.map((cat) => {
-        const items = periodDuties.filter((d) => d.category === cat);
-        if (!items.length) return null;
-        const dn = items.filter((d) => d.done).length;
-        return (
-          <div key={cat} style={{ marginBottom: 16 }}>
-            <div style={{ ...FS.kicker, display: "flex", alignItems: "center", marginBottom: 8 }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary }}>{dn}/{items.length}</span></div>
-            {items.map((a) => {
-              const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
-              return (
-              <div key={a.id}>
-                <div style={FS.row}>
-                  {(() => {
-                    const canUncheck = canManage || a.doneBy === me?.id;
-                    const canCompleteThis = a.assignedTo == null || a.assignedTo === me?.id || canManage;
-                    if (a.done && !canUncheck) return <span title={`Completed by ${nameById.get(a.doneBy) ?? "a member"} — only they or leadership can undo`} style={{ display: "inline-flex", flexShrink: 0 }}><CheckCircle2 size={22} color={FIRE.green} /></span>;
-                    if (!a.done && !canCompleteThis) return <span title={`Assigned to ${nameById.get(a.assignedTo) ?? "a member"} — only they or a leader can complete this`} style={{ display: "inline-flex", flexShrink: 0 }}><span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block", opacity: 0.5 }} /></span>;
-                    return (
-                      <button onClick={() => a.done ? uncompleteDuty(a.id) : openPicker(a.id)} title={a.done ? "Undo (yours)" : "Mark done"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                        {a.done ? <CheckCircle2 size={22} color={FIRE.green} /> : <span style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
-                      </button>
-                    );
-                  })()}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
-                    {a.done && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
-                  </div>
-                  {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
-                  {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
-                    const d = new Date(a.dueDate + "T00:00:00");
-                    const t = new Date(); t.setHours(0, 0, 0, 0);
-                    const days = Math.round((d - t) / 86400000);
-                    const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted
-                    const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                    return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
-                  })()}
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
-                  {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-                  {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
-                </div>
-                {pickerForDutyId === a.id && (
-                  <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-                    {pickerStage === "ask" ? (<>
-                      <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Did you have help?</span>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> No, just me</button>
-                        <button style={FS.btn} onClick={() => setPickerStage("pick")}>Yes</button>
-                        <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
-                      </div>
-                    </>) : (<>
-                      <span style={{ ...S.fieldLabel, color: FIRE.textPrimary }}>Who helped?</span>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {members.filter((m) => m.id !== me?.id && isAssignable(m)).map((m) => {
-                          const sel = selectedHelpers.includes(m.id);
-                          return (
-                            <button key={m.id} onClick={() => setSelectedHelpers((hs) => hs.includes(m.id) ? hs.filter((x) => x !== m.id) : [...hs, m.id])}
-                              style={{ ...FS.btn, padding: "5px 11px", fontSize: 12.5, ...(sel ? { color: FIRE.greenText, border: `0.5px solid ${FIRE.greenText}` } : {}) }}>
-                              {m.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button style={FS.btnPrimary} onClick={() => confirmComplete(a.id)}><CheckCircle2 size={15} /> Mark done</button>
-                        <button style={FS.btn} onClick={() => { setPickerForDutyId(null); setSelectedHelpers([]); setPickerStage("ask"); }}>Cancel</button>
-                      </div>
-                    </>)}
-                  </div>
-                )}
-                {editingDutyId === a.id && (
-                  <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                    <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Duty</span><input style={FS.input} value={editBuf.title} onChange={(e) => setEditBuf((b) => ({ ...b, title: e.target.value }))} /></label>
-                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={editBuf.category} onChange={(e) => setEditBuf((b) => ({ ...b, category: e.target.value }))}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
-                    {editBuf.category === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={editBuf.catNew} onChange={(e) => setEditBuf((b) => ({ ...b, catNew: e.target.value }))} /></label>}
-                    <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={editBuf.recurrence} onChange={(e) => setEditBuf((b) => ({ ...b, recurrence: e.target.value }))}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
-                    <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={editBuf.assignee} onChange={(e) => setEditBuf((b) => ({ ...b, assignee: e.target.value }))}><option value="">Station-wide (everyone)</option>{members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={editBuf.due} onChange={(e) => setEditBuf((b) => ({ ...b, due: e.target.value }))} /></label>
-                    <button style={FS.btnPrimary} onClick={() => saveEditDuty(a.id)}><CheckCircle2 size={15} /> Save</button>
-                    <button style={FS.btn} onClick={() => setEditingDutyId(null)}>Cancel</button>
-                  </div>
-                )}
-              </div>
-              );
-            })}
+      {dutiesGrouped ? (
+        /* One section per house. A house with no duties still gets its heading — the point of the
+           view is seeing every house, including the one nobody has set up yet. */
+        dutySections.map((sec) => (
+          <div key={sec.key}>
+            <StationSectionHead station={sec.station} notify={notify} />
+            {sec.rows.length === 0
+              ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 10px" }}>Nothing here yet.</div>
+              : renderDutyCategories(sec.rows)}
           </div>
-        );
-      })}
+        ))
+      ) : renderDutyCategories(periodDuties)}
 
       <div style={{ ...FS.kicker, marginTop: 22, marginBottom: 8 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />OTHER WORK LOGGED</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>Did something that isn't on the checklist? Log it here so it's on the record — anyone can add.</p>
-      <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <p style={{ ...S.helpP, color: FIRE.textMuted }}>{allMode ? "Work logged across every house. Go to a station to add an entry." : "Did something that isn't on the checklist? Log it here so it's on the record — anyone can add."}</p>
+      {/* The log form stamps the STORED station, so in all-houses mode it would file the entry
+          under whichever house happened to be active — hide it and label the rows instead. */}
+      <div style={{ ...FS.card, padding: 16, marginBottom: 12, display: allMode ? "none" : "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What got done</span><input style={FS.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
         <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span>
           <select style={FS.input} value={lwhoId} onChange={(e) => setLwhoId(e.target.value)}>
@@ -16625,7 +16819,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
-              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{otherWho(e)} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span></div>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{otherWho(e)} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span>{dutiesGrouped ? ` · ${stationNameOf(e.station_id)}` : ""}</div>
             </div>
             {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
