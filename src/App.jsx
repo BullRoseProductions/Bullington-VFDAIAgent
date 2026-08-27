@@ -1937,6 +1937,42 @@ export default function App() {
   const [consentVersion, setConsentVersion] = useState(0);
   useEffect(() => subscribeGeofenceConsent(() => setConsentVersion((v) => v + 1)), []);
 
+  /* D2b: THE FENCE LIST. my_station_fences() is the only read that carries per-house coordinates —
+     my_stations() has none, and the department pin describes one building. Loaded here rather than
+     inside geofence.js so the module stays a native wrapper with no opinion about our schema.
+
+     Fetched only when this member could actually be fenced. A department that has not opted in
+     makes no call at all. */
+  const [fences, setFences] = useState(null);   // null = not loaded; [] = loaded and nothing usable
+  useEffect(() => {
+    if (!myMemberId || !dept?.geofence_enabled || !geofenceAvailable()) return;
+    let off = false;
+    supabase.rpc("my_station_fences").then(({ data, error }) => {
+      // A failed read keeps the last-known list rather than tearing down live fences. Losing the
+      // network must not un-fence a member who is standing in a station.
+      if (off || error) return;
+      setFences(Array.isArray(data) ? data : []);
+    });
+    return () => { off = true; };
+  }, [myMemberId, dept?.geofence_enabled]);
+
+  /* THE DEPENDENCY DIGEST, and it is load-bearing.
+
+     The effect below used to key on dept.station_lat/lng/radius_m — three scalars that React can
+     compare. `fences` is a new array on every fetch, so listing it as a dependency would re-run the
+     effect on every load whether or not anything moved, and re-registering fences is not free.
+     Worse, omitting it would mean a DA correcting a pin changes nothing until the app restarts —
+     the exact bug consentVersion exists to solve for consent.
+
+     A string digest of the fields that actually define a fence gives value comparison: same houses,
+     same pins, same flags -> identical string -> no re-run. Sorted, because my_station_fences
+     orders by is_default then name and a rename would otherwise reorder the array and read as a
+     change when no fence moved. */
+  const fenceDigest = (fences || [])
+    .map((f) => `${f.station_id}|${f.lat}|${f.lng}|${f.radius_m}|${f.geofence_enabled ? 1 : 0}`)
+    .sort()
+    .join(";");
+
   useEffect(() => {
     let alive = true;
     if (!myMemberId || !dept?.geofence_enabled || !geofenceAvailable()) { setGeofenceActive(false); return; }
@@ -1944,6 +1980,7 @@ export default function App() {
 
     startStationGeofence({
       dept,
+      fences,                       // D2b: one fence per pinned, enabled house
       rationale: GEOFENCE_RATIONALE,
       // Fires from the background daemon, so it must stay cheap and never block. A failed
       // write is surfaced quietly — the member is still on shift and can check in by hand,
@@ -1976,7 +2013,11 @@ export default function App() {
       });
     });
     return () => { alive = false; };
-  }, [myMemberId, dept?.geofence_enabled, dept?.station_lat, dept?.station_lng, dept?.station_radius_m, consentVersion]);
+  // Keyed on the DIGEST, not on `fences` — see the note above. dept.station_* are gone from this
+  // list: the fences now come from my_station_fences(), and the department pin only reaches a
+  // fence through the default house's row, which the digest already covers.
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [myMemberId, dept?.geofence_enabled, fenceDigest, consentVersion]);
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
   // Trim to the oversight+support surface ONLY when the ACTIVE role is exactly Project Admin
   // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —

@@ -392,8 +392,7 @@ export async function stopGeofence() {
   const bg = await loadPlugin();
   if (!bg) return { ok: false, reason: "plugin-missing" };
   try {
-    await bg.removeGeofences([STATION_FENCE_ID]).catch(() => {});
-    fenceSignature = null;
+    await removeOurFences();
     if (geoSub) { try { geoSub.remove(); } catch { /* already gone */ } geoSub = null; }
     await bg.stop();
     running = false;
@@ -408,7 +407,22 @@ export async function stopGeofence() {
    G4d — the station fence and the handlers that write to the ledger.
    ══════════════════════════════════════════════════════════════════════════════ */
 
-const STATION_FENCE_ID = "b4c-station";
+/* THE IDENTIFIER IS THE CHANNEL THAT CARRIES THE HOUSE.
+
+   D2a made the server able to attribute an arrival to the house whose fence fired; this is the
+   half that tells it which one. The SDK hands `identifier` back on every transition, and until
+   now we registered ONE fence called "b4c-station" and threw that field away — so every automatic
+   arrival in a multi-house department fell to the B3 trigger and landed on the default house.
+
+   PREFIX + UUID, not a bare uuid, for two reasons: `removeGeofences`/`getGeofences` operate on the
+   SDK's whole registry, which may one day hold fences we did not add, and a prefix is what lets
+   stop/isActive act on OURS only. The parser returns null for anything that is not ours rather
+   than throwing, because an unrecognised identifier arriving from the OS is a thing to ignore, not
+   a crash in a background handler. */
+const FENCE_PREFIX = "b4c-station:";
+const fenceIdFor = (stationId) => `${FENCE_PREFIX}${stationId}`;
+const isOurFence = (identifier) => typeof identifier === "string" && identifier.startsWith(FENCE_PREFIX);
+const stationIdFrom = (identifier) => (isOurFence(identifier) ? identifier.slice(FENCE_PREFIX.length) || null : null);
 
 /* A geofence is a TRIGGER, not a verdict. The server decides truth: geofence_arrive
    re-runs is_at_point() against the department's own radius and stamps `verified`
@@ -432,7 +446,12 @@ const FENCE_MIN_RADIUS_M = 100;
    noise, and it buys a number nobody has to explain away. */
 const FENCE_LOITERING_MS = 2 * 60 * 1000;
 
-let fenceSignature = null;   // lat|lng|radius currently registered — re-register when it changes
+/* PER-HOUSE SIGNATURES, keyed by station id. Was one `lat|lng|radius` string for the single
+   department fence; a Map is what makes re-registration surgical. Correcting Station 2's pin must
+   re-register Station 2 and leave Station 1's fence untouched — tearing down every fence to move
+   one would drop a member who is inside another house's boundary at that moment, and the OS does
+   not re-fire ENTER for a region you are already standing in when you add it. */
+let fenceSignatures = new Map();   // station_id -> "lat|lng|radius" currently registered
 let geoSub = null;           // the onGeofence subscription; must never stack
 let provSub = null;          // onProviderChange — watches for a late Always grant or a revocation
 let running = false;
@@ -465,6 +484,14 @@ let restarting = false;      // re-entrancy guard: the watcher calls the functio
 async function handleGeofenceEvent(evt, { onEvent } = {}) {
   const action = evt?.action;
   const at = evt?.timestamp || null;    // ISO string; the RPCs bound and clamp it server-side
+  /* WHICH HOUSE FIRED. A HINT, NEVER AN AUTHORITY — the server validates it against the caller's
+     own department and, failing that, re-derives the house from the coordinates. A device that
+     names a station it has no business naming gets arm 2 or arm 3, not a refusal, so a spoofed
+     identifier degrades to today's behaviour instead of losing the arrival.
+
+     null when the identifier is missing or not ours: geofence_arrive treats a null p_station_id as
+     "resolve it yourself", which is exactly arm 2/3. Nothing to special-case here. */
+  const stationId = stationIdFrom(evt?.identifier);
 
   try {
     if (action === "EXIT") {
@@ -488,9 +515,10 @@ async function handleGeofenceEvent(evt, { onEvent } = {}) {
         p_lng: c.longitude,
         p_accuracy: typeof c.accuracy === "number" ? c.accuracy : null,
         p_at: at,
+        p_station_id: stationId,          // D2b: the house whose fence fired
       });
       if (error) throw error;
-      onEvent?.({ action: "arrive", at });
+      onEvent?.({ action: "arrive", at, stationId });
       return { ok: true, action: "arrive" };
     }
 
@@ -597,7 +625,7 @@ export async function drainGeofenceQueue({ onEvent } = {}) {
    at the same pin with the same radius as the attempt that was refused.
 
    RE-ENTRANCY IS REAL HERE: this calls the function that attaches it. `restarting` bounds that, and
-   the fenceSignature/running guards inside make the retry idempotent — a second grant event
+   the fenceSignatures/running guards inside make the retry idempotent — a second grant event
    re-registers nothing. */
 function attachProviderWatch(bg) {
   if (provSub) return;
@@ -648,32 +676,42 @@ export async function bootstrapGeofence({ onEvent } = {}) {
   return { ok: true, reason: "listening" };
 }
 
-/* Start geofence-only monitoring for this department's station.
+/* Start geofence-only monitoring for EVERY house this member's department has fenced.
 
    startGeofences(), NEVER start(). start() is continuous tracking — a breadcrumb trail,
    the thing the disclosure promises we do not do. The two calls differ by one word and by
    everything that matters, so this is the only place either may be called.
 
-   Re-registers when the department moves its pin: an officer correcting the station
-   location must not leave members fenced to the old one. */
-export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
+   TAKES A FENCE LIST, not the department. `fences` is my_station_fences() output:
+   { station_id, name, lat, lng, radius_m, geofence_enabled }. The department flag is still the
+   master switch and is still checked — a department that has not opted in registers nothing, and
+   a house whose own flag is off is skipped even when the department's is on.
+
+   Re-registers per house when a pin moves: correcting Station 2's location must not disturb
+   Station 1's fence. */
+export async function startStationGeofence({ dept, fences, rationale, onEvent } = {}) {
   if (!geofenceAvailable()) {
     return { ok: false, reason: Capacitor.isNativePlatform() ? "flag-off" : "web" };
   }
   // Remembered BEFORE any gate, so a grant that arrives after a refusal can retry this exact
   // request. Without it the watcher would fire with nothing to re-run.
-  lastStartArgs = { dept, rationale, onEvent };
+  lastStartArgs = { dept, fences, rationale, onEvent };
   if (onEvent) eventSink = onEvent;
   if (!dept?.geofence_enabled) return { ok: false, reason: "dept-not-enabled" };
 
-  const lat = Number(dept?.station_lat);
-  const lng = Number(dept?.station_lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    // No pin, no fence. Silent would be wrong — this is a department that switched the
-    // feature on without finishing the setup it depends on.
+  /* THE HOUSES WORTH FENCING. A house needs its own switch on AND a real pin: D2a's editor is
+     what puts coordinates on houses 2..N, and until a DA has done that they have none. Skipping
+     them is not a failure — it is the honest state of a department mid-setup. */
+  const usable = (Array.isArray(fences) ? fences : []).filter((f) =>
+    f?.geofence_enabled && Number.isFinite(Number(f.lat)) && Number.isFinite(Number(f.lng)));
+
+  if (usable.length === 0) {
+    /* Nothing to register. Tear down anything we left behind first — a department that switches
+       geofencing off, or un-pins its last house, must stop being monitored rather than keep
+       running on fences from a previous launch. */
+    await removeOurFences();
     return { ok: false, reason: "no-station-pin" };
   }
-  const radius = Math.max(Number(dept?.station_radius_m) || 150, FENCE_MIN_RADIUS_M);
 
   const init = await initGeofence({ rationale });
   if (!init.ok) return init;
@@ -709,27 +747,54 @@ export async function startStationGeofence({ dept, rationale, onEvent } = {}) {
     eventSink = onEvent || eventSink;
     attachGeofenceListener(bg);
 
-    const signature = `${lat}|${lng}|${radius}`;
-    if (fenceSignature !== signature) {
-      await bg.removeGeofences([STATION_FENCE_ID]).catch(() => {});
+    /* REGISTER PER HOUSE, AND ONLY WHAT CHANGED.
+
+       Each house gets its own signature. An unchanged house is left completely alone — not
+       removed and re-added — because the OS does not re-fire ENTER for a region you are already
+       inside when it is added. Tearing down a fence a member is currently standing in and putting
+       it straight back would silently drop their arrival. */
+    const wanted = new Map();
+    for (const f of usable) {
+      const lat = Number(f.lat);
+      const lng = Number(f.lng);
+      // The 100 m floor applies per house: OS geofencing does not fire reliably below it, and a
+      // fence that never fires is worse than one that fires early. Above 100 m it never bites.
+      const radius = Math.max(Number(f.radius_m) || 150, FENCE_MIN_RADIUS_M);
+      wanted.set(String(f.station_id), { lat, lng, radius, signature: `${lat}|${lng}|${radius}` });
+    }
+
+    // Houses that are gone, un-pinned, or switched off since the last run. Removed before adding,
+    // so a department at the platform region ceiling frees slots before asking for new ones.
+    const stale = [...fenceSignatures.keys()].filter((id) => !wanted.has(id));
+    if (stale.length) {
+      await bg.removeGeofences(stale.map(fenceIdFor)).catch(() => {});
+      stale.forEach((id) => fenceSignatures.delete(id));
+    }
+
+    let added = 0;
+    for (const [stationId, f] of wanted) {
+      if (fenceSignatures.get(stationId) === f.signature) continue;   // unchanged — leave it alone
+      await bg.removeGeofences([fenceIdFor(stationId)]).catch(() => {});
       await bg.addGeofence({
-        identifier: STATION_FENCE_ID,
-        latitude: lat,
-        longitude: lng,
-        radius,
+        identifier: fenceIdFor(stationId),   // THE CHANNEL that tells the server which house
+        latitude: f.lat,
+        longitude: f.lng,
+        radius: f.radius,
         notifyOnEntry: false,          // crossing is not arriving — see FENCE_LOITERING_MS
         notifyOnDwell: true,
         loiteringDelay: FENCE_LOITERING_MS,
         notifyOnExit: true,
       });
-      fenceSignature = signature;
+      fenceSignatures.set(stationId, f.signature);
+      added++;
     }
 
     if (!running) {
       await bg.startGeofences();      // geofence-only mode. NOT start().
       running = true;
     }
-    return { ok: true, reason: "monitoring", radius, dwellMs: FENCE_LOITERING_MS, permission: perm.reason };
+    return { ok: true, reason: "monitoring", houses: wanted.size, changed: added, removed: stale.length,
+             dwellMs: FENCE_LOITERING_MS, permission: perm.reason };
   } catch (e) {
     return { ok: false, reason: "start-failed", detail: String(e?.message || e) };
   }
@@ -743,6 +808,26 @@ export async function isStationGeofenceActive() {
   if (!bg) return false;
   try {
     const fences = await bg.getGeofences();
-    return Array.isArray(fences) && fences.some((f) => f.identifier === STATION_FENCE_ID);
+    // ANY of ours counts as monitoring. A department with three houses where only one is pinned
+    // is genuinely being monitored — reporting false because the other two are unconfigured would
+    // tell the member their arrivals are not recording when they are.
+    return Array.isArray(fences) && fences.some((f) => isOurFence(f?.identifier));
   } catch { return false; }
+}
+
+/* Remove every fence WE registered, and nothing else.
+
+   Prefix-matched against the SDK's live registry rather than against fenceSignatures, because the
+   two can disagree: the SDK persists fences across launches natively, so after a cold start the
+   registry holds fences this module has no memory of adding. Trusting our own map would leave
+   those running forever — a member still fenced to a house their department removed. */
+async function removeOurFences() {
+  fenceSignatures = new Map();
+  const bg = BG || (await loadPlugin());
+  if (!bg) return;
+  try {
+    const fences = await bg.getGeofences();
+    const ours = (Array.isArray(fences) ? fences : []).map((f) => f?.identifier).filter(isOurFence);
+    if (ours.length) await bg.removeGeofences(ours).catch(() => {});
+  } catch { /* a registry we cannot read is one we cannot clean; the signature reset still stands */ }
 }
