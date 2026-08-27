@@ -9725,7 +9725,7 @@ function ApparatusChecksReport({ S, dept, back }) {
 
   const loadRigs = () => {
     setErr("");
-    supabase.from("apparatus").select("id, name, type").order("name", { ascending: true })
+    supabase.from("apparatus").select("id, name, type").is("deleted_at", null).order("name", { ascending: true })
       .then(({ data, error }) => {
         setLoaded(true);
         if (error) { setErr(error.message || "Please try again."); return; }
@@ -10064,7 +10064,7 @@ function useApparatusReadiness() {
   const load = () => {
     setErr("");
     Promise.all([
-      supabase.from("apparatus").select("id, name, type, status, note, in_service").order("name", { ascending: true }),
+      supabase.from("apparatus").select("id, name, type, status, note, in_service").is("deleted_at", null).order("name", { ascending: true }),
       supabase.from("apparatus_check_results")
         .select("id, apparatus_checks!inner(apparatus_name, state)")
         .eq("result", "fail").is("resolved_at", null).eq("apparatus_checks.state", "finalized"),
@@ -10099,7 +10099,7 @@ function CapitalPlanReport({ S, dept, back }) {
   const [err, setErr] = useState("");   // a failed read is not "no capital plan" — never show an empty plan as fact
   const load = () => {
     setErr("");
-    supabase.from("apparatus").select("id, name, type, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost").order("name", { ascending: true })
+    supabase.from("apparatus").select("id, name, type, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost").is("deleted_at", null).order("name", { ascending: true })
       .then(({ data, error }) => {
         setLoaded(true);
         if (error) { setErr(error.message || "Please try again."); return; }
@@ -11055,7 +11055,14 @@ function CapitalFields({ S, v, set }) {
 function Apparatus({ S, role, members, meId, notify, dept }) {
   const activeStationId = useActiveStation();   // undefined = still loading
   const [rigs, setRigs] = useState([]);
-  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/DELETE
+  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches the is_canmanage_ops DB RLS on apparatus INSERT/UPDATE
+  /* REMOVAL IS A NARROWER RIGHT THAN MANAGEMENT, and after the Brush 25 incident it is its
+     own gate. Officers keep add, edit, service and every checklist path; only taking a rig out
+     of the fleet is Department-Admin-only. Mirrors the DB exactly — retire_apparatus() and
+     restore_apparatus() both gate on is_dept_admin(), the tightened DELETE policy does too, and
+     a trigger refuses a direct write to the deleted_* columns from anyone else. This constant is
+     the UI half of that; the DB is the boundary. */
+  const canRemove = isDeptAdmin(role);
   const me = members.find((m) => m.id === meId) || null;
   // canCheck is an IDENTITY question, so gate on meId (authoritative — always set for the
   // signed-in user), NOT on finding `me` in the RLS-filtered members array (which omits the
@@ -11119,10 +11126,38 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingRigId(null); setAdding(false); } return !v; }); }
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [loadErr, setLoadErr] = useState(false);
+  /* RECENTLY REMOVED — the undo and the accountability answer in one place.
+     DA-only, and NOT station-scoped: a rig removed while viewing Station 2 must still be
+     findable from Station 1, or the undo depends on remembering where you were standing. */
+  const [removed, setRemoved] = useState([]);
+  const [removedOpen, setRemovedOpen] = useState(false);
+  /* DEFINED HERE, not borrowed. Four other components declare a local fmtWhen and none of them
+     is in this scope — referencing one would be a ReferenceError at render, which is the exact
+     one-wrong-token-in-one-component failure this file's header warns about. Date AND time,
+     because "who removed it" is only half an answer without "when". */
+  const fmtRemovedAt = (iso) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? "at an unknown time" : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+  const loadRemoved = () => {
+    if (!isDeptAdmin(role)) return;                       // nobody else may restore, so nobody else needs the list
+    supabase.from("apparatus")
+      .select("id, name, type, deleted_at, deleted_by_name")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false })
+      .then(({ data, error }) => {
+        // A failed read keeps the last-known list. "No removed rigs" and "we couldn't check"
+        // are different statements, and only one of them is safe to make up.
+        if (error) return;
+        setRemoved(Array.isArray(data) ? data : []);
+      });
+  };
+  useEffect(() => { loadRemoved(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [role]);
   const loadRigs = () => {
     // Scoped to the active station. NOT filtered when the id is unknown — see useActiveStation.
     let q = supabase.from("apparatus")
       .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost, station_id")
+      .is("deleted_at", null)          // removed rigs are hidden, not gone — see removeRig
       .order("created_at", { ascending: true });
     // ALL_STATIONS drops the filter: RLS still scopes to the department, so this returns every
     // house's rigs and the render groups them. It is the same query the screen ran before B1.
@@ -11175,11 +11210,26 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     }
     setNm(""); setTp("Pumper"); setRd("Ready"); setSvc("In service"); setSvcReason(""); setCap(CAP_BLANK); setAdding(false); loadRigs();
   }
+  /* SOFT-DELETE, NOT A DELETE. The row survives with deleted_at / deleted_by / deleted_by_name
+     stamped, so a removal can be undone and can always be attributed. The old hard DELETE is
+     what left a battalion chief with no answer about Brush 25.
+
+     The wording changed with the behaviour: "removes it from the apparatus list" was true of a
+     hard delete and would now understate the undo. Saying it can be put back is the difference
+     between a decision someone hesitates over and one they can safely make. */
   async function removeRig(id, name) {
-    if (!window.confirm(`Take "${name}" out of the station? This removes it from the apparatus list.`)) return;
-    const { error } = await supabase.from("apparatus").delete().eq("id", id);
-    if (error) { notify({ kind: "error", title: "Couldn't remove the apparatus", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
-    loadRigs();   // refetch — UI matches true DB state
+    if (!window.confirm(`Take "${name}" out of the fleet?\n\nIt stops appearing in lists and checklists. You can put it back from "Recently removed", and the app records that you removed it.`)) return;
+    const { error } = await supabase.rpc("retire_apparatus", { p_id: id });
+    // The RPC raises rather than no-opping, so error.message is a sentence a DA can act on
+    // ("Only a Department Admin can remove a rig.") — surface it rather than swallowing it.
+    if (error) { notify({ kind: "error", title: "Couldn't remove the apparatus", text: error.message || "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadRigs(); loadRemoved();   // refetch both — the rig leaves one list and joins the other
+  }
+  async function putBackRig(id, name) {
+    const { error } = await supabase.rpc("restore_apparatus", { p_id: id });
+    if (error) { notify({ kind: "error", title: "Couldn't put that rig back", text: error.message || "Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: `${name} is back in the fleet.` });
+    loadRigs(); loadRemoved();
   }
   /* All-houses view. `grouped` requires the station list to have actually arrived AND to hold more
      than one house: a single-station department renders exactly as it always has, by construction
@@ -11203,7 +11253,9 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
             ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
             : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
           {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-          {canManage && editMode && <button title="Remove from station" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
+          {/* canRemove, NOT canManage — removal is Department-Admin-only. An Officer in edit
+              mode sees Edit and no X, which is the whole permission change on this screen. */}
+          {canRemove && editMode && <button title="Take out of the fleet" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
         </div>
         {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
         {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
@@ -11303,6 +11355,44 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         <div style={S.opGrid}>{rigs.map(renderRig)}</div>
       )}
       <MaintenancePanel S={S} role={role} rigs={rigs} meId={meId} members={members} notify={notify} />
+      {/* ---- RECENTLY REMOVED (DA-only) ----
+           The undo and the accountability answer in one place. This is the screen that would
+           have answered "who took Brush 25 out?" — it names the person and the moment, and it
+           puts the rig back in one tap.
+
+           Collapsed by default and hidden entirely when nothing has been removed: a fleet screen
+           should open on the fleet, not on a graveyard. NOT station-scoped, so a rig removed from
+           one house is findable from any of them. */}
+      {canRemove && removed.length > 0 && (
+        <div style={{ ...FS.card, padding: 16, marginTop: 14, maxWidth: 560 }}>
+          <button onClick={() => setRemovedOpen((v) => !v)}
+                  style={{ ...FS.btn, width: "100%", justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}>
+            <span>Recently removed ({removed.length})</span>
+            <ChevronDown size={15} color={FIRE.btnIcon} style={{ transform: removedOpen ? "rotate(180deg)" : "none" }} />
+          </button>
+          {removedOpen && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 8 }}>
+                These rigs are out of the fleet but not gone. Putting one back returns it to its station with its checks and history intact.
+              </div>
+              {removed.map((r) => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}{r.type && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6, fontWeight: 400 }}>{r.type}</span>}</div>
+                    {/* WHO AND WHEN, stated plainly. This is the line the incident was about. */}
+                    <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>
+                      Removed by {r.deleted_by_name || "someone no longer on the roster"} · {fmtRemovedAt(r.deleted_at)}
+                    </div>
+                  </div>
+                  <button style={{ ...FS.btn, padding: "5px 10px", flexShrink: 0 }} onClick={() => putBackRig(r.id, r.name)}>
+                    <RotateCcw size={13} color={FIRE.btnIcon} /> Put back
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {checkingRig && <CheckRunModal S={S} rig={checkingRig} meId={meId} notify={notify} canManage={canManage} onClose={() => setCheckingRig(null)} onFinalized={() => { loadRigs(); setHistoryKey((k) => k + 1); }} />}
     </div>
   );
