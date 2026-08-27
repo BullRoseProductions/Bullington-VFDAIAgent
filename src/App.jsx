@@ -10283,6 +10283,15 @@ function StationHoursReport({ S, dept, notify, back }) {
   const [shifts, setShifts] = useState([]);
   const [onNow, setOnNow] = useState([]);
   const [iso, setIso] = useState([]);        // dept_iso_hours rollup — de-overlapped, already per-member and pre-sorted by the RPC
+  const [isoByStation, setIsoByStation] = useState([]);   // E: same window, split per house + an Unassigned bucket
+  const [logStation, setLogStation] = useState(ALL_STATIONS);   // shift-log filter; ALL_STATIONS = every house, the default
+  /* THE ONE-ROW TEST, and it is the whole single-station suppression rule. my_stations() returns
+     every house in the department; one row means the breakdown would be a single line repeating
+     the total directly above it, which is noise rather than information. null means the read has
+     not landed (or failed) — treated as "don't show", the same way the picker and the B3b hours
+     breakdown treat it, because guessing wrong toward showing a broken panel is the worse error. */
+  const stationList = useStationList(true);
+  const multiStation = Array.isArray(stationList) && stationList.length > 1;
   const [loaded, setLoaded] = useState(false);
   const [first, setFirst] = useState(true);  // ONLY the first load blanks the screen; a range switch keeps the chrome and swaps the numbers
   const [err, setErr] = useState("");        // a failed read is not "zero hours" — never report an empty department as fact
@@ -10295,17 +10304,28 @@ function StationHoursReport({ S, dept, notify, back }) {
     setLoaded(false); setErr("");
     Promise.all([
       supabase.rpc("dept_station_shifts", { p_from: r.from.toISOString(), p_to: r.to.toISOString() }),
-      supabase.rpc("dept_on_station_now"),
+      // E: the all-houses view. dept_on_station_now (active-station-scoped, fails open) is
+      // deliberately still there for the operational "my house" screen — this report is the
+      // leadership view and wants every house at once.
+      supabase.rpc("dept_on_station_now_all"),
       // Same r.from/r.to as the shift read above, so the ISO figure and the Credited figure can never
       // describe different periods — the one way the two numbers could disagree for a boring reason.
       supabase.rpc("dept_iso_hours", { p_from: r.from.toISOString(), p_to: r.to.toISOString() }),
-    ]).then(([a, b, c]) => {
+      // E: the per-house breakdown of the SAME window. Its rows foot to the ISO headline by
+      // construction — see the panel's comment for what "foot" does and does not mean about
+      // the displayed 1-decimal figures.
+      supabase.rpc("dept_iso_hours_by_station", { p_from: r.from.toISOString(), p_to: r.to.toISOString() }),
+    ]).then(([a, b, c, d]) => {
       if (my !== reqRef.current) return;   // superseded by a newer range click — drop it, or the table would show the wrong period
       setLoaded(true); setFirst(false);
       if (a.error || b.error || c.error) { setErr((a.error || b.error || c.error).message || "Please try again."); return; }   // keep the last-known rows behind the banner
       setShifts(Array.isArray(a.data) ? a.data : []);
       setOnNow(Array.isArray(b.data) ? b.data : []);
       setIso(Array.isArray(c.data) ? c.data : []);
+      // NOT part of the error gate above, on purpose. The breakdown is an enhancement; if it
+      // alone fails, the department's reportable numbers are still correct and must still render.
+      // An empty breakdown hides the panel — it never blanks the report.
+      setIsoByStation(d?.error ? [] : (Array.isArray(d.data) ? d.data : []));
     });
   }
   useEffect(() => { load(rangeKey); setShowAll(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
@@ -10425,6 +10445,58 @@ function StationHoursReport({ S, dept, notify, back }) {
   // straddling p_to is EXCLUDED by Credited entirely but partly counted by ISO (delta negative).
   // Overlap de-duplication only ever pushes it positive. Label it neutrally.
   const iso_delta     = dept_total - iso_total;
+  /* ---- E derivations ----
+     dept_iso_hours_by_station returns one row per (member, house). The panel is a HOUSE view, so
+     roll the members up. Summing here is safe in a way summing the ISO headline never is: the RPC
+     has already de-overlapped and attributed each minute to one house, so these are disjoint
+     buckets, not overlapping intervals. Adding them is arithmetic, not interval logic. */
+  const byHouse = (() => {
+    const m = new Map();
+    for (const r of isoByStation) {
+      const key = r.station_id || "__unassigned__";
+      const cur = m.get(key) || { key, station_id: r.station_id || null, station_name: r.station_name || null, training_hours: 0, standby_hours: 0, iso_total_hours: 0 };
+      cur.training_hours  += iso_num(r.training_hours);
+      cur.standby_hours   += iso_num(r.standby_hours);
+      cur.iso_total_hours += iso_num(r.iso_total_hours);
+      m.set(key, cur);
+    }
+    // Biggest house first, Unassigned always last regardless of size — it is a category, not a
+    // house, and sorting it into the middle of the list would read as one.
+    return [...m.values()].sort((a, b) =>
+      (!a.station_id) - (!b.station_id) || b.iso_total_hours - a.iso_total_hours);
+  })();
+  // Shift-log filter. Counts come from the unfiltered set so a chip reading 0 still shows —
+  // "no shifts at this house" is a fact worth seeing, and a vanishing chip looks like a bug.
+  const logStationChips = (() => {
+    const counts = new Map();
+    for (const s of shifts) {
+      const key = s.station_id || "__unassigned__";
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const chips = [{ key: ALL_STATIONS, label: "All houses", count: shifts.length }];
+    for (const st of (stationList || [])) chips.push({ key: st.station_id, label: st.name, count: counts.get(st.station_id) || 0 });
+    // Only offered when it holds something — an always-present empty Unassigned chip would imply
+    // a problem that isn't there.
+    if (counts.get("__unassigned__")) chips.push({ key: "__unassigned__", label: "Not at a house", count: counts.get("__unassigned__") });
+    return chips;
+  })();
+  const shiftsForLog = logStation === ALL_STATIONS
+    ? shifts
+    : shifts.filter((s) => (s.station_id || "__unassigned__") === logStation);
+  /* "Who's on now", grouped per house. EMPTY HOUSES ARE SHOWN, deliberately: on a staffing view
+     "nobody there" is the answer an officer needs, and a house that simply vanishes reads as
+     missing data rather than as an empty bay. Built from the station list, not from the presence
+     rows, which is what makes an empty house representable at all. */
+  const onNowByHouse = (() => {
+    if (!multiStation) return null;                      // single house: render the flat list as before
+    const groups = (stationList || []).map((st) => ({
+      key: st.station_id, name: st.name,
+      people: onNow.filter((p) => p.station_id === st.station_id),
+    }));
+    const orphans = onNow.filter((p) => !p.station_id);
+    if (orphans.length) groups.push({ key: "__unassigned__", name: "Not at a house", people: orphans });
+    return groups;
+  })();
   if (first) return null;   // first paint only — after that the chrome stays put and the figures swap under it
   // ---- render ----
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -10440,7 +10512,7 @@ function StationHoursReport({ S, dept, notify, back }) {
   };
   const TH = { textAlign: "left", padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" };
   const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
-  const log = showAll ? shifts : shifts.slice(0, LOG_CAP);
+  const log = showAll ? shiftsForLog : shiftsForLog.slice(0, LOG_CAP);
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
@@ -10600,8 +10672,38 @@ function StationHoursReport({ S, dept, notify, back }) {
       {/* on station right now */}
       <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
         <div style={FS.kicker}>ON STATION RIGHT NOW</div>
-        {onNow.length === 0 ? (
+        {onNow.length === 0 && !onNowByHouse ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 10 }}>No one is clocked in right now.</div>
+        ) : onNowByHouse ? (
+          /* GROUPED PER HOUSE, and every house is listed even when nobody is in it. "Nobody
+             there" is the answer an officer is actually asking for on a staffing view; a house
+             that silently disappears reads as missing data, and staffing a call off a list that
+             quietly omits a station is the failure this grouping exists to prevent. */
+          <div style={{ marginTop: 6 }}>
+            {onNowByHouse.map((g) => (
+              <div key={g.key} style={{ marginTop: 10 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingBottom: 4, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: g.people.length ? FIRE.textSecondary : FIRE.textMuted2 }}>{g.name}</span>
+                  <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{g.people.length || "nobody"}{g.people.length ? (g.people.length === 1 ? " person" : " people") : " there"}</span>
+                </div>
+                {g.people.map((p, i) => (
+                  <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === g.people.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
+                    <div style={FS.rowTitle}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
+                      <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>Since {fmtHm(p.checked_in_at)} · {sinceText(p.checked_in_at)}</div>
+                    </div>
+                    <div style={{ ...FS.rowActions, gap: 8 }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{p.kind === "training" ? "Training" : "Standby"}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: p.verified ? FIRE.greenText : FIRE.amberText }}>
+                        {p.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{p.verified ? "Verified" : "Not verified"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         ) : (
           <div style={{ marginTop: 8 }}>
             {onNow.map((p, i) => (
@@ -10703,19 +10805,90 @@ function StationHoursReport({ S, dept, notify, back }) {
           </div>
         )}
       </div>
+      {/* ---- ISO BY HOUSE (E) ----
+           THE TOTAL ABOVE STAYS THE HEADLINE. This is an enhancement beneath it, never a
+           replacement: dept_iso_hours is untouched and is still where the reportable number
+           comes from. This panel reads dept_iso_hours_by_station over the SAME window.
+
+           WHY IT FOOTS. dept_iso_hours de-overlaps each member's intervals with range_agg, so
+           the department total is the measure of a UNION, not a sum — a member standing at one
+           house while an attested drill overlaps does not accrue both. The breakdown therefore
+           cuts that de-overlapped union into elementary intervals and attributes each to exactly
+           one house, so the houses partition the total rather than double-counting it.
+
+           THE ≤0.01 DRIFT IS EXPECTED, DO NOT "FIX" IT. Each row is rounded to 2dp exactly as
+           dept_iso_hours rounds each member, and this table renders at 1dp. Eyeball-summing the
+           displayed house figures can therefore land a hundredth or two off the headline. The
+           underlying seconds are exact; only the display rounds. Forcing the columns to add up
+           by adjusting a row would make an individual house's figure wrong to make a sum look
+           right, which is the worse trade on a compliance-adjacent screen.
+
+           SUPPRESSED ENTIRELY FOR A SINGLE-STATION DEPARTMENT — see multiStation. */}
+      {multiStation && isoByStation.length > 0 && (
+        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS BY HOUSE</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
+            The same ISO total above, split across your houses. Every minute is counted once and lands in exactly one house, so these add up to the department total.
+          </div>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead><tr><th style={TH}>House</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>ISO total</th></tr></thead>
+            <tbody>
+              {byHouse.map((h) => (
+                <tr key={h.key} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <td style={{ ...TD, fontWeight: 600, color: h.station_id ? FIRE.textPrimary : FIRE.textMuted2 }}>
+                    {h.station_name || "Not recorded at a house"}
+                    {/* The Unassigned bucket is a REAL, PERMANENT category, not a configuration
+                        failure — attested drill time has no house to be recorded at, because
+                        training sessions do not carry one. Saying so stops a DA hunting for a
+                        setting that does not exist. */}
+                    {!h.station_id && <div style={{ fontSize: 11.5, color: FIRE.textMuted, fontWeight: 400, marginTop: 2, whiteSpace: "normal", maxWidth: 320 }}>Mostly officer-attested drill time, credited to the department.</div>}
+                  </td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(h.training_hours)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(h.standby_hours)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(h.iso_total_hours)}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+                <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_training)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_standby)}</td>
+                <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_total)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
       {/* shift log */}
       <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
         <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFT LOG</div>
+        {/* Station filter, reusing the shipped all-houses idiom: ALL_STATIONS first and default,
+            then each house, then Unassigned only when there is something in it. Chips rather than
+            a select because the house count is small and a chip row shows the whole choice set at
+            once — the same reason Apparatus, Equipment and Station Duties use them. */}
+        {multiStation && shifts.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "2px 12px 8px" }}>
+            {logStationChips.map((c) => (
+              <button key={c.key} onClick={() => setLogStation(c.key)}
+                style={{ ...FS.btn, padding: "4px 10px", fontSize: 11.5,
+                         ...(logStation === c.key ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+                {c.label} <span style={{ color: FIRE.textMuted }}>{c.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {shifts.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No shifts in this range.</div>
         ) : (<>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
-            <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th><th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
+            <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th>{multiStation && <th style={TH}>House</th>}<th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
             <tbody>
               {log.map((s, i) => (
                 <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}`, opacity: (s.verified && !s.auto_closed) ? 1 : 0.62 }}>   {/* muted = recorded but not credited */}
                   <td style={TD}>{fmtDate(s.checked_in_at)}</td>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{s.member_name || "—"}</td>
+                  {/* Attested drill time carries no house — an em dash rather than a blank, so an
+                      empty cell reads as "not applicable" instead of "failed to load". */}
+                  {multiStation && <td style={{ ...TD, color: s.station_name ? FIRE.textSecondary : FIRE.textMuted2 }}>{s.station_name || "—"}</td>}
                   <td style={TD}>{fmtHm(s.checked_in_at)}</td>
                   {/* The out-time is the FICTION in an auto-closed row — flag it there, where a leader is
                       already looking to work out what actually happened, not in the verified column. */}
@@ -10731,11 +10904,20 @@ function StationHoursReport({ S, dept, notify, back }) {
               ))}
             </tbody>
           </table>
-          {shifts.length > LOG_CAP && (
+          {/* Counts the FILTERED set. Reading "showing 25 of 300" while a house filter is on
+              would be describing a list the reader is not looking at. */}
+          {shiftsForLog.length > LOG_CAP && (
             <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "10px 12px 4px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               {showAll
-                ? <>Showing all {shifts.length} shifts. <button onClick={() => setShowAll(false)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show first {LOG_CAP}</button></>
-                : <>Showing {LOG_CAP} of {shifts.length} shifts — {shifts.length - LOG_CAP} more not displayed. <button onClick={() => setShowAll(true)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show all</button></>}
+                ? <>Showing all {shiftsForLog.length} shifts. <button onClick={() => setShowAll(false)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show first {LOG_CAP}</button></>
+                : <>Showing {LOG_CAP} of {shiftsForLog.length} shifts — {shiftsForLog.length - LOG_CAP} more not displayed. <button onClick={() => setShowAll(true)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}>Show all</button></>}
+            </div>
+          )}
+          {/* Filtered down to nothing is a different statement from "no shifts this period", and
+              the fix is different too — clear the filter, not widen the range. */}
+          {shiftsForLog.length === 0 && (
+            <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>
+              No shifts at this house in this range. <button onClick={() => setLogStation(ALL_STATIONS)} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5, marginLeft: 4 }}>Show all houses</button>
             </div>
           )}
         </>)}
