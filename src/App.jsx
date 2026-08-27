@@ -270,32 +270,25 @@ function getPosition() {
 const SUPPORT_EMAIL = "ashlea@b4thecall.com";
 // DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
 function DeptSettings({ S, dept, setDept, setBrand }) {
-  // ?? not || on the coordinates: latitude/longitude 0 are real places, and || would wipe them to "".
-  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "", lat: dept?.station_lat ?? "", lng: dept?.station_lng ?? "", radius: dept?.station_radius_m ?? 150 });
+  const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "", });
   const [saving, setSaving] = useState(false);
-  const [saveState, setSaveState] = useState("");   // "" | "ok" | "err" | "coords"
-  const [geo, setGeo] = useState("");   // "" | "busy" | a human message — geolocation is best-effort, never blocking
+  const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const num = (v) => (String(v).trim() === "" ? null : (Number.isFinite(parseFloat(v)) ? parseFloat(v) : NaN));   // blank → null (clears it), garbage → NaN (caught before save)
-  // Best-effort device location. A denied prompt is an ordinary outcome, not an error state: the fields
-  // stay editable and the DA can type coordinates in by hand.
-  function fillFromDevice() {
-    setGeo("busy");
-    getPosition().then(
-      (p) => { setForm((f) => ({ ...f, lat: p.lat.toFixed(6), lng: p.lng.toFixed(6) })); setGeo(""); },
-      (e) => setGeo(`${e.message} — enter the coordinates manually.`)
-    );
-  }
+  /* THE PIN IS NO LONGER WRITTEN HERE (D2a). It is edited per-house in StationsAdmin, and the
+     default house's save mirrors down to departments.station_lat/lng/radius_m in the same
+     operation. Leaving the three columns in this UPDATE would have been the bug that costs a
+     department its location: this form's state is initialised once at mount, so a pin edited in
+     Stations and then a name saved here would write the STALE coordinates straight back over the
+     mirror. One writer, and it is the station editor. The read-only display below reads `dept`
+     rather than `form` for the same reason — it must reflect what Stations just wrote. */
   async function save() {
-    const lat = num(form.lat), lng = num(form.lng), radius = num(form.radius);
-    if ([lat, lng, radius].some(Number.isNaN) || (lat !== null && Math.abs(lat) > 90) || (lng !== null && Math.abs(lng) > 180) || (radius !== null && radius <= 0)) { setSaveState("coords"); return; }
     setSaving(true); setSaveState("");
     const { data: id } = await supabase.rpc("my_department_id");   // same dept-id source as brand save
     if (!id) { setSaving(false); setSaveState("err"); return; }
-    const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city, station_lat: lat, station_lng: lng, station_radius_m: radius ?? 150 }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable; radius is NOT NULL → blank falls back to the 150 m default
+    const { data, error } = await supabase.from("departments").update({ name: form.name, station: form.station, city: form.city }).eq("id", id).select();   // .select() so a silent 0-row RLS block is detectable
     setSaving(false);
     if (error || !data || data.length === 0) { setSaveState("err"); return; }   // 0 rows = RLS blocked (non-DA) → error, never a false "Saved"
-    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city, station_lat: lat, station_lng: lng, station_radius_m: radius ?? 150 }));   // sync sidebar crest + this form's source; same ?? 150 as the update, so a cleared radius shows 150 without a reload
+    setDept?.((d) => ({ ...(d || {}), name: form.name, station: form.station, city: form.city }));   // sync sidebar crest + this form's source
     setBrand?.((b) => ({ ...b, name: form.name, station: form.station }));       // keep Brand Kit's name/station consistent
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
@@ -303,7 +296,7 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {/* Stations sit above the department profile because adding one is the thing that makes a
           department multi-station at all — without it the picker can never appear. */}
-      <StationsAdmin S={S} />
+      <StationsAdmin S={S} setDept={setDept} />
       <div style={{ marginBottom: 16 }}>
         <div style={FS.kicker}>DEPARTMENT SETTINGS</div>
         <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Department details</h1>
@@ -313,23 +306,23 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station number</span><input style={FS.input} value={form.station} placeholder="e.g. Station 20" onChange={(e) => set("station", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={form.city} onChange={(e) => set("city", e.target.value)} /></label>
+        {/* THE PIN MOVED (D2a). It is edited per-house in Stations above, because a fence is
+            per-house and this one field could only ever describe one building. Left here as a
+            READ-ONLY pointer rather than deleted: a DA who knows where this lived would otherwise
+            conclude the setting was lost. Two independently writable fields over the same fact is
+            what D2a's resync existed to clean up — do not reintroduce one. */}
         <div style={{ borderTop: `0.5px solid ${FIRE.hairline}`, margin: "6px 0 2px" }} />
         <div style={FS.kicker}>STATION LOCATION</div>
-        <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 4px", lineHeight: 1.45 }}>Where the station sits, and how close a member has to be for a verified check-in. Optional — leave it blank until you're standing at the station.</div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 128 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Latitude</span><input style={FS.input} value={form.lat} placeholder="e.g. 34.052235" onChange={(e) => set("lat", e.target.value)} /></label>
-          <label style={{ ...S.field, flex: 1, minWidth: 128 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Longitude</span><input style={FS.input} value={form.lng} placeholder="e.g. -118.243683" onChange={(e) => set("lng", e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 104 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Radius (m)</span><input style={FS.input} value={form.radius} inputMode="numeric" onChange={(e) => set("radius", e.target.value)} /></label>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }} onClick={fillFromDevice} disabled={geo === "busy"}>{geo === "busy" ? <><Loader2 size={14} className="spin" /> Locating…</> : <><MapPin size={14} color={FIRE.btnIcon} /> Use my current location</>}</button>
-          {geo && geo !== "busy" && <span style={{ fontSize: 12, color: FIRE.amberText, lineHeight: 1.35 }}>{geo}</span>}
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 4px", lineHeight: 1.45 }}>
+          Each house now carries its own location, set under <b style={{ color: FIRE.textSecondary }}>Stations</b> at the top of this page.
+          {dept?.station_lat != null && dept?.station_lng != null
+            ? <> The default house is at <span style={{ fontVariantNumeric: "tabular-nums", color: FIRE.textSecondary }}>{dept.station_lat}, {dept.station_lng}</span> · {dept.station_radius_m || 150} m.</>
+            : <> The default house is not pinned yet.</>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
           <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
           {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
           {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
-          {saveState === "coords" && <span style={{ fontSize: 13, color: FIRE.redText }}>Check the station location — latitude −90…90, longitude −180…180, radius above 0.</span>}
         </div>
       </div>
     </div>
@@ -1161,15 +1154,31 @@ const moduleEnabled = (key, disabled) => {
    department_id is NOT sent: the RLS WITH CHECK requires it to equal my_department_id() anyway,
    and letting the client name a department invites the one mistake the policy exists to prevent.
    Instead it is read from my_department_id() so the row is explicit and the policy agrees. */
-function StationsAdmin({ S }) {
+function StationsAdmin({ S, setDept }) {
   const [rows, setRows] = useState(null);          // null = loading
   const [adding, setAdding] = useState(false);
   const [f, setF] = useState({ name: "", label: "", address: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [editId, setEditId] = useState(null);      // the station being edited, or null
-  const [ef, setEf] = useState({ name: "", label: "", address: "" });
+  /* D2a: the pin rides in the SAME editor as name/label/address. It is per-house
+     because a fence is per-house — the department pin could only ever describe one
+     building, which is why houses 2..N had no coordinates at all before this. */
+  const [ef, setEf] = useState({ name: "", label: "", address: "", lat: "", lng: "", radius: "", fence: false });
   const [eBusy, setEBusy] = useState(false);
+  const [geo, setGeo] = useState("");              // "" | "busy" | a human message; best-effort, never blocking
+  // ?? not || on coordinates: latitude/longitude 0 are real places and || would wipe them to "".
+  const numOrNull = (v) => (String(v).trim() === "" ? null : (Number.isFinite(parseFloat(v)) ? parseFloat(v) : NaN));
+  /* Same wrapper the check-in flow uses, so a DA pinning a house and a member punching
+     in are reading location through one code path. A denied prompt is an ordinary
+     outcome, not an error state — the fields stay editable and can be typed by hand. */
+  function pinFromDevice() {
+    setGeo("busy");
+    getPosition().then(
+      (p) => { setEf((x) => ({ ...x, lat: p.lat.toFixed(6), lng: p.lng.toFixed(6) })); setGeo(""); },
+      (e) => setGeo(`${e.message} — enter the coordinates manually.`)
+    );
+  }
   /* READS THE TABLE, NOT my_stations(). The RPC returns no address, and this list has to show
      one. The stations SELECT policy is department_id = my_department_id(), so a member reads
      their own department's rows and nothing else — the same boundary the RPC was relying on,
@@ -1183,7 +1192,7 @@ function StationsAdmin({ S }) {
     // failure to resolve the id does NOT block the list — RLS is the boundary either way, and
     // refusing to render over a redundant filter would break never-blank-on-error for nothing.
     const { data: deptId } = await supabase.rpc("my_department_id");
-    let q = supabase.from("stations").select("id, name, label, address, is_default, is_active");
+    let q = supabase.from("stations").select("id, name, label, address, is_default, is_active, lat, lng, radius_m, geofence_enabled");
     if (deptId) q = q.eq("department_id", deptId);
     const { data, error } = await q.order("is_default", { ascending: false }).order("name");
     // A failed read keeps the last-known list rather than claiming the department has none.
@@ -1191,9 +1200,23 @@ function StationsAdmin({ S }) {
     setErr(""); setRows(Array.isArray(data) ? data : []);
   };
   useEffect(() => { load(); }, []);
-  async function saveEdit(id) {
+  async function saveEdit(id, isDefault) {
     const name = ef.name.trim();
     if (!name) { setErr("Give the station a name."); return; }
+    const lat = numOrNull(ef.lat), lng = numOrNull(ef.lng), radius = numOrNull(ef.radius);
+    // Same bounds DeptSettings.save enforces, so a coordinate typed here cannot be worse than one
+    // typed there. Blank clears the pin (a house may legitimately be unpinned); garbage is refused.
+    if ([lat, lng, radius].some(Number.isNaN)
+        || (lat !== null && Math.abs(lat) > 90)
+        || (lng !== null && Math.abs(lng) > 180)
+        || (radius !== null && radius <= 0)) {
+      setErr("Check the location — latitude −90…90, longitude −180…180, radius above 0."); return;
+    }
+    // A fence with no pin cannot be registered, so switching one on without coordinates would be a
+    // setting that silently does nothing. Say so instead.
+    if (ef.fence && (lat === null || lng === null)) {
+      setErr("Give this house a location before switching its fence on."); return;
+    }
     setEBusy(true); setErr("");
     // is_default and department_id are deliberately NOT in this update: which house is "the"
     // default, and which department a station belongs to, are not edits — changing either would
@@ -1201,13 +1224,40 @@ function StationsAdmin({ S }) {
     // .select() so a 0-row RLS block is DETECTABLE — same guard as DeptSettings.save. Without it
     // a non-admin's refused update comes back with no error and would render as "saved".
     const { data, error } = await supabase.from("stations")
-      .update({ name, label: ef.label.trim() || null, address: ef.address.trim() || null })
+      .update({
+        name, label: ef.label.trim() || null, address: ef.address.trim() || null,
+        lat, lng, radius_m: radius, geofence_enabled: !!ef.fence,
+      })
       .eq("id", id).select();
-    setEBusy(false);
     const denied = "Only a Department Admin can edit a station.";
-    if (error) { setErr(/row-level|policy|violat/i.test(error.message || "") ? denied : (error.message || "Please try again.")); return; }
-    if (!data || data.length === 0) { setErr(denied); return; }   // 0 rows = RLS blocked, never a false "saved"
-    setEditId(null); load();
+    if (error) { setEBusy(false); setErr(/row-level|policy|violat/i.test(error.message || "") ? denied : (error.message || "Please try again.")); return; }
+    if (!data || data.length === 0) { setEBusy(false); setErr(denied); return; }   // 0 rows = RLS blocked, never a false "saved"
+
+    /* THE DEFAULT HOUSE MIRRORS DOWN TO THE DEPARTMENT, and this is not tidiness.
+       is_at_station() — training geo-verify, reached through member_check_in — still reads
+       departments.station_lat/lng/radius_m, and D2a deliberately does not touch it. So if the
+       default house's pin moved here and the department row kept the old one, training would
+       verify against a location the department no longer uses. Both writes happen in one save so
+       they cannot drift; the mirror is why the dept-settings pin field could be retired. */
+    if (isDefault) {
+      const { data: deptId } = await supabase.rpc("my_department_id");
+      if (deptId) {
+        const { data: dRows, error: dErr } = await supabase.from("departments")
+          .update({ station_lat: lat, station_lng: lng, station_radius_m: radius ?? 150 })
+          .eq("id", deptId).select();
+        setEBusy(false);
+        // The station write already succeeded. Saying "saved" here would be a lie about the half
+        // that did not, and the halves disagreeing is the exact failure the mirror exists to stop.
+        if (dErr || !dRows || dRows.length === 0) {
+          setErr("The house was saved, but the department's copy of the location was not — training check-in may still use the old pin. Try saving again.");
+          load(); return;
+        }
+        // Keep the sidebar crest and the geofence effect's dependencies in step without a reload.
+        setDept?.((d) => ({ ...(d || {}), station_lat: lat, station_lng: lng, station_radius_m: radius ?? 150 }));
+      } else { setEBusy(false); }
+    } else { setEBusy(false); }
+
+    setEditId(null); setGeo(""); load();
   }
   async function add() {
     const name = f.name.trim();
@@ -1245,9 +1295,39 @@ function StationsAdmin({ S }) {
                 <input style={FS.input} value={ef.label} onChange={(e) => setEf((x) => ({ ...x, label: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address (optional)</span>
                 <input style={FS.input} value={ef.address} onChange={(e) => setEf((x) => ({ ...x, address: e.target.value }))} /></label>
+              {/* ---- THE PIN (D2a) ----
+                   This is what makes automatic arrival possible for THIS house. Before D2a only the
+                   default house had coordinates, copied from the department; every other house had
+                   none, so there was nothing for a fence to be built from. */}
+              <div style={{ height: 1, background: FIRE.hairline, margin: "2px 0" }} />
+              <div style={FS.kicker}>LOCATION</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button style={{ ...FS.btnPrimary, opacity: (eBusy || !ef.name.trim()) ? 0.6 : 1 }} disabled={eBusy || !ef.name.trim()} onClick={() => saveEdit(r.id)}>{eBusy ? "Saving…" : "Save changes"}</button>
-                <button style={FS.btn} onClick={() => { setEditId(null); setErr(""); }} disabled={eBusy}>Cancel</button>
+                <label style={{ ...S.field, flex: 1, minWidth: 122 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Latitude</span>
+                  <input style={FS.input} value={ef.lat} placeholder="e.g. 32.540300" onChange={(e) => setEf((x) => ({ ...x, lat: e.target.value }))} /></label>
+                <label style={{ ...S.field, flex: 1, minWidth: 122 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Longitude</span>
+                  <input style={FS.input} value={ef.lng} placeholder="e.g. -97.794500" onChange={(e) => setEf((x) => ({ ...x, lng: e.target.value }))} /></label>
+                <label style={{ ...S.field, minWidth: 100 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Radius (m)</span>
+                  <input style={FS.input} value={ef.radius} inputMode="numeric" placeholder="150" onChange={(e) => setEf((x) => ({ ...x, radius: e.target.value }))} /></label>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }} onClick={pinFromDevice} disabled={geo === "busy" || eBusy}>
+                  {geo === "busy" ? <><Loader2 size={14} className="spin" /> Locating…</> : <><MapPin size={14} color={FIRE.btnIcon} /> Use my location</>}
+                </button>
+                {geo && geo !== "busy" && <span style={{ fontSize: 12, color: FIRE.amberText, lineHeight: 1.35 }}>{geo}</span>}
+              </div>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, color: FIRE.textPrimary, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!ef.fence} onChange={(e) => setEf((x) => ({ ...x, fence: e.target.checked }))} style={{ accentColor: FIRE.red }} />
+                Automatic arrival at this house
+              </label>
+              {/* The department switch is the master one. Saying so here stops a DA switching a
+                  house on, seeing nothing happen, and having no idea why. */}
+              <div style={{ fontSize: 12, color: FIRE.textMuted, lineHeight: 1.45, marginTop: -2 }}>
+                Only works while automatic arrival is switched on for the whole department.
+                {r.is_default && " This is the default house, so its location is also the one training check-in uses."}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button style={{ ...FS.btnPrimary, opacity: (eBusy || !ef.name.trim()) ? 0.6 : 1 }} disabled={eBusy || !ef.name.trim()} onClick={() => saveEdit(r.id, r.is_default)}>{eBusy ? "Saving…" : "Save changes"}</button>
+                <button style={FS.btn} onClick={() => { setEditId(null); setErr(""); setGeo(""); }} disabled={eBusy}>Cancel</button>
               </div>
             </div>
           ) : (
@@ -1260,10 +1340,17 @@ function StationsAdmin({ S }) {
                 {/* Says "no address yet" rather than rendering an empty line, so a missing address
                     reads as something to fill in instead of a layout gap. */}
                 <div style={{ fontSize: 12, color: r.address ? FIRE.textMuted : FIRE.textMuted2, marginTop: 2, fontStyle: r.address ? "normal" : "italic" }}>{r.address || "No address yet"}</div>
+                {/* Whether this house can record automatic arrivals, in one line. "Not pinned" is
+                    the actionable state — it is why a fence cannot exist here yet. */}
+                <div style={{ fontSize: 12, marginTop: 2, color: r.lat == null || r.lng == null ? FIRE.textMuted2 : (r.geofence_enabled ? FIRE.greenText : FIRE.textMuted) }}>
+                  {r.lat == null || r.lng == null
+                    ? "Not pinned — no automatic arrival"
+                    : (r.geofence_enabled ? `Automatic arrival on · ${r.radius_m || 150} m` : "Pinned · automatic arrival off")}
+                </div>
               </div>
               {r.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>DEFAULT</span>}
               {r.is_active === false && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.amberText, flexShrink: 0 }}>RETIRED</span>}
-              <button title="Edit station" style={{ ...FS.btn, padding: "5px 9px", flexShrink: 0 }} onClick={() => { setEditId(r.id); setEf({ name: r.name || "", label: r.label || "", address: r.address || "" }); setErr(""); }}><Pencil size={13} color={FIRE.btnIcon} /></button>
+              <button title="Edit station" style={{ ...FS.btn, padding: "5px 9px", flexShrink: 0 }} onClick={() => { setEditId(r.id); setEf({ name: r.name || "", label: r.label || "", address: r.address || "", lat: r.lat ?? "", lng: r.lng ?? "", radius: r.radius_m ?? "", fence: !!r.geofence_enabled }); setErr(""); setGeo(""); }}><Pencil size={13} color={FIRE.btnIcon} /></button>
             </div>
           )}
         </div>
