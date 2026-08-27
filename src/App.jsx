@@ -10445,6 +10445,20 @@ function StationHoursReport({ S, dept, notify, back }) {
                     : <span> · location confirmed</span>)}
                   {r.reason === "both" && <span style={{ color: FIRE.amberText }}> · also ran past the shift cap, so the end time is a guess</span>}
                 </div>
+                {/* WHAT THE PHONE ACTUALLY SAW (D1). Present only when the recorded checkout is NOT
+                    the phone's reading — either the sweeper closed the shift before the EXIT arrived,
+                    or the exit ran past the cap. Before D1 this reading was discarded and the officer
+                    had nothing but the machine's guess to go on.
+
+                    It is PROVENANCE, not a credited number, and deliberately NOT prefilled into the
+                    out-time input below: that field is left empty on purpose so a guess is never
+                    confirmed unread, and auto-filling it with the device's claim would defeat exactly
+                    that. The officer reads this, then types what they believe. */}
+                {r.fence_exit_at && (
+                  <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.5 }}>
+                    Phone reported leaving {fmtDate(r.fence_exit_at)} at <b style={{ color: FIRE.textPrimary }}>{fmtHm(r.fence_exit_at)}</b>
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
                   {/* Left EMPTY on purpose — prefilling with the machine's guess would invite confirming
                       it unread, which is the one thing this screen exists to prevent. min/max bound the
