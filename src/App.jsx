@@ -2008,7 +2008,7 @@ export default function App() {
           {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />}
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} meId={myMemberId} notify={notify} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
-          {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} />}
+          {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} go={go} />}
           {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} />}
           </ErrorBoundary>
         </main>
@@ -16958,10 +16958,14 @@ function Admin({ S, library, setLibrary, feedback }) {
 }
 
 /* ---------------- Add Department (Project-Admin-only: create a department + its first admin) ---------------- */
-function AddDepartment({ S, role, notify }) {
+function AddDepartment({ S, role, notify, go }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const isPA = hasAny(role, ["Project Admin"]);
-  const [f, setF] = useState({ name: "", station: "", city: "", adminName: "", adminEmail: "" });
+  /* `houses` is a CLIENT-ONLY steer, not a stored fact. Creation always makes exactly one
+     department with exactly one default house; "several" only changes where the PA lands
+     afterwards, so it can add houses 2+ through the proven pa_add_station flow. Nothing about the
+     department is different for having answered "several". */
+  const [f, setF] = useState({ name: "", station: "", city: "", address: "", adminName: "", adminEmail: "", houses: "one" });
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState(null);   // { id, name, adminEmail } after success — persists so the link button survives the form reset
   const [linkSent, setLinkSent] = useState(false);
@@ -16980,12 +16984,13 @@ function AddDepartment({ S, role, notify }) {
     const { data, error } = await supabase.rpc("pa_create_department", {
       p_name: name, p_station: f.station.trim() || null, p_city: f.city.trim() || null,
       p_admin_name: adminName, p_admin_email: adminEmail,
+      p_address: f.address.trim() || null,   // stamped onto the default house this call now creates
     });
     setBusy(false);
     if (error) { notify({ kind: "error", title: "Couldn't create the department", text: error.message, details: error.message }); return; }
-    setCreated({ id: data, name, adminEmail });
+    setCreated({ id: data, name, adminEmail, several: f.houses === "several" });
     setLinkSent(false);
-    setF({ name: "", station: "", city: "", adminName: "", adminEmail: "" });
+    setF({ name: "", station: "", city: "", address: "", adminName: "", adminEmail: "", houses: "one" });
     notify({ kind: "success", title: "Department created", text: `${name} is ready — send ${adminEmail} their login link to finish.` });
   }
 
@@ -17012,6 +17017,21 @@ function AddDepartment({ S, role, notify }) {
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={f.station} onChange={set("station")} placeholder="e.g. Station 1" /></label>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={f.city} onChange={set("city")} placeholder="e.g. North Hood, TX" /></label>
         </div>
+        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station address</span><input style={FS.input} value={f.address} onChange={set("address")} placeholder="e.g. 100 Main St" /></label>
+        {/* One or several only decides where the PA lands next — see the note on `houses`. Either
+            way this call creates one department and one default house. */}
+        <div style={S.field}>
+          <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>One station or several?</span>
+          <div style={{ display: "flex", gap: 14, marginTop: 5, flexWrap: "wrap" }}>
+            {[["one", "One station"], ["several", "Several stations"]].map(([v, lbl]) => (
+              <label key={v} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: FIRE.textPrimary, cursor: "pointer" }}>
+                <input type="radio" name="houses" checked={f.houses === v} onChange={() => setF((p) => ({ ...p, houses: v }))} style={{ accentColor: FIRE.red }} />
+                {lbl}
+              </label>
+            ))}
+          </div>
+          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>{f.houses === "several" ? "The details above create the first house. You'll add the rest straight after." : "The details above become this department's station."}</div>
+        </div>
         <div style={{ height: 1, background: FIRE.hairline, margin: "2px 0" }} />
         <div style={FS.kicker}>FIRST ADMIN</div>
         <div style={S.twoColForm}>
@@ -17030,6 +17050,15 @@ function AddDepartment({ S, role, notify }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.greenText, fontSize: 13.5, marginTop: 12 }}><CheckCircle2 size={16} /> Login link sent to {created.adminEmail}.</div>
           ) : (
             <button style={{ ...FS.btn, marginTop: 12, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={sendLink}><Send size={15} /> Send login link</button>
+          )}
+          {/* Houses 2+ go through the SAME pa_add_station form the department screen already has —
+              there is deliberately no second creation path. This just carries the PA to it with the
+              form open. */}
+          {created.several && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>You said this department has several stations. Its first house is set up — add the others now.</div>
+              <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => go?.("department", { id: created.id, name: created.name, focus: "stations" })}><Building2 size={15} color={FIRE.btnIcon} /> Add its other houses</button>
+            </div>
           )}
         </div>
       )}
@@ -17214,13 +17243,54 @@ function DepartmentAdmin({ S, role, target, notify }) {
   // houses under someone else's heading.
   const [stRows, setStRows] = useState(null);       // null = loading, [] = loaded and empty
   const [stListErr, setStListErr] = useState("");   // a failed read falls back to "confirm in the department"
-  const [stAdding, setStAdding] = useState(false);
+  // AddDepartment sends focus:"stations" after a "several stations" create, so the PA arrives with
+  // the add form already open rather than having to find it.
+  const [stAdding, setStAdding] = useState(target?.focus === "stations");
   const [stF, setStF] = useState({ name: "", label: "", address: "" });
   const [stBusy, setStBusy] = useState(false);
   const [stMsg, setStMsg] = useState("");
   const [stEditId, setStEditId] = useState(null);
   const [stEf, setStEf] = useState({ name: "", label: "", address: "" });
   const [stEBusy, setStEBusy] = useState(false);
+  /* PA-side ROSTER for THIS department, read through pa_department_members(deptId). Same reason
+     the stations list needs its own function: a PA is not a member here, so the members RLS
+     correctly refuses them, and any my_* helper would answer for the PA's OWN department. This
+     replaces hand-INSERTing roster rows in the Supabase console. */
+  const [mbRows, setMbRows] = useState(null);       // null = loading, [] = loaded and empty
+  const [mbListErr, setMbListErr] = useState("");
+  const [mbAdding, setMbAdding] = useState(false);
+  const [mbF, setMbF] = useState({ name: "", email: "", role: "", phone: "", access: ["Member"] });
+  const [mbBusy, setMbBusy] = useState(false);
+  const [mbMsg, setMbMsg] = useState("");
+  const loadMembers = (id) => {
+    if (!id) return;
+    supabase.rpc("pa_department_members", { p_department_id: id }).then(({ data, error }) => {
+      // Never a silent empty: a failed read must not read as "this department has no members."
+      if (error) { setMbListErr(error.message || "Please try again."); return; }
+      setMbListErr(""); setMbRows(Array.isArray(data) ? data : []);
+    });
+  };
+  async function addMember() {
+    const name = mbF.name.trim(), email = mbF.email.trim().toLowerCase();
+    if (!name || !/^\S+@\S+\.\S+$/.test(email)) { setMbMsg("A name and a valid email are required."); return; }
+    setMbBusy(true); setMbMsg("");
+    // ACCESS is the permission array (closed set); ROLE is free-text rank. Sending 'Member' as the
+    // role would create a member with a rank of "Member" and no permissions at all.
+    const { data, error } = await supabase.rpc("pa_add_member", {
+      p_department_id: deptId,
+      p_name: name,
+      p_email: email,
+      p_access: mbF.access.length ? mbF.access : ["Member"],
+      p_role:   mbF.role.trim()  || null,
+      p_phone:  mbF.phone.trim() || null,
+    });
+    setMbBusy(false);
+    if (error) { setMbMsg(error.message || "Couldn't add that member. Please try again."); return; }
+    if (!data) { setMbMsg("Couldn't add that member — nothing was written."); return; }   // no id back = no row; never a false "added"
+    setMbMsg(`Added ${name}.`);
+    setMbF({ name: "", email: "", role: "", phone: "", access: ["Member"] }); setMbAdding(false);
+    loadMembers(deptId);
+  }
   const loadStations = (id) => {
     if (!id) return;
     supabase.rpc("pa_department_stations", { p_department_id: id }).then(({ data, error }) => {
@@ -17243,6 +17313,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
       setAddonErr(null); setGeofenceOn(!!data);
     });
     loadStations(deptId);
+    loadMembers(deptId);
   }, [deptId]);
   const setModule = (key, on) => setDisabled((ds) => on ? (ds || []).filter((k) => k !== key) : [...(ds || []), key]);
   async function save() {
@@ -17406,6 +17477,73 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </div>
         )}
         {stMsg && <div style={{ fontSize: 12.5, color: /^(Added|Saved)/.test(stMsg) ? FIRE.greenText : FIRE.redText, marginTop: 8 }}>{stMsg}</div>}
+      </div>
+
+      {/* ---- ROSTER (PA-side) ----
+           Reads pa_department_members(deptId) and writes through pa_add_member(deptId, ...), both
+           gated on is_project_admin(). This is what replaced hand-INSERTing members in the Supabase
+           console for a department the PA is not in. The member row it writes is the SAME shape the
+           department's own add-member form writes. */}
+      <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
+        <div style={FS.kicker}>ROSTER</div>
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 8px", lineHeight: 1.5 }}>
+          The members of {deptName || "this department"}. Adding someone here is the same as adding them from the department's own Roster.
+        </div>
+        {mbRows === null && !mbListErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 6px" }}>Loading…</div>}
+        {mbListErr && (
+          <div style={{ fontSize: 12.5, color: FIRE.amberText, padding: "2px 0 6px", lineHeight: 1.45 }}>
+            Couldn&rsquo;t load this department&rsquo;s roster ({mbListErr}). You can still add a member below, then confirm by opening the department.
+          </div>
+        )}
+        {(mbRows || []).map((m) => (
+          <div key={m.member_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</span>
+                {m.role && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6 }}>{m.role}</span>}
+              </div>
+              {/* The email is the login. Saying so plainly beats a tidy layout — a missing or wrong
+                  one is exactly what a PA is here to fix. */}
+              <div style={{ fontSize: 12, color: m.email ? FIRE.textMuted : FIRE.amberText, marginTop: 2, fontStyle: m.email ? "normal" : "italic" }}>{m.email || "No email — can't sign in"}</div>
+            </div>
+            {(m.access || []).includes("Department Admin") && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>ADMIN</span>}
+            {m.status && m.status !== "Active" && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.amberText, flexShrink: 0 }}>{String(m.status).toUpperCase()}</span>}
+          </div>
+        ))}
+        {mbRows !== null && mbRows.length === 0 && !mbListErr && (
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "2px 0 6px" }}>No members yet.</div>
+        )}
+        {!mbAdding ? (
+          <button style={{ ...FS.btn, alignSelf: "flex-start", marginTop: 8 }} onClick={() => { setMbAdding(true); setMbMsg(""); }}><Plus size={15} /> Add a member</button>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
+              <input style={FS.input} value={mbF.name} onChange={(e) => setMbF((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. Scott Miller" /></label>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email * <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>(how they sign in)</span></span>
+              <input type="email" style={FS.input} value={mbF.email} onChange={(e) => setMbF((x) => ({ ...x, email: e.target.value }))} /></label>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank (optional)</span>
+              <input style={FS.input} value={mbF.role} onChange={(e) => setMbF((x) => ({ ...x, role: e.target.value }))} placeholder="e.g. Firefighter" /></label>
+            <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone (optional)</span>
+              <input style={FS.input} value={mbF.phone} onChange={(e) => setMbF((x) => ({ ...x, phone: e.target.value }))} /></label>
+            {/* Same checkbox set as the department's own roster editor — Project Admin is not in
+                GRANTABLE_ROLES and so is not offered here either. */}
+            <div style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Access</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 5 }}>
+                {GRANTABLE_ROLES.map((r) => (
+                  <label key={r} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: FIRE.textPrimary, cursor: "pointer" }}>
+                    <input type="checkbox" checked={mbF.access.includes(r)} onChange={(e) => setMbF((x) => ({ ...x, access: e.target.checked ? [...x.access, r] : x.access.filter((v) => v !== r) }))} />
+                    {r}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button style={{ ...FS.btnPrimary, opacity: (mbBusy || !mbF.name.trim() || !mbF.email.trim()) ? 0.6 : 1 }} disabled={mbBusy || !mbF.name.trim() || !mbF.email.trim()} onClick={addMember}>{mbBusy ? "Adding…" : "Add member"}</button>
+              <button style={FS.btn} onClick={() => { setMbAdding(false); setMbMsg(""); }} disabled={mbBusy}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {mbMsg && <div style={{ fontSize: 12.5, color: /^Added/.test(mbMsg) ? FIRE.greenText : FIRE.redText, marginTop: 8 }}>{mbMsg}</div>}
       </div>
 
       {/* ---- PER-STATION ADD-ONS ----
