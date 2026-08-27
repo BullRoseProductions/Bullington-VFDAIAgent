@@ -241,6 +241,25 @@ BEGIN
 END
 $do$;
 
+/* THE REPLAY IS NOT ENOUGH ON ITS OWN, and this line is why.
+   Found in production after this file was first applied: the ACL came back as
+     {=X/postgres, postgres=..., anon=..., authenticated=..., service_role=...}
+   — PUBLIC and anon holding EXECUTE on a leadership-gated report.
+
+   The capture/replay restores every GRANT that was live. It cannot restore the
+   ABSENCE of one. DROP discards the ACL, CREATE then re-applies Supabase's
+   default privileges — which include PUBLIC and anon — and the replay only ADDS
+   on top of those. So a deliberate revoke made in an earlier migration
+   (slice5 revoked anon here) is silently undone by any later DROP + CREATE.
+
+   Nothing was exposed: the body gates on is_leadership(), so an anon caller gets
+   'Not authorized'. But anon reaching the body at all is exactly what
+   revoke_anon_execute_sweep.sql exists to prevent, and the invariant holds for
+   every other RPC in this schema.
+
+   ANY DROP + CREATE IN THIS PROJECT NEEDS THIS LINE AFTER THE REPLAY. */
+REVOKE ALL ON FUNCTION public.dept_station_shifts(timestamptz, timestamptz) FROM anon, public;
+
 
 -- ---------------------------------------------------------------------
 -- 4. dept_iso_hours_by_station — the ISO breakdown. NEW; dept_iso_hours itself
