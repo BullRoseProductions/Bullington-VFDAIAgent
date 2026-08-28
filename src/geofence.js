@@ -16,6 +16,16 @@ import { supabase } from "./supabaseClient";
    see anything. Today the flag is unset and 0 of 2 departments have opted in. */
 const FLAG_ON = import.meta.env.VITE_GEOFENCE_ENABLED === "1";
 
+/* How far from the member a house's fence stays actively monitored. See the note at the
+   geofenceProximityRadius config line for why this is set at all.
+
+   50 km, chosen to be larger than any plausible distance between two houses of the same
+   volunteer department — a member driving from one end of a rural district to the other
+   must not have the house they just left silently stop being watched. It is NOT a
+   tracking radius: it decides which of OUR OWN fences the OS keeps loaded, nothing more,
+   and no location is recorded until a boundary is actually crossed. */
+const GEOFENCE_PROXIMITY_RADIUS_M = 50000;
+
 /* Deliberately NOT gated on Capacitor.isNativePlatform() — G4b makes no native calls, so
    the disclosure can be reviewed in a browser before any device exists. The native gate
    belongs in G4c, where the first real plugin call appears. Web must never get further
@@ -215,6 +225,27 @@ export async function initGeofence({ rationale } = {}) {
          plausible gap while still bounding the queue. */
       persistMode: bg.PERSIST_MODE_GEOFENCE,
       maxDaysToPersist: 14,
+
+      /* KEEP EVERY HOUSE'S FENCE ACTIVE AT ONCE.
+
+         The SDK does not hand all registered fences to the OS. It monitors those within
+         geofenceProximityRadius of the member and DEACTIVATES the rest, re-evaluating as
+         they move. On the default that radius is small enough that driving away from
+         House A — or toward House B — can deactivate House A's region BEFORE its boundary
+         is crossed, and a deactivated region cannot fire EXIT.
+
+         That is the leading explanation for the two-house bug: arrival works (you drive
+         toward the house you are entering, so it is the nearest and active), checkout
+         never comes, and a single-station department is unaffected because its one fence
+         is always the nearest.
+
+         GEOFENCE_PROXIMITY_RADIUS_M is set large enough that every house in a department
+         stays monitored for the whole drive. The cost is bounded and small: the OS caps
+         region monitoring at 20 per app, departments here have a handful of houses, and
+         these are geofence-only registrations — no continuous tracking, no breadcrumb
+         trail. The alternative, a radius that silently drops a fence mid-drive, loses a
+         member's departure and therefore their hours. */
+      geofenceProximityRadius: GEOFENCE_PROXIMITY_RADIUS_M,
 
       // Debug mode plays a sound and posts a notification on every geofence transition.
       // Genuinely useful for a field test and completely wrong on a member's phone, so it
