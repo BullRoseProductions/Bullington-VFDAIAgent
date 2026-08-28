@@ -1,0 +1,21 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["92M9A349JY.com.bigbulltech.b4c"],
+        "components": [
+          {
+            "/": "/",
+            "?": { "checkin": "?*" },
+            "comment": "Training QR sign-in. Opens the app so the member checks in as themselves."
+          },
+          {
+            "/": "/",
+            "?": { "handoff": "?*" },
+            "comment": "Equipment transfer QR. Same reason: custody moves to the signed-in member."
+          }
+        ]
+      }
+    ]
+  }
+}

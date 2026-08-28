@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.bigbulltech.b4c",
+      "sha256_cert_fingerprints": [
+        "34:5D:F8:7F:D7:2A:44:B0:09:11:22:58:7B:43:C5:71:D1:3F:7C:A6:F9:A4:F8:E1:16:08:90:61:80:33:26:F6"
+      ]
+    }
+  }
+]
