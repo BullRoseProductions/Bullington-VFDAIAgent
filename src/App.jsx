@@ -15388,8 +15388,52 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
   const [openPlans, setOpenPlans] = useState(null);   // per-session attached-plans section: collapsed by default (calm-at-rest), expand deliberately
-  // Live codes come from open_signin and are held locally for display only — never persisted/loaded, so a member can't read a code without scanning.
-  const [signinTokens, setSigninTokens] = useState({});   // sessionId -> 6-char code (this browser, this open)
+  /* Live codes come from open_signin. They are held here for display, and RESTORED on load
+     from current_signin_token() — a leadership-gated read of the same column member_check_in
+     validates against. They are still never selected into the session list, so a member
+     cannot read a code without scanning; the read is an officer-only RPC.
+
+     WHY THE RESTORE EXISTS. This map used to be the only copy. After a reload, a tab switch,
+     or a phone sleeping, signinOpen was still true while the code was gone from memory, so
+     checkinURL() built "?checkin=<id>&t=" with an EMPTY token — a QR that rendered perfectly
+     and could never match. North Hood recorded 3 QR sign-ins in 60 days against ~120
+     hand-marked attendance rows because of it. */
+  const [signinTokens, setSigninTokens] = useState({});   // sessionId -> 6-char code
+  const [tokenRestoreFailed, setTokenRestoreFailed] = useState({});   // sessionId -> true when the read errored
+  /* RESTORE, NOT REOPEN. current_signin_token only reads; open_signin would mint a new code
+     and invalidate whatever a member is mid-scan on, which is exactly the wrong thing to do
+     on a page load.
+
+     Only for sessions that are open, not done, and only for someone allowed to run sign-in —
+     the RPC refuses anyone else anyway, and asking on their behalf would just produce errors
+     in the console for every member who opens the training screen. */
+  useEffect(() => {
+    if (!canRunSignin) return;
+    const open = (sessions || []).filter((s) => s.signinOpen && !s.done);
+    if (!open.length) return;
+    let off = false;
+    Promise.all(open.map((s) =>
+      supabase.rpc("current_signin_token", { p_session_id: s.id })
+        .then(({ data, error }) => ({ id: s.id, token: error ? null : data, failed: !!error }))
+    )).then((rows) => {
+      if (off) return;
+      setSigninTokens((t) => {
+        const n = { ...t };
+        // Never clobber a code this browser just minted with a slower read.
+        for (const r of rows) if (r.token && !n[r.id]) n[r.id] = r.token;
+        return n;
+      });
+      setTokenRestoreFailed((f) => {
+        const n = { ...f };
+        for (const r of rows) if (r.failed) n[r.id] = true;
+        return n;
+      });
+    });
+    return () => { off = true; };
+    // Keyed on WHICH sessions are open, not on the array — sessions is a new array on every
+    // load and would re-fire this on every refresh for no gain.
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [canRunSignin, (sessions || []).filter((s) => s.signinOpen && !s.done).map((s) => s.id).sort().join(",")]);
   async function openSI(s) {
     const { data, error } = await supabase.rpc("open_signin", { p_session_id: s.id });   // generates/rotates; gated DA/TO/PA at the DB
     if (error) { notify({ kind: "error", title: "Couldn't open sign-in", text: error.message || "Please try again.", details: error.message }); return; }
@@ -15429,7 +15473,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     setSigninTokens((t) => { const n = { ...t }; delete n[s.id]; return n; });
     loadSessions();
   }
-  const checkinURL = (s, token) => `${APP_ORIGIN}/?checkin=${s.id}&t=${token || ""}`;
+  /* NEVER BUILD A URL WITH AN EMPTY TOKEN. member_check_in compares
+     signin_token <> p_token, so "&t=" can only ever fail — and it fails AFTER the member has
+     driven in, opened the app and scanned, which is the worst place to discover it. Returning
+     null makes the caller render an honest "couldn't load the code" instead of a QR that looks
+     right and cannot work. This is the sting of the bug, separate from the restore that fixes
+     the cause. */
+  const checkinURL = (s, token) => (token ? `${APP_ORIGIN}/?checkin=${s.id}&t=${token}` : null);
   // Full-screen QR overlay + hi-res PNG export for the sign-in code
   const [expandQR, setExpandQR] = useState(null);   // { s, token } | null
   const dlQRRef = useRef(null);                      // wraps the hidden 720px export QR (only one panel open at a time)
@@ -16270,13 +16320,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       )}
                       {!liveToken ? (
                         <div>
-                          <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Show the code to display the QR (this generates a fresh code).</> : <>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
+                          <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: "#F0F2F5" }}>{s.title}</b>{tokenRestoreFailed[s.id] ? <> — but this device couldn&rsquo;t load its code just now. Try again in a moment; a new code would stop the one members already have from working.</> : <>. Its code should appear here automatically.</>}</> : <>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
                           {/* C3's open_signin RAISES for an off-site drill with no location. Disable
                               here so the officer sees why before it becomes a server error; the RPC
                               guard is still the real wall against a crafted call. */}
                           <button disabled={needsLoc} title={needsLoc ? "Set the drill's location first — you have to be on site" : undefined}
                             style={{ ...LprimaryBtn, opacity: needsLoc ? 0.5 : 1, cursor: needsLoc ? "not-allowed" : "pointer" }}
-                            onClick={() => { if (!needsLoc) openSI(s); }}><QrCode size={15} /> {s.signinOpen ? "Show / refresh code" : "Open sign-in"}</button>
+                            onClick={() => { if (!needsLoc) openSI(s); }}><QrCode size={15} /> {s.signinOpen ? "New code" : "Open sign-in"}</button>
                           {s.signinOpen && <button style={{ ...Lbtn, marginLeft: 8 }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>}
                         </div>
                       ) : (
