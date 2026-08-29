@@ -2018,6 +2018,66 @@ export default function App() {
   // fence through the default house's row, which the digest already covers.
   /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [myMemberId, dept?.geofence_enabled, fenceDigest, consentVersion]);
+
+  /* ── THE VERIFY RESCUE ──────────────────────────────────────────────────────
+     `verified` decides whether a shift's hours reach ISO, and until now it was
+     decided once, from a single GPS fix, and never revisited. That fix is the one
+     attached to the DWELL event — taken at the fence boundary two minutes earlier,
+     the worst geometry of the whole shift. Real testing at Station 1 produced two
+     back-to-back arrivals, one verified and one not, from the same bay.
+
+     geofence_confirm_presence() is a one-way latch: a fix taken while the shift is
+     open that puts the member inside the radius upgrades verified to true, and
+     NOTHING anywhere can set it back to false. So a second look can only ever help.
+
+     WHEN: on app resume. That is the moment a member who drove in, parked and
+     pulled out their phone is standing well inside the building — the best fix
+     available, and free, because they opened the app anyway.
+
+     WHY NOT A TIMER: continuous or scheduled sampling is exactly the breadcrumb
+     trail the consent disclosure promises we do not collect. This takes one fix,
+     only when the member themselves brings the app to the front. */
+  const lastConfirmRef = useRef(0);
+  useReconnect((why) => {
+    // 'online' fires when the network returns, which is no evidence at all about
+    // where the member is standing. Only a real foreground counts.
+    if (why !== "resume") return;
+    // Native + flag + this member's own consent. The same three gates the fence
+    // itself is behind: never take a location fix from someone who has not agreed
+    // to be located, and never on web where it would raise a browser prompt out
+    // of nowhere.
+    if (!geofenceAvailable() || !myMemberId) return;
+    if (readGeofenceConsent(myMemberId) !== "granted") return;
+    // At most one fix per five minutes. Foregrounding is a common, repeated act;
+    // a GPS request on every one would be both wasteful and hard to justify to a
+    // member reading the disclosure.
+    if (Date.now() - lastConfirmRef.current < 5 * 60 * 1000) return;
+
+    (async () => {
+      // ASK THE CHEAP QUESTION FIRST. If there is no open shift, or the open one
+      // is already verified, there is nothing a fix could change — so we do not
+      // take one. Not an optimisation: not collecting a location we have no use
+      // for is the point.
+      const { data, error } = await supabase.rpc("my_open_station_session");
+      if (error) return;
+      const open = Array.isArray(data) ? data[0] : data;
+      if (!open || open.verified || open.kind === "offsite") return;
+
+      lastConfirmRef.current = Date.now();   // stamped before the await, so a slow
+                                             // fix cannot let a second run through
+      let pos = null;
+      try { pos = await getPosition(); } catch { return; }   // no fix, nothing to confirm
+      if (!pos) return;
+
+      // Failure here is genuinely nothing to report: the shift is unchanged and
+      // the member keeps whatever verdict they had. Silent by design — a toast
+      // about a background check they did not ask for would be noise they cannot
+      // act on.
+      await supabase.rpc("geofence_confirm_presence", {
+        p_lat: pos.lat, p_lng: pos.lng, p_accuracy: pos.accuracy ?? null,
+      });
+    })();
+  });
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
   // Trim to the oversight+support surface ONLY when the ACTIVE role is exactly Project Admin
   // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —
