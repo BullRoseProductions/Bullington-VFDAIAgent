@@ -18,6 +18,7 @@ import { authedFetch } from "./apiBase";
 import { useReconnect, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
+import { startDeepLinks } from "./deeplink";
 import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
@@ -1814,29 +1815,76 @@ export default function App() {
     if (error) return { ok: false, reason: error.message || "We couldn't complete the transfer — ask the sender for a fresh code." };
     return { ok: true, items: (data && data.items) || 0 };
   }
-  // Capture a QR/deep-link check-in on mount; don't act until we know who's signed in.
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
+  /* ONE ROUTER FOR BOTH DELIVERY PATHS.
+
+     A scanned QR reaches us two completely different ways. On WEB the browser
+     navigates to the URL and the parameters are in window.location.search. On NATIVE
+     the WebView loads from the local bundle, so window.location.search is empty no
+     matter how correct the link was — the URL arrives through the App plugin instead
+     (see deeplink.js).
+
+     Both call THIS function, so the rules for what a link means live in exactly one
+     place. A second implementation for native is how the two come to disagree about
+     which screen a code opens.
+
+     Takes a search string rather than a URL so the caller does the extracting: the
+     web side already has one, and the native side has a full URL to pull it from.
+
+     PRECEDENCE AND THE URL CLEAR are carried over from the two effects this replaces:
+     checkin is examined first, and the address bar is cleared only after something
+     matched — so a handoff link is still intact if checkin did not match. Clearing
+     matters on web (a refresh must not re-run the code) and is harmless on native,
+     where there is nothing in the bar to clear. */
+  const routeDeepLink = (search) => {
+    const p = new URLSearchParams(search || "");
     const cid = p.get("checkin");
     if (cid) {
       setPendingCheckin({ cid, token: p.get("t") });
       setCheckinResult({ pending: true });
       setScreen("checkin");
-      window.history.replaceState({}, "", window.location.pathname);
+      if (typeof window !== "undefined") window.history.replaceState({}, "", window.location.pathname);
+      return "checkin";
     }
-  }, []);
-  // Capture a QR/deep-link equipment handoff on mount; don't act until we know who's signed in.
-  // (The check-in effect above only clears the URL when a `checkin` param is present, so a `handoff`
-  //  URL is still intact here.)
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
     const hid = p.get("handoff");
     if (hid) {
       setPendingHandoff({ hid, code: p.get("t") });
       setHandoffResult({ pending: true });
       setScreen("handoff");
-      window.history.replaceState({}, "", window.location.pathname);
+      if (typeof window !== "undefined") window.history.replaceState({}, "", window.location.pathname);
+      return "handoff";
     }
+    return null;   // not one of ours — see the guard in the native effect
+  };
+
+  // WEB delivery: the address bar on mount. Unchanged in behaviour; it just calls the
+  // shared router now instead of owning the rules.
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  useEffect(() => { routeDeepLink(window.location.search); }, []);
+
+  /* NATIVE delivery: getLaunchUrl (cold start) + appUrlOpen (warm), both feeding the
+     same router. See deeplink.js for why both are needed and why neither alone is
+     enough.
+
+     THE IGNORE-GUARD IS routeDeepLink RETURNING NULL. Path-scoping the intent filter
+     to /checkin and /handoff means an auth email can no longer structurally reach
+     here — but this stays as defence in depth, because the cost of being wrong is a
+     member pulled into the app on a password-reset link, where the callback cannot
+     complete and they are locked out of their own account. A URL we do not recognise
+     is simply not acted on. */
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  useEffect(() => {
+    let teardown = null, dead = false;
+    startDeepLinks((url) => {
+      let search = "";
+      try { search = new URL(url).search; } catch { return; }   // unparseable: ignore
+      routeDeepLink(search);
+    }).then((fn) => {
+      // startDeepLinks is async: if we unmounted while it was resolving, the
+      // teardown would never be captured and the listener would stay attached
+      // with `started` still true — after which a remount could not attach one.
+      if (dead) fn?.(); else teardown = fn;
+    });
+    return () => { dead = true; teardown?.(); };
   }, []);
   // Perform the check-in for the REAL signed-in member — never a fallback person.
   useEffect(() => {
