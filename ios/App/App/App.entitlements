@@ -4,5 +4,15 @@
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
+	<!-- Universal links. UNLIKE aps-environment this value is IDENTICAL in both entitlements
+	     files — the domain does not vary by build config — but it still has to appear in both,
+	     because each config reads only its own file. Putting it here alone would give a Debug
+	     build working links and ship an archive with none, which is precisely how the APNs
+	     environment bug went unnoticed. `applinks:` only: webcredentials is for AutoFill of
+	     saved passwords and B4C has nothing to autofill. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:app.b4thecall.com</string>
+	</array>
 </dict>
 </plist>

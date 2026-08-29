@@ -7,5 +7,13 @@
 	     `development` for Debug device builds, so both work without editing a shared file each time. -->
 	<key>aps-environment</key>
 	<string>production</string>
+	<!-- Universal links. Same value as App/App.entitlements on purpose: the domain does not vary
+	     by build config, but each config reads only its own entitlements file, so the key must be
+	     written in both or the archive ships without it. `applinks:` only — webcredentials is for
+	     password AutoFill, which B4C does not use. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:app.b4thecall.com</string>
+	</array>
 </dict>
 </plist>
