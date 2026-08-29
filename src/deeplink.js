@@ -81,10 +81,10 @@ export async function startDeepLinks(onLink) {
   const deliver = (url) => {
     if (!url || url === lastRouted) return;
     lastRouted = url;
-    // Tagged so device testing can filter for it. A routing failure used to be a
-    // silent no-op — the link arrived, nothing happened, and there was nothing to
-    // look at. On a path that only runs on a phone, invisible is expensive.
-    try { onLink(url); } catch (err) { console.warn("[B4C-LINK] routing failed", url, err); }
+    /* The catch stays; only its logging came out. A routing failure must not take
+       down the launch path, and the URL carries a session id and a live sign-in
+       token — not something to print to a console we do not control. */
+    try { onLink(url); } catch { /* routing failed; the app still starts */ }
   };
 
   /* WARM START — attached FIRST, before the launch-URL read below. If it were
