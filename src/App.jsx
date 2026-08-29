@@ -13280,7 +13280,15 @@ function HandoffModal({ items, notify, onClose }) {
   }
 
   const url = (st.phase === "live")
-    ? `${APP_ORIGIN}/?handoff=${st.handoffId}&t=${st.code}`
+    /* /handoff PATH, ?handoff= QUERY. Both, deliberately.
+       The path is what lets Android's intent filter match this link and NOT an auth
+       email: filters match scheme/host/path only, never query, and every magic-link
+       and password-reset redirect lands on "/". Without the path the filter would
+       catch those too and pull members into the app where the auth callback cannot
+       complete — locking them out of their own account.
+       The query is what keeps the already-hosted AASA matching, so iOS needs no
+       re-host and no CDN re-warm, and the client parser is unchanged. */
+    ? `${APP_ORIGIN}/handoff?handoff=${st.handoffId}&t=${st.code}`
     : "";
 
   return createPortal(
@@ -15539,7 +15547,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
      null makes the caller render an honest "couldn't load the code" instead of a QR that looks
      right and cannot work. This is the sting of the bug, separate from the restore that fixes
      the cause. */
-  const checkinURL = (s, token) => (token ? `${APP_ORIGIN}/?checkin=${s.id}&t=${token}` : null);
+  // /checkin PATH + ?checkin= QUERY — see the handoff URL for why both. Printed codes
+  // carrying the old "/?checkin=" keep working on web: "/" is untouched and the parser
+  // reads window.location.search regardless of path. They simply do not open the app
+  // until reprinted.
+  const checkinURL = (s, token) => (token ? `${APP_ORIGIN}/checkin?checkin=${s.id}&t=${token}` : null);
   // Full-screen QR overlay + hi-res PNG export for the sign-in code
   const [expandQR, setExpandQR] = useState(null);   // { s, token } | null
   const dlQRRef = useRef(null);                      // wraps the hidden 720px export QR (only one panel open at a time)

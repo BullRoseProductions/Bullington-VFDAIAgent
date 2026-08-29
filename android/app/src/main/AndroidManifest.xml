@@ -23,6 +23,41 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+              APP LINKS — the QR codes open the app instead of the browser.
+
+              PATH-SCOPED, AND THAT IS THE WHOLE POINT. An intent filter matches on
+              scheme, host and PATH only — never on query or fragment. Every Supabase
+              auth redirect in this app lands on "https://app.b4thecall.com" with no
+              path: magic link (Login.jsx:41), password reset (Login.jsx:57), and the
+              PA invite links (App.jsx). A host-wide filter would catch all of those
+              and pull a member into the app, where the auth callback CANNOT complete —
+              breaking login for anyone who installed the app. Scoping to /checkin and
+              /handoff means "/" never matches, structurally, rather than being
+              defended against in JavaScript on every future auth path.
+
+              Two separate <data> elements rather than one with both prefixes: within a
+              single element Android combines attributes cartesian-style, and keeping
+              them apart is what makes each prefix independently readable.
+
+              autoVerify="true" is what removes the app-chooser dialog. Android fetches
+              https://app.b4thecall.com/.well-known/assetlinks.json AT INSTALL and
+              caches the result, so that file must be live and carry BOTH the upload
+              and Play App Signing fingerprints before anyone installs — it does, as of
+              a9408df. A failed verification does not retry on next launch; it sticks
+              until the app is reinstalled.
+
+              BROWSABLE + DEFAULT are both required for a link tapped from another app
+              to reach us at all.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="app.b4thecall.com" android:pathPrefix="/checkin" />
+                <data android:scheme="https" android:host="app.b4thecall.com" android:pathPrefix="/handoff" />
+            </intent-filter>
+
         </activity>
 
         <!--

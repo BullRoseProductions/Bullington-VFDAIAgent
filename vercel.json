@@ -78,5 +78,15 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/checkin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/handoff",
+      "destination": "/index.html"
+    }
   ]
 }
