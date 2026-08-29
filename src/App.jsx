@@ -2085,45 +2085,49 @@ export default function App() {
      WHY NOT A TIMER: continuous or scheduled sampling is exactly the breadcrumb
      trail the consent disclosure promises we do not collect. This takes one fix,
      only when the member themselves brings the app to the front. */
-  const lastConfirmRef = useRef(0);
+  const lastConfirmRef = useRef(0);      // last SUCCESSFUL confirm — the 5-minute window
+  const confirmInFlightRef = useRef(false);   // concurrency guard, separate from the window
   useReconnect((why) => {
-    // 'online' fires when the network returns, which is no evidence at all about
-    // where the member is standing. Only a real foreground counts.
     if (why !== "resume") return;
-    // Native + flag + this member's own consent. The same three gates the fence
-    // itself is behind: never take a location fix from someone who has not agreed
-    // to be located, and never on web where it would raise a browser prompt out
-    // of nowhere.
     if (!geofenceAvailable() || !myMemberId) return;
     if (readGeofenceConsent(myMemberId) !== "granted") return;
-    // At most one fix per five minutes. Foregrounding is a common, repeated act;
-    // a GPS request on every one would be both wasteful and hard to justify to a
-    // member reading the disclosure.
-    if (Date.now() - lastConfirmRef.current < 5 * 60 * 1000) return;
+    if (confirmInFlightRef.current) return;
+    if (lastConfirmRef.current && Date.now() - lastConfirmRef.current < 5 * 60 * 1000) return;
 
+    /* THE THROTTLE NOW MEASURES SUCCESSES, NOT ATTEMPTS — and that is a fix, not
+       just instrumentation. It used to be stamped BEFORE getPosition(), so a fix
+       that failed or timed out burned the whole five-minute window and every retry
+       silently hit the throttle. Concurrency is what the early stamp was actually
+       protecting against, and confirmInFlightRef does that job properly. */
+    confirmInFlightRef.current = true;
     (async () => {
-      // ASK THE CHEAP QUESTION FIRST. If there is no open shift, or the open one
-      // is already verified, there is nothing a fix could change — so we do not
-      // take one. Not an optimisation: not collecting a location we have no use
-      // for is the point.
-      const { data, error } = await supabase.rpc("my_open_station_session");
-      if (error) return;
-      const open = Array.isArray(data) ? data[0] : data;
-      if (!open || open.verified || open.kind === "offsite") return;
+      try {
+        // Cheap question first: if there is no open shift, or it is already verified,
+        // or it is off-site, a fix could change nothing — so we do not take one.
+        const { data, error } = await supabase.rpc("my_open_station_session");
+        if (error) return;
+        const open = Array.isArray(data) ? data[0] : data;
+        if (!open) return;
+        if (open.verified) return;
+        if (open.kind === "offsite") return;
 
-      lastConfirmRef.current = Date.now();   // stamped before the await, so a slow
-                                             // fix cannot let a second run through
-      let pos = null;
-      try { pos = await getPosition(); } catch { return; }   // no fix, nothing to confirm
-      if (!pos) return;
+        let pos = null;
+        try { pos = await getPosition(); }
+        catch { return; }                 // window NOT burned — see the stamp below
+        if (!pos) return;
 
-      // Failure here is genuinely nothing to report: the shift is unchanged and
-      // the member keeps whatever verdict they had. Silent by design — a toast
-      // about a background check they did not ask for would be noise they cannot
-      // act on.
-      await supabase.rpc("geofence_confirm_presence", {
-        p_lat: pos.lat, p_lng: pos.lng, p_accuracy: pos.accuracy ?? null,
-      });
+        const { error: cErr } = await supabase.rpc("geofence_confirm_presence", {
+          p_lat: pos.lat, p_lng: pos.lng, p_accuracy: pos.accuracy ?? null,
+        });
+        if (cErr) return;
+        /* STAMPED HERE AND NOWHERE EARLIER. The window measures SUCCESSFUL confirms,
+           so neither a failed fix nor a failed RPC costs the member five minutes of
+           retries. Moving this above the RPC — or above getPosition, as it originally
+           was — silently reintroduces that. */
+        lastConfirmRef.current = Date.now();
+      } finally {
+        confirmInFlightRef.current = false;
+      }
     })();
   });
   function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
