@@ -207,6 +207,21 @@ BEGIN
 END;
 $function$;
 
+-- STATE THE GRANTS RATHER THAN ASSUMING THEM.
+--
+-- CREATE OR REPLACE with an unchanged signature preserves the ACL, and the
+-- precondition above asserts the signature so that holds. But "the ACL survived"
+-- was left as an unstated assumption, and an unstated assumption about grants is
+-- exactly what stripped service_role from dept_shifts_needing_review and
+-- geofence_arrive earlier in this work — both caught by review, neither by the
+-- migration that caused them.
+--
+-- These are idempotent: re-granting a privilege that is already held is a no-op.
+-- They cost nothing and they turn a silent, scan-time outage into something the
+-- file guarantees. anon is deliberately NOT granted — see revoke_anon_execute_sweep.
+GRANT EXECUTE ON FUNCTION public.member_check_in(uuid, text, double precision, double precision, double precision) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.member_check_in(uuid, text, double precision, double precision, double precision) TO service_role;
+
 
 -- ---------------------------------------------------------------------
 -- 2. Put the two hand-closed rows back into close_signin's own end state.
