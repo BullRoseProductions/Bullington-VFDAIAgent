@@ -526,7 +526,15 @@ async function handleGeofenceEvent(evt, { onEvent } = {}) {
 
   try {
     if (action === "EXIT") {
-      const { error } = await supabase.rpc("geofence_depart", { p_at: at });
+      /* STATION-SCOPED SINCE THE DEPART MIGRATION. Passing the fence's own station
+         is what lets geofence_depart close a MANUALLY-opened standby shift — and,
+         just as importantly, what stops a replayed or duplicated EXIT for one
+         house from closing a shift at another. That was the Aug 28 failure.
+
+         NULL IS A SUPPORTED VALUE, not a bug: stationIdFrom returns null when the
+         identifier is missing or not ours, and the function's null branch is the
+         legacy behaviour every un-updated install still gets. Nothing to guard. */
+      const { error } = await supabase.rpc("geofence_depart", { p_at: at, p_station_id: stationId });
       if (error) throw error;
       onEvent?.({ action: "depart", at });
       return { ok: true, action: "depart" };
