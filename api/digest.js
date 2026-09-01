@@ -21,6 +21,10 @@
 // department_id and composed into that department's email. Nothing crosses departments.
 import { createClient } from "@supabase/supabase-js";
 import { buildNotifications, insertNotifications, sendPush } from "./_push.js";
+/* Maintenance arithmetic moved to shared/ so the weekly email and api/pulse.js's daily overdue push
+   cannot drift about whether the same pump test is overdue. shared/maint-due.test.mjs holds a
+   verbatim copy of what used to live here and proves the two agree across 4,059 cases. */
+import { detectMaintenanceFrom } from "../shared/maint-due.js";
 
 const DEFAULT_TO = "ashlea@b4thecall.com";
 const FROM = "B4C <notifications@b4thecall.com>";
@@ -36,8 +40,8 @@ const C = {
 };
 const CERT_WINDOW_DAYS = 60;
 const GEAR_WINDOW_DAYS = 90;
-const MAINT_WINDOW_DAYS = 14;
-const MAINT_CADENCE_DAYS = { Weekly: 7, Monthly: 30, Quarterly: 90, Annual: 365 };   // mirrors MAINT_CADENCE_DAYS in App.jsx
+// MAINT_WINDOW_DAYS and MAINT_CADENCE_DAYS live in shared/maint-due.js now, used by the detector
+// there rather than by this file directly. Nothing here reads them, so nothing is imported.
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_MS = 86400000;
 
@@ -247,26 +251,9 @@ async function detectMaintenance(sb, today) {
   const { data, error } = await sb.from("apparatus_maintenance")
     .select("id, department_id, task, cadence, last_done_at, apparatus(name)");
   if (error) throw new Error(`apparatus_maintenance read failed: ${error.message}`);
-  return (data || []).flatMap((r) => {
-    if (!r.department_id) return [];
-    const interval = MAINT_CADENCE_DAYS[r.cadence] || 30;
-    const last = parseDateOnly(r.last_done_at);
-    const nextDue = last ? addDays(last, interval) : null;      // null last_done_at → never done → overdue
-    const overdue = !nextDue || nextDue < today;
-    if (!overdue) {
-      if (daysBetween(today, nextDue) > MAINT_WINDOW_DAYS) return [];
-    }
-    return [{
-      department_id: r.department_id,
-      subject_ref: r.id,
-      kind: overdue ? "maint_overdue" : "maint_due",
-      sort: overdue ? -1 : daysBetween(today, nextDue),
-      apparatus: r.apparatus?.name || "All units",           // rig_id is nullable — a task can apply to every unit
-      task: r.task || "Maintenance task",
-      state: overdue ? "overdue" : `due in ${daysBetween(today, nextDue)}d`,
-      urgent: overdue,
-    }];
-  });
+  /* The READ stays here; only the arithmetic moved. detectMaintenanceFrom returns exactly what this
+     function used to build — plus an additive `nextDue`, which nothing downstream reads. */
+  return detectMaintenanceFrom(data, today);
 }
 
 /* ---------------- metrics ----------------

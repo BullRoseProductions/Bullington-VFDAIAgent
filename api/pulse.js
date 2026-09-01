@@ -31,7 +31,7 @@ import { createClient } from "@supabase/supabase-js";
 // that here would be a second definition of the same subtle thing.
 import { insertNotifications, sendPush } from "./_push.js";
 // The role vocabulary, shared with the client. See shared/roles.js for why this is not a copy.
-import { LEADERSHIP, BOARD, hasAny } from "../shared/roles.js";
+import { LEADERSHIP, BOARD, CANMANAGE_OPS_ROLES, hasAny } from "../shared/roles.js";
 // Same definition the duty screens use — see shared/duty-period.js for why this is not a copy.
 import { isDoneThisPeriod, periodKey, nudgeWindow, isNudgeWindowOpen } from "../shared/duty-period.js";
 
@@ -45,6 +45,19 @@ import { isDoneThisPeriod, periodKey, nudgeWindow, isNudgeWindowOpen } from "../
    non-Central department is onboarded, this constant and those SQL sites become one per-department
    column — a single decision, not four. */
 import { zonedInstant, todayISOIn, addDaysISO } from "../shared/zoned-time.js";
+/* Overdue-maintenance arithmetic, shared with api/digest.js so the weekly email and the daily push
+   cannot drift. See shared/maint-due.test.mjs for the equivalence proof. */
+import { overdueOnly, startOfToday } from "../shared/maint-due.js";
+
+/* Body for the maintenance summary. Named units first, truncated with a count rather than an
+   ellipsis — "+3 more" tells an officer how much they are not seeing, which "…" does not. Three is
+   enough to recognise the trucks without turning a push into a paragraph. */
+const MAINT_SUMMARY_MAX = 3;
+function maintSummaryBody(names) {
+  if (names.length <= MAINT_SUMMARY_MAX) return names.join(", ");
+  const shown = names.slice(0, MAINT_SUMMARY_MAX).join(", ");
+  return `${shown}, +${names.length - MAINT_SUMMARY_MAX} more`;
+}
 
 const TZ = "America/Chicago";
 
@@ -499,6 +512,93 @@ export default async function handler(req, res) {
     detectErrors.push({ family: "duties", error: String(e?.message || e) });
   }
 
+  /* ---- MAINTENANCE (overdue only) -------------------------------------------------------------
+     ONE SUMMARY PER OFFICER/ADMIN PER DEPARTMENT PER DAY. subject_ref carries the day key, so the
+     dedupe index (member_id, type, subject_ref) makes every later run the same day a harmless
+     no-op and lets it fire again tomorrow while the task is still overdue. That is the duty_summary
+     pattern, for the same reason: an hourly cron must nag daily, not hourly, and one summary beats
+     one push per item — a department with fifteen overdue tasks should buzz a phone once.
+
+     OVERDUE ONLY. maint_due stays digest-only: a daily nag about something due in six days is noise,
+     and the weekly email already covers the warning tier.
+
+     THE ARITHMETIC IS NOT HERE. It lives in shared/maint-due.js, which api/digest.js also uses, so
+     the email and the push can never disagree about whether the same pump test is overdue.
+     shared/maint-due.test.mjs proves the lift was behaviour-preserving across 4,059 cases.
+
+     RECIPIENTS ARE OPS LEADERS — Department Admin + Officer, from shared/roles.js. Board Member is
+     governance-only and is deliberately not buzzed about a pump test; Project Admin is excluded. */
+  try {
+    const { data: maintRows, error: mErr } = await sb.from("apparatus_maintenance")
+      .select("id, department_id, task, cadence, last_done_at, apparatus(name)");
+    if (mErr) throw new Error(mErr.message);
+
+    const byDept = new Map();
+    for (const r of maintRows || []) {
+      if (!r.department_id) continue;
+      if (!byDept.has(r.department_id)) byDept.set(r.department_id, []);
+      byDept.get(r.department_id).push(r);
+    }
+
+    let leaders = [];
+    if (byDept.size) {
+      const { data: mem, error: lErr } = await sb.from("members")
+        .select("id, department_id, status, access").in("department_id", [...byDept.keys()]);
+      if (lErr) throw new Error(lErr.message);
+      leaders = (mem || []).filter((m) =>
+        m.status === "Active"
+        && Array.isArray(m.access)
+        && m.access.some((r) => CANMANAGE_OPS_ROLES.includes(r)));
+    }
+
+    /* nowMs, not `now` — that one is scoped to the duties block. Both derive from the single
+       Date.now() taken at the top of the run, so every detector agrees on what "today" is even if
+       the run straddles midnight. */
+    const dayKey = todayISOIn(TZ, new Date(nowMs));
+    const today = startOfToday();
+    const maintSummary = {};
+    let maintPreviewShown = false;
+
+    for (const [deptId, rows] of byDept) {
+      const overdue = overdueOnly(rows, today);
+      const recips = leaders.filter((m) => m.department_id === deptId).map((m) => m.id);
+      maintSummary[deptId] = { overdueItems: overdue.length, opsLeaders: recips.length, fanOut: overdue.length ? recips.length : 0 };
+      if (!overdue.length || !recips.length) continue;
+
+      const names = overdue.map((o) => `${o.apparatus} · ${o.task}`).sort();   // stable text across runs
+      const title = `${overdue.length} maintenance ${overdue.length === 1 ? "item" : "items"} overdue`;
+      const body = maintSummaryBody(names);
+
+      for (const memberId of recips) {
+        detected.push({
+          member_id: memberId,
+          department_id: deptId,
+          family: "maint",                            // already in FAMILIES, so is_muted() needs no change
+          type: "maint_summary",                      // prefix "maint" -> ICON["maint"] = Wrench
+          subject_ref: `${deptId}:${dayKey}`,         // one summary per member per department per day
+          title,
+          body,
+          severity: "critical",                       // overdue maintenance is a readiness problem
+          why: `${overdue.length} overdue as of ${dayKey}`,
+        });
+      }
+
+      // Show the composed text once, so the wording is reviewable from a dry run before it can send.
+      if (!maintPreviewShown) {
+        diag.maintSummaryPreview = {
+          member_id: recips[0], department_id: deptId,
+          title, body, subject_ref: `${deptId}:${dayKey}`,
+          type: "maint_summary", family: "maint",
+          items: names,
+        };
+        maintPreviewShown = true;
+      }
+    }
+    diag.maintSummary = maintSummary;
+  } catch (e) {
+    detectErrors.push({ family: "maint", error: String(e?.message || e) });
+  }
+
   const candidates = detected;
 
   /* SCOPE IS APPLIED HERE, ONCE — not at send time. Narrowing the recipient list is what makes a
@@ -614,7 +714,15 @@ export default async function handler(req, res) {
       .select("id, member_id, type, title, body, created_at")
       .is("pushed_at", null)
       .gte("created_at", drainSince)
-      .or("type.like.event_*,type.like.task_*,type.like.duty_*")
+      /* maint_summary is matched EXACTLY — never as type.like.maint_*. THIS LINE IS WHERE THE
+         DIGEST/PULSE COUPLING LIVES. api/digest.js writes maint_overdue and maint_due rows and
+         pushes them itself, but predates pushed_at and never stamps it, so those rows sit at
+         pushed_at IS NULL forever. A prefix match here would find the digest's freshly-pushed
+         compliance rows and send every one of them a second time. Pulse drains what pulse
+         produces. Prefix matching stays for event_/task_/duty_ because pulse owns those prefixes
+         outright; it does NOT own maint_, and adding a second maint_ type here means adding it to
+         this list by name, deliberately. */
+      .or("type.like.event_*,type.like.task_*,type.like.duty_*,type.eq.maint_summary")
       .order("created_at", { ascending: true })
       .limit(500);                                   // a bounded run; leftovers go on the next pass
     if (onlyMember) q = q.eq("member_id", onlyMember);
