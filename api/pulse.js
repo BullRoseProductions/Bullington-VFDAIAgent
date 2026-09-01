@@ -82,6 +82,18 @@ const isTruthy = (v) => TRUTHY.includes(String(v ?? "").toLowerCase());
 
 const PULSE_ENABLED = isTruthy(process.env.PULSE_ENABLED);
 
+/* THE MASTER SWITCH, and it is deliberately parsed DIFFERENTLY from the one above.
+
+   api/digest.js:54 reads `process.env.PUSH_ENABLED === "1"`. This must match that exactly, because
+   the two engines have to agree on what "push is off" means. If pulse accepted "true" and the
+   digest did not, setting PUSH_ENABLED=true at launch would leave one engine sending and the other
+   silent — and the silent one would look like a broken feature rather than a misread flag.
+
+   So: strict === "1" here, isTruthy for PULSE_ENABLED. Not an inconsistency to tidy — PULSE_ENABLED
+   governs only this file, PUSH_ENABLED governs both, and the shared flag is the one that must be
+   read identically in both places. */
+const PUSH_ENABLED = process.env.PUSH_ENABLED === "1";
+
 // Kept here so slice 3 has one place to add to, and so the value passed to is_muted() can never be a
 // literal typed at the call site. is_muted RAISES on an unknown family precisely because a typo would
 // otherwise read as "not muted" and silently override somebody's opt-out.
@@ -752,7 +764,19 @@ export default async function handler(req, res) {
         devices: (tokensByMember.get(r.member_id) || []).length,
       }));
 
-      if (!isDry) {
+      /* BOTH FLAGS, AND THE STAMP IS INSIDE THE GATE ON PURPOSE.
+
+         Gating only the sendPush call below would be a data-loss bug. The stamp marks every drained
+         row pushed_at = now, including the deviceless and the failed — correct when a send was
+         genuinely attempted, catastrophic when it was not. With push off, a non-dry run would stamp
+         rows as pushed that nobody ever received, and because the drain only looks at
+         pushed_at IS NULL, those notifications could never be sent again. Turning the flag on later
+         would find nothing to send and the backlog would be silently gone.
+
+         So when push is off the drain still runs and still reports what it WOULD have sent
+         (wouldPush), but nothing is sent and nothing is stamped. The rows stay in the inbox,
+         unpushed, exactly as they were. */
+      if (!isDry && PUSH_ENABLED) {
         if (sendable.length) {
           const res = await sendPush(sb, sendable, tokensByMember);
           pushed = res.sent || 0;
@@ -788,6 +812,9 @@ export default async function handler(req, res) {
   const report = {
     enabled: true,
     slice: "5-drain",
+    // false explains a run that drained rows and sent none — otherwise indistinguishable from
+    // "nothing to push", which is the report a reader would misdiagnose.
+    pushEnabled: PUSH_ENABLED,
     scope,
     dry: isDry,
     note: isDry
