@@ -15,7 +15,7 @@ import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { authedFetch } from "./apiBase";
-import { useReconnect, looksOffline } from "./useReconnect";
+import { useReconnect, useAutoRefresh, useEditorOpen, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
 import { startDeepLinks } from "./deeplink";
@@ -272,6 +272,7 @@ const SUPPORT_EMAIL = "ashlea@b4thecall.com";
 // DA-gated department-identity editor (name/station/city). Mirrors saveBrand's RPC-id + .select() 0-row-guard + sync pattern.
 function DeptSettings({ S, dept, setDept, setBrand }) {
   const [form, setForm] = useState({ name: dept?.name || "", station: dept?.station || "", city: dept?.city || "", });
+  useEditorOpen(true);   // the whole screen is an editor while it is mounted
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState("");   // "" | "ok" | "err"
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -1162,6 +1163,7 @@ function StationsAdmin({ S, setDept }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [editId, setEditId] = useState(null);      // the station being edited, or null
+  useEditorOpen(adding || !!editId);   // stations editor
   /* D2a: the pin rides in the SAME editor as name/label/address. It is per-house
      because a fence is per-house — the department pin could only ever describe one
      building, which is why houses 2..N had no coordinates at all before this. */
@@ -1591,8 +1593,10 @@ export default function App() {
   const [members, setMembers] = useState(MEMBERS);
   const [toast, setToast] = useState(null);
   const [rosterErr, setRosterErr] = useState(false);
+  // Returns its promise so useAutoRefresh can stamp its throttle only once the read has actually
+  // finished. Without the return the chain resolves immediately and the window starts early.
   const loadMembers = () => {
-    Promise.all([
+    return Promise.all([
       supabase.from("members_view").select("*"),
       supabase.from("certs").select("id, member_id, name, exp, proof_path"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
     ]).then(([membersRes, certsRes]) => {
@@ -1717,7 +1721,7 @@ export default function App() {
   const [trainingPlan, setTrainingPlan] = useState([]);
   const [plansErr, setPlansErr] = useState(false);
   const loadPlans = () => {
-    supabase.from("training_plans")
+    return supabase.from("training_plans")
       .select("id, name, cadence, last_iso, color")
       .then(({ data, error }) => {
         if (error || !data) {   // a failed READ is not "zero categories" — keep last-known, log, offer retry (never blank on error)
@@ -1784,6 +1788,15 @@ export default function App() {
     if (sessionsErr) loadSessions();
     if (plansErr) loadPlans();
   });
+  /* AND THE OTHER HALF: refresh them on resume even when nothing failed.
+     The block above only ever recovers a load that ERRORED, which is why the app could sit on
+     hours-old data indefinitely and still look healthy — these three mount once and never re-read,
+     so they are the only truly session-lifetime state in the app and the biggest single win.
+     Silent and throttled; see useAutoRefresh. No skipWhen: these feed read-only dashboards, and
+     the screens that own editable forms guard themselves individually. */
+  useAutoRefresh(loadMembers);
+  useAutoRefresh(loadSessions);
+  useAutoRefresh(loadPlans);
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
   const [handoffResult, setHandoffResult] = useState(null);
@@ -8672,6 +8685,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
     if (!(await printRoster(members, dept))) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
   }
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
+  useEditorOpen(adding);   // add-member form open — hold the roster refresh
   const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
   const q = query.trim().toLowerCase();
@@ -8807,9 +8821,11 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   const [busyId, setBusyId] = useState(null);
   const [editingCertId, setEditingCertId] = useState(null);
   const [draft, setDraft] = useState({ name: "", exp: "" });
+  useEditorOpen(!!draft.name || !!draft.exp);   // half-typed cert
   const [priv, setPriv] = useState(null);        // member_private (birthday/address/joined_date) — DA/PA only
   const [notes, setNotes] = useState([]);        // member_notes rows — DA/PA only (RLS-gated)
   const [editing, setEditing] = useState(false);
+  useEditorOpen(editing);   // cert editor: a roster refresh must not swap the row being edited
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
@@ -11433,6 +11449,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const [nm, setNm] = useState(""); const [tp, setTp] = useState("Pumper"); const [rd, setRd] = useState("Ready");
   const [svc, setSvc] = useState("In service"); const [svcReason, setSvcReason] = useState("");   // initial availability on create
   const [editingRigId, setEditingRigId] = useState(null);   // which rig is in inline edit (separate from maintenance)
+  useEditorOpen(adding || !!editingRigId);   // apparatus add / inline rig edit
   const [rigBuf, setRigBuf] = useState({ name: "", type: "Pumper", purchaseYear: "", purchaseCost: "", currentCost: "", inflationRate: "", replaceYear: "", replaceCost: "" });
   // A NEW rig prefills the default rate; an EXISTING one shows whatever is stored, blank included.
   // Prefilling the edit buffer would write 3% onto every rig somebody opens to fix a typo on.
@@ -11514,6 +11531,10 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   // and then re-filtered. Re-runs if the station changes.
   useEffect(() => { if (activeStationId !== undefined) loadRigs(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [members, activeStationId]);
   useReconnect(() => { if (loadErr) loadRigs(); });
+  /* Resume-refresh. loadRigs reads whatever mode the screen is in, so this covers the single-house
+     view and the grouped "all stations" view with one call — the station filter lives inside the
+     loader, not here. */
+  useAutoRefresh(loadRigs);
   const inServiceRigs = rigs.filter((r) => r.inService);   // out-of-service rigs excluded from readiness stats
   const ready = inServiceRigs.filter((r) => r.status === "Pass").length;
   const flagged = inServiceRigs.filter((r) => r.status !== "Pass").length;   // computed directly on in-service rigs, NOT total − ready
@@ -13554,6 +13575,11 @@ function StationHours({ S, dept, notify }) {
   }
   useEffect(() => { load(); }, []);
   useEffect(() => { loadHours(rangeKey); setShowAllHours(false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rangeKey]);
+  /* Resume-refresh. This screen goes stale in the way members notice most: the clock card says
+     whether they are on station RIGHT NOW, and a shift someone else closed while the app was
+     backgrounded left it claiming they were still clocked in. Both the open-session read and the
+     hours list for the visible range. */
+  useAutoRefresh(() => Promise.all([load(), loadHours(rangeKey)]));
   // Tick only while the clock is running — the elapsed line is the one thing here that goes stale on its own.
   useEffect(() => { if (!open) return; const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, [open]);
   const spanText = (a, b) => {
@@ -13790,6 +13816,7 @@ function Equipment({ S, role, members, meId, notify }) {
     return (Number.isInteger(n) && n > 0 && n <= 100) ? n : undefined;
   };
   const [editingTypeId, setEditingTypeId] = useState(null);
+  useEditorOpen(!!addingFor || !!editingId || addingType || !!editingTypeId);   // equipment editors
   const [tb, setTb] = useState({ name: "", catSel: "__new__", catNew: "", returnable: true });
   const [managers, setManagers] = useState([]);   // active equipment_manager rows for the dept (members-read)
   const [mgrPick, setMgrPick] = useState(""); const [mgrBusy, setMgrBusy] = useState(false);
@@ -13869,6 +13896,9 @@ function Equipment({ S, role, members, meId, notify }) {
   // Holds the first fetch until the station id is known, so the list is never briefly unfiltered.
   useEffect(() => { if (activeStationId !== undefined) { loadEquipment(); loadManagers(); loadPending(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [members, activeStationId]);
   useReconnect(() => { if (loadErr) { loadEquipment(); loadManagers(); loadPending(); } });
+  /* Resume-refresh, both station modes — see Apparatus. Only the equipment list itself is
+     refreshed: managers change rarely, and pending approvals have their own surface. */
+  useAutoRefresh(loadEquipment);
   const allUnits = types.flatMap((t) => t.units);
   const totalUnits = allUnits.length;
   const available = allUnits.filter((u) => u.status === "in_inventory").length;
@@ -14456,6 +14486,9 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     setItems((data || []).sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99")));   // soonest due first
   }
   useEffect(() => { loadActionItems(); }, []);
+  /* Resume-refresh: action items are assigned to people between meetings, so a stale list is
+     the difference between an officer seeing their task and not seeing it. */
+  useAutoRefresh(loadActionItems);
   async function completeItem(it) {
     if (!canManage) return;
     const { error } = await supabase.rpc("complete_action_item", { p_id: it.id });   // server-stamps completed_at/completed_by + snapshots assignee_name
@@ -16982,6 +17015,11 @@ function StationDuties({ S, role, members, meId, notify }) {
     setResumeTick((t) => t + 1);                     // app resumed / network back: re-slice the current week (no timer)
     if (loadErr) { setLoadErr(false); loadDuties(); loadStationLog(); }
   });
+  /* Resume-refresh for the duty board and the station log, in both the single-house and grouped
+     "all stations" views. Separate from the resumeTick above: that only re-slices the week
+     boundary from data already in memory, which is why a Monday-morning resume could show a fresh
+     week populated with last week's rows. */
+  useAutoRefresh(() => Promise.all([loadDuties(), loadStationLog()]));
   useEffect(() => {
     if (!canManage) return;
     supabase.from("duty_log")

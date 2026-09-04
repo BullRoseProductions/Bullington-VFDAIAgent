@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, ClipboardList, Settings, Lock } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { useAutoRefresh } from "./useReconnect";
 
 /* Notification centre — reads the STORED notifications table (not a recomputed list), so read/unread
    survives a refresh and the department keeps a "we told them, on this date" record.
@@ -231,6 +232,10 @@ export default function NotificationCenter({ S, meId, back }) {
     setErr(""); setRows(data);
   }, []);
   useEffect(() => { load(); }, [load]);
+  /* Resume-refresh the inbox. The bell above already re-reads on every visibilitychange with no
+     throttle, deliberately — a badge count is one cheap select and wants to be instant. The list
+     is the heavier read, so it takes the shared throttle instead of a second ad-hoc listener. */
+  useAutoRefresh(load);
 
   async function markRead(id) {
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, read_at: r.read_at || new Date().toISOString() } : r)));   // optimistic
