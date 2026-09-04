@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "eslint . && vite build",
-    "build:native": "eslint . && VITE_GEOFENCE_ENABLED=1 vite build",
+    "build:native": "eslint . && VITE_GEOFENCE_ENABLED=1 VITE_PUSH_ENABLED=1 vite build",
     "preview": "vite preview",
     "cap:sync": "npm run build:native && cap sync",
     "cap:ios": "npm run cap:sync && cap open ios",
