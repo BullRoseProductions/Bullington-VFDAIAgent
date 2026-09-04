@@ -1401,14 +1401,55 @@ const setAllStationsMode = (on) => {
   try { if (on) sessionStorage.setItem("b4c.stations.all", "1"); else sessionStorage.removeItem("b4c.stations.all"); } catch { /* private mode — the view just won't persist */ }
 };
 
+/* HAS THE MEMBER ACTUALLY PICKED A STATION THIS SESSION?
+
+   Needed because setAllStationsMode(false) REMOVES its key, which makes "I chose a single house"
+   indistinguishable from "I have not chosen anything yet". Without this second key, defaulting a
+   multi-station department to All Stations would override a deliberate choice on every screen
+   mount — the member picks Station 2, navigates, and is bounced back to the grouped view. */
+const STATION_CHOICE_KEY = "b4c.stations.chosen";
+const stationChoiceMade = () => { try { return sessionStorage.getItem(STATION_CHOICE_KEY) === "1"; } catch { return false; } };
+const markStationChoice = () => { try { sessionStorage.setItem(STATION_CHOICE_KEY, "1"); } catch { /* private mode — the default simply reapplies next screen */ } };
+
+/* THE ACTIVE STATION, or ALL_STATIONS when the grouped view is on.
+
+   MULTI-STATION DEPARTMENTS NOW DEFAULT TO ALL STATIONS. A department with two houses that opens
+   the app on Station 1 sees half its apparatus and half its duties, with nothing on screen saying
+   so — the single-house view is only the right default when there IS only one house. Two or more,
+   and the honest opening view is everything, with the picker there to narrow it.
+
+   THE DEFAULT IS CLIENT VIEW-STATE ONLY. set_active_station() is never called with the sentinel:
+   it takes a real station uuid and would reject one, and more importantly the stored active station
+   stays a real house because every WRITE path uses it. Only the view changes. That constraint is
+   the same one the picker's choose() has always honoured.
+
+   COSTS ONE EXTRA RPC, once per session, and only until a choice is recorded — my_stations() is
+   how we learn the house count. Single-station departments pay it once and then behave exactly as
+   before: one house, no picker, no grouped view. */
 function useActiveStation() {
   const [stationId, setStationId] = useState(undefined);
   useEffect(() => {
     let off = false;
     // The view wins over the stored station, and costs no round trip.
     if (allStationsMode()) { setStationId(ALL_STATIONS); return () => { off = true; }; }
-    supabase.rpc("my_active_station_id").then(({ data, error }) => {
+
+    const readStored = () => supabase.rpc("my_active_station_id").then(({ data, error }) => {
       if (!off) setStationId(error ? null : (data || null));
+    });
+
+    // An explicit pick this session is honoured as-is — the default must never override it.
+    if (stationChoiceMade()) { readStored(); return () => { off = true; }; }
+
+    supabase.rpc("my_stations").then(({ data, error }) => {
+      if (off) return;
+      // A failed read must not flip the view. Fall back to the stored house, which is what this
+      // hook did before the default existed — degrade to the old behaviour, never to a guess.
+      if (!error && Array.isArray(data) && data.length >= 2) {
+        setAllStationsMode(true);
+        setStationId(ALL_STATIONS);
+        return;
+      }
+      readStored();
     });
     return () => { off = true; };
   }, []);
@@ -1499,6 +1540,11 @@ function StationPicker({ S, notify }) {
   const [list, setList] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [busy, setBusy] = useState(false);
+  /* A REACTIVE MIRROR OF THE ALL-MODE FLAG. sessionStorage is not reactive — writing the key
+     changes nothing on screen — so the label would keep saying "Station 1" until a reload even
+     though the view had already flipped. This state is what the SELECT reads; the sessionStorage
+     key remains the source of truth that survives navigation. */
+  const [allMode, setAllMode] = useState(allStationsMode());
   useEffect(() => {
     let off = false;
     // Both answers come from the database. The label must name the station the SERVER is
@@ -1508,7 +1554,24 @@ function StationPicker({ S, notify }) {
       setList(data);
       // Self-heal: a department that drops back to one house must not be left stuck in a view it
       // can no longer offer. Clearing here means the next reload is the ordinary single view.
-      if (data.length <= 1) setAllStationsMode(false);
+      if (data.length <= 1) { setAllStationsMode(false); setAllMode(false); return; }
+
+      /* THE MULTI-STATION DEFAULT LIVES HERE, and the location is the whole fix.
+
+         It used to live only in useActiveStation(), which is called by Apparatus, Equipment and
+         StationDuties — and by nothing else. The landing dashboard, the roster and this picker
+         never call it, so on a fresh load the default never ran at all: the picker read the stored
+         active station and showed "Station 1" while sessionStorage stayed empty. A member on a
+         two-house department opened the app and silently saw half of it.
+
+         This component is the right home because it is the ALWAYS-MOUNTED header. Whatever screen
+         the app lands on, the picker mounts, so the default fires exactly once per session
+         regardless of where the member starts.
+
+         Deliberate picks still win: stationChoiceMade() is set by choose() below for both
+         branches, so this cannot bounce someone out of the house they selected. The
+         !allStationsMode() check keeps it idempotent across re-mounts. */
+      if (!stationChoiceMade() && !allStationsMode()) { setAllStationsMode(true); setAllMode(true); }
     });
     supabase.rpc("my_active_station_id").then(({ data, error }) => { if (!off && !error) setActiveId(data || null); });
     return () => { off = true; };
@@ -1517,16 +1580,22 @@ function StationPicker({ S, notify }) {
   if (rows.length <= 1) return null;
   // The stored station is still a real house while the view is "all" — it is what "Go to this
   // station" and every write path use. Only the SELECT shows ALL_STATIONS.
-  const shownValue = allStationsMode() ? ALL_STATIONS : (activeId || "");
+  const shownValue = allMode ? ALL_STATIONS : (activeId || "");
   async function choose(id) {
     if (!id || id === shownValue || busy) return;
     setBusy(true);
     // ALL_STATIONS is never written to the server — set_active_station takes a real station id,
     // and passing a sentinel would be rejected as a bad uuid. Flip the view and reload instead.
-    if (id === ALL_STATIONS) { setAllStationsMode(true); if (typeof window !== "undefined") window.location.reload(); return; }
+    // Either branch is a deliberate choice, and both are recorded — otherwise the multi-station
+    // default in useActiveStation would reassert All Stations on the next screen that mounts.
+    // setAllMode alongside setAllStationsMode in both branches: the reload below makes it moot in
+    // practice, but leaving the mirror stale would be a trap for the next person who removes it.
+    if (id === ALL_STATIONS) { markStationChoice(); setAllStationsMode(true); setAllMode(true); if (typeof window !== "undefined") window.location.reload(); return; }
     const { error } = await supabase.rpc("set_active_station", { p_station_id: id });
     if (error) { setBusy(false); notify?.({ kind: "error", title: "Couldn't switch station", text: error.message || "Please try again." }); return; }
+    markStationChoice();
     setAllStationsMode(false);   // picking a real house leaves the view
+    setAllMode(false);
     if (typeof window !== "undefined") window.location.reload();
   }
   const label = (r) => `${r.name}${r.label ? ` · ${r.label}` : ""}${r.is_active === false ? " (retired)" : ""}`;
@@ -10646,7 +10715,7 @@ function StationHoursReport({ S, dept, notify, back }) {
     for (const st of (stationList || [])) chips.push({ key: st.station_id, label: st.name, count: counts.get(st.station_id) || 0 });
     // Only offered when it holds something — an always-present empty Unassigned chip would imply
     // a problem that isn't there.
-    if (counts.get("__unassigned__")) chips.push({ key: "__unassigned__", label: "Not at a house", count: counts.get("__unassigned__") });
+    if (counts.get("__unassigned__")) chips.push({ key: "__unassigned__", label: "Station not recorded", count: counts.get("__unassigned__") });
     return chips;
   })();
   const shiftsForLog = logStation === ALL_STATIONS
@@ -10663,7 +10732,7 @@ function StationHoursReport({ S, dept, notify, back }) {
       people: onNow.filter((p) => p.station_id === st.station_id),
     }));
     const orphans = onNow.filter((p) => !p.station_id);
-    if (orphans.length) groups.push({ key: "__unassigned__", name: "Not at a house", people: orphans });
+    if (orphans.length) groups.push({ key: "__unassigned__", name: "Station not recorded", people: orphans });
     return groups;
   })();
   if (first) return null;   // first paint only — after that the chrome stays put and the figures swap under it
@@ -11005,7 +11074,7 @@ function StationHoursReport({ S, dept, notify, back }) {
               {byHouse.map((h) => (
                 <tr key={h.key} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
                   <td style={{ ...TD, fontWeight: 600, color: h.station_id ? FIRE.textPrimary : FIRE.textMuted2 }}>
-                    {h.station_name || "Not recorded at a house"}
+                    {h.station_name || "Station not recorded"}
                     {/* The Unassigned bucket is a REAL, PERMANENT category, not a configuration
                         failure — attested drill time has no house to be recorded at, because
                         training sessions do not carry one. Saying so stops a DA hunting for a
