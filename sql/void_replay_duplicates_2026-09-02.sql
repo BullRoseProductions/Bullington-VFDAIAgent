@@ -1,10 +1,19 @@
 -- =====================================================================
--- STATUS: NOT APPLIED as of 2026-09-03. Reviewed, not yet run.
+-- STATUS: APPLIED 2026-09-02. Three rows zeroed, confirmed:
+--   9ba2248a (Jeff Harper, 0.51h) · e9fabc20 (Matt Hohon, 1.64h) · 808d1c4f (Matt Hohon, 0.59h)
+--   all now hours_now = 0.00. A later re-run returned NO rows, which is the
+--   scoping working as designed: `checked_out_at = t.close_at` no longer matches
+--   once a row has been zeroed, so a second run cannot touch anything.
 --
--- Git records that this file exists, never that it ran — see the "migrations
--- applied by hand" rule. If you are reading this later, check the rows before
--- assuming either way: the three ids below should have
--- checked_out_at = checked_in_at if it has been applied.
+-- 2.74 credited hours removed. Randy Little's 24.18h pair is untouched and still
+-- needs the officer who set its out-times — see the exclusion below.
+--
+-- THIS HEADER WAS BRIEFLY WRONG, and the reason is worth keeping. It first said
+-- NOT APPLIED, because nobody had reported a result back and absence of
+-- confirmation was read as absence of a run. That is precisely the trap the
+-- "migrations applied by hand" rule names: a file, a commit and a conversation
+-- all say nothing about whether SQL is live. Only the rows do. Check them —
+-- the three ids above should read checked_out_at = checked_in_at.
 --
 -- VOID THE UNAMBIGUOUS REPLAY DUPLICATES. One statement, three rows.
 --
