@@ -3174,12 +3174,18 @@ function computeInsights({ sessions, members, openItems, openFailures, todayISO 
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
   const eligibleFor = (m, s) => !isRestrictedEvent(s);   // TRAINING-gap only — leadership EVENTS excluded (event filter, not person); leaders' regular-training gaps still count
-  const pastDone = (sessions || []).filter((s) => s.done && (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, done, roll-taken
+  /* A CHECK-IN COUNTS THE MOMENT IT IS WRITTEN, not only once the officer finalizes the drill.
+     member_check_in inserts the session_attendance row as the member scans, but this list used to
+     require s.done as well — so someone who signed into tonight's drill still read as "42 days
+     since training" until the officer closed it out, and stayed on the reach-out list they had
+     just earned their way off. The roll being taken is the evidence; `done` is a separate,
+     later administrative step. */
+  const pastAttended = (sessions || []).filter((s) => (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, roll-taken, finalized or not
   const isPureBoard = (m) => isBoard(m.access) && !hasAny(m.access, ["Member", "Officer", "Department Admin", "Project Admin"]);   // governance-only → not expected at drills (overdue-items still flags them)
-  const attendanceGaps = pastDone.length === 0 ? [] : (members || []).filter((m) => countsInStats(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
+  const attendanceGaps = pastAttended.length === 0 ? [] : (members || []).filter((m) => countsInStats(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
     // Only flag members who have attended at least one B4C session; measure the gap from their LAST actual attendance.
     // Never-attended members are skipped entirely — no station-tenure/first-drill fallback (B4C has no history for them yet).
-    const attendedISO = pastDone.filter((s) => eligibleFor(m, s) && (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
+    const attendedISO = pastAttended.filter((s) => eligibleFor(m, s) && (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
     if (attendedISO.length === 0) return null;   // never attended a B4C session → not flagged
     const refISO = attendedISO[attendedISO.length - 1];   // days since their last B4C attendance
     return { type: "attendance", memberId: m.id, memberName: m.name, days: dayDiff(todayISO, refISO) };
