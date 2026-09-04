@@ -15901,7 +15901,22 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   // Finalize & lock — the explicit second step, run AFTER the roll is confirmed.
   async function finalizeSession(s) {
-    if (!window.confirm(`Lock attendance for "${s.title}"? You can reopen it later if needed.`)) return;
+    /* AN EMPTY ROLL GETS A DIFFERENT QUESTION. Finalizing locks the drill and settles who earned
+       credit for it, and a drill with nobody marked present used to lock behind the same reassuring
+       "you can reopen it later" prompt as a full one. That is how a drill gets closed against the
+       wrong session with nothing on screen objecting — the officer answers a question about
+       reopening while the actual fact, that the roll is empty, goes unmentioned.
+
+       ZERO ONLY. A low roll is ordinary — three people at a Tuesday drill is a real Tuesday — and
+       warning about it would train officers to click through the warning that matters. Some drills
+       genuinely have nobody, so this stays a confirm rather than a block: still one click to
+       proceed, never by accident. */
+    const presentCount = (s.attendance || []).length;
+    if (presentCount === 0) {
+      if (!window.confirm(`Nobody is marked present for "${s.title}". Finalizing locks it with an empty roll — no one earns training credit for it. Finalize anyway?`)) return;
+    } else {
+      if (!window.confirm(`Lock attendance for "${s.title}"? You can reopen it later if needed.`)) return;
+    }
     // auto-close any open QR sign-in so no stale code lingers / no post-lock scans
     if (s.signinOpen) {
       const { error: cErr } = await supabase.rpc("close_signin", { p_session_id: s.id });
