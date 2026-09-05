@@ -247,6 +247,33 @@ export async function initGeofence({ rationale } = {}) {
          member's departure and therefore their hours. */
       geofenceProximityRadius: GEOFENCE_PROXIMITY_RADIUS_M,
 
+      // ANDROID EXIT PROMPTNESS. Default (false) lets Android wait until the phone is well past
+      // the boundary before EXIT fires — a late exit over-credits station time. true runs a
+      // location foreground service so ENTER/EXIT are near-instant. ANDROID-ONLY: iOS ignores it;
+      // iOS region-exit stays OS-governed and is contained server-side, not here.
+      //
+      // NOT A MOTION SETTING. This runs the LOCATION engine harder, not the activity-recognition
+      // one — so it does not reintroduce the ACTIVITY_RECOGNITION requirement G4a removed, and
+      // disableMotionActivityUpdates:true above stays exactly as it is. The manifest keeps all
+      // three ACTIVITY_RECOGNITION variants at tools:node="remove"; that pairing is unchanged.
+      // The foreground service it starts needs FOREGROUND_SERVICE and FOREGROUND_SERVICE_LOCATION,
+      // both already declared — no new permission, and nothing new to disclose in Play.
+      geofenceModeHighAccuracy: true,
+
+      // Persistent notification the Android foreground service shows while monitoring. Honest,
+      // member-facing: states we record station presence, nothing more.
+      //
+      // It is not optional decoration. Android REQUIRES a visible notification for a location
+      // foreground service, so the only choice is what it says — and a member who sees a
+      // permanent notice deserves one that names the actual purpose rather than a generic
+      // "app is running". Not "tracking your location": we record presence at a station, and
+      // the wording should not claim more surveillance than the app performs.
+      notification: {
+        title: "B4C station presence",
+        text: "Recording your time at the station",
+        channelName: "Station presence",
+      },
+
       // Debug mode plays a sound and posts a notification on every geofence transition.
       // Genuinely useful for a field test and completely wrong on a member's phone, so it
       // stays off here and gets switched on deliberately for testing.
