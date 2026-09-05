@@ -161,6 +161,29 @@ export const anEditorIsOpen = () => {
 const editingOrJustFinished = () =>
   anEditorIsOpen() || (Date.now() - lastEditorClosedAt < EDITOR_GRACE_MS);
 
+/* RESUME-DEAD RETRY. WKWebView tears the network stack down while the app is suspended,
+   so the FIRST fetch after a resume frequently rejects with "TypeError: Load failed"
+   before the OS re-establishes the connection a beat later. The loader caught it and kept
+   last-known data, but nothing tried again, so the screen sat stale until the next resume.
+   One or two short retries bridge exactly that window. Bounded, and ONLY on a THROWN
+   (transient) failure — a loader that resolves normally (even one that recorded a Supabase
+   {error} itself) is left alone, and a real outage still stops after the last attempt with
+   last-known data intact. */
+const RESUME_RETRY_DELAYS_MS = [600, 1500];
+async function runWithResumeRetry(fn) {
+  let lastErr;
+  for (let attempt = 0; attempt <= RESUME_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (attempt === RESUME_RETRY_DELAYS_MS.length) break;
+      await new Promise((r) => setTimeout(r, RESUME_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+  throw lastErr;
+}
+
 /* useAutoRefresh — keep a screen's data current without anyone force-quitting.
 
    THE PROBLEM IT SOLVES. Every loader in this app runs once in an empty-deps effect and never
@@ -201,8 +224,9 @@ export function useAutoRefresh(loader, { minIntervalMs = 60000, skipWhen } = {})
     if (editingOrJustFinished()) return;                                          // someone is mid-form
     if (skipRef.current && skipRef.current()) return;                             // screen-specific hold
     inFlightRef.current = true;
-    Promise.resolve()
-      .then(() => loaderRef.current?.())
+    // inFlightRef stays true across the retries, so the whole bounded sequence counts as ONE
+    // refresh — a second resume mid-retry cannot start a parallel one.
+    runWithResumeRetry(() => loaderRef.current?.())
       .then(() => { lastSuccessRef.current = Date.now(); })   // AFTER, never before
       .catch(() => { /* keep last-known data; the loader owns its own error surface */ })
       .finally(() => { inFlightRef.current = false; });
