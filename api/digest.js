@@ -306,33 +306,109 @@ function shiftHours(s) {
   if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
   return (b - a) / 3600000;
 }
-// Station presence rollup — mirrors the app's own derivation at App.jsx:6304-6323 exactly:
-//   • only CLOSED shifts count (an open one has no duration to credit)
-//   • VERIFIED-ONLY CREDIT: unverified time lands in its own bucket and is never folded into the credited
-//     figure, because that figure is what gets reported to ISO/LOSAP
-//   • kind splits credited time into training vs standby ("standby is the only other surfaced kind")
-//   • verifiedPct is the share of check-in EVENTS verified, not of hours
-// Totals are summed raw and rounded once at the end, matching h1() (App.jsx:6327) — rounding per row would drift.
+/* Station hours for the digest — the same split, from the same two sides, as the app's
+   mergeStationHours (App.jsx). This function is the email's half of that agreement.
+
+   WHY IT CHANGED. It used to compute credited as `standby + training` from these rows. Those two
+   buckets are not disjoint — a member on standby when a drill starts is inside both — so every drill
+   attended by someone already at the station was counted twice. Chase Thomas read 38.42 credited for a
+   month in which he was present 36.92 hours. The screen had the same bug; both are fixed by taking the
+   figure from SQL instead of adding it up here.
+
+   The de-overlap is interval logic (union each member's spans with range_agg, training winning the
+   tie) and it must not be reimplemented in JavaScript. It would be a fourth copy of the credit rule,
+   and it would also have to reproduce attested_training's flat-90-capped-at-drill-length derivation
+   including its dedup against observed rows — from session start times this file does not even read.
+   dept_iso_hours_for does all of it, once, and is service-role callable.
+
+   WHAT COMES FROM WHERE, the same clean line the client draws:
+     • credited / standby / training  <- dept_iso_hours_for. De-overlapped, clipped to the window,
+       attested attendance included, auto-closed and unverified already excluded. Never recomputed.
+     • unverified, verifiedPct        <- these station_presence rows. dept_iso_hours_for cannot see
+       uncredited time by construction, and verifiedPct counts EVENTS, which is not an hours question.
+
+   A UNION ON member_id, because both directions occur:
+     • presence-only — a member whose whole month was unverified or auto-closed has no ISO row, and
+       must still appear with 0 credited and their uncredited hours.
+     • ISO-only — the two reads window differently. This read filters on checked_in_at, so a shift that
+       STARTED before the month is not in it; dept_iso_hours_for filters on overlap and clips, so the
+       part inside the month IS. Such a member has ISO hours and no check-in event here.
+
+   That second case is why verifiedPct is null rather than 0 when there are no events: there is no
+   denominator to take a percentage of, and dash() renders null as "—". A 0% would assert that a member
+   who verifies fine never does.
+
+   countsInStats is applied to BOTH sides, as before — the digest's figures are department statistics
+   and must not move because a test account clocked in.
+
+   Sums are raw and rounded once at the end, matching h1() in the app; rounding per member would drift
+   the total away from the rows behind it. */
 const h1 = (n) => Math.round(n * 10) / 10;
-function stationMetrics(rows, countedIds) {
+// Exported ONLY so api/digest.station-hours.test.mjs can exercise the merge directly. The route is the
+// default export; a named export alongside it changes nothing about how Vercel builds or runs this.
+// The two halves of a number that goes to a board are worth being able to test without a database.
+export function stationMetrics(rows, isoRows, countedIds) {
+  // NULL MEANS "COULD NOT FIND OUT", empty array means "genuinely none". Only the second is a zero.
+  // When the hours RPC failed for this department the credited tiles dash out and the uncredited
+  // bucket — which comes from rows this function CAN see — is still reported.
+  const isoFailed = isoRows == null;
   const mine = rows.filter((s) => countedIds.has(s.member_id));
-  let standby = 0, training = 0, unverified = 0, vTrue = 0, n = 0;
+  const iso = (isoRows || []).filter((r) => countedIds.has(r.member_id));
+  const num = (v) => Number(v) || 0;
+  // ---- the presence side: uncredited hours and check-in events, per member ----
+  const byMember = new Map();
+  const seat = (id) => {
+    if (!byMember.has(id)) byMember.set(id, { unverified: 0, vTrue: 0, events: 0, credited: 0, standby: 0, training: 0 });
+    return byMember.get(id);
+  };
   for (const s of mine) {
     const hrs = shiftHours(s);
-    if (hrs === null) continue;
-    n += 1;
-    if (!s.verified) unverified += hrs;                             // recorded, not credited
-    else if (s.kind === "training") training += hrs;
-    else standby += hrs;
-    if (s.verified) vTrue += 1;
+    if (hrs === null) continue;                                     // unparseable or backwards — dropped, never credited
+    const m = seat(s.member_id);
+    m.events += 1;
+    // auto_closed FIRST, exactly as the app orders it: a shift can be properly geo-verified while its
+    // stop time was guessed by the sweeper, so the duration is fiction and the hours stay uncredited
+    // until an officer confirms the real out-time. Reversing these two tests would silently credit
+    // estimated hours. Every station_presence row is a real check-in — attested attendance is derived
+    // at read time and never written here — so all of them count toward the verified denominator,
+    // auto-closed included, which is what makes this "of check-ins".
+    if (s.auto_closed || !s.verified) m.unverified += hrs;
+    if (s.verified) m.vTrue += 1;
   }
-  if (!n) return { credited: null, standby: null, training: null, unverified: null, verifiedPct: null };
+  // ---- the ISO side: the credited split, taken as given ----
+  for (const r of iso) {
+    const m = seat(r.member_id);
+    m.credited = num(r.iso_total_hours);
+    m.standby  = num(r.standby_hours);
+    m.training = num(r.training_hours);
+  }
+  // Nothing on either side is genuinely "no data" — every tile dashes out rather than asserting zero.
+  if (byMember.size === 0) return { credited: null, standby: null, training: null, unverified: null, verifiedPct: null, members: [] };
+  let standby = 0, training = 0, credited = 0, unverified = 0, vTrue = 0, events = 0;
+  for (const m of byMember.values()) {
+    credited += m.credited; standby += m.standby; training += m.training;
+    unverified += m.unverified; vTrue += m.vTrue; events += m.events;
+  }
   return {
-    credited: h1(standby + training),
-    standby: h1(standby),
-    training: h1(training),
+    credited: isoFailed ? null : h1(credited),
+    standby:  isoFailed ? null : h1(standby),
+    training: isoFailed ? null : h1(training),
     unverified: h1(unverified),
-    verifiedPct: Math.round(100 * vTrue / n),
+    // Null, not 0: no check-in events in the window means no denominator. dash() renders it "—".
+    verifiedPct: events ? Math.round(100 * vTrue / events) : null,
+    // Not rendered anywhere — the email shows department tiles only. Carried so that `?dry=1` returns
+    // a per-member breakdown that can be checked against the Station Hours screen row by row, which is
+    // the only way to catch these two halves drifting apart again.
+    members: [...byMember.entries()].map(([id, m]) => ({
+      member_id: id,
+      credited: isoFailed ? null : h1(m.credited),
+      standby:  isoFailed ? null : h1(m.standby),
+      training: isoFailed ? null : h1(m.training),
+      unverified: h1(m.unverified),
+      verifiedPct: m.events ? Math.round(100 * m.vTrue / m.events) : null,
+    // Sorted on the raw figure, not the nullable rendered one: when the hours read failed every
+    // credited is null and `b.credited - a.credited` would be NaN, leaving the order to chance.
+    })).sort((a, b) => (byMember.get(b.member_id)?.credited || 0) - (byMember.get(a.member_id)?.credited || 0)),
   };
 }
 
@@ -555,7 +631,12 @@ export default async function handler(req, res) {
       sb.from("session_attendance").select("session_id, member_id"),
       sb.from("certs").select("department_id, member_id, exp"),
       sb.from("apparatus").select("department_id, in_service"),
-      sb.from("station_presence").select("department_id, member_id, checked_in_at, checked_out_at, verified, kind")
+      // auto_closed IS SELECTED NOW, and it is load-bearing. Without it this read could not tell a
+      // shift whose stop time an officer confirmed from one the sweeper guessed at the cap, so the
+      // digest credited estimated hours the screen refuses. These rows no longer produce the credited
+      // figure at all — that comes from dept_iso_hours_for — but they still produce the UNVERIFIED
+      // bucket, and an auto-closed shift belongs in it.
+      sb.from("station_presence").select("department_id, member_id, checked_in_at, checked_out_at, verified, auto_closed, kind")
         .not("checked_out_at", "is", null)                        // closed shifts only — an open one has no duration
         .gte("checked_in_at", monthStart.toISOString())
         .lt("checked_in_at", monthEnd.toISOString()),
@@ -598,6 +679,40 @@ export default async function handler(req, res) {
   // single decision point.
   for (const r of [...du.dutyLog, ...du.stationLog]) if (r.department_id) bucket(r.department_id);
 
+  /* De-overlapped credited hours, one call per department, over the SAME month window as the
+     station_presence read above — so the credited figure and the unverified figure beside it can never
+     describe different periods.
+
+     WHY A LOOP AND NOT ONE QUERY. dept_iso_hours_for takes a single p_dept. That is deliberate: the
+     de-overlap is per member and per department, and a cross-department version would have to be
+     trusted to scope itself. Departments are few and these run concurrently.
+
+     AFTER the duty bucketing, not before: byDept is still being seeded up to the line above, and a
+     department added by duty activity alone must not be left without hours.
+
+     NON-FATAL, like the metric reads and unlike the detection reads. A department whose call fails
+     gets no ISO rows, so its credited figure dashes out to "—" while every item that needs attention
+     still goes out. A digest that fails to mention an expired SCBA cert because an hours RPC hiccuped
+     would be a far worse failure than a missing tile. Per department, not all-or-nothing: one bad
+     department must not blank the other twelve. */
+  const isoByDept = new Map();
+  const isoErrors = [];
+  await Promise.all([...byDept.keys()].map(async (deptId) => {
+    try {
+      const { data, error } = await sb.rpc("dept_iso_hours_for", {
+        p_dept: deptId,
+        p_from: monthStart.toISOString(),
+        p_to: monthEnd.toISOString(),
+      });
+      if (error) throw new Error(error.message);
+      isoByDept.set(deptId, Array.isArray(data) ? data : []);
+    } catch (e) {
+      // No entry, NOT an empty array: stationMetrics must be able to tell "this department genuinely
+      // had no credited hours" from "we could not find out", and only the first of those is a zero.
+      isoErrors.push({ deptId, error: String(e?.message || e) });
+    }
+  }));
+
   const results = [];
   const skipped = [];                                        // departments deliberately not mailed, with the reason — never silent
   let total = 0;
@@ -626,7 +741,11 @@ export default async function handler(req, res) {
     const metrics = {
       trainingPct: trainingCompliancePct(mi.sessions.filter((s) => s.department_id === deptId), mi.attendance, counted, year),
       certsPct: certsCurrentPct(mi.certRows.filter((c) => c.department_id === deptId), countedIds, today),
-      station: stationMetrics(mi.shifts.filter((s) => s.department_id === deptId), countedIds),
+      // `?? null` is the whole point of the has() check: a department whose hours read failed passes
+      // null and dashes out, rather than passing [] and asserting zero credited hours.
+      station: stationMetrics(mi.shifts.filter((s) => s.department_id === deptId),
+                              isoByDept.has(deptId) ? isoByDept.get(deptId) : null,
+                              countedIds),
       apparatus: {
         total: deptApparatus.length || null,                  // no apparatus on file → "—", not "0 of 0"
         inService: deptApparatus.filter((a) => a.in_service !== false).length,   // null counts as in service, matching App.jsx:6789
@@ -695,5 +814,8 @@ export default async function handler(req, res) {
     ...(du.error ? { dutiesError: du.error } : {}),
     ...(skipped.length ? { skipped } : {}),
     ...(mi.error ? { metricsError: mi.error } : {}),
+    // Same reason mi.error is surfaced: a department showing "—" for station hours is otherwise
+    // indistinguishable from one that genuinely had none, and nobody would know to look.
+    ...(isoErrors.length ? { isoHoursErrors: isoErrors } : {}),
   });
 }

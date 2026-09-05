@@ -981,6 +981,18 @@ export function buildStationHoursDoc(data) {
     const hh = d.getHours(), mm = String(d.getMinutes()).padStart(2, "0");
     return `${((hh + 11) % 12) + 1}:${mm} ${hh < 12 ? "AM" : "PM"}`;
   };
+  /* THE OUT-TIME, DATE-STAMPED ONLY WHEN IT DRIFTS. The Date column carries the IN-date, so an
+     overnight shift printed "In 7:15 AM / Out 8:10 PM" and read as a 13-hour day beside an Hours
+     column saying 36.9 — a contradiction on the page, in the document that goes to the county.
+     Same rule and same separator as the Shift Log on screen, so a leader checking one against the
+     other sees the same row twice rather than two versions of it. Same-day shifts stay time-only:
+     stamping every row would bury the drifting ones. */
+  const clockOut = (inIso, outIso) => {
+    const a = inIso ? new Date(inIso) : null, b = outIso ? new Date(outIso) : null;
+    if (!b || isNaN(b.getTime())) return "—";
+    const drifted = a && !isNaN(a.getTime()) && a.toDateString() !== b.toDateString();
+    return drifted ? `${stamp(outIso)} · ${clock(outIso)}` : clock(outIso);
+  };
   const periodLabel = range.label ? String(range.label).toUpperCase() : "";
 
   y = reportBanner(doc, { deptName: fullName, station, subtitle: "Station Hours", period: periodLabel, prepared });
@@ -1060,7 +1072,9 @@ export function buildStationHoursDoc(data) {
         h1(m.total),
         h1(m.unverified),
         String(m.n ?? 0),
-        `${m.vpct ?? 0}%`,
+        // "—", not 0%: a null vpct means there were no check-in events in the window to take a
+        // percentage of, and a county filing must not print perfect non-verification as a fact.
+        m.vpct == null ? "—" : `${m.vpct}%`,
       ]),
       { columnStyles: { 0: { fontStyle: "bold" }, 1: { halign: "right", cellWidth: 62 }, 2: { halign: "right", cellWidth: 66 }, 3: { halign: "center", cellWidth: 48 }, 4: { halign: "center", cellWidth: 56 } } });
   }
@@ -1083,7 +1097,7 @@ export function buildStationHoursDoc(data) {
       list.map((s) => [
         stamp(s.checked_in_at),
         clock(s.checked_in_at),
-        clock(s.checked_out_at),
+        clockOut(s.checked_in_at, s.checked_out_at),
         h1(s.hours),
         s.kind === "training" ? "Training" : "Standby",
         // WHERE THE ROW CAME FROM. "From attendance" means nobody clocked in — the times shown are
@@ -1118,9 +1132,12 @@ export function buildStationHoursDoc(data) {
     + "labelled \u201cOfficer check-in\u201d so the two can always be told apart, and the flat allowance is "
     + "deliberately conservative rather than the drill's full length. Where a member also checked in on "
     + "location, that observed row wins and their actual clocked duration is used instead. Board meetings, "
-    + "off-site sessions and drills with no recorded length produce no hours at all. Optional sessions "
-    + "credit hours but are not ISO-qualifying training, so they raise the credited total without raising "
-    + "ISO \u2014 which is why the two figures can differ by more than de-overlapping explains.\n"
+    + "off-site sessions, optional sessions and drills with no recorded length produce no credited hours "
+    + "at all \u2014 optional sessions are attended and recorded, but they are not ISO-qualifying training.\n"
+    + "EVERY MINUTE COUNTED ONCE. Time that is both training and standby \u2014 a drill attended by someone "
+    + "already on duty at the station \u2014 is credited once, to training, not twice. Shifts are clipped to "
+    + "the reporting period, so one starting before it or running past it counts only for the part inside. "
+    + "The credited figure IS the ISO/LOSAP figure; there is no second total.\n"
     + "WHAT IS EXCLUDED, and shown anyway. Unverified shifts are recorded and listed but never added to "
     + "the credited figure. Auto-closed shifts are excluded even when the check-in was verified: the stop "
     + "time was estimated by the system rather than observed, so the duration is not evidence until an "

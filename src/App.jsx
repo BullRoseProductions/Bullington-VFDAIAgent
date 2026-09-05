@@ -11,6 +11,7 @@ import {
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
 } from "lucide-react";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
+import { mergeStationHours } from "../shared/station-hours.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -9574,7 +9575,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         `Station hours credited (verified station standby + training): ${h1r(sh.totals.credited)} h across ${sh.totals.shifts} shifts by ${sh.totals.members} members`,
         `Station hours CREDITED comprises location-verified check-ins at their actual clocked duration plus officer-attested drill attendance at a flat 90 minutes each${sh.totals.attestedHrs ? `; ${h1r(sh.totals.attestedHrs)} h of the credited total is officer-attested` : ""}`,
         `Station hours RECORDED but NOT credited toward ISO/LOSAP — check-ins that were neither location-verified nor officer-attested, plus auto-closed shifts whose stop time the system guessed: ${h1r(sh.totals.unverified)} h`,
-        `ISO/LOSAP hours (de-overlapped, clipped to the period): ${h1r(sh.isoTotal)} h`,
+        // ONE FIGURE, SAID ONCE. Credited is now the de-overlapped, clipped figure itself, so stating
+        // an ISO number separately would hand the model two identical values under two labels — which
+        // is how a report ends up adding them, or presenting a "difference" of zero as a finding.
+        `The credited figure above IS the ISO/LOSAP figure: every minute is counted once (time that is both training and standby counts as training only) and shifts are clipped to the period. Do not state a separate ISO total and do not describe any difference between credited and ISO hours.`,
         `Share of check-ins location-verified: ${sh.totals.vpct}%`,
         ...(sh.totals.autoClosed ? [`Shifts auto-closed by the system and awaiting an officer's confirmation: ${sh.totals.autoClosed} (their hours are NOT credited until reviewed)`] : []),
       ] : [`Station hours: unavailable — the record could not be read, so no hours figure is provided.`]),
@@ -9665,7 +9669,9 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
             {/* Three states named, because "100% of check-ins verified" beside 18 uncredited rows read
                 as a contradiction. A count of each is unambiguous where a single percentage was not. */}
             <Line>{sh.totals.vTrue} location-verified · {sh.totals.oTrue} officer check-in{sh.totals.oTrue === 1 ? "" : "s"}{sh.totals.attestedHrs ? ` (${h1r(sh.totals.attestedHrs)} h)` : ""}</Line>
-            <Line>ISO {h1r(sh.isoTotal)} h · {sh.totals.members} members · {sh.totals.shifts} records</Line>
+            {/* No separate ISO line: the credited figure in the heading IS the ISO figure now, and
+                printing it twice under two labels invites a reader to treat them as two quantities. */}
+            <Line>{sh.totals.members} members · {sh.totals.shifts} records</Line>
             {sh.totals.autoClosed > 0 && <Line>⚠ {sh.totals.autoClosed} auto-closed shift{sh.totals.autoClosed > 1 ? "s" : ""} awaiting officer confirmation — not credited</Line>}
           </>
         )}
@@ -10175,80 +10181,9 @@ function ApparatusChecksReport({ S, dept, back }) {
   );
 }
 
-/* THE station-hours bucketing rule — one definition, three readers.
-
-   Lifted verbatim out of StationHoursReport so the Station Hours screen, the Chief's Report and the
-   Meeting Agenda cannot drift apart. They already did once: api/digest.js kept its own copy, missed the
-   auto_closed rule, and now credits hours the screen does not. That divergence is invisible until two
-   documents quoting the same period disagree in front of a board.
-
-   ORDER IS THE RULE. auto_closed is tested BEFORE verified, because a check-in can be properly
-   geo-verified while its stop time was guessed by the sweeper — the duration is fiction, so the shift is
-   recorded and never credited until an officer confirms the real out-time. Reversing these two lines
-   would silently credit estimated hours to ISO/LOSAP.
-
-   Sums are raw; rounding happens once at the display edge. Rounding per row would drift a column away
-   from the total printed above it.
-
-   Input rows are dept_station_shifts output, which already excludes incident, off-site and open shifts
-   at the SQL layer — this function must not re-filter, or the two layers would each hold half a rule. */
-function rollupStationHours(shifts) {
-  const byMember = {};
-  for (const s of shifts || []) {
-    // `id` is carried so PDF detail sections can join on member_id rather than a display name.
-    const m = (byMember[s.member_id] ||= { id: s.member_id, name: s.member_name, standby: 0, training: 0, unverified: 0, vTrue: 0, oTrue: 0, n: 0, autoClosed: 0, checkins: 0, attestedHrs: 0, optionalHrs: 0 });
-    // THREE STATES NOW, not two. `officer_attested` is a separate flag from `verified` on purpose:
-    // an officer marking someone present is a human attestation, not a location proof, and the
-    // ledger has to keep saying which one it was. Crediting them equally is a policy decision;
-    // recording them identically would be a lie, and the whole audit story rests on the difference
-    // staying visible. Never set verified=true on a derived row to make the arithmetic simpler.
-    const attested = !!s.officer_attested;
-    // Older RPC, before the migration lands, returns no such column -> undefined -> false -> these
-    // rows stay in the uncredited bucket exactly as they do today. The client can ship first.
-    const hrs = Number(s.hours) || 0;
-    // auto_closed STILL FIRST and still uncredited, even for an attested row: the stop time was
-    // guessed by the sweeper either way, and an attestation about attendance is not an attestation
-    // about when someone left.
-    if (s.auto_closed) { m.unverified += hrs; m.autoClosed += 1; }
-    else if (!s.verified && !attested) m.unverified += hrs;      // neither proven nor attested
-    else if (s.kind === "training") m.training += hrs;
-    else m.standby += hrs;                                       // standby is the only other surfaced kind
-    if (s.verified) m.vTrue += 1;
-    if (attested && !s.verified) m.oTrue += 1;                   // counted once, in one state only
-    m.n += 1;
-    // VERIFIED % DENOMINATOR — a deliberate choice, and it stays "of CHECK-INS".
-    // Attendance-derived rows involve no check-in at all, so counting them would silently
-    // change what the metric measures: from "how often did people verify at the station when
-    // they checked in" (a discipline number an officer can act on) to "what share of all
-    // recorded time is creditable" (a different question). Including them would also make the
-    // figure fall the moment attendance hours switch on, for reasons unrelated to check-in
-    // behaviour. Derived rows are excluded from the denominator and the label says "of check-ins".
-    // "check-ins" means someone actually checked in — a real punch, geo or otherwise. An officer
-    // marking a roster is not a check-in, so attested rows stay out of this denominator and the
-    // verified % keeps meaning "how often did people verify when they checked in".
-    if (!attested) m.checkins += 1;
-    if (attested) { m.attestedHrs += hrs; if (s.optional) m.optionalHrs += hrs; }
-  }
-  const rows = Object.values(byMember)
-    .map((m) => ({ ...m, total: m.standby + m.training, vpct: m.checkins ? Math.round(100 * m.vTrue / m.checkins) : 0 }))
-    .sort((x, y) => y.total - x.total);   // ranked by CREDITED hours — padding unverified time can't climb this list
-  const standby    = rows.reduce((a, r) => a + r.standby, 0);
-  const training   = rows.reduce((a, r) => a + r.training, 0);
-  const unverified = rows.reduce((a, r) => a + r.unverified, 0);
-  const n          = rows.reduce((a, r) => a + r.n, 0);
-  const vTrue      = rows.reduce((a, r) => a + r.vTrue, 0);
-  const autoClosed = rows.reduce((a, r) => a + r.autoClosed, 0);
-  const checkins   = rows.reduce((a, r) => a + r.checkins, 0);
-  const oTrue       = rows.reduce((a, r) => a + r.oTrue, 0);
-  const attestedHrs = rows.reduce((a, r) => a + r.attestedHrs, 0);
-  const optionalHrs   = rows.reduce((a, r) => a + r.optionalHrs, 0);
-  return {
-    rows,
-    totals: { standby, training, credited: standby + training, unverified, shifts: n, members: rows.length,
-              vTrue, oTrue, checkins, vpct: checkins ? Math.round(100 * vTrue / checkins) : 0,
-              autoClosed, attestedHrs, optionalHrs },
-  };
-}
+/* The station-hours credited rule now lives in shared/station-hours.js — lifted out VERBATIM so it
+   can be tested in node, which cannot import a .jsx file. See that file's header for the rule
+   itself; nothing about the derivation changed in the move. */
 
 /* Station hours for an arbitrary reporting window, for the Chief's Report and the Agenda.
 
@@ -10290,9 +10225,13 @@ function useStationHoursRange(range) {
   };
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [from, to]);
   useReconnect(() => { if (err) load(); });
-  const { rows, totals } = rollupStationHours(shifts);
+  // Merged, not rolled up: totals.credited is the de-overlapped ISO figure, so the Chief's Report and
+  // the Agenda quote the same number the Station Hours screen shows for the same window.
+  const { rows, totals } = mergeStationHours(shifts, iso);
+  // Equal to totals.credited by construction now. Kept as its own name because callers print it under
+  // an explicit ISO/LOSAP label, and that label is worth keeping even when the two agree.
   const isoTotal = (iso || []).reduce((a, r) => a + (Number(r.iso_total_hours) || 0), 0);
-  return { rows, totals, isoTotal, shifts, loaded, err, retry: load };
+  return { rows, totals, isoTotal, iso, shifts, loaded, err, retry: load };
 }
 
 /* Apparatus readiness, AS OF TODAY. Same derivation as the Apparatus screen: out-of-service rigs are
@@ -10662,7 +10601,12 @@ function StationHoursReport({ S, dept, notify, back }) {
   // Agenda read the same one. The names below are unchanged deliberately: everything downstream —
   // the tiles, the roster table, the PDF payload — keeps referring to exactly what it did before,
   // which is what makes this a pure extraction rather than a rewrite.
-  const { rows: shRows, totals: SH } = rollupStationHours(shifts);
+  //
+  // mergeStationHours, NOT rollupStationHours. The credited columns now come from the de-overlapped
+  // dept_iso_hours split, so a drill a member was already on standby for is credited once instead of
+  // twice; the uncredited bucket and the verified % still come from these shift rows. `iso` is loaded
+  // in the same Promise.all below, so both halves always describe the same window.
+  const { rows: shRows, totals: SH } = mergeStationHours(shifts, iso);
   // NOTE: the banner count comes from the UNWINDOWED review queue (review.length), not from `shifts`.
   // Counting auto-closed rows inside the current range would hide a shift flagged last month while
   // you're viewing "This month" — the exact case the queue exists to prevent.
@@ -10682,12 +10626,11 @@ function StationHoursReport({ S, dept, notify, back }) {
   const iso_training  = iso.reduce((a, r) => a + iso_num(r.training_hours), 0);
   const iso_standby   = iso.reduce((a, r) => a + iso_num(r.standby_hours), 0);
   const iso_total     = iso.reduce((a, r) => a + iso_num(r.iso_total_hours), 0);
-  // NOT "overlap removed" — it is two effects at once, and it can go either way.
-  // dept_station_shifts (pulled live) filters on checked_in_at alone (>= p_from AND < p_to) and counts
-  // each qualifying shift WHOLE; dept_iso_hours filters on overlap and CLIPS to the window. So a shift
-  // straddling p_from is counted whole by Credited and clipped by ISO (delta positive), while one
-  // straddling p_to is EXCLUDED by Credited entirely but partly counted by ISO (delta negative).
-  // Overlap de-duplication only ever pushes it positive. Label it neutrally.
+  // ZERO BY CONSTRUCTION NOW, and kept only as an assertion. Credited used to be an independent
+  // (wrong) sum, so this delta was a real reconciliation between two derivations and the screen
+  // explained it at length. Credited now IS the ISO figure — mergeStationHours takes it from these
+  // same rows — so any non-zero value here means the two disagree about something they cannot
+  // disagree about, and the explainer below says so instead of narrating a difference by design.
   const iso_delta     = dept_total - iso_total;
   /* ---- E derivations ----
      dept_iso_hours_by_station returns one row per (member, house). The panel is a HOUSE view, so
@@ -10986,7 +10929,10 @@ function StationHoursReport({ S, dept, notify, back }) {
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(r.total)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: r.unverified > 0 ? FIRE.amberText : FIRE.textMuted2 }}>{r.unverified > 0 ? h1(r.unverified) : "—"}</td>
-                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: vColor(r.vpct), fontWeight: 700 }}>{r.vpct}%</td>
+                  {/* Null, not zero, when there were no check-in EVENTS in the window to take a
+                      percentage of — a member whose only presence straddled the period start has ISO
+                      hours here and no shift row. "0%" would read as a member who never verifies. */}
+                  <td style={{ ...TD, textAlign: "right", ...FS.num, color: r.vpct == null ? FIRE.textMuted2 : vColor(r.vpct), fontWeight: 700 }}>{r.vpct == null ? "—" : `${r.vpct}%`}</td>
                 </tr>
               ))}
               <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
@@ -11012,8 +10958,11 @@ function StationHoursReport({ S, dept, notify, back }) {
       <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
         <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS — NO DOUBLE-COUNTING</div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
-          Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This total is reconciled against <b style={{ color: FIRE.textSecondary }}>Credited</b> above and may differ by design.
-          {Math.abs(iso_delta) > 0.05 && <> Difference from Credited this period: <b style={{ color: FIRE.textSecondary }}>{h1(Math.abs(iso_delta))}</b> hrs {iso_delta > 0 ? "lower" : "higher"}. With no shifts straddling the period boundary, that difference is simply the overlap removed.</>}
+          Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This is the per-member breakdown of the <b style={{ color: FIRE.textSecondary }}>Credited</b> figure above; the two agree exactly, because they are the same numbers.
+          {/* Was a reconciliation note explaining a legitimate gap between two derivations. There is
+              one derivation now, so any gap is a fault, and it is reported as one rather than
+              explained away. */}
+          {Math.abs(iso_delta) > 0.05 && <> <b style={{ color: FIRE.amberText }}>These figures disagree with Credited above by {h1(Math.abs(iso_delta))} hrs.</b> They are drawn from the same rows and cannot legitimately differ — treat both as unreliable and report it.</>}
         </div>
         {iso.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "0 12px 12px" }}>
@@ -11126,7 +11075,18 @@ function StationHoursReport({ S, dept, notify, back }) {
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th>{multiStation && <th style={TH}>House</th>}<th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
             <tbody>
-              {log.map((s, i) => (
+              {log.map((s, i) => {
+                /* AN OUT-TIME CAN BELONG TO ANOTHER DAY. The Date column shows the IN-date, so a
+                   shift that ran overnight printed "In 7:15 AM / Out 8:10 PM" and read as a
+                   13-hour Thursday when it was really a 37-hour Thursday-to-Friday. The Hours
+                   column said 36.9 and the two looked like a contradiction — which is exactly
+                   the row a leader stops on, because a long shift is also what an auto-close or a
+                   forgotten check-out looks like. Date-stamp the out-time only when it drifts;
+                   stamping every row would bury the ones that matter in noise. */
+                const outNextDay = s.checked_out_at
+                  && new Date(s.checked_in_at).toDateString() !== new Date(s.checked_out_at).toDateString();
+                const outAt = `${outNextDay ? `${fmtDate(s.checked_out_at)} · ` : ""}${fmtHm(s.checked_out_at)}`;
+                return (
                 <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}`, opacity: (s.verified && !s.auto_closed) ? 1 : 0.62 }}>   {/* muted = recorded but not credited */}
                   <td style={TD}>{fmtDate(s.checked_in_at)}</td>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{s.member_name || "—"}</td>
@@ -11138,14 +11098,15 @@ function StationHoursReport({ S, dept, notify, back }) {
                       already looking to work out what actually happened, not in the verified column. */}
                   <td style={TD}>{s.checked_out_at
                     ? (s.auto_closed
-                        ? <span title="Stopped automatically at the department's maximum shift length — the real out-time is unknown, so this shift is not credited." style={{ color: FIRE.amberText, fontWeight: 600 }}>{fmtHm(s.checked_out_at)} · auto</span>
-                        : fmtHm(s.checked_out_at))
+                        ? <span title="Stopped automatically at the department's maximum shift length — the real out-time is unknown, so this shift is not credited." style={{ color: FIRE.amberText, fontWeight: 600 }}>{outAt} · auto</span>
+                        : outAt)
                     : <span style={{ color: FIRE.greenText, fontWeight: 600 }}>Open</span>}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(s.hours)}</td>
                   <td style={TD}>{s.kind === "training" ? "Training" : "Standby"}</td>
                   <td style={{ ...TD, color: s.verified ? FIRE.greenText : FIRE.amberText, fontWeight: 600 }}>{s.verified ? "✓" : "⚠"}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {/* Counts the FILTERED set. Reading "showing 25 of 300" while a house filter is on
@@ -14892,7 +14853,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}${s.audience === "board" ? " (board)" : s.audience === "leadership" ? " (leadership)" : ""}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
       ...(shOk ? [
-        `Station hours · ${agendaSpan}: ${h1r(sh.totals.credited)} h CREDITED — location-verified check-ins at actual duration plus officer-attested attendance at a flat 90 minutes each${sh.totals.attestedHrs ? ` (${h1r(sh.totals.attestedHrs)} h attested)` : ""}; ${h1r(sh.totals.unverified)} h RECORDED but not credited; ISO ${h1r(sh.isoTotal)} h; ${sh.totals.vTrue} location-verified and ${sh.totals.oTrue} officer check-ins`,
+        `Station hours · ${agendaSpan}: ${h1r(sh.totals.credited)} h CREDITED — location-verified check-ins at actual duration plus officer-attested attendance at a flat 90 minutes each${sh.totals.attestedHrs ? ` (${h1r(sh.totals.attestedHrs)} h attested)` : ""}; ${h1r(sh.totals.unverified)} h RECORDED but not credited; ${sh.totals.vTrue} location-verified and ${sh.totals.oTrue} officer check-ins. The CREDITED figure is already the ISO/LOSAP figure — every minute counted once, clipped to the period. Do not state a separate ISO total.`,
         ...(sh.totals.autoClosed ? [`Auto-closed shifts awaiting an officer's confirmation: ${sh.totals.autoClosed} (hours not credited until reviewed)`] : []),
       ] : [`Station hours: unavailable — not read, so no hours figure is provided.`]),
       ...(apOk ? [
