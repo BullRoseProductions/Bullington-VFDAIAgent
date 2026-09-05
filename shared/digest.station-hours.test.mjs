@@ -1,6 +1,12 @@
 /* stationMetrics — the digest's half of the credited-hours agreement.
  *
- * Runs with no database and no network: `node api/digest.station-hours.test.mjs`.
+ * Runs with no database and no network: `node shared/digest.station-hours.test.mjs`.
+ *
+ * IT LIVES IN shared/ AND MUST STAY THERE, even though it tests a function in api/. Vercel routes
+ * EVERY file under api/, so sitting next to its subject made this test a public serverless endpoint —
+ * 295KB, reachable at /api/digest.station-hours.test, returning 500 because it exports no handler and
+ * calls process.exit() at import. shared/ is where duty-period.test.mjs and maint-due.test.mjs already
+ * live, for exactly this reason. Proximity to the code under test is not worth a public route.
  *
  * WHAT THIS DOES AND DOES NOT PROVE. It proves the MERGE is right — that credited comes from the ISO
  * rows and never from adding standby to training, that auto-closed time lands in the uncredited
@@ -10,7 +16,7 @@
  *
  * Case 1 is Chase Thomas's real shape, which is the whole reason for this change.
  */
-import { stationMetrics } from "./digest.js";
+import { stationMetrics } from "../api/digest.js";
 
 const CHASE = "11111111-1111-1111-1111-111111111111";
 const DREW  = "22222222-2222-2222-2222-222222222222";

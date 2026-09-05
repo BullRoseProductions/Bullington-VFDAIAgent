@@ -344,7 +344,7 @@ function shiftHours(s) {
    Sums are raw and rounded once at the end, matching h1() in the app; rounding per member would drift
    the total away from the rows behind it. */
 const h1 = (n) => Math.round(n * 10) / 10;
-// Exported ONLY so api/digest.station-hours.test.mjs can exercise the merge directly. The route is the
+// Exported ONLY so shared/digest.station-hours.test.mjs can exercise the merge directly. The route is the
 // default export; a named export alongside it changes nothing about how Vercel builds or runs this.
 // The two halves of a number that goes to a board are worth being able to test without a database.
 export function stationMetrics(rows, isoRows, countedIds) {

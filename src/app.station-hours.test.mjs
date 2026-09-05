@@ -1,7 +1,7 @@
 /* mergeStationHours — the Station Hours screen's half of the credited-hours agreement.
  *
  * Runs with no database, no browser and no React: `node src/app.station-hours.test.mjs`.
- * The sibling suite is api/digest.station-hours.test.mjs; the fixtures deliberately mirror it, because
+ * The sibling suite is shared/digest.station-hours.test.mjs; the fixtures deliberately mirror it, because
  * the whole point is that the screen and the weekly email agree about the same member.
  *
  * WHAT THIS PROVES. That the merge is right: credited comes from the de-overlapped ISO rows and is
