@@ -9773,7 +9773,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
   if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
-  if (view === "stationhours") return <StationHoursReport S={S} dept={dept} notify={notify} back={() => setView(null)} />;   // notify: the needs-review panel writes, so it reports failures the same way every other leadership mutation does
+  if (view === "stationhours") return <StationHoursReport S={S} role={role} dept={dept} notify={notify} back={() => setView(null)} />;   // notify: the needs-review panel writes, so it reports failures the same way every other leadership mutation does. role: the open-shift panel is ADMIN-only, narrower than this screen
   if (view === "capital") return <CapitalPlanReport S={S} dept={dept} back={() => setView(null)} />;
   if (view === "apparatuschecks") return <ApparatusChecksReport S={S} dept={dept} back={() => setView(null)} />;
   return (
@@ -10461,7 +10461,7 @@ const RANGES = {
 // Two reads in parallel; the per-member rollup is done here rather than in SQL so the shift log and the
 // summary are guaranteed to be the same rows. Still no coordinates anywhere — a shift carries only
 // verified true/false, and no distance is ever computed or shown.
-function StationHoursReport({ S, dept, notify, back }) {
+function StationHoursReport({ S, role, dept, notify, back }) {
   const [rangeKey, setRangeKey] = useState("month");
   const [shifts, setShifts] = useState([]);
   const [onNow, setOnNow] = useState([]);
@@ -10528,6 +10528,52 @@ function StationHoursReport({ S, dept, notify, back }) {
     });
   }
   useEffect(() => { loadReview(); }, []);
+  /* ---- open shifts that may have missed a checkout (early catch) ----
+     A DIFFERENT QUESTION FROM THE QUEUE ABOVE, which is why it is a separate read and a separate
+     panel. The review queue asks "the machine guessed a stop time — what was the real one?" about a
+     CLOSED row. This asks "nobody has stopped this clock at all — is that person still there?" about
+     an OPEN one, while it can still be answered from memory rather than reconstructed weeks later.
+
+     ADMIN ONLY, narrower than this screen. Editing the hours that feed ISO/LOSAP is a Department
+     Admin action; an Officer can read the report but not rewrite a clock. The RPC enforces it —
+     is_dept_admin() — and this gate only decides whether to ASK, because calling it as an Officer
+     would return "Not authorized" and put an error banner on a screen they are entitled to read.
+     DEPT_ADMIN_ROLES includes Project Admin, so the support account keeps access. */
+  const isDA = isDeptAdmin(role);
+  const [openLong, setOpenLong] = useState([]);
+  const [openLongErr, setOpenLongErr] = useState("");
+  const [openLongShown, setOpenLongShown] = useState(false);
+  const [closeAt, setCloseAt] = useState({});      // shift_id -> datetime-local string, uncommitted
+  function loadOpenLong() {
+    if (!isDA) return;
+    supabase.rpc("dept_open_long_shifts").then(({ data, error }) => {
+      // Last-known list kept on failure, like every other loader here: a read that failed is not
+      // "nothing is stuck open", and reporting an empty list would be the more dangerous answer.
+      if (error) { setOpenLongErr(error.message || "Please try again."); return; }
+      setOpenLongErr(""); setOpenLong(Array.isArray(data) ? data : []);
+    });
+  }
+  useEffect(() => { loadOpenLong(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isDA]);
+  // The one write this panel performs. Same shape as confirmOut: busy id, RPC, notify with the
+  // server's own sentence on failure, reload BOTH the list and the windowed figures on success —
+  // closing a shift adds credited hours, so the tiles above must not keep showing the old total.
+  async function closeOpenShift(r) {
+    const raw = closeAt[r.shift_id];
+    const when = raw ? new Date(raw) : null;       // datetime-local parses as LOCAL time — correct here
+    if (!raw || !when || isNaN(when.getTime())) {
+      notify?.({ kind: "error", title: "Enter the out-time", text: "Set when the member actually left before closing the shift." });
+      return;
+    }
+    setBusyId(r.shift_id);
+    const { error } = await supabase.rpc("close_open_shift", { p_shift_id: r.shift_id, p_checked_out_at: when.toISOString() });
+    setBusyId(null);
+    // The RPC raises rather than no-opping, so error.message is a sentence an admin can act on
+    // ("That shift is already closed.") — surface it rather than swallowing it.
+    if (error) { notify?.({ kind: "error", title: "Couldn't close that shift", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: `Shift closed for ${r.member_name || "that member"}.` });
+    setCloseAt((o) => { const n = { ...o }; delete n[r.shift_id]; return n; });
+    loadOpenLong(); load(rangeKey);
+  }
   // <input type="datetime-local"> speaks local wall-clock with no zone. Format for min/max the same
   // way the browser will hand the value back, so the native picker constrains to a sane window.
   const localInput = (iso) => {
@@ -10691,6 +10737,17 @@ function StationHoursReport({ S, dept, notify, back }) {
   const vColor = (p) => (p < 85 ? FIRE.amberText : FIRE.green);                      // 85% is the "mostly at the station" line
   const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   const fmtHm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };   // NOT the module-scope fmtTime — that one parses a bare "HH:MM", this takes a full timestamp
+  /* CENTRAL, STATED. Everything else on this screen renders in the browser's own zone, which is
+     correct for a member reading their own department's hours. This one line is read by a support
+     account that may be in another zone while deciding whether a shift that started "yesterday
+     evening" is stuck — and getting that wrong by an hour is how the wrong out-time gets typed.
+     The zone is named in the output rather than assumed, so a reader in Denver knows what they are
+     looking at instead of quietly mis-reading it. Matches DIGEST_TZ in api/digest.js. */
+  const fmtCT = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
   const sinceText = (iso) => {
     const ms = Date.now() - new Date(iso).getTime();
     if (!Number.isFinite(ms) || ms < 0) return "";
@@ -10772,6 +10829,17 @@ function StationHoursReport({ S, dept, notify, back }) {
             // past the cap — and it takes the off-site branch, because approve_offsite fixes the time
             // AND approves in one action, which is exactly what that row needs.
             const isOffsite = r.reason === "offsite_pending" || r.reason === "both";
+            /* WHO MAY ACT, now that the server has narrowed it. resolve_auto_closed_shift and
+               void_auto_closed_shift moved to is_dept_admin(); approve_offsite deliberately did
+               NOT, because approving off-site work is a judgement about whether it counted, not an
+               edit to a clock. So an Officer keeps the off-site decisions and loses the auto-closed
+               corrections — and the buttons have to follow, or they click Confirm and get
+               "Not authorized" from a screen that offered them the action.
+
+               THE QUEUE ITSELF STAYS VISIBLE to anyone who can see this report. Knowing a shift is
+               unresolved is not the same as being able to resolve it, and hiding the row would turn
+               a narrower edit permission into a narrower view of the department's own hours. */
+            const canAct = isOffsite || isDA;
             return (
               <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
@@ -10805,6 +10873,15 @@ function StationHoursReport({ S, dept, notify, back }) {
                     Phone reported leaving {fmtDate(r.fence_exit_at)} at <b style={{ color: FIRE.textPrimary }}>{fmtHm(r.fence_exit_at)}</b>
                   </div>
                 )}
+                {/* Says WHO can finish it rather than showing controls that can only fail. An Officer
+                    reading this now knows the row is waiting on someone specific, which is more
+                    useful than a button that returns "Not authorized". */}
+                {!canAct && (
+                  <div style={{ fontSize: 12, color: FIRE.textMuted2, marginTop: 8, lineHeight: 1.5 }}>
+                    A Department Admin sets the real out-time for this one.
+                  </div>
+                )}
+                {canAct && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
                   {/* Left EMPTY on purpose — prefilling with the machine's guess would invite confirming
                       it unread, which is the one thing this screen exists to prevent. min/max bound the
@@ -10834,6 +10911,69 @@ function StationHoursReport({ S, dept, notify, back }) {
                       <X size={14} color="#C8606A" /> Void — didn&rsquo;t count
                     </button>
                   </>)}
+                </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* OPEN SHIFTS THAT MAY HAVE MISSED A CHECKOUT — the early catch.
+          Admin-only, and SILENT WHEN CLEAN: no empty state, no "0 stuck shifts" reassurance. This
+          sits on a screen leaders read for other reasons, and a panel that is always present stops
+          being noticed. It appears only when there is something to do. */}
+      {isDA && openLong.length > 0 && (
+        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+          <AlertTriangle size={18} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{openLong.length} open shift{openLong.length === 1 ? "" : "s"} that may have missed a checkout</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.5 }}>
+              {openLong.length === 1 ? "This clock is" : "These clocks are"} still running well past a normal shift, which usually means the phone never reported leaving. Closing {openLong.length === 1 ? "it" : "them"} now at the real time is better than letting the automatic stop guess later — <b style={{ color: FIRE.textSecondary }}>nothing is credited until you do</b>.
+            </div>
+          </div>
+          <button style={FS.btn} onClick={() => setOpenLongShown((v) => !v)}>{openLongShown ? <><ChevronUp size={14} color={FIRE.btnIcon} /> Hide</> : <><ClipboardCheck size={14} color={FIRE.btnIcon} /> Close them out</>}</button>
+        </div>
+      )}
+      {isDA && openLongShown && openLong.length > 0 && (
+        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 12 }}>
+          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>OPEN SHIFTS — MAY HAVE MISSED A CHECKOUT</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
+            Longest-running first, and not limited to the selected period. Times are Central.
+          </div>
+          {openLongErr && <div style={{ fontSize: 12, color: FIRE.redText, padding: "0 12px 10px" }}>Couldn&rsquo;t refresh the list: {openLongErr}</div>}
+          {openLong.map((r) => {
+            const busy = busyId === r.shift_id;
+            return (
+              <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{r.kind === "offsite" ? "Off-site" : "Standby"}</span>
+                  {/* The arrival verdict, shown and never edited here. It decides whether these hours
+                      will count once the shift closes, so an admin typing an out-time deserves to
+                      know which they are creating — but closing a shift cannot change it. */}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: r.verified ? FIRE.greenText : FIRE.amberText }}>
+                    {r.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{r.verified ? "Verified" : "Not verified"}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.5 }}>
+                  In {fmtCT(r.checked_in_at)} CT · still open <b style={{ color: FIRE.amberText }}>{h1(r.hours_open)} hrs</b>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
+                  {/* Left EMPTY, for the same reason the review queue leaves its field empty: there is
+                      no machine guess worth confirming unread, and prefilling "now" would quietly turn
+                      every one of these into a full-length shift. min/max bound the native picker to
+                      [check-in, now] — the same window close_open_shift enforces server-side. */}
+                  <label style={{ ...S.field, minWidth: 210 }}>
+                    <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Actual out-time</span>
+                    <input type="datetime-local" style={FS.input}
+                      value={closeAt[r.shift_id] || ""}
+                      min={localInput(r.checked_in_at)}
+                      max={localInput(new Date().toISOString())}
+                      onChange={(e) => setCloseAt((o) => ({ ...o, [r.shift_id]: e.target.value }))} />
+                  </label>
+                  <button disabled={busy} style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={() => closeOpenShift(r)}>
+                    {busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> Close shift</>}
+                  </button>
                 </div>
               </div>
             );
