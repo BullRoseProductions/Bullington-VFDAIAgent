@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>B4C — Before the Call</title>
 
+    <!-- Don't let the platform inflate text on its own. Same stopgap as the Android text-zoom lock
+         in MainActivity, from the other side: this covers iOS and older WebViews, where the engine
+         scales text up without being asked and fixed-pixel layouts collide. Harmless everywhere it
+         is not needed. Both are temporary — the durable fix is font-scale-flexible layouts. -->
+    <style>html{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }</style>
+
     <!-- Favicons (assets live in public/, served from web root) -->
     <link rel="icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32.png" />
