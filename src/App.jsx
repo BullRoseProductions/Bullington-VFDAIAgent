@@ -22,6 +22,7 @@ import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
 import { startDeepLinks } from "./deeplink";
 import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
+import { consumePendingScan } from "./pendingScan";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 // that parser is lazy-imported in extractPdfText() on first upload.
@@ -1939,10 +1940,53 @@ export default function App() {
     return null;   // not one of ours — see the guard in the native effect
   };
 
-  // WEB delivery: the address bar on mount. Unchanged in behaviour; it just calls the
-  // shared router now instead of owning the rules.
+  /* WEB delivery: the address bar on mount, then the stash as a fallback.
+
+     THE URL STILL WINS THE ROUTING. routeDeepLink is unchanged and still decides the screen, so
+     the already-authed same-tab case behaves exactly as it did — parameters read from the bar, bar
+     cleared, done.
+
+     THE STASH IS FOR THE CASE THE URL CANNOT COVER. A camera scan opens Safari, where the member
+     usually has no session; main.jsx renders <Login/> instead of <App/>, so this effect never ran
+     and the parameters were lost. main.jsx now captures the scan at module scope BEFORE that gate,
+     and this replays it the first time <App/> actually mounts — which is the moment there is a
+     real signed-in member to attribute the check-in to.
+
+     ONE STEP COVERS BOTH LOGIN ROUTES. Password login re-renders this same tab; the magic link
+     usually opens a new one. Neither matters here: localStorage is shared across tabs of the
+     origin, so the replay fires wherever <App/> first mounts.
+
+     CONSUMED, NOT JUST READ. consumePendingScan deletes before returning, so a StrictMode double
+     invoke, a failed check-in or any later unrelated login cannot fire the same scan a second time.
+     A lost scan is recoverable by scanning again; a phantom attendance record is not something the
+     member would ever see to correct.
+
+     SPENT ON FIRST MOUNT, BEFORE THE URL IS EVEN CONSULTED. Consuming inside the "URL found
+     nothing" branch looked equivalent and was not: the magic-link redirect returns the member to
+     /checkin?... WITH the parameters, so routeDeepLink matches, and the stash that put them there
+     would be left sitting in storage for the rest of its TTL — free to fire again at the next
+     mount, the next tab, or the next login inside half an hour. That is the duplicate-attendance
+     case the consume-once rule exists to prevent, arriving by the one path the fix itself creates.
+     It also double-fired under StrictMode, whose second invoke sees a cleared URL and would have
+     found the stash still there.
+
+     So: spend it unconditionally, then let the URL win the ROUTING. If both are present they are
+     the same scan anyway; if they somehow differ, the address bar is the more recent intent. */
   /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  useEffect(() => { routeDeepLink(window.location.search); }, []);
+  useEffect(() => {
+    const scan = consumePendingScan();                   // spend it on first mount, whichever path delivered the code
+    if (routeDeepLink(window.location.search)) return;   // URL still wins for routing
+    if (!scan) return;
+    if (scan.kind === "checkin") {
+      setPendingCheckin({ cid: scan.id, token: scan.token });
+      setCheckinResult({ pending: true });
+      setScreen("checkin");
+    } else if (scan.kind === "handoff") {
+      setPendingHandoff({ hid: scan.id, code: scan.token });
+      setHandoffResult({ pending: true });
+      setScreen("handoff");
+    }
+  }, []);
 
   /* NATIVE delivery: getLaunchUrl (cold start) + appUrlOpen (warm), both feeding the
      same router. See deeplink.js for why both are needed and why neither alone is

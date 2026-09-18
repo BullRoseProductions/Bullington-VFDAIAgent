@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { supabase, APP_URL } from "./supabaseClient";
+import { supabase, APP_URL, APP_ORIGIN } from "./supabaseClient";
+import { readFreshPendingScan, scanRedirectUrl } from "./pendingScan";
 
 const RESEND_COOLDOWN = 30; // seconds — protects Supabase's auth-email rate limit from repeat taps
 
@@ -36,9 +37,19 @@ export default function Login() {
     setErr("");
     if (!email.trim()) { setErr("Enter your email first."); return; }
     setLoading(true);
+    /* SEND THEM BACK TO THE CODE THEY SCANNED, not to a bare dashboard.
+       A member who scanned a drill QR and was stopped by this screen has a pending scan stashed
+       (see pendingScan.js). Returning them to APP_URL drops it from the URL entirely, which is
+       half of why the check-in was being lost.
+       This is HARDENING, not the mechanism: the replay in App.jsx performs the check-in from
+       localStorage wherever they land. It matters because the emailed link often opens a new tab,
+       and because it is the one path that still works if the returning tab cannot read storage.
+       ONLY when a fresh stash exists — an ordinary login is untouched. */
+    const scan = readFreshPendingScan();
+    const redirect = (scan && scanRedirectUrl(APP_ORIGIN, scan)) || APP_URL;
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: APP_URL },
+      options: { emailRedirectTo: redirect },
     });
     setLoading(false);
     if (error) { setErr(error.message); return; }

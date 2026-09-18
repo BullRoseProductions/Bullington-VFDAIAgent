@@ -4,6 +4,7 @@ import App from "./App.jsx";
 import Login from "./Login.jsx";
 import { supabase } from "./supabaseClient";
 import { SetNewPassword } from "./SetPassword.jsx";
+import { capturePendingScan } from "./pendingScan";
 
 /* ---------------- Password-recovery URL capture ----------------
  * A reset link lands with `#...type=recovery` in the hash. The auth SDK's
@@ -17,6 +18,20 @@ const IS_RECOVERY =
   typeof window !== "undefined" &&
   (window.location.hash.includes("type=recovery") ||
     new URLSearchParams(window.location.search).get("type") === "recovery");
+
+/* ---------------- Scanned-QR capture, BEFORE the auth gate ----------------
+ * A camera scan of a drill sign-in QR does not fire a Universal Link, so it opens in Safari —
+ * where the member usually has no session. `if (!session) return <Login/>` below renders BEFORE
+ * <App/>, and routeDeepLink lives inside <App/>, so the ?checkin= parameters were never read at
+ * all: sign in, land on the dashboard, check-in silently lost.
+ *
+ * Captured HERE for the same structural reason IS_RECOVERY is: this runs at module scope, on the
+ * import stack, before anything renders and before any gate can decide not to render <App/>.
+ *
+ * Deliberately does NOT clear the URL — routeDeepLink still owns that, so the already-authed
+ * same-tab path keeps working exactly as it does today. See src/pendingScan.js for the TTL, the
+ * consume-once rule, and why this is localStorage rather than sessionStorage. */
+capturePendingScan(typeof window !== "undefined" ? window.location.search : "");
 
 /* ---------------- Stale-bundle guard (no service worker) ----------------
  * index.html points at a content-hashed bundle. Installed PWAs — iOS standalone especially —
