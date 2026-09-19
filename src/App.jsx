@@ -23,6 +23,7 @@ import { startDeepLinks } from "./deeplink";
 import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 import { consumePendingScan } from "./pendingScan";
+import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 // that parser is lazy-imported in extractPdfText() on first upload.
@@ -9064,7 +9065,22 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               {[
                 ["Access", member.access?.length ? member.access.join(", ") : "—"],
                 ["Mentor", (members || []).find((m) => m.id === member.mentorId)?.name || "—"],
-                ["Email", member.email || "—"],
+                /* THE EMAIL IS THE LOGIN, so this cell carries the action that goes with it.
+                   An admin onboarding a station works down the roster opening files; the resend
+                   belongs where they already are when someone says "I never got it", not on a
+                   separate screen. ALREADY ADMIN-GATED: this whole block renders under `assign`
+                   (hasAny(role, DEPT_ADMIN_ROLES)), the same gate as Edit member and the roster's
+                   add/remove — so Officers and members never see it, matching the server-side rule
+                   that account actions are a Department Admin's. */
+                ["Email", member.email
+                  ? (<>
+                      <div>{member.email}</div>
+                      <div style={{ marginTop: 5 }}><ResendLink email={member.email} notify={notify} /></div>
+                    </>)
+                  /* No email means there is nothing to send to, and no button — a control that can
+                     only fail is worse than none. Say what to do instead: the Edit member form
+                     immediately above is where an address gets added. */
+                  : (<span style={{ color: FIRE.amberText, fontStyle: "italic" }}>No email — can&rsquo;t sign in. Add one with <b style={{ fontStyle: "normal" }}>Edit member</b>.</span>)],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
                 ["Address", priv?.address || "—"],
@@ -18453,21 +18469,56 @@ function DepartmentAdmin({ S, role, target, notify }) {
   );
 }
 
-// Resend a login link to a department's admin — signInWithOtp, doesn't disturb the PA's own session.
+/* Send someone their login link. Used by the PA's department list and by a Department Admin from a
+   member's file — the same action either way, so it is the same component.
+
+   signInWithOtp DOES NOT DISTURB THE CALLER'S OWN SESSION: it emails the other person a link and
+   returns. The admin stays signed in as themselves.
+
+   IT STAYS AVAILABLE AFTER A SEND, and that is the change this needed to be usable from the roster.
+   It used to latch `sent` permanently, so the button vanished for good and a second attempt meant
+   navigating away and back. The common real case is precisely a second attempt — "it never
+   arrived", check the spam folder, send again — so the confirmation now gives way to a countdown
+   and then to a working button.
+
+   THE COOLDOWN IS SHARED WITH THE LOGIN SCREEN and is the real reason it exists. Supabase caps
+   auth emails per hour per PROJECT — one ceiling behind every one of these buttons — so an admin
+   working down a roster of new members can exhaust the hour's allowance and lock out everybody
+   else's sign-in, with nothing on screen saying so. See src/authLinks.js. */
 function ResendLink({ email, notify }) {
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [sentTo, setSentTo] = useState(null);         // the address we last sent to, for the confirmation
+  const [cooldown, setCooldown] = useState(0);
+  // Same tick as Login.jsx. Cleared on unmount, so closing a member's file mid-countdown does not
+  // leave a timer setting state on a component that is gone.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
   async function send() {
     setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: APP_URL } });
+    const { error } = await sendLoginLink(email);      // trims + lowercases; APP_URL redirect
     setBusy(false);
+    // Surface Supabase's own message rather than a friendly substitute: "For security purposes you
+    // can only request this once every 60 seconds" is something the admin can act on, and inventing
+    // our own wording for a rate limit would hide which limit was hit.
     if (error) { notify?.({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
-    setSent(true);
+    setSentTo(normalizeLoginEmail(email));
+    setCooldown(RESEND_COOLDOWN);
   }
-  if (sent) return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.greenText }}><CheckCircle2 size={14} /> Login link sent to {email}</span>;
+  if (!normalizeLoginEmail(email)) return null;        // nothing to send to — the caller says why
+  if (sentTo && cooldown > 0) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.greenText, flexWrap: "wrap" }}>
+        <CheckCircle2 size={14} /> Login link sent to {sentTo}
+        <span style={{ color: FIRE.textMuted2 }}>· again in {cooldown}s</span>
+      </span>
+    );
+  }
   return (
     <button onClick={send} disabled={busy} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.7 : 1 }}>
-      {busy ? <Loader2 size={13} className="spin" /> : <Send size={13} />} Resend login link
+      {busy ? <Loader2 size={13} className="spin" /> : <Send size={13} />} {sentTo ? "Send again" : "Resend login link"}
     </button>
   );
 }

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase, APP_URL, APP_ORIGIN } from "./supabaseClient";
 import { readFreshPendingScan, scanRedirectUrl } from "./pendingScan";
-
-const RESEND_COOLDOWN = 30; // seconds — protects Supabase's auth-email rate limit from repeat taps
+// The cooldown and the sender are shared with the admin-side resend in App.jsx: all of these
+// buttons draw on ONE project-wide auth-email allowance, so the guard has to be one definition.
+import { RESEND_COOLDOWN, sendLoginLink } from "./authLinks";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -47,10 +48,7 @@ export default function Login() {
        ONLY when a fresh stash exists — an ordinary login is untouched. */
     const scan = readFreshPendingScan();
     const redirect = (scan && scanRedirectUrl(APP_ORIGIN, scan)) || APP_URL;
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: redirect },
-    });
+    const { error } = await sendLoginLink(email, { redirect });
     setLoading(false);
     if (error) { setErr(error.message); return; }
     setSent("link");
