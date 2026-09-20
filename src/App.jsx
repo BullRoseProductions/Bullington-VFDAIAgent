@@ -2737,7 +2737,7 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
 // for them. A plain member has no operations view — this is their ONLY copy, so it stays by default.
 function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard = true, showUpcomingTraining = true }) {
   const { openProof, proofMount } = useProofViewer(notify);   // "View proof" on the member's own approved certs
-  const { openSessionPlans, mounts } = usePlanViewer(S, notify);
+  const { openSessionPlans, mounts } = usePlanViewer(S, notify, dept);
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
   const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length, certsTotal = certsAll.length;
   const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length, expired = certsAll.filter((c) => c.st.rank === 0).length;
@@ -4018,7 +4018,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
   const [upcomingAll, setUpcomingAll] = useState([]);   // all sorted upcoming across the 4 calendar sources; nextEvent derived at render (audience-aware)
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
-  const { openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);   // openSessionPlans left to PersonalView, which owns UPCOMING TRAINING
+  const { openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);   // openSessionPlans left to PersonalView, which owns UPCOMING TRAINING
   const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
@@ -7680,6 +7680,14 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
   function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
   function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
+  /* Print the open document. sectionsToHtml mirrors the on-screen renderer, so the paper matches
+     what was proof-read. printHTML returns false only when the pop-up was blocked — the one
+     failure a member can actually fix, so it is named. */
+  async function printDoc() {
+    if (!openDraft) return;
+    const ok = await printHTML(openDraft.title || "Fundraiser", sectionsToHtml(openDraft.current_text ?? openDraft.ai_text), dept);
+    if (!ok) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+  }
   async function saveEdit() {
     if (!editBuf.trim()) return;
     setSavingEdit(true);
@@ -7859,6 +7867,10 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Draft"}</div>
               <div style={{ display: "flex", gap: 8 }}>
+                {/* Print. Not gated on canManage — a member who can read the document can put it
+                    on paper; nothing is written and nothing leaves the department. Uses the shared
+                    printHTML + sectionsToHtml, so this page prints exactly what the screen shows. */}
+                <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printDoc}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
               </div>
@@ -8952,23 +8964,38 @@ async function logoDataUri(url) {
     return await new Promise((resolve) => { const r = new FileReader(); r.onloadend = () => resolve(typeof r.result === "string" ? r.result : null); r.onerror = () => resolve(null); r.readAsDataURL(blob); });
   } catch { return null; }
 }
-async function printRoster(list, dept) {
+/* HTML-escape for everything that reaches a print window. Module scope because three things now
+   need it — printHTML, sectionsToHtml and printRoster's table — and three copies of an escaper is
+   three chances for one of them to be the lenient one. */
+const printEsc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* THE PRINT SHELL, for every printable document in the app.
+
+   Lifted out of printRoster rather than written beside it: one print path means one place where
+   the pop-up handling, the crest, the stylesheet and the print trigger are correct, and no second
+   implementation to drift. printRoster now calls this and produces only its table.
+
+   THE SYNCHRONOUS window.open IS LOAD-BEARING AND MUST STAY FIRST. Browsers grant a pop-up only
+   while a user gesture is still on the stack; a single await before it — the logo fetch, say —
+   consumes the gesture and the window is blocked. So the window opens first and the logo is
+   awaited afterwards, into a window that is already ours. Returning false rather than throwing
+   lets every caller say the one useful thing: allow pop-ups.
+
+   bodyHtml IS TRUSTED. Callers escape their own content (sectionsToHtml does, printRoster does);
+   this only wraps it. Anything reaching here unescaped is the caller's bug, and there is exactly
+   one escaper — printEsc — for all of them. */
+async function printHTML(title, bodyHtml, dept, opts = {}) {
   const w = window.open("", "_blank");   // open SYNC (before any await) so the user gesture isn't consumed -> no pop-up block
   if (!w) return false;   // pop-up blocked
-  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const lastName = (m) => { const p = (m.name || "").trim().split(/\s+/); return (p[p.length - 1] || m.name || "").toLowerCase(); };
-  const rows = [...(list || [])].sort((a, b) => lastName(a).localeCompare(lastName(b)) || (a.name || "").localeCompare(b.name || ""));
+  const esc = printEsc;
   const now = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const deptName = dept?.name || "Department";
-  const meta = [dept?.station ? `Station ${esc(dept.station)}` : "", `${rows.length} member${rows.length === 1 ? "" : "s"}`, `Printed ${esc(now)}`].filter(Boolean).join(" &middot; ");
   const logo = await logoDataUri(dept?.logo_url);   // real crest when persisted (embedded); else monogram fallback (same as the app)
   const crest = logo ? `<img class="crest" src="${logo}" alt="">` : `<div class="crest mono">${esc(deptMonogram(dept?.name))}</div>`;
-  const body = rows.map((m) => {
-    const inactive = m.status === "Inactive";
-    const nameCell = esc(m.name || "") + (inactive ? ' <span class="inact">(inactive)</span>' : "");
-    return `<tr class="${inactive ? "r-inact" : ""}"><td>${nameCell}</td><td>${esc(m.role || "Member")}</td><td>${esc(m.phone || "")}</td><td>${esc(m.email || "")}</td></tr>`;
-  }).join("");
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(deptName)} Roster</title><style>
+  // `meta` lets the roster keep its "Station 1 · 27 members" line; everything else just gets the
+  // printed-on date, which is what makes a sheet in a folder self-dating a year later.
+  const sub = [opts.meta || "", `Printed ${esc(now)}`].filter(Boolean).join(" &middot; ");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(deptName)} ${esc(title)}</title><style>
     *{box-sizing:border-box} body{font-family:Georgia,'Times New Roman',serif;color:#000;background:#fff;margin:32px}
     .head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:14px}
     .crest{width:58px;height:58px;flex-shrink:0;object-fit:contain}
@@ -8976,14 +9003,74 @@ async function printRoster(list, dept) {
     h1{font-size:20px;margin:0 0 3px} .sub{font-size:12px;color:#333;margin:0}
     table{width:100%;border-collapse:collapse;font-size:12.5px} th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #aaa;vertical-align:top}
     th{border-bottom:2px solid #000;font-size:11px;text-transform:uppercase;letter-spacing:.04em} .inact{color:#777;font-style:italic;font-size:11px} .r-inact td{color:#555}
+    h2{font-size:14px;margin:16px 0 5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #000;padding-bottom:3px}
+    p{font-size:13px;line-height:1.5;margin:0 0 8px} ul,ol{font-size:13px;line-height:1.5;margin:0 0 9px;padding-left:22px} li{margin:0 0 3px}
+    /* Keep a heading with the block under it — a section title alone at the foot of a page is the
+       classic print artefact, and on an agenda it reads as an empty item. */
+    h2{break-after:avoid;page-break-after:avoid} ul,ol,p{break-inside:avoid-page}
     @media print{body{margin:.5in}}
   </style></head><body>
-    <div class="head">${crest}<div><h1>${esc(deptName)} &mdash; Roster</h1><div class="sub">${meta}</div></div></div>
-    <table><thead><tr><th>Name</th><th>Rank</th><th>Phone</th><th>Email</th></tr></thead><tbody>${body}</tbody></table>
+    <div class="head">${crest}<div><h1>${esc(deptName)} &mdash; ${esc(title)}</h1><div class="sub">${sub}</div></div></div>
+    ${bodyHtml}
   </body></html>`;
   w.document.write(html); w.document.close(); w.focus();
   setTimeout(() => { try { w.print(); } catch {} }, 350);
   return true;
+}
+
+/* The same document the screen shows, as print HTML.
+
+   MIRRORS parseSections AND RichText DELIBERATELY, rather than importing a markdown library. The
+   printout has to match what RichOutput rendered — a member proof-reads on screen and signs the
+   paper — and a general-purpose parser would differ in exactly the small ways nobody checks:
+   an underscore treated as emphasis, a stray `#` becoming a heading. Same rules, same order, same
+   blank-line-flushes-a-list behaviour, so the two cannot disagree.
+
+   Headings render as <h2>: <h1> is already the department name in the shell above. */
+function sectionsToHtml(text) {
+  const esc = printEsc;
+  // **bold** only, matching RichText exactly. Escaped FIRST, so the markers are found in text that
+  // can no longer contain markup.
+  const inline = (t) => esc(t).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const lines = String(text ?? "").replace(/\r/g, "").split("\n");
+  const out = [];
+  let list = null;   // { ordered, items[] }
+  const flush = () => { if (list) { out.push(`<${list.ordered ? "ol" : "ul"}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.ordered ? "ol" : "ul"}>`); list = null; } };
+  const header = (t) => {
+    if (/^#{1,6}\s+/.test(t)) return t.replace(/^#{1,6}\s+/, "").replace(/\*\*/g, "").trim();
+    const m = t.match(/^\*\*(.+?)\*\*:?$/); return m ? m[1].trim() : null;
+  };
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (t === "") { flush(); continue; }
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flush(); continue; }   // rules are dropped, as on screen
+    const h = header(t); if (h) { flush(); out.push(`<h2>${inline(h)}</h2>`); continue; }
+    const b = t.match(/^[-*•]\s+(.*)$/);
+    if (b) { if (!list || list.ordered) { flush(); list = { ordered: false, items: [] }; } list.items.push(b[1]); continue; }
+    const o = t.match(/^\d+[.)]\s+(.*)$/);
+    if (o) { if (!list || !list.ordered) { flush(); list = { ordered: true, items: [] }; } list.items.push(o[1]); continue; }
+    flush(); out.push(`<p>${inline(t)}</p>`);
+  }
+  flush();
+  // An empty document still prints — a letterhead page with the date on it is a legitimate thing
+  // to hand someone, and a blank white window would read as a failure.
+  return out.join("") || "<p><em>This document is empty.</em></p>";
+}
+
+async function printRoster(list, dept) {
+  const esc = printEsc;
+  const lastName = (m) => { const p = (m.name || "").trim().split(/\s+/); return (p[p.length - 1] || m.name || "").toLowerCase(); };
+  const rows = [...(list || [])].sort((a, b) => lastName(a).localeCompare(lastName(b)) || (a.name || "").localeCompare(b.name || ""));
+  const body = rows.map((m) => {
+    const inactive = m.status === "Inactive";
+    const nameCell = esc(m.name || "") + (inactive ? ' <span class="inact">(inactive)</span>' : "");
+    return `<tr class="${inactive ? "r-inact" : ""}"><td>${nameCell}</td><td>${esc(m.role || "Member")}</td><td>${esc(m.phone || "")}</td><td>${esc(m.email || "")}</td></tr>`;
+  }).join("");
+  const table = `<table><thead><tr><th>Name</th><th>Rank</th><th>Phone</th><th>Email</th></tr></thead><tbody>${body}</tbody></table>`;
+  // meta reproduces the line this sheet has always carried; printHTML appends "Printed <date>",
+  // which is where that half of it used to live.
+  const meta = [dept?.station ? `Station ${esc(dept.station)}` : "", `${rows.length} member${rows.length === 1 ? "" : "s"}`].filter(Boolean).join(" &middot; ");
+  return printHTML("Roster", table, dept, { meta });
 }
 function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, initialTab, dept }) {
   const leader = isLeader(role);
@@ -15246,6 +15333,14 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }
   function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }
   function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
+  /* Print the open document. sectionsToHtml mirrors the on-screen renderer, so the paper matches
+     what was proof-read. printHTML returns false only when the pop-up was blocked — the one
+     failure a member can actually fix, so it is named. */
+  async function printDoc() {
+    if (!openDraft) return;
+    const ok = await printHTML(openDraft.title || "Minutes", sectionsToHtml(openDraft.current_text ?? openDraft.ai_text), dept);
+    if (!ok) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+  }
   async function saveEdit() {
     if (!editBuf.trim()) return;
     setSavingEdit(true);
@@ -15563,6 +15658,10 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} disabled={extracting} onClick={() => { const d = openDraft; closeDraft(); extractActionsFrom(d.current_text ?? d.ai_text, d.id, d.title || "Minutes"); }}>{extracting ? <><Loader2 size={14} className="spin" /> Reading…</> : <><Sparkles size={14} color={FIRE.btnIcon} /> Extract action items</>}</button>}
                 {!editing && openDraft.source === "imported" && openDraft.source_file_path && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={() => downloadOriginal(openDraft)}><Download size={14} color={FIRE.btnIcon} /> Download original</button>}
+                {/* Print. Not gated on canManage — a member who can read the document can put it
+                    on paper; nothing is written and nothing leaves the department. Uses the shared
+                    printHTML + sectionsToHtml, so this page prints exactly what the screen shows. */}
+                <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printDoc}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
               </div>
@@ -15695,6 +15794,14 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
   function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
   function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
+  /* Print the open document. sectionsToHtml mirrors the on-screen renderer, so the paper matches
+     what was proof-read. printHTML returns false only when the pop-up was blocked — the one
+     failure a member can actually fix, so it is named. */
+  async function printDoc() {
+    if (!openDraft) return;
+    const ok = await printHTML(openDraft.title || "Agenda", sectionsToHtml(openDraft.current_text ?? openDraft.ai_text), dept);
+    if (!ok) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+  }
   async function saveEdit() {
     if (!editBuf.trim()) return;
     setSavingEdit(true);
@@ -15780,6 +15887,10 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Agenda"}</div>
               <div style={{ display: "flex", gap: 8 }}>
+                {/* Print. Not gated on canManage — a member who can read the document can put it
+                    on paper; nothing is written and nothing leaves the department. Uses the shared
+                    printHTML + sectionsToHtml, so this page prints exactly what the screen shows. */}
+                <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printDoc}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
               </div>
@@ -16170,8 +16281,16 @@ function HandoffConfirm({ S, result, go }) {
   );
 }
 // Re-viewable AI plan: modal showing an ai_text session_plan (reused by Training + MemberDashboard)
-function AiPlanViewer({ S, plan, onClose }) {
+function AiPlanViewer({ S, plan, onClose, dept, notify }) {
   const [view, setView] = useState("quick");   // 'quick' | 'full' — hook BEFORE the early return
+  /* PRINTS THE WHOLE PLAN, not the visible tab. The tabs are a reading convenience — Quick run
+     sheet is an extract of the same document — and a printed "plan" that silently omitted half of
+     it would be discovered at the worst moment, by somebody teaching from the paper. */
+  async function printPlan() {
+    if (!plan) return;
+    const ok = await printHTML(plan.title || "Training Plan", sectionsToHtml(plan.ai_text || ""), dept);
+    if (!ok) notify?.({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+  }
   if (!plan) return null;
   // Split the saved text on `## ` headings; isolate the "Quick Run Sheet" block from the rest.
   const full = plan.ai_text || "";
@@ -16189,7 +16308,10 @@ function AiPlanViewer({ S, plan, onClose }) {
       <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "20px 22px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
           <div style={{ ...FS.kicker, marginBottom: 0 }}>{plan.title || "AI-drafted plan"}</div>
-          <button style={{ ...FS.btn, padding: "6px 10px", flexShrink: 0 }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /> Close</button>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printPlan}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
+            <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /> Close</button>
+          </div>
         </div>
         {hasRun && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{tab("quick", "Quick run sheet")}{tab("full", "Full plan")}</div>}
         <Disclaimer S={S} compact dark />
@@ -16225,7 +16347,14 @@ function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
 // Shared plan-viewing: ONE scope-safe return — a consumer gets the handlers AND the mounts from the
 // same call, so it can't wire a click without also having the viewer mounted (the white-screen we hit).
 // AiPlanViewer + SessionPlanChooser stay module-level; the hook just renders them.
-function usePlanViewer(S, notify) {
+/* dept IS OPTIONAL, and the omission is deliberate rather than an oversight. Five screens use this
+   hook; three hold `dept` (Training, MemberDashboard, PersonalView) and the two dashboard TILES do
+   not. Threading it into those would mean two signature changes and seven call-site edits across
+   the busiest screens in the app, to improve the letterhead on a print started from a tile — so
+   they pass nothing and printHTML falls back to "Department" with a monogram, exactly as it does
+   for a department that has never uploaded a crest. The screen this feature was asked for,
+   Training, passes it. */
+function usePlanViewer(S, notify, dept) {
   const [viewPlan, setViewPlan] = useState(null);
   const [chooserSession, setChooserSession] = useState(null);
   const [viewerDoc, setViewerDoc] = useState(null);   // in-app DocViewer target ({url, name})
@@ -16242,7 +16371,7 @@ function usePlanViewer(S, notify) {
     setChooserSession(s);
   }
   const mounts = (<>
-    {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} />}
+    {viewPlan && <AiPlanViewer S={S} plan={viewPlan} onClose={() => setViewPlan(null)} dept={dept} notify={notify} />}
     {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} onClose={() => setViewerDoc(null)} />}
     {chooserSession && <SessionPlanChooser S={S} session={chooserSession} onView={(p) => { setViewPlan(p); setChooserSession(null); }} onOpen={(p) => { openPlan(p); setChooserSession(null); }} onClose={() => setChooserSession(null)} />}
   </>);
@@ -16525,7 +16654,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [rCount, setRCount] = useState("26");               // N occurrences (the end condition)
   // AI training-plan drafter (Card 2) + ai_text viewer
   const [draftOpen, setDraftOpen] = useState(false);
-  const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify);
+  const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);
   async function toggleAttend(s, mid) {
     if (s.done) return;   // officer lock (UI also hides the control once done)
     const present = (s.attendance || []).includes(mid);
