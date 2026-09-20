@@ -11856,6 +11856,242 @@ function CapitalFields({ S, v, set }) {
 // `dept` is threaded through for ONE reason: the county PDF's banner needs the department
 // name and station, and this screen never needed them before. It is not read anywhere else
 // here, and the button that uses it is gated on it being present.
+/* AFTER-CALL CHECKLIST — the run page and the running log. Slice 3.
+
+   A BRANCH OFF APPARATUS, NOT A NAV ITEM. It renders instead of the rig list and hands the page
+   back untouched. The rigs come in as a prop rather than being re-fetched: Apparatus has already
+   loaded them, scoped to the active station, and a second query here would be a second answer to
+   "which rigs are there" that could disagree with the list the member just came from.
+
+   ANY ACTIVE MEMBER RUNS THIS. It is a chore list, not a readiness judgement — the people who
+   wash the rig at 2am are the people who log it. Gated on the same canCheck identity test the
+   Truck Check uses, and aftercall_log enforces active-member server-side regardless.
+
+   EVERY ACTIVE TASK IS SENT, done true OR false. The log has to record what was SKIPPED as much
+   as what was done — "nobody restocked the gloves" is the single most useful thing this feature
+   can tell a department, and it only exists if unticked items are written too. Sending just the
+   ticked ones would make an empty run and a perfect run identical in the record.
+
+   THE TRUCK CHECK IS NOT TOUCHED. This mirrors CheckRunModal and ApparatusHistory for shape and
+   style; it shares no state, no table and no component with them. */
+function AfterCallRun({ S, rigs, meId, notify, onBack }) {
+  const [rigId, setRigId] = useState("");
+  const [tasks, setTasks] = useState(null);      // null = loading, [] = none set up
+  const [tasksErr, setTasksErr] = useState("");
+  const [ticks, setTicks] = useState({});        // task id -> true
+  const [itemNotes, setItemNotes] = useState({});// task id -> note
+  const [runNote, setRunNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [runs, setRuns] = useState(null);        // null = loading
+  const [runsErr, setRunsErr] = useState("");
+  const [expanded, setExpanded] = useState(null);      // run id whose items are shown
+  const [itemsByRun, setItemsByRun] = useState({});    // run id -> rows
+  const [itemsLoading, setItemsLoading] = useState(null);
+
+  // Central, and SAID so. A run's timestamp is read by whoever asks "did anyone restock after
+  // last night's call" — an hour's ambiguity is the difference between yes and no. Matches
+  // DIGEST_TZ in api/digest.js and the Station Hours open-shift list.
+  const fmtCT = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+  const rigName = (id) => (rigs || []).find((r) => r.id === id)?.name
+    // A run outlives the rig it was logged against: aftercall_runs has no name snapshot, so once
+    // a rig is removed from the fleet the id no longer resolves. Say that plainly rather than
+    // printing a bare uuid or, worse, nothing.
+    || "(removed rig)";
+
+  // Preselect when there is only one rig — an obligatory choice with one option is not a choice.
+  useEffect(() => {
+    if (!rigId && (rigs || []).length === 1) setRigId(rigs[0].id);
+  }, [rigs, rigId]);
+
+  const loadTasks = async () => {
+    const { data, error } = await supabase.from("aftercall_items")
+      .select("id, label").eq("active", true)
+      .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+    if (error) { setTasksErr(error.message || "Please try again."); return; }
+    setTasksErr(""); setTasks(data || []);
+  };
+  const loadRuns = async () => {
+    const { data, error } = await supabase.from("aftercall_runs")
+      .select("id, apparatus_id, performed_by_name, performed_at, note")
+      .order("performed_at", { ascending: false }).limit(50);
+    // A failed read is not an empty log. Keep what is on screen and say so — telling a crew
+    // "nothing logged" when the read simply failed is the one answer that must never be invented.
+    if (error) { setRunsErr(error.message || "Please try again."); return; }
+    setRunsErr(""); setRuns(data || []);
+  };
+  useEffect(() => { loadTasks(); loadRuns(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function toggleExpand(id) {
+    if (expanded === id) { setExpanded(null); return; }
+    setExpanded(id);
+    if (itemsByRun[id]) return;                 // already fetched — a log never changes
+    setItemsLoading(id);
+    const { data, error } = await supabase.from("aftercall_run_items")
+      .select("id, item_label, done, note").eq("run_id", id).order("id", { ascending: true });
+    setItemsLoading(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't open that checklist", text: error.message || "Please try again." }); return; }
+    setItemsByRun((m) => ({ ...m, [id]: data || [] }));
+  }
+
+  async function submit() {
+    if (!rigId) { notify?.({ kind: "error", title: "Pick an apparatus", text: "Choose which rig this checklist is for." }); return; }
+    if (!tasks || tasks.length === 0) return;
+    setSaving(true);
+    /* THE WHOLE LIST, in the order it was shown. Each entry carries done explicitly so the run
+       records the skipped tasks as well as the finished ones. Empty notes are sent as null rather
+       than "" — the RPC trims and nulls them anyway, and a row of empty strings reads as a note
+       that was written and then erased. */
+    const p_items = tasks.map((t) => ({
+      label: t.label,
+      done: !!ticks[t.id],
+      note: (itemNotes[t.id] || "").trim() || null,
+    }));
+    const { data, error } = await supabase.rpc("aftercall_log", {
+      p_apparatus_id: rigId,
+      p_items,
+      p_note: runNote.trim() || null,
+    });
+    setSaving(false);
+    // The RPC raises with a sentence a member can act on — a cross-department rig, an inactive
+    // member, a malformed item. Surface it rather than replacing it with something friendlier
+    // and less true.
+    if (error || !data) { notify?.({ kind: "error", title: "Couldn't log the checklist", text: error?.message || "Nothing was saved — please try again." }); return; }
+    const done = p_items.filter((i) => i.done).length;
+    notify?.({ kind: "success", text: `Logged for ${rigName(rigId)} — ${done} of ${p_items.length} done.` });
+    setTicks({}); setItemNotes({}); setRunNote("");
+    loadRuns();
+  }
+
+  const doneCount = (tasks || []).filter((t) => ticks[t.id]).length;
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={onBack}><ArrowLeft size={15} /> Apparatus</button>
+      <div style={{ marginBottom: 16 }}>
+        <div style={FS.kicker}>AFTER-CALL CHECKLIST</div>
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Back in service</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Tick off what you did after the call. What you skip is recorded too, so the next crew knows what&rsquo;s still outstanding.</div>
+      </div>
+
+      {/* ---- the run form ---- */}
+      <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+        <label style={{ ...S.field, maxWidth: 320 }}>
+          <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Apparatus <span style={{ color: FIRE.deleteRed }}>*</span></span>
+          <select style={FS.input} value={rigId} onChange={(e) => setRigId(e.target.value)}>
+            <option value="">Choose a rig…</option>
+            {(rigs || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </label>
+
+        {tasksErr && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 12, lineHeight: 1.5 }}>Couldn&rsquo;t load the tasks: {tasksErr}</div>}
+        {tasks === null && !tasksErr && <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 12 }}>Loading tasks…</div>}
+
+        {/* Nothing to run. Names where the list comes from, so a member who hits this knows who to
+            ask instead of assuming the feature is broken. */}
+        {tasks !== null && tasks.length === 0 && !tasksErr && (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.5 }}>
+            No tasks set up yet — a leader adds them in <b style={{ color: FIRE.textSecondary }}>Settings &rarr; After-Call Checklist</b>.
+          </div>
+        )}
+
+        {tasks !== null && tasks.length > 0 && (<>
+          <div style={{ ...FS.kicker, marginTop: 16 }}>WHAT YOU DID · {doneCount} of {tasks.length}</div>
+          <div style={{ marginTop: 6 }}>
+            {tasks.map((t) => {
+              const on = !!ticks[t.id];
+              return (
+                <div key={t.id} style={{ padding: "10px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  {/* The whole row is the target. A tick box alone is a small thing to hit on a
+                      phone in the dark with gloves on. */}
+                  <div onClick={() => setTicks((m) => ({ ...m, [t.id]: !on }))}
+                       style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <span style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                   border: `1.5px solid ${on ? FIRE.green : FIRE.btnBorder}`, background: on ? FIRE.green : "transparent" }}>
+                      {on && <CheckCircle2 size={14} color="#0E1014" />}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: on ? FIRE.textPrimary : FIRE.textSecondary }}>{t.label}</span>
+                  </div>
+                  <input style={{ ...FS.input, marginTop: 6, fontSize: 12.5 }}
+                         placeholder={on ? "Note (optional)" : "Why not? (optional)"}
+                         value={itemNotes[t.id] || ""}
+                         onChange={(e) => setItemNotes((m) => ({ ...m, [t.id]: e.target.value }))} />
+                </div>
+              );
+            })}
+          </div>
+          <label style={{ ...S.field, marginTop: 14 }}>
+            <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Anything else (optional)</span>
+            <input style={FS.input} value={runNote} placeholder="e.g. back at 0230, fuel low"
+                   onChange={(e) => setRunNote(e.target.value)} />
+          </label>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
+            <button disabled={saving || !rigId} style={{ ...FS.btnPrimary, opacity: (saving || !rigId) ? 0.6 : 1 }} onClick={submit}>
+              {saving ? <><Loader2 size={16} className="spin" /> Logging…</> : <><ClipboardCheck size={16} /> Log checklist</>}
+            </button>
+            {/* An all-unticked run is legitimate — it records that a crew looked and did none of
+                it — so this informs rather than blocks. */}
+            {doneCount === 0 && <span style={{ fontSize: 12, color: FIRE.textMuted2 }}>Nothing ticked — this will log every task as not done.</span>}
+          </div>
+        </>)}
+      </div>
+
+      {/* ---- the running log ---- */}
+      <div style={{ ...FS.card, padding: "8px 0" }}>
+        <div style={{ ...FS.kicker, padding: "10px 14px 4px" }}>RECENT CHECKLISTS</div>
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
+          Newest first. Times are Central. Tap one to see what was done and what wasn&rsquo;t.
+        </div>
+        {runsErr && <div style={{ fontSize: 12.5, color: FIRE.redText, padding: "0 14px 10px", lineHeight: 1.5 }}>Couldn&rsquo;t load the log: {runsErr}</div>}
+        {runs === null && !runsErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "0 14px 12px" }}>Loading…</div>}
+        {runs !== null && runs.length === 0 && !runsErr && (
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "0 14px 12px" }}>Nothing logged yet.</div>
+        )}
+        {(runs || []).map((r) => {
+          const open = expanded === r.id;
+          const items = itemsByRun[r.id];
+          return (
+            <div key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div onClick={() => toggleExpand(r.id)}
+                   style={{ padding: "11px 14px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", flexWrap: "wrap" }}>
+                <Truck size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{rigName(r.apparatus_id)}</div>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{r.performed_by_name || "A member"} · {fmtCT(r.performed_at)}</div>
+                </div>
+                {open ? <ChevronUp size={15} color={FIRE.textMuted} /> : <ChevronRight size={15} color={FIRE.textMuted} />}
+              </div>
+              {open && (
+                <div style={{ padding: "0 14px 12px" }}>
+                  {r.note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>{r.note}</div>}
+                  {itemsLoading === r.id && <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Loading…</div>}
+                  {(items || []).map((it) => (
+                    <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 0" }}>
+                      {/* Not-done is amber, not red. A skipped task is information for the next
+                          crew, not a failure to punish somebody for. */}
+                      {it.done
+                        ? <CheckCircle2 size={14} color={FIRE.greenText} style={{ flexShrink: 0, marginTop: 2 }} />
+                        : <X size={14} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 2 }} />}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 13, color: it.done ? FIRE.textSecondary : FIRE.textMuted }}>{it.item_label}</span>
+                        {it.note && <div style={{ fontSize: 12, color: FIRE.textMuted2, marginTop: 1, lineHeight: 1.45 }}>{it.note}</div>}
+                      </div>
+                    </div>
+                  ))}
+                  {items && items.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No items recorded.</div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Apparatus({ S, role, members, meId, notify, dept }) {
   const activeStationId = useActiveStation();   // undefined = still loading
   const [rigs, setRigs] = useState([]);
@@ -11873,6 +12109,9 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   // owner/PA, so the array lookup silently fails for them — same reason canManage never broke).
   // If `me` happens to resolve we still honor an explicit Inactive; the RPC enforces active-member server-side.
   const canCheck = !!meId && (me ? me.status !== "Inactive" : true);
+  // After-Call Checklist branch. A sub-view of this page rather than a nav item: it is about a rig,
+  // so it belongs where the rigs are. false = the ordinary Apparatus page, untouched.
+  const [aftercallOpen, setAftercallOpen] = useState(false);
   const [checkingRig, setCheckingRig] = useState(null);  // rig whose check modal is open
   const [historyKey, setHistoryKey] = useState(0);       // bump to remount ApparatusHistory after a finalize (refetch)
   const [serviceKey, setServiceKey] = useState(0);       // bump to remount ApparatusServiceHistory after a take-out/return
@@ -12108,6 +12347,14 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       </div>
     );
   };
+  /* THE BRANCH. Rendered INSTEAD of the rig list, so the main page below is reached only when the
+     checklist is closed and is otherwise exactly what it was. The flag is re-tested here and not
+     only on the entry card: a department that switches the feature off while somebody has the
+     sub-view open should land them back on Apparatus, not leave them inside a feature that no
+     longer exists. Rigs are handed down rather than re-queried — one loader, one answer. */
+  if (aftercallOpen && dept?.aftercall_enabled) {
+    return <AfterCallRun S={S} rigs={rigs} meId={meId} notify={notify} onBack={() => setAftercallOpen(false)} />;
+  }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />}
@@ -12122,6 +12369,27 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         <Stat S={S} dark n={String(rigs.length)} label="Apparatus in station" />
       </div>
       {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
+      {/* AFTER-CALL CHECKLIST — the way into the branch view.
+
+          TWO CONDITIONS, both required. dept.aftercall_enabled means the department opted in; a
+          department that has not must see no trace of it, which is what "off by default" has to
+          mean to be worth anything. canCheck is the same identity gate Start Check uses — any
+          active member, because the crew who did the work are the ones who log it.
+
+          Placed under the readiness tiles and above the rigs: it is a page-level action rather
+          than something you do to one rig, and putting it inside a rig card would have meant
+          choosing the apparatus twice. */}
+      {dept?.aftercall_enabled && canCheck && (
+        <div onClick={() => setAftercallOpen(true)}
+             style={{ ...FS.card, padding: "14px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", borderLeft: `3px solid ${FIRE.btnIcon}` }}>
+          <ClipboardCheck size={18} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>After-Call Checklist</div>
+            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.5 }}>Log the after-call tasks for a rig.</div>
+          </div>
+          <ChevronRight size={16} color={FIRE.textMuted} />
+        </div>
+      )}
       {/* Add and edit are hidden in all-houses mode: it is a read/scan view, and "Go to this
           station" is the way into the house where both already work. That also removes any
           path by which a new rig could be created without a real station. */}
