@@ -11884,6 +11884,17 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
   const [saving, setSaving] = useState(false);
   const [runs, setRuns] = useState(null);        // null = loading
   const [runsErr, setRunsErr] = useState("");
+  /* THE LOG IS A HISTORY, NOT A RECENT-ITEMS LIST. A flat limit(50) is fine for a week and
+     useless for a year: at fifty calls a month it silently hides everything older with no way
+     to reach it, and "no way to reach it" is indistinguishable from "deleted" to the person
+     looking. The range is the real bound; the cap below is only a runaway guard.
+     THIS MONTH by default — a per-call log is reviewed by month, and This Year would just be a
+     bigger pile. Same DateRangePicker, presetRange and presets as attendance and the reports,
+     so the control behaves identically everywhere it appears. */
+  const [presetKey, setPresetKey] = useState("month");
+  const [range, setRange] = useState(() => presetRange("month"));
+  const [capped, setCapped] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [expanded, setExpanded] = useState(null);      // run id whose items are shown
   const [itemsByRun, setItemsByRun] = useState({});    // run id -> rows
   const [itemsLoading, setItemsLoading] = useState(null);
@@ -11914,16 +11925,30 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
     if (error) { setTasksErr(error.message || "Please try again."); return; }
     setTasksErr(""); setTasks(data || []);
   };
+  const RUN_CAP = 500;   // runaway guard only — the date range is what actually bounds this
+  /* THE BOUNDARY IS [from 00:00, to+1 day 00:00), copied from downloadFleet rather than
+     re-derived. `to` is a date with no time, so comparing against it directly would drop almost
+     the whole final day of a range — silently, which is how a chief concludes a crew did nothing
+     on the 30th. Identical to how the fleet report and attendance bound the same question. */
   const loadRuns = async () => {
+    const startAt = new Date(`${range.from}T00:00:00`);
+    const endAt = new Date(`${range.to}T00:00:00`); endAt.setDate(endAt.getDate() + 1);
+    if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) { setRunsErr("Those dates don't look right."); return; }
     const { data, error } = await supabase.from("aftercall_runs")
       .select("id, apparatus_id, performed_by_name, performed_at, note")
-      .order("performed_at", { ascending: false }).limit(50);
+      .gte("performed_at", startAt.toISOString())
+      .lt("performed_at", endAt.toISOString())
+      .order("performed_at", { ascending: false })
+      .limit(RUN_CAP);
     // A failed read is not an empty log. Keep what is on screen and say so — telling a crew
     // "nothing logged" when the read simply failed is the one answer that must never be invented.
     if (error) { setRunsErr(error.message || "Please try again."); return; }
-    setRunsErr(""); setRuns(data || []);
+    setRunsErr(""); setRuns(data || []); setCapped((data || []).length >= RUN_CAP);
   };
-  useEffect(() => { loadTasks(); loadRuns(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { loadTasks(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // Re-reads whenever the range moves. from/to as deps rather than the object, which is a new
+  // identity on every render and would loop.
+  useEffect(() => { loadRuns(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [range.from, range.to]);
 
   async function toggleExpand(id) {
     if (expanded === id) { setExpanded(null); return; }
@@ -11967,6 +11992,64 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
   }
 
   const doneCount = (tasks || []).filter((t) => ticks[t.id]).length;
+
+  /* GROUPED BY CENTRAL DAY, deliberately the same zone the timestamps render in. Grouping by the
+     reader's local day while printing Central times would put a run under a header it visibly
+     contradicts — an 11pm Central run showing beneath the next day's heading. en-CA gives
+     YYYY-MM-DD, which sorts as text. The rows arrive newest-first, so walking them in order
+     yields newest day first and newest run first inside each day with no second sort. */
+  const ctDayKey   = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "?" : d.toLocaleDateString("en-CA", { timeZone: "America/Chicago" }); };
+  const ctDayLabel = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "Unknown date" : d.toLocaleDateString("en-US", { timeZone: "America/Chicago", weekday: "short", month: "short", day: "numeric" }); };
+  const days = (() => {
+    const out = [];
+    for (const r of runs || []) {
+      const key = ctDayKey(r.performed_at);
+      const last = out[out.length - 1];
+      if (last && last.key === key) last.runs.push(r);
+      else out.push({ key, label: ctDayLabel(r.performed_at), runs: [r] });
+    }
+    return out;
+  })();
+
+  /* CSV for the range — a chief's records, and the one form of this log that survives outside the
+     app. ONE ROW PER TASK, not per run: a run with six tasks is six facts, and a chief asking
+     "who has been skipping the fuel check" needs them as rows, not packed into a cell.
+     It fetches the items for every run in the range in ONE query rather than reusing the
+     expand-on-tap cache, which only holds the runs somebody happened to open. */
+  const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  async function exportCsv() {
+    if (!runs || runs.length === 0) return;
+    setExporting(true);
+    const ids = runs.map((r) => r.id);
+    const { data, error } = await supabase.from("aftercall_run_items")
+      .select("run_id, item_label, done, note").in("run_id", ids);
+    setExporting(false);
+    // Refuses rather than exporting a file with the task columns silently blank — a spreadsheet
+    // that looks complete and is not is worse than no spreadsheet.
+    if (error) { notify?.({ kind: "error", title: "Couldn't build the export", text: error.message || "Please try again." }); return; }
+    const byRun = new Map();
+    for (const it of data || []) { if (!byRun.has(it.run_id)) byRun.set(it.run_id, []); byRun.get(it.run_id).push(it); }
+    const rows = [
+      [`After-Call Checklist — ${range.from} to ${range.to}`],
+      ["Date (CT)", "Apparatus", "Logged by", "Task", "Done", "Task note", "Run note"],
+    ];
+    for (const r of runs) {
+      const items = byRun.get(r.id) || [];
+      if (items.length === 0) rows.push([fmtCT(r.performed_at), rigName(r.apparatus_id), r.performed_by_name || "", "(no items recorded)", "", "", r.note || ""]);
+      for (const it of items) {
+        rows.push([fmtCT(r.performed_at), rigName(r.apparatus_id), r.performed_by_name || "",
+                   it.item_label, it.done ? "Yes" : "No", it.note || "", r.note || ""]);
+      }
+    }
+    const csv = rows.map((row) => row.map(csvField).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `after-call-${range.from}_to_${range.to}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -12041,16 +12124,46 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
 
       {/* ---- the running log ---- */}
       <div style={{ ...FS.card, padding: "8px 0" }}>
-        <div style={{ ...FS.kicker, padding: "10px 14px 4px" }}>RECENT CHECKLISTS</div>
+        <div style={{ ...FS.kicker, padding: "10px 14px 4px" }}>CHECKLIST HISTORY</div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
-          Newest first. Times are Central. Tap one to see what was done and what wasn&rsquo;t.
+          Grouped by day, newest first. Times are Central. Tap one to see what was done and what wasn&rsquo;t.
+        </div>
+        <div style={{ padding: "0 14px 12px" }}>
+          <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
+          {/* Nothing is ever removed — widening the range always reaches it. Worth saying on the
+              screen, because a log that shows one month looks like a log that KEEPS one month. */}
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+            <span style={{ fontSize: 11.5, color: FIRE.textMuted2, lineHeight: 1.5 }}>
+              Every checklist is kept — widen the dates to reach older ones.
+            </span>
+            {runs !== null && runs.length > 0 && (
+              <button disabled={exporting} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, marginLeft: "auto", opacity: exporting ? 0.7 : 1 }} onClick={exportCsv}>
+                {exporting ? <Loader2 size={13} className="spin" /> : <Download size={13} color={FIRE.btnIcon} />} Export CSV
+              </button>
+            )}
+          </div>
         </div>
         {runsErr && <div style={{ fontSize: 12.5, color: FIRE.redText, padding: "0 14px 10px", lineHeight: 1.5 }}>Couldn&rsquo;t load the log: {runsErr}</div>}
         {runs === null && !runsErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "0 14px 12px" }}>Loading…</div>}
+        {/* RANGE-AWARE. "Nothing logged yet" would be a claim about the whole department; this is
+            only ever a claim about the dates on screen. */}
         {runs !== null && runs.length === 0 && !runsErr && (
-          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "0 14px 12px" }}>Nothing logged yet.</div>
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "0 14px 12px", lineHeight: 1.5 }}>No checklists logged in this range.</div>
         )}
-        {(runs || []).map((r) => {
+        {/* The cap is a runaway guard, not a policy — but if it ever bites, the list is silently
+            partial, so say so and say what to do about it. */}
+        {capped && (
+          <div style={{ fontSize: 12, color: FIRE.amberText, padding: "0 14px 10px", lineHeight: 1.5 }}>
+            Showing the first {RUN_CAP} in this range — narrow the dates to see the rest.
+          </div>
+        )}
+        {days.map((d) => (
+          <div key={d.key}>
+            <div style={{ padding: "8px 14px 6px", borderTop: `0.5px solid ${FIRE.hairline}`, background: FIRE.btnBg }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textSecondary }}>{d.label}</span>
+              <span style={{ fontSize: 11.5, color: FIRE.textMuted2, marginLeft: 8 }}>{d.runs.length} checklist{d.runs.length === 1 ? "" : "s"}</span>
+            </div>
+            {d.runs.map((r) => {
           const open = expanded === r.id;
           const items = itemsByRun[r.id];
           return (
@@ -12086,7 +12199,9 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
               )}
             </div>
           );
-        })}
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );
