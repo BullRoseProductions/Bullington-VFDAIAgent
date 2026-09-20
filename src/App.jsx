@@ -1022,6 +1022,210 @@ function GeofenceConsentFlow({ meId, notify, onBack, onDone }) {
                              onEscalate={handleEscalate} permission={permission} />;
 }
 
+/* AFTER-CALL CHECKLIST — the department's setup screen. Slice 2: the toggle and the shared task
+   list. No nav item, no member-facing run page and no history view yet; those are slice 3, and
+   aftercall_log() is deliberately not called from here.
+
+   TWO GATES, DELIBERATELY DIFFERENT, because they answer different questions:
+     • WHO SEES THIS SCREEN and edits the list — canManage(): Board | Department Admin | Officer.
+       It matches the is_canmanage() gate the slice 1 policies use, so the screen offers exactly
+       what the server will accept. The owner reaches it as a Board Member.
+     • WHO FLIPS THE FEATURE ON — isDeptAdmin(): Department Admin | Project Admin. Turning a
+       feature on for a whole department is a different decision from maintaining its contents,
+       and an Officer curating the list is not the same as an Officer deciding the department has
+       the feature at all.
+   A non-DA leader therefore sees the true state, read-only, and is told who can change it —
+   rather than a control that would fail.
+
+   THE LIST WRITES DIRECTLY TO aftercall_items under the slice 1 RLS. No RPC: the policies already
+   say is_canmanage() AND department_id = my_department_id(), so the server is the authority and
+   this screen only decides what to offer.
+
+   EVERY WRITE USES .select() AND CHECKS FOR ZERO ROWS. A write REFUSED BY RLS comes back with no
+   error and no rows — not an error — so treating a falsy `error` as success would show a member a
+   task that was never saved. This is the same guard the apparatus checklist and the week-start
+   setter use, for the same reason. */
+function AfterCallSettings({ S, role, dept, setDept, notify }) {
+  const isDA = isDeptAdmin(role);
+  const enabled = !!dept?.aftercall_enabled;
+  const [busyToggle, setBusyToggle] = useState(false);
+  const [items, setItems] = useState(null);        // null = not loaded yet, [] = genuinely empty
+  const [loadErr, setLoadErr] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editBuf, setEditBuf] = useState("");
+
+  /* RLS already confines this to the caller's own department, so no .eq("department_id") is
+     needed — but sort_order IS load-bearing: it is the order crews will read the list in at 2am,
+     and created_at breaks ties so two items added with the same order never swap around between
+     loads. Retired items are excluded; they live on only inside past runs' snapshots. */
+  const load = async () => {
+    const { data, error } = await supabase.from("aftercall_items")
+      .select("id, label, sort_order")
+      .eq("active", true)
+      .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+    // A failed read is not an empty list. Keep whatever was on screen and say so, rather than
+    // showing "no tasks yet" to a department that has twelve.
+    if (error) { setLoadErr(error.message || "Please try again."); return; }
+    setLoadErr(""); setItems(data || []);
+  };
+  useEffect(() => { if (enabled) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled]);
+
+  async function toggle() {
+    const next = !enabled;
+    setBusyToggle(true);
+    const { error } = await supabase.rpc("set_aftercall_enabled", { p_enabled: next });
+    setBusyToggle(false);
+    if (error) { notify?.({ kind: "error", title: "Couldn't change that setting", text: error.message || "Please try again." }); return; }
+    setDept?.((d) => (d ? { ...d, aftercall_enabled: next } : d));
+    notify?.({ kind: "success", text: next ? "After-Call Checklist is on for your department." : "After-Call Checklist is off. Nothing already logged was deleted." });
+  }
+
+  async function addItem() {
+    const lbl = label.trim();
+    if (!lbl) { notify?.({ kind: "error", title: "Give the task a name", text: "For example: “Wash the rig” or “Restock gloves”." }); return; }
+    setBusy(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { setBusy(false); notify?.({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    // Appended at the end: a new task is the newest thing to do, not a re-ordering of the list
+    // somebody else already put in an order that means something to them.
+    const nextOrder = (items || []).reduce((mx, it) => Math.max(mx, it.sort_order ?? 0), -1) + 1;
+    const { data, error } = await supabase.from("aftercall_items")
+      .insert({ department_id: deptId, label: lbl, sort_order: nextOrder, active: true }).select();
+    setBusy(false);
+    if (error || !data || data.length === 0) { notify?.({ kind: "error", title: "Couldn't add that task", text: "It wasn't saved — please try again.", details: error?.message }); return; }
+    setLabel(""); setAdding(false); load();
+  }
+
+  async function saveEdit(id) {
+    const lbl = editBuf.trim();
+    if (!lbl) { notify?.({ kind: "error", title: "Give the task a name", text: "A task needs a name crews will recognise." }); return; }
+    setBusy(true);
+    const { data, error } = await supabase.from("aftercall_items").update({ label: lbl }).eq("id", id).select();
+    setBusy(false);
+    if (error || !data || data.length === 0) { notify?.({ kind: "error", title: "Couldn't save that task", text: "It wasn't changed — please try again.", details: error?.message }); return; }
+    setEditingId(null); load();
+  }
+
+  /* RETIRE, NEVER DELETE. Slice 1 copies the label onto every run at the moment it is logged, so
+     a past run keeps reading exactly as it did — but that is only half of it. The row stays so the
+     department can still see the task existed; deleting it would remove the only evidence outside
+     those snapshots. The confirm says what actually happens, because "remove" reads like erasure. */
+  async function retire(it) {
+    if (!window.confirm(`Remove “${it.label}” from the list?\n\nCrews will stop seeing it. Checklists already logged keep it exactly as it was.`)) return;
+    setBusy(true);
+    const { data, error } = await supabase.from("aftercall_items").update({ active: false }).eq("id", it.id).select();
+    setBusy(false);
+    if (error || !data || data.length === 0) { notify?.({ kind: "error", title: "Couldn't remove that task", text: "It's still on the list — please try again.", details: error?.message }); return; }
+    load();
+  }
+
+  return (
+    <div style={{ padding: "4px 2px 0" }}>
+      <div style={{ marginBottom: 14 }}>
+        <div style={FS.kicker}>AFTER-CALL CHECKLIST</div>
+        {/* The literal, not the DISPLAY const — that one is scoped inside another component far
+            below and is not in scope here. Same face every other settings screen sets. */}
+        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>After-Call Checklist</h1>
+        <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
+          A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.
+        </div>
+      </div>
+
+      {/* the toggle */}
+      <div style={{ ...FS.card, padding: 18, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>
+              {enabled ? "On for your department" : "Off"}
+            </div>
+            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.5 }}>
+              {enabled
+                ? "Crews can log a checklist after a call."
+                : "Nobody sees the checklist until this is on."}
+            </div>
+          </div>
+          {isDA ? (
+            <button disabled={busyToggle} onClick={toggle}
+                    style={{ ...(enabled ? FS.btn : FS.btnPrimary), opacity: busyToggle ? 0.7 : 1 }}>
+              {busyToggle ? <><Loader2 size={15} className="spin" /> Saving…</> : (enabled ? "Turn off" : <><CheckCircle2 size={15} /> Turn on</>)}
+            </button>
+          ) : (
+            /* Read-only for a leader who can curate the list but not switch the feature on.
+               Naming who can is more use than a disabled button with no explanation. */
+            <span style={{ fontSize: 12.5, color: FIRE.textMuted2, maxWidth: 260, lineHeight: 1.5 }}>
+              Ask a Department Admin to turn this on.
+            </span>
+          )}
+        </div>
+        {/* Said plainly at the moment of the decision: turning it off is reversible and destroys
+            nothing, which is exactly what someone hesitating over a toggle needs to know. */}
+        {enabled && (
+          <div style={{ fontSize: 12, color: FIRE.textMuted2, marginTop: 10, lineHeight: 1.5 }}>
+            Turning it off hides the checklist. Anything already logged is kept.
+          </div>
+        )}
+      </div>
+
+      {/* the shared list — only once the feature is on */}
+      {enabled && (
+        <div style={{ ...FS.card, padding: "8px 0" }}>
+          <div style={{ ...FS.kicker, padding: "10px 14px 4px" }}>THE TASK LIST</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
+            One list for the whole department — every rig uses it. Crews tick these off after a call.
+          </div>
+          {loadErr && (
+            <div style={{ fontSize: 12.5, color: FIRE.redText, padding: "0 14px 10px", lineHeight: 1.5 }}>
+              Couldn&rsquo;t load the list: {loadErr}
+            </div>
+          )}
+          {items === null && !loadErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "0 14px 12px" }}>Loading…</div>}
+          {items !== null && items.length === 0 && !loadErr && (
+            <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "0 14px 12px", lineHeight: 1.5 }}>
+              No tasks yet — add the things crews do after a call.
+            </div>
+          )}
+          {(items || []).map((it) => (
+            <div key={it.id} style={{ padding: "10px 14px", borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {editingId === it.id ? (<>
+                <input style={{ ...FS.input, flex: 1, minWidth: 180 }} value={editBuf} autoFocus
+                       onChange={(e) => setEditBuf(e.target.value)}
+                       onKeyDown={(e) => { if (e.key === "Enter") saveEdit(it.id); if (e.key === "Escape") setEditingId(null); }} />
+                <button disabled={busy} style={{ ...FS.btnPrimary, padding: "6px 12px", fontSize: 12.5, opacity: busy ? 0.7 : 1 }} onClick={() => saveEdit(it.id)}>Save</button>
+                <button disabled={busy} style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => setEditingId(null)}>Cancel</button>
+              </>) : (<>
+                <span style={{ flex: 1, minWidth: 140, fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
+                <button style={{ ...FS.btn, padding: "5px 9px" }} title="Rename this task"
+                        onClick={() => { setEditingId(it.id); setEditBuf(it.label || ""); }}><Pencil size={13} color={FIRE.btnIcon} /></button>
+                <button disabled={busy} style={{ ...FS.btn, padding: "5px 9px" }} title="Remove from the list"
+                        onClick={() => retire(it)}><X size={13} color={FIRE.deleteRed} /></button>
+              </>)}
+            </div>
+          ))}
+          <div style={{ padding: "10px 14px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            {adding ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <input style={{ ...FS.input, flex: 1, minWidth: 180 }} value={label} autoFocus
+                       placeholder="e.g. Wash the rig"
+                       onChange={(e) => setLabel(e.target.value)}
+                       onKeyDown={(e) => { if (e.key === "Enter") addItem(); if (e.key === "Escape") { setAdding(false); setLabel(""); } }} />
+                <button disabled={busy} style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={addItem}>
+                  {busy ? <><Loader2 size={15} className="spin" /> Adding…</> : "Add task"}
+                </button>
+                <button disabled={busy} style={FS.btn} onClick={() => { setAdding(false); setLabel(""); }}>Cancel</button>
+              </div>
+            ) : (
+              <button style={FS.btn} onClick={() => setAdding(true)}><Plus size={15} /> Add a task</button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests, members, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
   const isDA = isDeptAdmin(role);
@@ -1036,6 +1240,10 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 Big Bull Technologies, LLC. All rights reserved.</>);
   if (view === "geofence") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<GeofenceConsentFlow meId={meId} notify={notify} onBack={back} /></div>;
+  /* GATED HERE TOO, not only on the card. A card that is not rendered is not a permission — the
+     view key survives in state, so the route needs the same test the card does or a stale key
+     would walk somebody straight past it. */
+  if (view === "aftercall" && canManage(role)) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<AfterCallSettings S={S} role={role} dept={dept} setDept={setDept} notify={notify} /></div>;
   const card = (key, Icon, title, desc) => (
     <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -1065,6 +1273,15 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
           because offering it is already a suggestion that it's expected. Both must be on. */}
       {geofenceConsentAvailable() && dept?.geofence_enabled &&
         card("geofence", MapPin, "Automatic station presence", "Record arrivals and departures at your department's approved locations — read what's collected before you decide.")}
+      {/* Shown to the people who manage the list — Board | DA | Officer, matching the is_canmanage()
+          gate on the aftercall_items policies, so the card never leads to a screen whose writes the
+          server would refuse. The card appears whether the feature is on or off: while it is off,
+          this screen is the only place to find out it exists at all. The description states the
+          default so nobody reads an empty department as a broken one. */}
+      {canManage(role) && card("aftercall", ClipboardCheck, "After-Call Checklist",
+        dept?.aftercall_enabled
+          ? "The shared list of tasks crews complete after a call — add, rename or remove tasks."
+          : "A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.")}
       {card("support", Mail, "Support & Contact", "Get help, send feedback, or request custom training.")}
       {card("about", Award, "About", "App info and copyright.")}
     </div>
@@ -1772,7 +1989,7 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day, geofence_enabled").eq("id", id).single().then(({ data }) => {
+      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day, geofence_enabled, aftercall_enabled").eq("id", id).single().then(({ data }) => {
         if (!data) return;
         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
