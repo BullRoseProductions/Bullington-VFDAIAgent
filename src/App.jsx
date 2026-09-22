@@ -15,7 +15,7 @@ import { mergeStationHours } from "../shared/station-hours.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { authedFetch } from "./apiBase";
+import { authedFetch, isNative } from "./apiBase";
 import { useReconnect, useAutoRefresh, useEditorOpen, looksOffline } from "./useReconnect";
 import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
@@ -23,6 +23,7 @@ import { startDeepLinks } from "./deeplink";
 import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 import { consumePendingScan } from "./pendingScan";
+import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -2262,6 +2263,14 @@ export default function App() {
   useEffect(() => {
     setOnSessionExpired(() => notify({ kind: "error", title: "Your session expired", text: "Please sign back in to keep working — your data is safe.", action: { label: "Sign in", onClick: () => supabase.auth.signOut() } }));
     return () => setOnSessionExpired(null);
+  }, []);
+  /* The export paths — report PDFs, the printable documents, the CSVs — run from module
+     scope and from report.js, none of which can see `notify`. Registering it once here is
+     what lets a failed save say so: a silent no-op is the exact bug the native share path
+     exists to fix, and a share that fails quietly would be indistinguishable from it. */
+  useEffect(() => {
+    setShareNotifier(notify);
+    return () => setShareNotifier(null);
   }, []);
   const S = baseStyles();
 
@@ -7680,13 +7689,13 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
   function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
   function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
-  /* Print the open document. sectionsToHtml mirrors the on-screen renderer, so the paper matches
-     what was proof-read. printHTML returns false only when the pop-up was blocked — the one
-     failure a member can actually fix, so it is named. */
+  /* Print the open document. sectionsToBlocks mirrors the on-screen renderer, so the paper —
+     or, on a phone, the shared PDF — matches what was proof-read. printDocument reports which
+     kind of failure it was; printFailureNotice is the one place that words them. */
   async function printDoc() {
     if (!openDraft) return;
-    const ok = await printHTML(openDraft.title || "Fundraiser", sectionsToHtml(openDraft.current_text ?? openDraft.ai_text), dept);
-    if (!ok) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+    const n = printFailureNotice(await printDocument(openDraft.title || "Fundraiser", sectionsToBlocks(openDraft.current_text ?? openDraft.ai_text), dept));
+    if (n) notify(n);
   }
   async function saveEdit() {
     if (!editBuf.trim()) return;
@@ -7869,7 +7878,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
               <div style={{ display: "flex", gap: 8 }}>
                 {/* Print. Not gated on canManage — a member who can read the document can put it
                     on paper; nothing is written and nothing leaves the department. Uses the shared
-                    printHTML + sectionsToHtml, so this page prints exactly what the screen shows. */}
+                    printDocument + sectionsToBlocks, so this page prints exactly what the screen shows. */}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printDoc}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
@@ -8965,7 +8974,7 @@ async function logoDataUri(url) {
   } catch { return null; }
 }
 /* HTML-escape for everything that reaches a print window. Module scope because three things now
-   need it — printHTML, sectionsToHtml and printRoster's table — and three copies of an escaper is
+   need it — printHTML, blocksToHtml and the table it builds — and three copies of an escaper is
    three chances for one of them to be the lenient one. */
 const printEsc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -8981,7 +8990,7 @@ const printEsc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;
    awaited afterwards, into a window that is already ours. Returning false rather than throwing
    lets every caller say the one useful thing: allow pop-ups.
 
-   bodyHtml IS TRUSTED. Callers escape their own content (sectionsToHtml does, printRoster does);
+   bodyHtml IS TRUSTED. Its only caller is printDocument, via blocksToHtml, which escapes;
    this only wraps it. Anything reaching here unescaped is the caller's bug, and there is exactly
    one escaper — printEsc — for all of them. */
 async function printHTML(title, bodyHtml, dept, opts = {}) {
@@ -8994,7 +9003,9 @@ async function printHTML(title, bodyHtml, dept, opts = {}) {
   const crest = logo ? `<img class="crest" src="${logo}" alt="">` : `<div class="crest mono">${esc(deptMonogram(dept?.name))}</div>`;
   // `meta` lets the roster keep its "Station 1 · 27 members" line; everything else just gets the
   // printed-on date, which is what makes a sheet in a folder self-dating a year later.
-  const sub = [opts.meta || "", `Printed ${esc(now)}`].filter(Boolean).join(" &middot; ");
+  // PLAIN TEXT, escaped here: the PDF renderer takes the same string and would print a
+  // literal "&middot;" if the caller pre-escaped it for HTML.
+  const sub = [opts.meta ? esc(opts.meta) : "", `Printed ${esc(now)}`].filter(Boolean).join(" &middot; ");
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(deptName)} ${esc(title)}</title><style>
     *{box-sizing:border-box} body{font-family:Georgia,'Times New Roman',serif;color:#000;background:#fff;margin:32px}
     .head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:14px}
@@ -9018,7 +9029,66 @@ async function printHTML(title, bodyHtml, dept, opts = {}) {
   return true;
 }
 
-/* The same document the screen shows, as print HTML.
+/* PRINT / SHARE, THE ONE ENTRY POINT EVERY PRINTABLE DOCUMENT NOW USES.
+
+   THE BUG: window.print() and <a download> are both no-ops inside the Capacitor
+   WKWebView. In the installed iOS app, every Print button and every "Download PDF" did
+   literally nothing — no sheet, no error, no file. iOS has no download manager for a web
+   view to target and no print dialog it can raise from JS.
+
+   THE BRANCH: web is untouched — same synchronous window.open, same stylesheet, same
+   pop-up handling, byte for byte. Native renders the same blocks to a real PDF and hands
+   it to the system share sheet, which is where "Save to Files", Mail, AirDrop and AirPrint
+   all live. So the native answer to "print this" is a share sheet with a printable PDF in
+   it, which is the only thing iOS actually offers.
+
+   Returns { ok, reason } rather than a bare boolean: the two platforms fail differently
+   (a blocked pop-up is a thing the member can fix; a PDF that wouldn't build is not), and
+   a caller that can only see `false` would give the wrong instruction on one of them.
+   printFailureNotice turns the result into the toast. */
+async function printDocument(title, blocks, dept, opts = {}) {
+  if (!isNative()) {
+    const ok = await printHTML(title, blocksToHtml(blocks), dept, opts);
+    return ok ? { ok: true } : { ok: false, reason: "popup" };
+  }
+  try {
+    const { buildPrintPdf } = await import("./printPdf.js");
+    const deptName = dept?.name || "Department";
+    const blob = buildPrintPdf({
+      title,
+      deptName,
+      meta: opts.meta || "",
+      printedOn: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+      logo: await logoDataUri(dept?.logo_url),
+      monogram: deptMonogram(dept?.name),
+      blocks,
+    });
+    const filename = `${deptName} - ${title}`.replace(/\s+/g, "-") + ".pdf";
+    const res = await saveOrShare(blob, filename, `${deptName} — ${title}`);
+    // saveOrShare has already toasted anything worth toasting, and a cancelled share
+    // sheet is a deliberate choice, not a failure.
+    return res.ok ? { ok: true } : { ok: false, reason: "share", message: res.message };
+  } catch (e) {
+    return { ok: false, reason: "pdf", message: e?.message };
+  }
+}
+
+/* One failure message, so five Print buttons cannot drift into five different apologies.
+   Returns null when there is nothing to say. */
+function printFailureNotice(res) {
+  if (!res || res.ok) return null;
+  if (res.reason === "popup") return { kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." };
+  if (res.reason === "share") return null;   // saveOrShare already said it
+  return { kind: "error", title: "Couldn't create the PDF", text: "Something went wrong building the document. Please try again.", details: res.message };
+}
+
+/* The same document the screen shows, parsed once into blocks.
+
+   SPLIT FROM THE HTML RENDERER so the native PDF renderer can consume the SAME parse. The
+   printout has to match what RichOutput rendered, and the PDF a member shares off their
+   phone has to match the printout; two parsers would give three documents. One parse,
+   two renderers (blocksToHtml here, buildPrintPdf in printPdf.js).
+
 
    MIRRORS parseSections AND RichText DELIBERATELY, rather than importing a markdown library. The
    printout has to match what RichOutput rendered — a member proof-reads on screen and signs the
@@ -9027,15 +9097,11 @@ async function printHTML(title, bodyHtml, dept, opts = {}) {
    blank-line-flushes-a-list behaviour, so the two cannot disagree.
 
    Headings render as <h2>: <h1> is already the department name in the shell above. */
-function sectionsToHtml(text) {
-  const esc = printEsc;
-  // **bold** only, matching RichText exactly. Escaped FIRST, so the markers are found in text that
-  // can no longer contain markup.
-  const inline = (t) => esc(t).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+function sectionsToBlocks(text) {
   const lines = String(text ?? "").replace(/\r/g, "").split("\n");
   const out = [];
   let list = null;   // { ordered, items[] }
-  const flush = () => { if (list) { out.push(`<${list.ordered ? "ol" : "ul"}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.ordered ? "ol" : "ul"}>`); list = null; } };
+  const flush = () => { if (list) { out.push({ type: "list", ordered: list.ordered, items: list.items }); list = null; } };
   const header = (t) => {
     if (/^#{1,6}\s+/.test(t)) return t.replace(/^#{1,6}\s+/, "").replace(/\*\*/g, "").trim();
     const m = t.match(/^\*\*(.+?)\*\*:?$/); return m ? m[1].trim() : null;
@@ -9044,33 +9110,65 @@ function sectionsToHtml(text) {
     const t = raw.trim();
     if (t === "") { flush(); continue; }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flush(); continue; }   // rules are dropped, as on screen
-    const h = header(t); if (h) { flush(); out.push(`<h2>${inline(h)}</h2>`); continue; }
-    const b = t.match(/^[-*•]\s+(.*)$/);
+    const h = header(t); if (h) { flush(); out.push({ type: "h2", text: h }); continue; }
+    const b = t.match(/^[-*\u2022]\s+(.*)$/);
     if (b) { if (!list || list.ordered) { flush(); list = { ordered: false, items: [] }; } list.items.push(b[1]); continue; }
     const o = t.match(/^\d+[.)]\s+(.*)$/);
     if (o) { if (!list || !list.ordered) { flush(); list = { ordered: true, items: [] }; } list.items.push(o[1]); continue; }
-    flush(); out.push(`<p>${inline(t)}</p>`);
+    flush(); out.push({ type: "p", text: t });
   }
   flush();
+  return out;
+}
+
+/* Blocks -> the print shell's HTML. The web half of the pair; printPdf.js is the other.
+   Both consume sectionsToBlocks, so the paper and the shared PDF cannot disagree about
+   what is a heading, what is a list, or where a list ended. */
+function blocksToHtml(blocks) {
+  const esc = printEsc;
+  // **bold** only, matching RichText exactly. Escaped FIRST, so the markers are found in text that
+  // can no longer contain markup.
+  const inline = (t) => esc(t).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const out = (blocks || []).map((b) => {
+    if (b.type === "h2") return `<h2>${inline(b.text)}</h2>`;
+    if (b.type === "p") return `<p>${inline(b.text)}</p>`;
+    if (b.type === "list") { const tag = b.ordered ? "ol" : "ul"; return `<${tag}>${b.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${tag}>`; }
+    if (b.type === "table") {
+      const head = `<thead><tr>${(b.head || []).map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>`;
+      const body = (b.rows || []).map((r) => `<tr class="${r.muted ? "r-inact" : ""}">${(r.cells || []).map((c, i) => `<td>${esc(c)}${r.muted && i === 0 ? ' <span class="inact">(inactive)</span>' : ""}</td>`).join("")}</tr>`).join("");
+      return `<table>${head}<tbody>${body}</tbody></table>`;
+    }
+    return "";
+  });
   // An empty document still prints — a letterhead page with the date on it is a legitimate thing
   // to hand someone, and a blank white window would read as a failure.
   return out.join("") || "<p><em>This document is empty.</em></p>";
 }
 
+
 async function printRoster(list, dept) {
-  const esc = printEsc;
   const lastName = (m) => { const p = (m.name || "").trim().split(/\s+/); return (p[p.length - 1] || m.name || "").toLowerCase(); };
   const rows = [...(list || [])].sort((a, b) => lastName(a).localeCompare(lastName(b)) || (a.name || "").localeCompare(b.name || ""));
-  const body = rows.map((m) => {
-    const inactive = m.status === "Inactive";
-    const nameCell = esc(m.name || "") + (inactive ? ' <span class="inact">(inactive)</span>' : "");
-    return `<tr class="${inactive ? "r-inact" : ""}"><td>${nameCell}</td><td>${esc(m.role || "Member")}</td><td>${esc(m.phone || "")}</td><td>${esc(m.email || "")}</td></tr>`;
-  }).join("");
-  const table = `<table><thead><tr><th>Name</th><th>Rank</th><th>Phone</th><th>Email</th></tr></thead><tbody>${body}</tbody></table>`;
-  // meta reproduces the line this sheet has always carried; printHTML appends "Printed <date>",
-  // which is where that half of it used to live.
-  const meta = [dept?.station ? `Station ${esc(dept.station)}` : "", `${rows.length} member${rows.length === 1 ? "" : "s"}`].filter(Boolean).join(" &middot; ");
-  return printHTML("Roster", table, dept, { meta });
+  // A TABLE BLOCK, not a hand-built HTML string. The roster is the one printable that isn't
+  // prose, and it has to survive both renderers: blocksToHtml rebuilds the same <table> the
+  // sheet has always had, and the PDF path runs it through autoTable with the same rules and
+  // the same greyed-out treatment for inactive members. `muted` carries that one distinction.
+  const table = {
+    type: "table",
+    head: ["Name", "Rank", "Phone", "Email"],
+    // `muted` is the ONE fact — this member is inactive — and each renderer says it in its own
+    // medium: the HTML sheet keeps its small italic grey "(inactive)" span, the PDF appends the
+    // word in grey text. What must not happen is either of them printing an inactive member as
+    // though they were on the active roll, so the word appears on both; only its styling differs.
+    rows: rows.map((m) => ({
+      muted: m.status === "Inactive",
+      cells: [m.name || "", m.role || "Member", m.phone || "", m.email || ""],
+    })),
+  };
+  // meta reproduces the line this sheet has always carried; the shell appends "Printed <date>",
+  // which is where that half of it used to live. Plain text — each renderer escapes its own.
+  const meta = [dept?.station ? `Station ${dept.station}` : "", `${rows.length} member${rows.length === 1 ? "" : "s"}`].filter(Boolean).join(" \u00b7 ");
+  return printDocument("Roster", [table], dept, { meta });
 }
 function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, initialTab, dept }) {
   const leader = isLeader(role);
@@ -9107,7 +9205,8 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
   const canPrint = isLeader(role);   // is_canmanage (Board/DA/Officer) + Project Admin/owner — LEADERSHIP set
   async function handlePrint() {
-    if (!(await printRoster(members, dept))) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+    const n = printFailureNotice(await printRoster(members, dept));
+    if (n) notify(n);
   }
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
   useEditorOpen(adding);   // add-member form open — hold the roster refresh
@@ -11670,13 +11769,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       ["Legend: P = present, A = absent, blank = not expected (restricted session, not on that roll), (L) = leadership session, (B) = board session"],
     ];
     const csv = allRows.map((r) => r.map(csvField).join(",")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `attendance-${range.from}_to_${range.to}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveOrShareText(csv, `attendance-${range.from}_to_${range.to}.csv`);
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -11839,10 +11932,7 @@ function ActionItemsReport({ S, members, back }) {
       ...open.map(toRow),   // included for the full board picture; Status column marks them Open
     ];
     const csv = allRows.map((r) => r.map(csvField).join(",")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `action-items-${range.from}_to_${range.to}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    saveOrShareText(csv, `action-items-${range.from}_to_${range.to}.csv`);
   }
 
   return (
@@ -12129,13 +12219,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
       }
     }
     const csv = rows.map((row) => row.map(csvField).join(",")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `after-call-${range.from}_to_${range.to}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveOrShareText(csv, `after-call-${range.from}_to_${range.to}.csv`);
   }
 
   return (
@@ -15333,13 +15417,13 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }
   function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }
   function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
-  /* Print the open document. sectionsToHtml mirrors the on-screen renderer, so the paper matches
-     what was proof-read. printHTML returns false only when the pop-up was blocked — the one
-     failure a member can actually fix, so it is named. */
+  /* Print the open document. sectionsToBlocks mirrors the on-screen renderer, so the paper —
+     or, on a phone, the shared PDF — matches what was proof-read. printDocument reports which
+     kind of failure it was; printFailureNotice is the one place that words them. */
   async function printDoc() {
     if (!openDraft) return;
-    const ok = await printHTML(openDraft.title || "Minutes", sectionsToHtml(openDraft.current_text ?? openDraft.ai_text), dept);
-    if (!ok) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+    const n = printFailureNotice(await printDocument(openDraft.title || "Minutes", sectionsToBlocks(openDraft.current_text ?? openDraft.ai_text), dept));
+    if (n) notify(n);
   }
   async function saveEdit() {
     if (!editBuf.trim()) return;
@@ -15477,13 +15561,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         return [it.text, who, when];
       });
     const csv = [header, ...rows].map((r) => r.map(csvField).join(",")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "action-items-completed.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    saveOrShareText(csv, "action-items-completed.csv");
   }
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -15660,7 +15738,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
                 {!editing && openDraft.source === "imported" && openDraft.source_file_path && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={() => downloadOriginal(openDraft)}><Download size={14} color={FIRE.btnIcon} /> Download original</button>}
                 {/* Print. Not gated on canManage — a member who can read the document can put it
                     on paper; nothing is written and nothing leaves the department. Uses the shared
-                    printHTML + sectionsToHtml, so this page prints exactly what the screen shows. */}
+                    printDocument + sectionsToBlocks, so this page prints exactly what the screen shows. */}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printDoc}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
@@ -15794,13 +15872,13 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   function closeDraft() { setOpenDraft(null); setEditing(false); setEditBuf(""); }       // backdrop / X
   function reopen(d) { setEditing(false); setEditBuf(""); setOpenDraft(d); }             // list Open — clear stale edit first
   function startEdit() { setEditBuf(openDraft.current_text ?? openDraft.ai_text ?? ""); setEditing(true); }
-  /* Print the open document. sectionsToHtml mirrors the on-screen renderer, so the paper matches
-     what was proof-read. printHTML returns false only when the pop-up was blocked — the one
-     failure a member can actually fix, so it is named. */
+  /* Print the open document. sectionsToBlocks mirrors the on-screen renderer, so the paper —
+     or, on a phone, the shared PDF — matches what was proof-read. printDocument reports which
+     kind of failure it was; printFailureNotice is the one place that words them. */
   async function printDoc() {
     if (!openDraft) return;
-    const ok = await printHTML(openDraft.title || "Agenda", sectionsToHtml(openDraft.current_text ?? openDraft.ai_text), dept);
-    if (!ok) notify({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+    const n = printFailureNotice(await printDocument(openDraft.title || "Agenda", sectionsToBlocks(openDraft.current_text ?? openDraft.ai_text), dept));
+    if (n) notify(n);
   }
   async function saveEdit() {
     if (!editBuf.trim()) return;
@@ -15889,7 +15967,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
               <div style={{ display: "flex", gap: 8 }}>
                 {/* Print. Not gated on canManage — a member who can read the document can put it
                     on paper; nothing is written and nothing leaves the department. Uses the shared
-                    printHTML + sectionsToHtml, so this page prints exactly what the screen shows. */}
+                    printDocument + sectionsToBlocks, so this page prints exactly what the screen shows. */}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printDoc}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
@@ -16288,8 +16366,8 @@ function AiPlanViewer({ S, plan, onClose, dept, notify }) {
      it would be discovered at the worst moment, by somebody teaching from the paper. */
   async function printPlan() {
     if (!plan) return;
-    const ok = await printHTML(plan.title || "Training Plan", sectionsToHtml(plan.ai_text || ""), dept);
-    if (!ok) notify?.({ kind: "error", title: "Couldn't open the print view", text: "Your browser blocked the pop-up — allow pop-ups for this site, then try again." });
+    const n = printFailureNotice(await printDocument(plan.title || "Training Plan", sectionsToBlocks(plan.ai_text || ""), dept));
+    if (n) notify?.(n);
   }
   if (!plan) return null;
   // Split the saved text on `## ` headings; isolate the "Quick Run Sheet" block from the rest.
@@ -16634,7 +16712,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     ctx.fillText("Scan to check in", W / 2, y); y += footLH;
     ctx.fillStyle = "#6B7280"; ctx.font = "400 28px system-ui, -apple-system, sans-serif";
     ctx.fillText(`${fmtSess(s)} · Code ${token}`, W / 2, y);
-    c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `signin-${s.id}-${token}.png`; a.click(); URL.revokeObjectURL(a.href); }, "image/png");
+    c.toBlob((b) => { if (b) saveOrShare(b, `signin-${s.id}-${token}.png`, "Sign-in sheet"); }, "image/png");
   }
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
@@ -17809,7 +17887,7 @@ function GraphicStudio({ S, brand }) {
   const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   function download() {
     const img = new window.Image();
-    img.onload = () => { const c = document.createElement("canvas"); c.width = size.w; c.height = size.h; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size.w, size.h); ctx.drawImage(img, 0, 0, size.w, size.h); c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `${tk}-${size.key}.png`; a.click(); }); };
+    img.onload = () => { const c = document.createElement("canvas"); c.width = size.w; c.height = size.h; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size.w, size.h); ctx.drawImage(img, 0, 0, size.w, size.h); c.toBlob((b) => { if (b) saveOrShare(b, `${tk}-${size.key}.png`, "QR poster"); }); };
     img.src = dataUrl;
   }
   async function genAI() {
@@ -18216,13 +18294,7 @@ function StationDuties({ S, role, members, meId, notify }) {
       return [e.kind === "other" ? "Other work" : "Duty", e.kind === "other" ? e.what : e.dutyName, who, when];
     });
     const csv = [header, ...rows].map((r) => r.map(csvField).join(",")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `duty-log-week-of-${currentWeek.wk}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveOrShareText(csv, `duty-log-week-of-${currentWeek.wk}.csv`);
   }
   /* All-houses view — same rule as Apparatus and Equipment. */
   const allMode = activeStationId === ALL_STATIONS;

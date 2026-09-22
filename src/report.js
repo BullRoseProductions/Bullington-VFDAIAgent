@@ -2,6 +2,17 @@
 // Generates a downloadable PDF from the department's live data.
 import { jsPDF } from "jspdf";
 import "jspdf-autotable";
+import { saveOrShare } from "./share";
+
+/* WHY NOT doc.save(). jsPDF's save() builds an <a download> and clicks it, which is a
+   silent no-op inside the Capacitor WKWebView: on the installed iPhone app every one of
+   these five "Download PDF" buttons did nothing at all. saveOrShare keeps that exact
+   anchor click on the web and, on a device, writes the file and opens the system share
+   sheet instead — the only route iOS gives a web view to Files, Mail or a printer.
+
+   The download* wrappers are now async. Every call site is an onClick that ignores the
+   result, which is fine: saveOrShare reports its own failures through the toast channel
+   rather than throwing at a caller that was never going to catch it. */
 
 // palette (RGB)
 const RED = [177, 30, 47], RED_DK = [126, 20, 32], PINK = [243, 201, 206];
@@ -132,9 +143,9 @@ function signatureBlock(doc, y, { lines = [] } = {}) {
   return y;
 }
 
-export function downloadDepartmentReport(data) {
+export async function downloadDepartmentReport(data) {
   const { doc, slug } = buildReportDoc(data);
-  doc.save(slug);
+  return saveOrShare(doc.output("blob"), slug);
 }
 
 export function buildReportDoc(data) {
@@ -378,9 +389,9 @@ export function buildReportDoc(data) {
    failure a board report cannot have. subtotal, grandTotal and recommendedAnnual are likewise
    passed in rather than re-derived. isProjected says which of the two a row got, and is printed —
    a reader is entitled to know which numbers the department stated and which were computed. */
-export function downloadCapitalPlan(data) {
+export async function downloadCapitalPlan(data) {
   const { doc, slug } = buildCapitalPlanDoc(data);
-  doc.save(slug);
+  return saveOrShare(doc.output("blob"), slug);
 }
 
 export function buildCapitalPlanDoc(data) {
@@ -567,9 +578,9 @@ const APPARATUS_ITEM_COLSTYLE = { badgeCol: 1, columnStyles: { 0: { fontStyle: "
             rig:   { name, type },
             check: { performed_by_name, performed_at, outcome, pass_count, fail_count, general_note },
             items: [{ item_label, result, note, resolved_at, resolved_by_name, resolution_note }] } */
-export function downloadApparatusCheck(data) {
+export async function downloadApparatusCheck(data) {
   const { doc, slug } = buildApparatusCheckDoc(data);
-  doc.save(slug);
+  return saveOrShare(doc.output("blob"), slug);
 }
 
 export function buildApparatusCheckDoc(data) {
@@ -732,9 +743,9 @@ export function buildApparatusCheckDoc(data) {
    `() => true`. That is the whole switch; nothing else below depends on the choice. */
 const FLEET_EXPAND_ITEMS = (check) => String(check?.outcome || "").toLowerCase() === "fail";
 
-export function downloadFleetCheck(data) {
+export async function downloadFleetCheck(data) {
   const { doc, slug } = buildFleetCheckDoc(data);
-  doc.save(slug);
+  return saveOrShare(doc.output("blob"), slug);
 }
 
 export function buildFleetCheckDoc(data) {
@@ -948,9 +959,9 @@ export function buildFleetCheckDoc(data) {
    dept_station_shifts does not return it, and widening that RPC is a schema change. An always-blank
    "Capture" column would look like missing data rather than an absent field, so the column is omitted
    and the provenance note says why. */
-export function downloadStationHoursReport(data) {
+export async function downloadStationHoursReport(data) {
   const { doc, slug } = buildStationHoursDoc(data);
-  doc.save(slug);
+  return saveOrShare(doc.output("blob"), slug);
 }
 
 export function buildStationHoursDoc(data) {
