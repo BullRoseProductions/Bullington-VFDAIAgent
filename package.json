@@ -21,6 +21,7 @@
     "@capacitor/ios": "^8.5.0",
     "@capacitor/push-notifications": "^8.1.2",
     "@capacitor/share": "^8.0.2",
+    "@capgo/capacitor-updater": "^8.51.23",
     "@supabase/supabase-js": "^2.108.2",
     "@transistorsoft/capacitor-background-geolocation": "^9.3.0",
     "jspdf": "^2.5.2",

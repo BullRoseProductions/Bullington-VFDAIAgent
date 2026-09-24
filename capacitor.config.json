@@ -1,5 +1,15 @@
 {
   "appId": "com.bigbulltech.b4c",
   "appName": "B4C — Before the Call",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "CapacitorUpdater": {
+      "autoUpdate": "atBackground",
+      "defaultChannel": "production",
+      "resetWhenUpdate": true,
+      "autoDeleteFailed": true,
+      "autoDeletePrevious": true,
+      "appReadyTimeout": 10000
+    }
+  }
 }

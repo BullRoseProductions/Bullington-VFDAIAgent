@@ -5,6 +5,8 @@ import Login from "./Login.jsx";
 import { supabase } from "./supabaseClient";
 import { SetNewPassword } from "./SetPassword.jsx";
 import { capturePendingScan } from "./pendingScan";
+import { markBundleHealthy, watchLiveUpdates } from "./liveUpdate";
+import { DestructiveConfirmHost } from "./ConfirmDestructive.jsx";
 
 /* ---------------- Password-recovery URL capture ----------------
  * A reset link lands with `#...type=recovery` in the hash. The auth SDK's
@@ -40,7 +42,13 @@ capturePendingScan(typeof window !== "undefined" ? window.location.search : "");
  * compare it to a freshly-fetched /version.json on load AND on every foreground (the iOS
  * home-screen resume trigger). Mismatch => a newer deploy exists: reload on cold start
  * (loop-guarded), or surface an "Update now" banner mid-session. Cache-Control headers in
- * vercel.json make the reload actually fetch the new index.html. */
+ * vercel.json make the reload actually fetch the new index.html.
+ *
+ * WEB ONLY, IN PRACTICE. In a native build the fetched /version.json comes out of the
+ * SAME bundle as BUILD_ID, so it always matches and this can never fire — that is not a
+ * bug to fix here. Native updates are Capgo's job (src/liveUpdate.js), which swaps the
+ * whole local bundle, version.json included. The two never race: each only ever sees a
+ * self-consistent pair. */
 const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
 async function fetchDeployedBuild() {
   try {
@@ -101,6 +109,18 @@ function Root() {
   /* null = still checking. The THIRD state matters: rendering <App/> while the answer is in flight
      would flash the whole app at somebody who is about to be told to set a password. */
   const [pwOk, setPwOk] = useState(null);
+
+  /* OTA HEALTH SIGNAL + breadcrumbs. Mounted-and-rendered is the claim being made:
+     React came up, supabaseClient initialised without throwing, and this effect ran.
+     A bundle that white-screens never gets here, so Capgo rolls that phone back on its
+     own. Deliberately NOT at module scope, where "it parsed" would be all we proved.
+     No-ops on web. See src/liveUpdate.js for the three rollback layers. */
+  useEffect(() => {
+    markBundleHealthy();
+    let detach = () => {};
+    watchLiveUpdates().then((d) => { detach = d; });
+    return () => detach();
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -175,7 +195,10 @@ function Root() {
   if (pwOk === null) return loading;                    // never flash <App/> mid-check
   if (pwOk === false) return <SetNewPassword firstTime hasSession={!!session} onDone={proceedAfterSet} />;
 
-  return <App />;
+  /* The confirm host is a SIBLING of <App/>, not a child of any screen. It renders
+     through a portal and has to outlive whichever screen asked the question — a delete
+     that unmounts its own list on the way out would otherwise take the dialog with it. */
+  return <><App /><DestructiveConfirmHost /></>;
 }
 
 /* LAST RESORT, below the per-screen boundary in App.jsx.

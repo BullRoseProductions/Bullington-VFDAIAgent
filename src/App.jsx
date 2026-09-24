@@ -24,6 +24,7 @@ import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, write
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
+import { confirmDestructive, setDeleteGateRole } from "./ConfirmDestructive.jsx";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -450,7 +451,7 @@ function YourSix({ S, role, meId, members, notify }) {
     cancelForm(); load();
   }
   async function removeResource(r) {
-    if (!window.confirm(`Remove "${r.name}"? This can't be undone.`)) return;
+    if (!(await confirmDestructive({ noun: "resource", name: r.name }))) return;
     const { data, error } = await supabase.from("resources").delete().eq("id", r.id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the resource", text: "Something went wrong. Please try again.", details: error?.message }); return; }
     load();
@@ -2272,6 +2273,14 @@ export default function App() {
     setShareNotifier(notify);
     return () => setShareNotifier(null);
   }, []);
+  /* Publish the signed-in member's access array to the delete guard. One registration
+     instead of threading `role` into eighteen screens — see src/ConfirmDestructive.jsx
+     for why that matters. Re-runs on role change so a permission edit takes effect
+     without a reload, and clears on unmount so a signed-out shell cannot delete. */
+  useEffect(() => {
+    setDeleteGateRole(role);
+    return () => setDeleteGateRole(null);
+  }, [role]);
   const S = baseStyles();
 
   function go(k, arg) { setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null); }
@@ -3013,7 +3022,7 @@ function Announcements({ role, members, meId, notify, style }) {
   }
 
   async function remove(id) {
-    if (!window.confirm("Delete this announcement?")) return;
+    if (!(await confirmDestructive({ noun: "announcement", name: items.find((x) => x.id === id)?.title || "this announcement", impact: "Everyone who was sent it loses it from their feed." }))) return;
     const prev = items;
     setItems((xs) => xs.filter((x) => x.id !== id));   // optimistic
     const { error } = await supabase.from("announcements").delete().eq("id", id);   // RLS: author or Dept Admin
@@ -5378,7 +5387,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
   // Permanent hard delete (PA ONLY): erase the file + row. Cannot be undone.
   async function hardDeleteDoc(item) {
     if (!item?.id) return;
-    if (!window.confirm(`Permanently delete "${item.name}"? This CANNOT be undone — the file and its record are erased.`)) return;
+    if (!(await confirmDestructive({ noun: "document", name: item.name, impact: "The file and its record are erased. This is the permanent delete — it does not go to the trash." }))) return;
     if (item.storage_path) {
       const { error: rmErr } = await supabase.storage.from("station-documents").remove([item.storage_path]);
       if (rmErr) { notify({ kind: "error", title: "Couldn't delete file", text: "Please try again.", details: rmErr.message }); return; }
@@ -5735,7 +5744,7 @@ function ContentCalendar({ S, role, notify }) {
     setShow(false); setFt(""); loadPosts();
   }
   async function remove(id, t) {
-    if (!window.confirm(`Remove “${t}” from the calendar?`)) return;
+    if (!(await confirmDestructive({ noun: "calendar post", name: t }))) return;
     const { error } = await supabase.from("content_calendar").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the post", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadPosts();
@@ -5753,7 +5762,7 @@ function ContentCalendar({ S, role, notify }) {
     loadCategories(false);                                   // refresh chips; do NOT reset the form selection
   }
   async function deleteCat(cat) {
-    if (!window.confirm(`Delete the “${cat.tag}” category? Posts already on the calendar keep their color and won't change.`)) return;
+    if (!(await confirmDestructive({ noun: "category", name: cat.tag, impact: "Posts already on the calendar keep their colour and won't change." }))) return;
     const { error } = await supabase.from("post_categories").delete().eq("id", cat.id);
     if (error) { notify({ kind: "error", title: "Couldn't delete the category", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadCategories(false);                                   // NOTE: posts state is intentionally untouched here
@@ -5878,7 +5887,7 @@ function RecruitmentCalendar({ S, role, notify }) {
     setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); loadItems();
   }
   async function removeEvent(id, title) {
-    if (!window.confirm(`Remove “${title}” from the recruitment calendar?`)) return;
+    if (!(await confirmDestructive({ noun: "recruitment event", name: title }))) return;
     const { error } = await supabase.from("recruitment_events").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the event", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadItems();
@@ -5988,7 +5997,7 @@ function FundingCalendar({ S, role, notify }) {
     setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); loadItems();
   }
   async function removeEvent(id, title) {
-    if (!window.confirm(`Remove “${title}” from the funding calendar?`)) return;
+    if (!(await confirmDestructive({ noun: "funding event", name: title }))) return;
     const { error } = await supabase.from("funding_events").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the event", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadItems();
@@ -6798,7 +6807,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
   async function removeDate(d) {
     // Same wording as the funding calendar's own remove, because it is the same row and removing it
     // here removes it from the calendar too — the confirm should not imply a smaller blast radius.
-    if (!window.confirm(`Remove \u201c${d.title}\u201d from the funding calendar?`)) return;
+    if (!(await confirmDestructive({ noun: "funding event", name: d.title, impact: "It is the same row the funding calendar shows, so it disappears there too." }))) return;
     const { error } = await supabase.from("funding_events").delete().eq("id", d.id);
     if (error) { notify({ kind: "error", title: "Couldn't remove that date", text: "Something went wrong removing it. Please try again.", details: error.message }); return; }
     load();
@@ -7574,8 +7583,9 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
     if (error) { notify({ kind: "error", title: "Couldn't log that fundraiser", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setLn(""); setLd(""); setLa(""); setAddingLog(false); loadFundraiserLog();
   }
-  async function removeLog(id) {
-    const { error } = await supabase.from("fundraiser_log").delete().eq("id", id);
+  async function removeLog(e) {
+    if (!(await confirmDestructive({ noun: "fundraiser record", name: e?.name || "this fundraiser", impact: "The amount raised comes out of the department's totals." }))) return;
+    const { error } = await supabase.from("fundraiser_log").delete().eq("id", e.id);
     if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadFundraiserLog();   // refetch — UI matches true DB state (covers the silent zero-rows case)
   }
@@ -7848,7 +7858,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
                 <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.date}</div>
               </div>
               {e.amount > 0 && <span style={{ fontWeight: 700, color: FIRE.greenText, fontSize: 13.5 }}>${e.amount.toLocaleString()}</span>}
-              <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>
+              <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>
             </div>
           ))}
       </div>
@@ -9249,7 +9259,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
     setNm(""); setPh(""); setEm(""); setSt("Active"); setAx(["Member"]); setMt(""); setBday(""); setSdate(""); setAddr(""); setSendLink(true); setAdding(false);
   }
   async function remove(id, name) {
-    if (!window.confirm(`Remove ${name} from the department roster? This takes them off the active list.`)) return;
+    if (!(await confirmDestructive({ noun: "member", name, impact: "They come off the roster entirely. To keep their record but stand them down, set them Inactive instead." }))) return;
     setMembers((m) => m.filter((x) => x.id !== id));
     const { error } = await supabase.from("members").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the member", text: "Something went wrong removing that. Please try again.", details: error.message }); }
@@ -13845,8 +13855,9 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't add the item", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setT(""); setAdding(false); loadMaint();
   }
-  async function removeItem(id) {
-    const { error } = await supabase.from("apparatus_maintenance").delete().eq("id", id);
+  async function removeItem(i) {
+    if (!(await confirmDestructive({ noun: "maintenance item", name: i?.task || "this item", impact: "Its completion history goes with it, and the rig stops being checked for this." }))) return;
+    const { error } = await supabase.from("apparatus_maintenance").delete().eq("id", i.id);
     if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadMaint();
   }
@@ -13892,7 +13903,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
             {canManage && <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDone(i)}><ClipboardCheck size={14} /> Mark done</button>}
             <button title="Completion history" style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => toggleHistory(i.id)}><List size={14} color={FIRE.btnIcon} /> History{histFor === i.id ? " ▾" : ""}</button>
             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-            {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+            {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
             {doneFor === i.id && (
               <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div style={{ flexBasis: "100%", fontSize: 12.5, color: FIRE.textSecondary }}>Recording <strong style={{ color: FIRE.textPrimary }}>{i.task}</strong> as done today — notes and cost are optional.</div>
@@ -14963,7 +14974,7 @@ function Equipment({ S, role, members, meId, notify }) {
     setEditingId(null); loadEquipment();
   }
   async function removeUnit(id, label) {
-    if (!window.confirm(`Remove ${label || "this unit"} from the registry?`)) return;
+    if (!(await confirmDestructive({ noun: "equipment unit", name: label || "this unit" }))) return;
     const { data, error } = await supabase.from("equipment").delete().eq("id", id).select();
     if (error || !data || data.length === 0) { notify({ kind: "error", title: "Couldn't remove the unit", text: "Something went wrong removing that. Please try again.", details: error?.message }); return; }
     loadEquipment();
@@ -14996,7 +15007,7 @@ function Equipment({ S, role, members, meId, notify }) {
     setEditingTypeId(null); loadEquipment();
   }
   async function removeType(t) {
-    if (!window.confirm(`Remove the "${t.name}" type?`)) return;
+    if (!(await confirmDestructive({ noun: "equipment type", name: t.name }))) return;
     const { data, error } = await supabase.from("equipment_type").delete().eq("id", t.id).select();
     if (error) {   // FK ON DELETE RESTRICT: units still point at this type (Postgres 23503) — human message, not a raw error
       if (error.code === "23503" || /foreign key|still referenced|violates/i.test(error.message || "")) {
@@ -16080,7 +16091,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
   }
   async function removeItem(it) {
     if (it.is_mentor) return;   // protected — no delete
-    if (!window.confirm(`Remove "${it.label}"? This also clears members' progress on it.`)) return;
+    if (!(await confirmDestructive({ noun: "onboarding item", name: it.label, impact: "Every member's recorded progress on this item is cleared with it." }))) return;
     setBusy(true);
     const { error } = await supabase.from("onboarding_items").delete().eq("id", it.id);   // FK cascade removes its onboarding_progress rows
     setBusy(false);
@@ -16775,7 +16786,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   async function removePlan(id) {
     const p = plan.find((x) => x.id === id);
-    if (!window.confirm(`Remove “${p?.name || "this training"}” from the training plan?`)) return;
+    if (!(await confirmDestructive({ noun: "training plan", name: p?.name || "this training", impact: "Sessions already scheduled from it stay on the calendar, but lose their link back to the plan — which is exactly what made the September deletions unrecoverable from the live database." }))) return;
     const { error } = await supabase.from("training_plans").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the training", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadPlans();
@@ -16945,7 +16956,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                text: `${sess.attendance.length} ${sess.attendance.length === 1 ? "person has" : "people have"} already been marked present for this session, so removing it would erase their attendance. Clear the roster first if you really need to delete it.` });
       return;
     }
-    if (!window.confirm(`Remove “${sess?.title || "this session"}” from the training calendar?`)) return;
+    if (!(await confirmDestructive({ noun: "training session", name: sess?.title || "this session", impact: "Attendance already recorded against this session goes with it." }))) return;
     const { error } = await supabase.from("training_sessions").delete().eq("id", id);
     if (error) {
       // RLS refusing a closed session surfaces as an empty result or a policy violation rather
@@ -17003,7 +17014,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   async function detachPlan(plan) {
     if (!plan?.id) return;
-    if (!window.confirm(`Remove the attached plan “${plan.title}”?`)) return;
+    if (!(await confirmDestructive({ noun: "attached plan", name: plan.title, impact: "The uploaded file is deleted from storage as well as the record." }))) return;
     if (plan.storage_path) { const { error: rmErr } = await supabase.storage.from("station-documents").remove([plan.storage_path]); if (rmErr) { notify({ kind: "error", title: "Couldn't remove the plan", text: "Please try again.", details: rmErr.message }); return; } }
     const { error } = await supabase.from("session_plans").delete().eq("id", plan.id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the plan", text: "The file was removed but its record wasn't.", details: error.message }); }
@@ -18211,7 +18222,7 @@ function StationDuties({ S, role, members, meId, notify }) {
     setAd(""); setAcat("Cleanup"); setAcatNew(""); setArec("Weekly"); setAssignee(""); setDue(""); setAddingA(false);
   }
   async function removeDuty(id, title) {
-    if (!window.confirm(`Remove “${title}” from the duty checklist? Past completions stay in the log.`)) return;
+    if (!(await confirmDestructive({ noun: "duty", name: title, impact: "Past completions stay in the log." }))) return;
     const { error } = await supabase.from("duties").delete().eq("id", id);
     if (error) { notify({ kind: "error", title: "Couldn't remove the duty", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadDuties();   // refetch — UI matches true DB state (covers the silent zero-rows case)
@@ -18241,8 +18252,9 @@ function StationDuties({ S, role, members, meId, notify }) {
     if (error) { notify({ kind: "error", title: "Couldn't log that", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     setLw(""); loadStationLog();
   }
-  async function removeLog(id) {
-    const { error } = await supabase.from("station_log").delete().eq("id", id);
+  async function removeLog(e) {
+    if (!(await confirmDestructive({ noun: "station log entry", name: e?.what || "this entry", impact: "The hours credited for it come off the member's record." }))) return;
+    const { error } = await supabase.from("station_log").delete().eq("id", e.id);
     if (error) { notify({ kind: "error", title: "Couldn't remove that", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
     loadStationLog();   // refetch — UI matches true DB state (covers the silent zero-rows case)
   }
@@ -18499,7 +18511,7 @@ function StationDuties({ S, role, members, meId, notify }) {
               <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
               <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{otherWho(e)} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span>{dutiesGrouped ? ` · ${stationNameOf(e.station_id)}` : ""}</div>
             </div>
-            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
       </div>
