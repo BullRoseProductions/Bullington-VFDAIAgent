@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Lock, X } from "lucide-react";
 import { isDeptAdmin } from "../shared/roles.js";
@@ -45,7 +45,34 @@ let open = null;   // set by the mounted host; null on web pages that never moun
    NOT A SECURITY BOUNDARY — the same caveat as the typed phrase above. RLS is.
    `role` is members.access (the permission array), never members.role (rank). */
 let gateRole = null;
-export function setDeleteGateRole(role) { gateRole = role; }
+const gateSubs = new Set();
+export function setDeleteGateRole(role) {
+  gateRole = role;
+  for (const fn of gateSubs) { try { fn(); } catch { /* a stale subscriber must not block the rest */ } }
+}
+
+/* THE SAME FACT, FOR RENDERING — so the control can be hidden rather than shown and
+   then refused.
+
+   Officers were getting a delete button that always said no. Hiding it is the decision:
+   a control you cannot use should not be on the screen. But the components that render
+   these buttons gate on canManage, editMode, isPA, canEdit — a dozen different local
+   rules — and most never receive `role` at all. Prop-drilling it into each of them, so
+   each could recompute the same boolean, is the same duplication the central gate above
+   exists to avoid.
+
+   useSyncExternalStore rather than a Context: this value is set once per session from
+   App, changes only when a permission is edited, and a store needs no provider wrapped
+   around a 19,000-line tree. getServerSnapshot is supplied because this app is also a
+   web build — without it a future SSR/prerender pass throws here rather than rendering
+   the button hidden, which is the safe direction anyway. */
+export function useCanDeleteShared() {
+  return useSyncExternalStore(
+    (cb) => { gateSubs.add(cb); return () => gateSubs.delete(cb); },
+    () => isDeptAdmin(gateRole),
+    () => false,
+  );
+}
 
 /* Ask. Resolves true only if the member typed the phrase and pressed Delete.
    Resolves false for cancel, backdrop, Escape — and, deliberately, if no host is
@@ -55,8 +82,12 @@ export function confirmDestructive({ noun, name, impact, phrase } = {}) {
     console.error("[b4c] confirmDestructive called with no <DestructiveConfirmHost/> mounted — refusing the delete");
     return Promise.resolve(false);
   }
-  // Refused BEFORE the typed field is offered: someone who may not do this should not
-  // be walked to the edge of doing it and then stopped. They get told who can.
+  /* BACKSTOP ONLY. Every delete control is now hidden from anyone who is not a
+     Department Admin (useCanDeleteShared below), so in normal use this branch is
+     unreachable. It stays because the alternative failure modes are not equal: if a
+     control is ever added without the guard, reaching here shows a dialog nobody
+     wanted, while removing this would let that same control actually delete. A
+     surprising dialog is a bug report; a silent deletion is another September. */
   if (!isDeptAdmin(gateRole)) return open({ noun, name, denied: true });
   return open({ noun, name, impact, phrase });
 }

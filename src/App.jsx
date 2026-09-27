@@ -24,7 +24,7 @@ import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, write
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
-import { confirmDestructive, setDeleteGateRole } from "./ConfirmDestructive.jsx";
+import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -386,6 +386,8 @@ const mapsHref = (addr) => {
   return isApple ? `https://maps.apple.com/?q=${q}` : `https://maps.google.com/?q=${q}`;
 };
 function YourSix({ S, role, meId, members, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const canManage = hasAny(role, CANMANAGE_ROLES);   // add/edit/remove local resources — is_canmanage() (Board/DA/Officer), mirrors the RLS
   const [resources, setResources] = useState(null);   // null = loading
   const [editMode, setEditMode] = useState(false);    // false = calm read-only; true = reveal Add + per-local-row Edit/Remove
@@ -505,7 +507,7 @@ function YourSix({ S, role, meId, members, notify }) {
             ? <span title={r.is_business ? "Platform sponsor — locked" : "Verified national resource — locked"} style={{ flexShrink: 0, display: "inline-flex", marginTop: 2 }}><Lock size={13} color={FIRE.textMuted2} /></span>
             : <span style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
                 <button title="Edit" style={YS_TILE_EDIT_BTN} onClick={() => startEdit(r)}><Pencil size={12} color={FIRE.textSecondary} /></button>
-                <button title="Remove" style={YS_TILE_EDIT_BTN} onClick={() => removeResource(r)}><X size={12} color={FIRE.deleteRed} /></button>
+                {canDeleteShared && <button title="Remove" style={YS_TILE_EDIT_BTN} onClick={() => removeResource(r)}><X size={12} color={FIRE.deleteRed} /></button>}
               </span>)}
         </div>
         {hasTag && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 5 }}>
@@ -2968,6 +2970,8 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
 // or Dept Admin. Dropped into all three dashboards; announcements are the featured
 // top of the "Feed" card, with room reserved below for birthdays/anniversaries.
 function Announcements({ role, members, meId, notify, style }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [composing, setComposing] = useState(false);
@@ -2978,7 +2982,9 @@ function Announcements({ role, members, meId, notify, style }) {
   const [celebrations, setCelebrations] = useState([]);   // celebrations view: member_id, birthday, joined_date (dept-scoped, all-members-readable)
   const canPost = hasAny(role, ANNOUNCE_ROLES);
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
-  const canDelete = (it) => it.author_id === meId || isDeptAdmin(role);
+  // Was "author OR dept admin". An announcement is a department-wide record, so it now follows the
+  // same rule as the rest of them: admins only. An officer who posted one asks an admin to pull it.
+  const canDelete = (it) => canDeleteShared && (it.author_id === meId || isDeptAdmin(role));
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
 
   const [loadErr, setLoadErr] = useState(false);
@@ -5247,6 +5253,8 @@ function DocViewer({ url, name, onClose }) {
   );
 }
 function Documents({ S, role, notify, uploaderName, members }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const leader = isLeader(role);
   const canManageDocs = hasAny(role, CANMANAGE_OPS_ROLES);
   const isDA = isDeptAdmin(role);                       // DA/PA — matches the soft_delete_document / restore_document DB gate
@@ -5564,7 +5572,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>Trashed {d.deletedWhen}{d.deletedBy ? ` · ${nameById.get(d.deletedBy) || "An admin"}` : ""}</div>
                 </div>
                 <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => restoreDoc(d)}><RefreshCw size={14} /> Restore</button>
-                {isPA && <button title="Permanently delete" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => hardDeleteDoc(d)}><Trash2 size={14} color={FIRE.deleteRed} /></button>}
+                {isPA && canDeleteShared && <button title="Permanently delete" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => hardDeleteDoc(d)}><Trash2 size={14} color={FIRE.deleteRed} /></button>}
               </div>
             ))
           )}
@@ -5672,6 +5680,8 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
   );
 }
 function ContentCalendar({ S, role, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [posts, setPosts] = useState([]);
@@ -5777,7 +5787,7 @@ function ContentCalendar({ S, role, notify }) {
               style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <Plus size={13} /> {cat.tag}
             </button>
-            {canEditCategories && !cat.isDefault && (
+            {canEditCategories && !cat.isDefault && canDeleteShared && (
               <button title={`Delete ${cat.tag}`} onClick={(e) => { e.stopPropagation(); deleteCat(cat); }}
                 style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 999, border: `1px solid ${cat.c}`, background: FIRE.card, color: cat.c, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
                 <X size={10} />
@@ -5828,7 +5838,7 @@ function ContentCalendar({ S, role, notify }) {
       <MonthCalendar
         cur={cur} setCur={setCur} dark
         items={monthPosts}
-        renderChip={(p) => ({ color: p.c, label: p.t, title: `${p.tag} — ${p.t} (tap to remove)`, onClick: () => remove(p.id, p.t) })}
+        renderChip={(p) => ({ color: p.c, label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
         todayColor="#B11E2A"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={
@@ -5842,6 +5852,8 @@ function ContentCalendar({ S, role, notify }) {
   );
 }
 function RecruitmentCalendar({ S, role, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
@@ -5917,7 +5929,7 @@ function RecruitmentCalendar({ S, role, notify }) {
       <MonthCalendar
         cur={cur} setCur={setCur} dark
         items={monthItems}
-        renderChip={(it) => ({ color: it.c, label: it.title, title: canEdit ? `${it.title} (tap to remove)` : it.title, onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
+        renderChip={(it) => ({ color: it.c, label: it.title, title: (canEdit && canDeleteShared) ? `${it.title} (tap to remove)` : it.title, onClick: (canEdit && canDeleteShared) ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#0E6B62"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
@@ -5931,6 +5943,8 @@ function RecruitmentCalendar({ S, role, notify }) {
   );
 }
 function FundingCalendar({ S, role, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const today = new Date();
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
@@ -6045,7 +6059,7 @@ function FundingCalendar({ S, role, notify }) {
            map, so it falls back to what it was stored with rather than rendering colourless. */
         renderChip={(it) => ({ color: it.fundraiserId ? (frColorMap.get(it.fundraiserId) || it.c) : it.c, label: it.title,
           title: `${it.title}${it.fundraiserId && frName.get(it.fundraiserId) ? ` — ${frName.get(it.fundraiserId)}` : ""}${canEdit ? " (tap to remove)" : ""}`,
-          onClick: canEdit ? () => removeEvent(it.id, it.title) : undefined })}
+          onClick: (canEdit && canDeleteShared) ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor="#9A6B12"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
@@ -6432,6 +6446,8 @@ function frWhen(iso, todayISO) {
    allowed it would skip the stamping. Creation is a direct insert, which the insert policy permits
    and which the rest of this file already does. */
 function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEdit, onOpenDoc, onWorkAdded, onFundraiserChanged }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const [items, setItems] = useState(null);
   const [sponsors, setSponsors] = useState(null);
   const [dates, setDates] = useState(null);        // null = first load; [] = genuinely none
@@ -7174,7 +7190,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
                   <div style={{ fontSize: 14, fontWeight: 700, color: past ? FIRE.textMuted : FIRE.textPrimary }}>{d.title}</div>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{d.date}{rel ? ` \u00b7 ${rel}` : ""}</div>
                 </div>
-                <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => removeDate(d)}><Trash2 size={13} /> Remove</button>
+                {canDeleteShared && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => removeDate(d)}><Trash2 size={13} /> Remove</button>}
               </div>
             );
           })}
@@ -7535,6 +7551,8 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
 }
 
 function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const [mode, setMode] = useState("Plan a fundraiser");
   const [ideasOpen, setIdeasOpen] = useState(false);   // Event Ideas collapsed by default
   const [plannerOpen, setPlannerOpen] = useState(true);   // Fundraiser Planner — expanded by default
@@ -7858,7 +7876,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
                 <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{e.date}</div>
               </div>
               {e.amount > 0 && <span style={{ fontWeight: 700, color: FIRE.greenText, fontSize: 13.5 }}>${e.amount.toLocaleString()}</span>}
-              <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>
+              {canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
           ))}
       </div>
@@ -9212,6 +9230,8 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   );
 }
 function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
   const canPrint = isLeader(role);   // is_canmanage (Board/DA/Officer) + Project Admin/owner — LEADERSHIP set
   async function handlePrint() {
@@ -9324,7 +9344,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
                 <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role || "Member"} · since {m.joined}</div>
               </div>
               {m.status ? <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill> : null}
-              {canAdd && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
+              {canAdd && canDeleteShared && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: FIRE.textMuted }}>
               <Phone size={13} /> {m.phone}
@@ -13759,6 +13779,8 @@ function maintStatus(cadence, lastDoneAt) {
 const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
 function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops INSERT/DELETE RLS on apparatus_maintenance
   const meName = (members || []).find((m) => m.id === meId)?.name || "Unknown";
   const [doneFor, setDoneFor] = useState(null);      // item id whose mark-done confirm is open
@@ -13903,7 +13925,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
             {canManage && <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDone(i)}><ClipboardCheck size={14} /> Mark done</button>}
             <button title="Completion history" style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => toggleHistory(i.id)}><List size={14} color={FIRE.btnIcon} /> History{histFor === i.id ? " ▾" : ""}</button>
             {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-            {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
+            {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
             {doneFor === i.id && (
               <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div style={{ flexBasis: "100%", fontSize: 12.5, color: FIRE.textSecondary }}>Recording <strong style={{ color: FIRE.textPrimary }}>{i.task}</strong> as done today — notes and cost are optional.</div>
@@ -14805,6 +14827,8 @@ function StationHours({ S, dept, notify }) {
   );
 }
 function Equipment({ S, role, members, meId, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const activeStationId = useActiveStation();   // undefined = still loading
   const [types, setTypes] = useState([]);
   // NOTE: canManage is defined further down, right after isManager — it now depends on it. Registry
@@ -15062,7 +15086,7 @@ function Equipment({ S, role, members, meId, notify }) {
                     <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronDown size={16} color={FIRE.textMuted} /> : <ChevronRight size={16} color={FIRE.textMuted} />}</span>
                   </button>
                   {canManage && editMode && <button title="Edit type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEditType(t)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
-                  {canManage && editMode && <button title="Remove type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeType(t)}><X size={13} color={FIRE.deleteRed} /></button>}
+                  {canManage && editMode && canDeleteShared && <button title="Remove type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeType(t)}><X size={13} color={FIRE.deleteRed} /></button>}
                 </div>
                 {editingTypeId === t.id && (
                   <div style={{ ...FS.card, padding: 12, margin: "2px 0 10px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -15106,7 +15130,7 @@ function Equipment({ S, role, members, meId, notify }) {
                         {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
                         {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
                         {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
-                        {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
+                        {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
                         {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
                         {(isManager || isDA) && editMode && u.status === "held" && <button title="Mark lost" disabled={lostId === u.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5, color: FIRE.deleteRed, opacity: lostId === u.id ? 0.6 : 1 }} onClick={() => markLost(u, idLabel)}>Lost</button>}
                       </div>
@@ -16010,6 +16034,8 @@ const ONBOARD_TEMPLATE = [
   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
 ];
 function Onboarding({ S, members, setMembers, notify, role }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const canManage = hasAny(role, DEPT_ADMIN_ROLES);   // PA/DA — same set as is_dept_admin() (RLS enforces server-side)
   const assignable = assignableMembers(members);
   const candidates = assignable.length ? assignable : [{ id: 0, name: "New member", role: "Firefighter" }];
@@ -16195,7 +16221,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                       <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => startEdit(it)}>Edit</button>
                       {it.is_mentor
                         ? <button style={{ ...FS.btn, padding: "5px 9px", opacity: 0.45, cursor: "not-allowed" }} disabled title="Required — reflects the assigned mentor">Remove</button>
-                        : <button style={{ ...FS.btn, padding: "5px 9px", color: FIRE.deleteRed }} onClick={() => removeItem(it)} disabled={busy}>Remove</button>}
+                        : canDeleteShared ? <button style={{ ...FS.btn, padding: "5px 9px", color: FIRE.deleteRed }} onClick={() => removeItem(it)} disabled={busy}>Remove</button> : null}
                     </>)}
                   </div>
                 );
@@ -16576,6 +16602,8 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
   );
 }
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, notify, dept, addFeedback }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
   const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
   const canPlanAI = hasAny(role, SIGNIN_ROLES);   // AI drill planner — same PA/DA/TO set as the retired standalone AI page (NOT canManage: excludes Board, includes PA)
@@ -17330,7 +17358,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
                 {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
                 {canManage && editPlanMode && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
-                {canManage && editPlanMode && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
+                {canManage && editPlanMode && canDeleteShared && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
               </div>
             </div>
           )
@@ -17449,7 +17477,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           Deliberately NOT reusing `locked`, which also covers signinOpen: an open QR sign-in
                           nobody has used yet is still an empty session and still cleanup-able. Reopen renders
                           in the done branch above, so a closed session shows the right action instead. */}
-                      {canManage && editSessionMode && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
+                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
                     </div>
                   </div>
                   {editingSessionId === s.id && (
@@ -17481,7 +17509,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           {p.kind === "file"
                             ? <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => openPlan(p)}><FileText size={13} color={LbtnIcon} /> Open</button>
                             : <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => setViewPlan(p)}><FileText size={13} color={LbtnIcon} /> View</button>}
-                          {canManage && editSessionMode && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color="#C8606A" /></button>}
+                          {canManage && editSessionMode && canDeleteShared && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color="#C8606A" /></button>}
                         </div>
                       ))}
                     </div>
@@ -18013,6 +18041,8 @@ const DUTY_SEED = [
   { id: 15, duty: "Update run & incident logs", category: "Admin", recurrence: "Weekly", done: false, doneBy: null, doneAt: null },
 ];
 function StationDuties({ S, role, members, meId, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+
   const activeStationId = useActiveStation();   // undefined = still loading
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES); // assign/manage duties — ops only (DA/Officer, excludes Board + PA)
   const canCreate = hasAny(role, CANMANAGE_OPS_ROLES); // create duty — ops only (DA/Officer, excludes Board + PA)
@@ -18360,7 +18390,7 @@ function StationDuties({ S, role, members, meId, notify }) {
                 })()}
                 <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
                 {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-                {canManage && editMode && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
+                {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
               {pickerForDutyId === a.id && (
                 <div style={{ ...FS.card, padding: 14, marginTop: 6, marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -18511,7 +18541,7 @@ function StationDuties({ S, role, members, meId, notify }) {
               <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.what}</span>
               <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{otherWho(e)} · <span style={{ color: FIRE.textMuted2, ...FS.num }}>{e.when}</span>{dutiesGrouped ? ` · ${stationNameOf(e.station_id)}` : ""}</div>
             </div>
-            {canManage && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>}
+            {canManage && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
       </div>
