@@ -39,3 +39,4 @@ _digest_preview/
 *firebase-adminsdk*.json
 *.p8
 CREDENTIALS.txt
+.vercel
