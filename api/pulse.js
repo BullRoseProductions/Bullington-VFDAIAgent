@@ -97,7 +97,63 @@ const PUSH_ENABLED = process.env.PUSH_ENABLED === "1";
 // Kept here so slice 3 has one place to add to, and so the value passed to is_muted() can never be a
 // literal typed at the call site. is_muted RAISES on an unknown family precisely because a typo would
 // otherwise read as "not muted" and silently override somebody's opt-out.
-const FAMILIES = ["certs", "gear", "maint", "events", "tasks"];
+const FAMILIES = ["certs", "gear", "maint", "events", "tasks", "shifts"];
+
+/* ---- STUCK-SHIFT NUDGE: SEND WINDOW ------------------------------------------------------------
+   THERE IS NO GENERAL QUIET-HOURS MECHANISM IN THIS ENGINE. The V2 brief assumed the nudge would
+   inherit one; it would not have, because none exists — every other family here fires whenever the
+   hourly cron finds something. For a cert expiring in a week that is harmless, since the row is
+   found once and the member reads it in the morning. For this one it is not: a stuck shift is at
+   its most detectable in the small hours, which is exactly when a phone should not buzz about
+   paperwork.
+
+   So the window is scoped to THIS TYPE rather than bolted onto the engine. Making it global would
+   change the delivery behaviour of four families that were specified, reviewed and shipped without
+   it — a much larger change than the one that was asked for, and not one to make as a side effect.
+
+   A SKIPPED RUN COSTS NOTHING. Dedup is on the shift id, not the hour, so a shift that becomes
+   eligible at 03:00 is simply nudged on the 08:00 run, still long before V1's flat threshold flags
+   it to an admin. The lost time is hours; the thing being prevented is a 2am notification. */
+const NUDGE_WINDOW_START = 8;    // 08:00 local — inclusive
+const NUDGE_WINDOW_END   = 21;   // 21:00 local — exclusive
+
+function isWithinNudgeWindow(at) {
+  // Hour in the department-facing timezone, not the server's. Vercel runs UTC; without this the
+  // window would drift by five or six hours depending on daylight saving, which is the kind of bug
+  // that only shows up in November.
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hour12: false }).format(at));
+  return hour >= NUDGE_WINDOW_START && hour < NUDGE_WINDOW_END;
+}
+
+/* ---- STUCK-SHIFT NUDGE: COPY -------------------------------------------------------------------
+   DRAFT WORDING — the brief's approved set was not available when this was written; only the first
+   line below is quoted from it verbatim. The rest follow its rules and need Ashlea's sign-off
+   before this ships.
+
+   The rules, which are the point: never accuse, never imply the member did something wrong, never
+   ask a question the notification cannot receive an answer to. There are no "Still there?" / "I
+   left" buttons anywhere in this feature — a push with two buttons invites a one-tap answer to a
+   question about payroll-adjacent hours, and the whole design routes corrections through an admin
+   instead.
+
+   ROTATION IS BY SHIFT ID, NOT RANDOM. The same shift always produces the same sentence, so a
+   re-run cannot change the wording of a notification already sitting in someone's inbox, and two
+   members with stuck shifts on the same evening do not get word-for-word identical messages. */
+const NUDGE_COPY = [
+  "Give your station hours a quick look — just making sure they're right.",
+  "Worth a quick look at your station hours when you get a minute.",
+  "Your station hours are still running. Have a look when you can.",
+  "Quick check on your station hours — tap to see where they stand.",
+];
+
+function nudgeCopy(shiftId) {
+  // Cheap stable hash of the uuid. Deterministic across runs and across processes, which a
+  // Math.random() pick or an array index would not be.
+  let h = 0;
+  const s = String(shiftId);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return NUDGE_COPY[h % NUDGE_COPY.length];
+}
 
 // Type names are load-bearing UI: the inbox picks its icon from type.split("_")[0]. Anything added
 // here needs a matching ICON entry in src/Notifications.jsx or it renders as a generic warning.
@@ -609,6 +665,64 @@ export default async function handler(req, res) {
     diag.maintSummary = maintSummary;
   } catch (e) {
     detectErrors.push({ family: "maint", error: String(e?.message || e) });
+  }
+
+  /* STUCK-SHIFT SELF-REVIEW NUDGE (early-catch V2) ------------------------------------------------
+     A fenced shift that is still open well past what THIS member normally works. The baseline and
+     the threshold are computed in SQL by open_shift_nudge_candidates() — see
+     sql/early_catch_v2_pattern_nudge_2026-10-03.sql for why it is median + IQR rather than mean and
+     standard deviation, and why the threshold is capped at the department's flat number so V2 can
+     only ever fire EARLIER than V1's admin flag, never later.
+
+     THIS NEVER CLOSES ANYTHING. The row is a message. The only thing that writes an out-time is
+     close_open_shift(), which is admin-gated, so a member who realises their shift is wrong still
+     routes through review rather than editing their own hours.
+
+     WHY AN RPC AND NOT A QUERY. Every other family here reads tables directly. This one does not,
+     because the threshold is a per-member statistic over 180 days of history: computing it in JS
+     would mean pulling every closed shift for every member on every hourly run, and would put a
+     second definition of "normal shift length" in a second language. The function is granted to
+     service_role only — it crosses department boundaries by design.
+
+     ONE NUDGE PER OPEN SHIFT, EVER. subject_ref is the shift id, so the (member_id, type,
+     subject_ref) dedupe index makes every later run a no-op for a shift already nudged. A member
+     who ignores it is not nagged hourly for the next day and a half — the admin flag is the
+     escalation, not repetition. */
+  try {
+    if (!isWithinNudgeWindow(new Date(nowMs))) {
+      diag.shiftNudge = { skipped: "outside send window", windowLocal: `${NUDGE_WINDOW_START}:00-${NUDGE_WINDOW_END}:00 ${TZ}` };
+    } else {
+      const { data: stuck, error } = await sb.rpc("open_shift_nudge_candidates", {
+        p_k: 3.0, p_min_sample: 5, p_floor_hours: 3.0,
+      });
+      if (error) throw new Error(error.message);
+
+      diag.shiftNudge = {
+        found: (stuck || []).length,
+        learned: (stuck || []).filter((r) => r.basis === "learned").length,
+        deptDefault: (stuck || []).filter((r) => r.basis === "dept_default").length,
+        sample: (stuck || []).slice(0, 3).map((r) => ({
+          member: r.member_name, hoursOpen: r.hours_open, threshold: r.threshold_hours,
+          basis: r.basis, median: r.baseline_median, iqr: r.baseline_iqr, n: r.sample_count,
+        })),
+      };
+
+      for (const r of stuck || []) {
+        detected.push({
+          member_id: r.member_id,
+          department_id: r.department_id,
+          family: "shifts",
+          type: "shift_self_review",
+          subject_ref: String(r.shift_id),          // ONE per open shift — see above
+          title: "Station hours",
+          body: nudgeCopy(r.shift_id),
+          severity: "info",                          // quiet and low-priority, by design
+          why: `open ${r.hours_open}h vs ${r.threshold_hours}h threshold (${r.basis}${r.basis === "learned" ? `, median ${r.baseline_median}h, iqr ${r.baseline_iqr}h, n=${r.sample_count}` : ""})`,
+        });
+      }
+    }
+  } catch (e) {
+    detectErrors.push({ family: "shifts", error: String(e?.message || e) });
   }
 
   const candidates = detected;

@@ -3965,6 +3965,33 @@ function StationClockCard({ S, dept, go }) {
     isStationGeofenceActive().then((v) => { if (alive) setAutoPresence(!!v); });
     return () => { alive = false; };
   }, []);
+
+  /* THE SELF-REVIEW NUDGE, IN-APP (early-catch V2).
+
+     DRIVEN BY THE NOTIFICATION ROW, NOT BY A SECOND THRESHOLD CALCULATION. The decision that this
+     shift has run unusually long for THIS member is made once, in SQL, by
+     open_shift_nudge_candidates() — which is service-role only and deliberately unreachable from
+     the client. Re-deriving it here would need that member's whole shift history on the phone, and
+     would put a second copy of the rule somewhere it could disagree with the push the member is
+     holding. So the client asks a much smaller question: is there a nudge on file for the shift I
+     am looking at right now?
+
+     subject_ref IS the shift id, which is what makes this a one-row lookup and what guarantees the
+     banner and the push are about the same shift. */
+  const [nudged, setNudged] = useState(false);
+  const openId = open?.id;
+  useEffect(() => {
+    if (!openId) { setNudged(false); return; }
+    let alive = true;
+    supabase.from("notifications")
+      .select("id")
+      .eq("type", "shift_self_review")
+      .eq("subject_ref", String(openId))
+      .limit(1)
+      .then(({ data, error }) => { if (alive && !error) setNudged((data || []).length > 0); });
+    return () => { alive = false; };
+  }, [openId]);
+
   if (!loaded || failed) return null;   // a read that failed is not "clocked out" — say nothing rather than something wrong
   const onClock = !!open;
   const since = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
@@ -3980,6 +4007,22 @@ function StationClockCard({ S, dept, go }) {
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: 12, fontWeight: 600, color: open.verified ? FIRE.greenText : FIRE.amberText }}>
             {open.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{open.verified ? "Verified" : "Not verified"}
           </div>
+          {/* The nudge. Tapping goes to the member's own Station Hours screen, which is as far as
+              the member can take it — a backdated close is close_open_shift(), which is admin-gated,
+              so the correction is reviewed rather than self-served. No "Still there?" / "I left"
+              buttons: this must not look like a question with a one-tap answer about hours that
+              feed ISO and LOSAP. */}
+          {nudged && (
+            <button onClick={() => go("stationhours")}
+                    style={{ display: "flex", alignItems: "flex-start", gap: 7, marginTop: 8, padding: "8px 10px", borderRadius: 9,
+                             background: "rgba(214,169,94,.09)", border: "0.5px solid rgba(214,169,94,.22)",
+                             textAlign: "left", cursor: "pointer", width: "100%" }}>
+              <Clock size={12} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 2 }} />
+              <span style={{ fontSize: 12, color: FIRE.amberText, lineHeight: 1.45 }}>
+                This shift has been running a while. Give your station hours a quick look — just making sure they&rsquo;re right.
+              </span>
+            </button>
+          )}
           {/* THE REMINDER IS CONDITIONAL, and the condition is load-bearing. geofence_depart
               closes ONLY rows the daemon opened (source='gps_geofence') — a shift someone
               punched in by hand is a human statement the phone must not overrule. So a

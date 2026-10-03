@@ -100,6 +100,12 @@ const MUTABLE_FAMILIES = [
     desc: "A day before and an hour before each drill, meeting or training session you're expected at." },
   { key: "tasks", label: "Tasks & assignments",
     desc: "When something assigned to you is due tomorrow, due today, or overdue." },
+  /* 'shifts' is mutable in is_muted() as of the early-catch V2 migration, so it MUST appear here.
+     A family the database will honour an opt-out for, with no control in the UI, is the exact
+     "control that exists and cannot be reached" this file's header warns about — except inverted:
+     the member cannot turn it off at all. */
+  { key: "shifts", label: "Station hours check-ins",
+    desc: "A quiet nudge when a station shift has been running longer than you normally work, in case a check-out was missed." },
 ];
 
 const ALWAYS_ON_BLURB =
