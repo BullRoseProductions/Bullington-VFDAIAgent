@@ -848,8 +848,17 @@ export default async function handler(req, res) {
          compliance rows and send every one of them a second time. Pulse drains what pulse
          produces. Prefix matching stays for event_/task_/duty_ because pulse owns those prefixes
          outright; it does NOT own maint_, and adding a second maint_ type here means adding it to
-         this list by name, deliberately. */
-      .or("type.like.event_*,type.like.task_*,type.like.duty_*,type.eq.maint_summary")
+         this list by name, deliberately.
+
+         shift_self_review IS NAMED, NOT PREFIXED, for the same reason — and it is here because
+         leaving it out broke the first live run. V2 added the type to FAMILIES and to the write
+         path, and both worked: the 17:00 tick on 2026-10-03 detected three stuck shifts, cleared
+         the mute gate and wrote three correct rows. All three then sat at pushed_at NULL, because
+         shift_self_review is not maint_summary and carries none of the prefixes above, so this
+         filter never selected them. THE FAMILY LIST AND THIS FILTER ARE TWO SEPARATE GATES. A new
+         notification type has to pass both, and nothing fails loudly when it only passes one —
+         the rows land in the inbox looking perfectly healthy and simply never reach a phone. */
+      .or("type.like.event_*,type.like.task_*,type.like.duty_*,type.eq.maint_summary,type.eq.shift_self_review")
       .order("created_at", { ascending: true })
       .limit(500);                                   // a bounded run; leftovers go on the next pass
     if (onlyMember) q = q.eq("member_id", onlyMember);
