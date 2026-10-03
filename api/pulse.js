@@ -126,11 +126,11 @@ function isWithinNudgeWindow(at) {
 }
 
 /* ---- STUCK-SHIFT NUDGE: COPY -------------------------------------------------------------------
-   DRAFT WORDING — the brief's approved set was not available when this was written; only the first
-   line below is quoted from it verbatim. The rest follow its rules and need Ashlea's sign-off
-   before this ships.
+   APPROVED WORDING. All four lines are reproduced verbatim from the sign-off — do not reword them,
+   including the punctuation. The title is fixed at "Quick heads-up" and the body is the rotating
+   line, so the member sees the same calm heading every time and the sentence underneath varies.
 
-   The rules, which are the point: never accuse, never imply the member did something wrong, never
+   The rules behind them, which are the point: never accuse, never imply the member did something wrong, never
    ask a question the notification cannot receive an answer to. There are no "Still there?" / "I
    left" buttons anywhere in this feature — a push with two buttons invites a one-tap answer to a
    question about payroll-adjacent hours, and the whole design routes corrections through an admin
@@ -139,11 +139,12 @@ function isWithinNudgeWindow(at) {
    ROTATION IS BY SHIFT ID, NOT RANDOM. The same shift always produces the same sentence, so a
    re-run cannot change the wording of a notification already sitting in someone's inbox, and two
    members with stuck shifts on the same evening do not get word-for-word identical messages. */
+const NUDGE_TITLE = "Quick heads-up";
 const NUDGE_COPY = [
-  "Give your station hours a quick look — just making sure they're right.",
-  "Worth a quick look at your station hours when you get a minute.",
-  "Your station hours are still running. Have a look when you can.",
-  "Quick check on your station hours — tap to see where they stand.",
+  "Give your station hours a quick look \u2014 just making sure they're right.",
+  "A quick heads-up to review yours and make sure they're correct.",
+  "Your station hours are ready to review \u2014 take a look to be sure they're right.",
+  "Give your hours a quick review when you get a chance \u2014 just making sure they're accurate.",
 ];
 
 function nudgeCopy(shiftId) {
@@ -714,7 +715,7 @@ export default async function handler(req, res) {
           family: "shifts",
           type: "shift_self_review",
           subject_ref: String(r.shift_id),          // ONE per open shift — see above
-          title: "Station hours",
+          title: NUDGE_TITLE,
           body: nudgeCopy(r.shift_id),
           severity: "info",                          // quiet and low-priority, by design
           why: `open ${r.hours_open}h vs ${r.threshold_hours}h threshold (${r.basis}${r.basis === "learned" ? `, median ${r.baseline_median}h, iqr ${r.baseline_iqr}h, n=${r.sample_count}` : ""})`,

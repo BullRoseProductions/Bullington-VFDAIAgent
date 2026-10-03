@@ -156,11 +156,25 @@ grant execute on function public.member_shift_baselines() to service_role;
 --
 -- THE THRESHOLD, and why each clamp is there:
 --
---   raw   = median + k * GREATEST(iqr, 0.5)
+--   raw   = median + k * GREATEST(LEAST(iqr, median), 0.5)
 --           The 0.5h minimum spread protects the metronomic member. Someone
 --           whose last twenty shifts were all 4.00 hours has an IQR of zero,
 --           and median + k*0 would nudge them four hours and one minute in,
 --           every single shift.
+--
+--           THE IQR IS CAPPED AT THE MEMBER'S OWN MEDIAN, and that clamp was
+--           added after the first live dry run, which found the opposite of
+--           what it was looking for. The median resists contamination from past
+--           phantom shifts — that is why it was chosen. THE IQR DOES NOT. A
+--           member with a history of stuck shifts has an upper quartile dragged
+--           up by them, so their learned threshold drifts toward the flat
+--           default and they stop being catchable. On live data one member sat
+--           25 hours into an open shift with a median of 4.1h and an IQR of
+--           7.9h, giving a threshold of 27.8h — he would not have been nudged
+--           before the backstop, which is precisely the member this feature
+--           exists for. Capping the spread at the median says: however erratic
+--           the history looks, "unusual" can never mean more than one typical
+--           shift's worth of slack per k.
 --
 --   floor = p_floor_hours (default 3h)
 --           Nobody is told their hours look wrong three hours into a shift.
@@ -227,7 +241,7 @@ as $function$
      select case
               when b.sample_count >= p_min_sample
               then least(
-                     greatest(b.median_hours + p_k * greatest(b.iqr_hours, 0.5), p_floor_hours),
+                     greatest(b.median_hours + p_k * greatest(least(b.iqr_hours, b.median_hours), 0.5), p_floor_hours),
                      coalesce(d.expected_shift_hours, 28)::numeric)
               else coalesce(d.expected_shift_hours, 28)::numeric
             end as threshold_hours
