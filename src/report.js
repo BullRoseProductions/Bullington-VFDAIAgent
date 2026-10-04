@@ -345,17 +345,24 @@ export function buildReportDoc(data) {
   }
 
   // ---------- Provenance ----------
-  ensure(56);
-  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 46, "F");
-  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
-  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   const prov = doc.splitTextToSize(
     "How this report was produced. Drafted automatically from the department\u2019s roster, training, and certification "
     + "records, then reviewed and approved by a qualified officer before release \u2014 the platform\u2019s "
     + "standing rule: the system drafts, a human approves, then it publishes.", CW - 24);
+  /* Panel sized FROM the text, matching the Capital Plan. +1 line because the approval rule below
+     is drawn INSIDE this panel, after the loop — sizing on prov.length alone would print it on the
+     grey edge. This note had 4pt of headroom against its old fixed 46pt: one more sentence and the
+     department report would have reproduced the Station Hours overlap. */
+  const provH = (prov.length + 1) * 10 + 16;
+  ensure(provH + 6);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, provH, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   let py = y + 13;
   prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
   doc.text("Approved by: ____________________  (Training Officer)   \u00b7   Date: __________", M + 12, py + 2);
+  y += provH + 10;
 
   // ---------- footers ----------
   const n = doc.getNumberOfPages();
@@ -683,17 +690,24 @@ export function buildApparatusCheckDoc(data) {
   }
 
   // ---------- provenance ----------
-  ensure(46);
-  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 40, "F");
-  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
-  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   const prov = doc.splitTextToSize(
     "Generated from the department\u2019s own apparatus-check records. Item results, notes and "
     + "resolutions are reproduced exactly as recorded by the member who performed the check and "
     + "the officer who closed out each failure. Times are shown in the department\u2019s local time.", CW - 24);
+  /* Panel sized FROM the text, matching the Capital Plan and Station Hours. A hardcoded height
+     does not clip text — jsPDF draws past the rect — it desynchronises the CURSOR, so everything
+     after this block draws on top of the overflow. Short today; one added sentence is all it
+     takes, which is exactly how the Station Hours methodology came to overlap its own
+     Certification block. */
+  const provH = prov.length * 10 + 16;
+  ensure(provH + 6);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, provH, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   let py = y + 13;
   prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
-  y += 40 + 14;
+  y += provH + 10;
 
   // ---------- certification ----------
   // The signatures are the point of the exercise: this page is evidence a human inspected a
@@ -900,18 +914,25 @@ export function buildFleetCheckDoc(data) {
   });
 
   // ---------- provenance ----------
-  ensure(46);
-  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 40, "F");
-  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
-  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   const prov = doc.splitTextToSize(
     "Generated from the department’s own apparatus-check records for the period shown. Item results, "
     + "notes and resolutions are reproduced exactly as recorded by the member who performed each check "
     + "and the officer who closed out each failure. Checks that passed are listed by date; checks that "
     + "failed are expanded in full. Times are shown in the department’s local time.", CW - 24);
+  /* Panel sized FROM the text, matching the Capital Plan and Station Hours. A hardcoded height
+     does not clip text — jsPDF draws past the rect — it desynchronises the CURSOR, so everything
+     after this block draws on top of the overflow. Short today; one added sentence is all it
+     takes, which is exactly how the Station Hours methodology came to overlap its own
+     Certification block. */
+  const provH = prov.length * 10 + 16;
+  ensure(provH + 6);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, provH, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   let py = y + 13;
   prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 10; });
-  y += 40 + 14;
+  y += provH + 10;
 
   // ---------- certification ----------
   ensure(120);
@@ -1130,10 +1151,7 @@ export function buildStationHoursDoc(data) {
   });
 
   // ---------- provenance ----------
-  ensure(84);
-  doc.setFillColor(...PANEL); doc.rect(M, y, CW, 78, "F");
-  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
-  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   const prov = doc.splitTextToSize(
     "WHAT COUNTS. Credited hours are station standby and training shifts whose check-in was "
     + "location-verified at the station. Those are the hours reported for ISO and LOSAP.\n"
@@ -1157,9 +1175,21 @@ export function buildStationHoursDoc(data) {
     + "The ISO figure de-overlaps concurrent shifts and clips them to the period, so it will not always "
     + "equal the credited total. Capture method (manual or automatic check-in) is recorded against each "
     + "shift but is not reproduced here.", CW - 24);
+  /* Panel sized FROM the text, matching the Capital Plan. A hardcoded height does not clip the
+     text — jsPDF happily draws past the rect — it desynchronises the CURSOR: y advanced by the
+     fixed height while the lines ran further down the page, so everything after this block drew
+     on top of the overflow. On the Station Hours report the note had grown to 22 lines (219pt)
+     against a 78pt panel and a 92pt cursor advance, and the Certification heading and signature
+     rules landed across the last third of the methodology. ensure() could not save it: it was
+     measuring from a cursor that was already 127pt wrong. */
+  const provH = prov.length * 9.4 + 16;
+  ensure(provH + 6);
+  doc.setFillColor(...PANEL); doc.rect(M, y, CW, provH, "F");
+  doc.setFillColor(...RED); doc.rect(M, y, CW, 2, "F");
+  doc.setTextColor(...GRAY); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6);
   let py = y + 12;
   prov.forEach((ln) => { doc.text(ln, M + 12, py); py += 9.4; });
-  y += 78 + 14;
+  y += provH + 10;
 
   // ---------- certification ----------
   ensure(120);
