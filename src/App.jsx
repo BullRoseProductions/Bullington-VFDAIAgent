@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
 import { mergeStationHours } from "../shared/station-hours.js";
+import { todayISOIn } from "../shared/zoned-time.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -2978,6 +2979,9 @@ function Announcements({ role, members, meId, notify, style }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [audience, setAudience] = useState("everyone");
+  const [expiresOn, setExpiresOn] = useState("");          // "" = no end date = runs forever
+  const [editingExpiry, setEditingExpiry] = useState(null); // { id, value } while a row's date is open
+  const [expiryBusy, setExpiryBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [celebrations, setCelebrations] = useState([]);   // celebrations view: member_id, birthday, joined_date (dept-scoped, all-members-readable)
   const canPost = hasAny(role, ANNOUNCE_ROLES);
@@ -2985,14 +2989,51 @@ function Announcements({ role, members, meId, notify, style }) {
   // Was "author OR dept admin". An announcement is a department-wide record, so it now follows the
   // same rule as the rest of them: admins only. An officer who posted one asks an admin to pull it.
   const canDelete = (it) => canDeleteShared && (it.author_id === meId || isDeptAdmin(role));
+
+  /* ---- ANNOUNCEMENT RUN-TIME (expires_on) --------------------------------------------------
+     WHO MAY SET A DATE: author OR department admin — deliberately the SAME pair as the UPDATE
+     RLS policy ("author or dept admin update announcements"). Not canDelete, which is narrower
+     (it also requires canDeleteShared), and not canPost, which is wider. A control the policy
+     will refuse is worse than no control, and a control narrower than the policy hides a
+     capability the member actually has.
+
+     THE DATE BASIS IS America/Chicago, NOT THE DEVICE. The RLS hides a row when
+     expires_on < (now() AT TIME ZONE 'America/Chicago')::date. If this badge compared against
+     the phone's local midnight instead, an admin in another zone would be told a row is still
+     showing for an hour after the server stopped serving it — the UI and the database would
+     disagree about the one fact this feature exists to state. todayISOIn is the same helper the
+     duty periods and the pulse engine use, so there is one definition of "today" in the app.
+
+     INCLUSIVE, matching the policy's >=: a row dated today is still showing today. */
+  const todayLocal = todayISOIn("America/Chicago");
+  const canSetExpiry = (it) => it.author_id === meId || isDeptAdmin(role);
+  const isExpired = (it) => !!it.expires_on && it.expires_on < todayLocal;
+  const fmtDate = (ymd) => {
+    // Parsed as parts, never new Date("2026-10-03") — that string is read as UTC midnight and
+    // renders as the PREVIOUS day for anyone west of Greenwich, which is everyone here.
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ""));
+    if (!m) return String(ymd || "");
+    return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  async function saveExpiry(id, value) {
+    setExpiryBusy(true);
+    const next = value || null;                      // "" -> null -> runs forever
+    const { error } = await supabase.from("announcements").update({ expires_on: next }).eq("id", id);
+    setExpiryBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the end date", text: "Something went wrong. Please try again.", details: error.message }); return; }
+    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, expires_on: next } : x)));
+    setEditingExpiry(null);
+    notify({ kind: "success", text: next ? "End date saved." : "End date removed — this runs until you remove it." });
+  }
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
 
   const [loadErr, setLoadErr] = useState(false);
   function load() {
     setLoadErr(false);
     supabase.from("announcements")
-      .select("id, author_id, title, body, audience, created_at")
-      .order("created_at", { ascending: false })   // newest first; dept + audience filtered by RLS
+      .select("id, author_id, title, body, audience, created_at, expires_on")
+      .order("created_at", { ascending: false })   // newest first; dept + audience + expiry filtered by RLS
       .then(({ data, error }) => {
         setLoading(false);
         // A failed READ is not "no announcements". Keep whatever we already have and say so —
@@ -3018,12 +3059,12 @@ function Announcements({ role, members, meId, notify, style }) {
     ]);
     if (!deptId || !memberId) { setBusy(false); notify({ kind: "error", title: "Couldn't find your account", text: "Please try again." }); return; }
     const { data, error } = await supabase.from("announcements")
-      .insert({ department_id: deptId, author_id: memberId, title: title.trim() || null, body: b, audience })
-      .select("id, author_id, title, body, audience, created_at").single();
+      .insert({ department_id: deptId, author_id: memberId, title: title.trim() || null, body: b, audience, expires_on: expiresOn || null })
+      .select("id, author_id, title, body, audience, created_at, expires_on").single();
     setBusy(false);
     if (error || !data) { notify({ kind: "error", title: "Couldn't post the announcement", text: "Something went wrong. Please try again.", details: error?.message }); return; }
     setItems((xs) => [data, ...xs]);                 // optimistic prepend (row already committed)
-    setTitle(""); setBody(""); setAudience("everyone"); setComposing(false);
+    setTitle(""); setBody(""); setAudience("everyone"); setExpiresOn(""); setComposing(false);
     notify({ kind: "success", text: "Announcement posted." });
   }
 
@@ -3063,6 +3104,41 @@ function Announcements({ role, members, meId, notify, style }) {
             </div>
             <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: it.title ? 3 : 0 }}>{it.body}</div>
             <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{nameById.get(it.author_id) || "Unknown"} · {fmtWhen(it.created_at)}</div>
+
+            {/* EXPIRY CHROME IS FOR MANAGERS ONLY. A regular member never sees any of this: the
+                RLS has already removed expired rows from their feed, so there is nothing to
+                explain and a "shows until" line would only invite questions about a mechanism
+                they do not operate. An expired row reaching here at all means the viewer is the
+                author or a dept admin — the policy's own bypass. */}
+            {canSetExpiry(it) && (
+              editingExpiry?.id === it.id ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                  <input type="date" min={todayLocal} value={editingExpiry.value} disabled={expiryBusy}
+                         onChange={(e) => setEditingExpiry({ id: it.id, value: e.target.value })}
+                         style={{ ...FS.input, width: "auto", padding: "4px 8px", fontSize: 12, colorScheme: "dark" }} />
+                  <button disabled={expiryBusy} onClick={() => saveExpiry(it.id, editingExpiry.value)}
+                          style={{ ...FS.btn, padding: "4px 9px", fontSize: 12 }}>Save</button>
+                  {/* The re-run path: clears the date so the row goes back to running forever. */}
+                  {it.expires_on && <button disabled={expiryBusy} onClick={() => saveExpiry(it.id, "")}
+                          style={{ ...FS.btn, padding: "4px 9px", fontSize: 12 }}>Remove end date</button>}
+                  <button disabled={expiryBusy} onClick={() => setEditingExpiry(null)}
+                          style={{ ...FS.btn, padding: "4px 9px", fontSize: 12 }}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setEditingExpiry({ id: it.id, value: it.expires_on || "" })}
+                        style={{ background: "none", border: "none", padding: 0, marginTop: 5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  {!it.expires_on ? (
+                    <span style={{ fontSize: 11, color: FIRE.textMuted }}>Set an end date</span>
+                  ) : isExpired(it) ? (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.redText, border: `0.5px solid ${FIRE.redText}55`, borderRadius: 5, padding: "1px 5px" }}>
+                      Expired {fmtDate(it.expires_on)}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: FIRE.textMuted2 }}>Shows until {fmtDate(it.expires_on)}</span>
+                  )}
+                </button>
+              )
+            )}
           </div>
         ))}
       </div>
@@ -3079,9 +3155,18 @@ function Announcements({ role, members, meId, notify, style }) {
               <button key={v} onClick={() => setAudience(v)} style={{ ...FS.btn, flex: 1, justifyContent: "center", ...(audience === v ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{l}</button>
             ))}
           </div>
+          {/* min=today so a past date cannot be picked by accident. TODAY IS VALID — the policy
+              compares with >=, so a row dated today runs through today. min is a nudge, not a
+              guard: the browser lets a typed date through, and the only thing that matters is
+              that a past date simply means "already expired", which is a recoverable state an
+              admin can see and clear, not a corruption. */}
+          <label style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted2, marginBottom: 4 }}>Show until (optional)</label>
+          <input type="date" min={todayLocal} value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)}
+                 style={{ ...FS.input, marginBottom: 4, colorScheme: "dark" }} />
+          <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 10 }}>Leave blank to run until you remove it.</div>
           <div style={{ display: "flex", gap: 8 }}>
             <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={post}>{busy ? "Posting…" : "Post"}</button>
-            <button style={FS.btn} disabled={busy} onClick={() => { setComposing(false); setTitle(""); setBody(""); setAudience("everyone"); }}>Cancel</button>
+            <button style={FS.btn} disabled={busy} onClick={() => { setComposing(false); setTitle(""); setBody(""); setAudience("everyone"); setExpiresOn(""); }}>Cancel</button>
           </div>
           <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8 }}>{audience === "leadership" ? "Only leaders will see this." : "Everyone in the department will see this."}</div>
         </div>
