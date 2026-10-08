@@ -3197,7 +3197,7 @@ function Announcements({ role, members, meId, notify, style }) {
   );
 }
 // Board oversight dashboard — governance/health view (Board is oversight, not ops).
-// Derivations MIRROR DeptAdminDashboard exactly (deptAttendance, cert compliance, readiness 40/40/20).
+// Derivations MIRROR DeptAdminDashboard exactly (deptAttendance, cert coverage, duty completion).
 // SCAFFOLD: header + raw derived numbers for verification; cards/styling + governance queries land next.
 // Soonest FUTURE restricted event (board or leadership) the VIEWER is on the roll for, for the
 // leader dashboards. Audience-aware: a board member sees the next board OR leadership event; an
@@ -3224,7 +3224,6 @@ function NextLeadershipEventTile({ S, sessions, role, notify }) {
 }
 function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DeptAdminDashboard
   const me = members.find((m) => m.id === meId) || null;
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);   // dept attendance % + drills
@@ -3235,20 +3234,15 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   // "any expired cert exists", which is a different question from coverage and still worth flagging.
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
   const expdC = ranks.filter((r) => r === 0).length;
-  const cov = certCoverage(members);
-  const certPct = cov.pct;
+  const cov = certCoverage(members, { includeProbationary: true });
   const drillsHeld = doneThisYear.length;
   const [duties, setDuties] = useState([]);
-  const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   const [loadErr, setLoadErr] = useState(false);
   const loadBoard = () => {
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setDuties(data); });   // dept-scoped by RLS
   };
-  useEffect(() => {
-    loadBoard();
-    const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
-  }, []);
+  useEffect(() => { loadBoard(); }, []);
   // Governance data (read-only; ai_outputs + action_items are leader-readable, Board included) — reuses the Minutes/Agenda/DeptAdmin patterns.
   const [minutesRow, setMinutesRow] = useState(null);
   const [openItems, setOpenItems] = useState([]);
@@ -3268,16 +3262,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
   const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   // null, NOT 100. A department that has configured no duties has nothing measured, not
-  // everything done; 100 was a free 20 points on the ring for never setting duties up.
+  // everything done — the tile says "No duties set" rather than awarding a free 100%.
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
-  const readiness = readinessScore([
-    { value: certPct, weight: 0.40 },
-    { value: avgPart, weight: 0.40 },
-    { value: dutyCompletion, weight: 0.20 },   // null when no duties are configured — re-normalises
-  ]);        // 40% certs · 40% attendance · 20% duty completion
-  // readiness is null when nothing is measurable (a brand-new department). Neutral, not red —
-  // `null >= 75` is false, so an unguarded comparison would paint "no data yet" as a failure.
-  const ringColor = readiness == null ? FIRE.textMuted : readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {/* HEADER */}
@@ -3336,30 +3322,23 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
         </div>
       </div>
 
-      {/* DEPARTMENT HEALTH strip — readiness ring (reused from DeptAdminDashboard) + oversight stats */}
+      {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
+          unlike things (a 0% cert, a 42% attendance, a "no duties" n/a) into one figure nobody could act on. */}
       <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH · OVERSIGHT</div>
-      <div style={{ ...FS.card, padding: "18px 20px", display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
-          <svg width="100%" height="100%" viewBox="0 0 84 84">
-            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
-            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={(ringOn && readiness != null) ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
-          </svg>
-          <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: readiness == null ? "1.1rem" : "1.5rem", fontWeight: 700, color: readiness == null ? FIRE.textMuted : FIRE.textPrimary, ...FS.num }}>{readiness == null ? "\u2014" : `${readiness}%`}</div>
-            <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
-          </div>
-        </div>
-        <div style={{ flex: 1, minWidth: 220, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "14px 20px" }}>
+      <div style={{ ...FS.card, padding: "18px 20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "14px 20px" }}>
           {[
-            ["Cert compliance", `${certPct}%`],
+            ["Certs on file", cov.total ? `${cov.withCerts}/${cov.total}` : "\u2014", <CertNote key="n" cov={cov} />],
             ["Attendance", `${avgPart}%`],
+            ["Duty completion", dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`],
             ["Active roster", String(total)],
             ["Drills held", String(drillsHeld)],
             ["Board attendance", `${boardPct}%`],
-          ].map(([label, val]) => (
+          ].map(([label, val, note]) => (
             <div key={label}>
-              <div style={{ fontFamily: DISPLAY, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1, ...FS.num }}>{val}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: val.length > 6 ? 18 : 26, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1, ...FS.num }}>{val}</div>
               <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted2, marginTop: 5 }}>{label}</div>
+              {note}
             </div>
           ))}
         </div>
@@ -3388,7 +3367,6 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same geometry as the member attendance ring
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
   const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
@@ -3398,8 +3376,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   // "any expired cert exists", which is a different question from coverage and still worth flagging.
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
   const expdC = ranks.filter((r) => r === 0).length;
-  const cov = certCoverage(members);
-  const certPct = cov.pct;
+  const cov = certCoverage(members, { includeProbationary: true });
   const drillsHeld = doneThisYear.length;
   const todayISO = toISODate(new Date());
   const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
@@ -3410,7 +3387,6 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [openItems, setOpenItems] = useState([]);   // full open action_items rows → computeInsights
   const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
   const [attnOpen, setAttnOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible; default expanded
-  const [ringOn, setRingOn] = useState(false);   // ring fill animation on mount
   const [loadErr, setLoadErr] = useState(false);
   const loadPanels = () => {
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
@@ -3420,10 +3396,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     supabase.from("action_items").select("*").eq("status", "open")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setOpenItems(data); setOpenActions(data.length); });   // count for the stat + rows for insights
   };
-  useEffect(() => {
-    loadPanels();
-    const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
-  }, []);
+  useEffect(() => { loadPanels(); }, []);
   useReconnect(() => { if (loadErr) { setLoadErr(false); loadPanels(); } });
   const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
@@ -3433,16 +3406,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
   const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   // null, NOT 100. A department that has configured no duties has nothing measured, not
-  // everything done; 100 was a free 20 points on the ring for never setting duties up.
+  // everything done — the tile says "No duties set" rather than awarding a free 100%.
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
-  const readiness = readinessScore([
-    { value: certPct, weight: 0.40 },
-    { value: avgPart, weight: 0.40 },
-    { value: dutyCompletion, weight: 0.20 },   // null when no duties are configured — re-normalises
-  ]);        // 40% certs · 40% attendance · 20% duty completion
-  // readiness is null when nothing is measurable (a brand-new department). Neutral, not red —
-  // `null >= 75` is false, so an unguarded comparison would paint "no data yet" as a failure.
-  const ringColor = readiness == null ? FIRE.textMuted : readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0 || insights.apparatusFailures.length > 0;
   const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
@@ -3462,37 +3427,18 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
         </button>
       </div>
-      <div style={{ ...FS.card, padding: "18px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
-          <svg width="100%" height="100%" viewBox="0 0 84 84">
-            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
-            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={(ringOn && readiness != null) ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
-          </svg>
-          <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: readiness == null ? "1.1rem" : "1.5rem", fontWeight: 700, color: readiness == null ? FIRE.textMuted : FIRE.textPrimary, ...FS.num }}>{readiness == null ? "\u2014" : `${readiness}%`}</div>
-            <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
-          </div>
-        </div>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={FS.kicker}>DEPARTMENT READINESS</div>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>40% certifications · 40% attendance · 20% duty completion</div>
-        </div>
-        <button onClick={() => go("training")} className="stat-cta" title="Board attendance — view training" style={{ background: "none", border: "none", padding: "0 2px", cursor: "pointer", textAlign: "right", fontFamily: "inherit", flexShrink: 0, alignSelf: "center" }}>
-          <div style={FS.kicker}>BOARD ATTENDANCE</div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, ...FS.num, marginTop: 4, color: boardPct > 75 ? FIRE.green : boardPct >= 30 ? FIRE.amberText : FIRE.redText }}>{boardPct}%</div>
-        </button>
-      </div>
       <div style={{ marginBottom: 12, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat S={S} dark n={String(total)} label="Members" onClick={() => go("roster", "members")} />
         <div style={{ display: "grid" }}>
-          <Stat S={S} dark n={certPct == null ? "\u2014" : `${certPct}%`} label="Cert compliance" pct={expdC > 0 ? 0 : certPct} onClick={() => go("roster", "certs")} />
-          <CoverageNote cov={cov} onShowUncovered={() => go("roster", "certs")} />
+          <Stat S={S} dark n={cov.total ? `${cov.withCerts}/${cov.total}` : "\u2014"} label="Certs on file" warn={expdC > 0} onClick={() => go("roster", "certs")} />
+          <CertNote cov={cov} onShowUncovered={() => go("roster", "certs")} />
         </div>
         <Stat S={S} dark n={`${avgPart}%`} label="Attendance" pct={avgPart} onClick={() => go("roster", "attendance")} />
         <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`} label="Duty completion" pct={dutyCompletion} onClick={() => go("duties")} /></div>
         <Stat S={S} dark n={String(drillsHeld)} label="Drills held" onClick={() => go("training")} />
         <Stat S={S} dark n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />
+        <Stat S={S} dark n={`${boardPct}%`} label="Board attendance" pct={boardPct} onClick={() => go("training")} />
       </div>
       <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
@@ -3751,7 +3697,6 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
 function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;   // same ring geometry as DA/Board
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
   const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
@@ -3761,8 +3706,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   // "any expired cert exists", which is a different question from coverage and still worth flagging.
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
   const expdC = ranks.filter((r) => r === 0).length;
-  const cov = certCoverage(members);
-  const certPct = cov.pct;
+  const cov = certCoverage(members, { includeProbationary: true });
   const drillsHeld = doneThisYear.length;
   const todayISO = toISODate(new Date());
   const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
@@ -3773,7 +3717,6 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const [raised, setRaised] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight (fed to computeInsights)
   const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
-  const [ringOn, setRingOn] = useState(false);
   useEffect(() => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
     Promise.all([
@@ -3791,21 +3734,12 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       setRaised((fl.data || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
       setOpenItems(ai.data || []);
     });
-    const t = setTimeout(() => setRingOn(true), 80); return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   // null, NOT 100. A department that has configured no duties has nothing measured, not
-  // everything done; 100 was a free 20 points on the ring for never setting duties up.
+  // everything done — the tile says "No duties set" rather than awarding a free 100%.
   const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
-  const readiness = readinessScore([
-    { value: certPct, weight: 0.40 },
-    { value: avgPart, weight: 0.40 },
-    { value: dutyCompletion, weight: 0.20 },   // null when no duties are configured — re-normalises
-  ]);   // same formula as DA/Board
-  // readiness is null when nothing is measurable (a brand-new department). Neutral, not red —
-  // `null >= 75` is false, so an unguarded comparison would paint "no data yet" as a failure.
-  const ringColor = readiness == null ? FIRE.textMuted : readiness >= 75 ? FIRE.green : readiness >= 50 ? FIRE.amberText : FIRE.redText;
   const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
@@ -3826,28 +3760,14 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
         </div>
       </div>
-      <div style={{ ...FS.card, padding: "18px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
-          <svg width="100%" height="100%" viewBox="0 0 84 84">
-            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
-            <circle cx="42" cy="42" r={RING_R} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={(ringOn && readiness != null) ? RING_C * (1 - readiness / 100) : RING_C} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
-          </svg>
-          <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: readiness == null ? "1.1rem" : "1.5rem", fontWeight: 700, color: readiness == null ? FIRE.textMuted : FIRE.textPrimary, ...FS.num }}>{readiness == null ? "\u2014" : `${readiness}%`}</div>
-            <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>Ready</div>
-          </div>
-        </div>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={FS.kicker}>DEPARTMENT HEALTH</div>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>40% certifications · 40% attendance · 20% duty completion</div>
-        </div>
-      </div>
+      <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <div style={{ display: "grid" }}>
-          <Stat S={S} dark n={certPct == null ? "\u2014" : `${certPct}%`} label="Cert coverage" warn={expdC > 0} />
-          <CoverageNote cov={cov} />
+          <Stat S={S} dark n={cov.total ? `${cov.withCerts}/${cov.total}` : "\u2014"} label="Certs on file" warn={expdC > 0} />
+          <CertNote cov={cov} />
         </div>
         <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
+        <Stat S={S} dark n={dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`} label="Duty completion" pct={dutyCompletion} />
         <Stat S={S} dark n={String(activeCount)} label="Active members" />
         <Stat S={S} dark n={String(drillsHeld)} label="Drills run" />
         <Stat S={S} dark n={`${boardPct}%`} label="Board attendance" />
@@ -9126,10 +9046,16 @@ function certStatus(exp) {
    folding it into "not covered" would conflate "has nothing" with "has something that needs
    renewing soon" — two different conversations with two different members.
 
-   ACTIVE-ONLY DENOMINATOR. Probationary members are excluded by default: a probationary
-   firefighter who has not certified yet is the expected state, not a failure, and the Chief's
-   Report already reports active and probationary as separate populations. includeProbationary
-   flips it in one place if the question ever becomes "who can we field tonight".
+   DENOMINATOR. The default is Active-only, but since 2026-10-08 every call site passes
+   includeProbationary: true — the roster question is "who can we field", and a probationary
+   member who responds is in that answer. Inactive members stay out (their certs don't count),
+   which is intended.
+
+   ON FILE vs CURRENT. Two further numbers ride on the same base so the tile can say WHY a
+   department is low: withCerts = members with at least one cert row (the data-entry gap), and
+   current = of those, members with NO expired and NO undated cert. An undated cert is a
+   data-quality problem, not proof of currency, so it disqualifies "current" rather than being
+   skipped. `covered` (≥1 live cert) is unchanged and still drives the not-covered chase list.
 
    members.status is free text with no CHECK, so a mistyped value would silently leave someone out
    of the denominator. Audited against production on 2026-10-04: exactly three distinct values —
@@ -9138,15 +9064,18 @@ function certCoverage(members, { includeProbationary = false } = {}) {
   const cm = (members || []).filter(countsInStats);
   const inScope = cm.filter((m) => m.status === "Active" || (includeProbationary && m.status === "Probationary"));
   const covered = [], uncovered = [];
-  let undatedCerts = 0;
+  let undatedCerts = 0, withCerts = 0, current = 0;
   for (const m of inScope) {
-    let hasLive = false;
-    for (const c of (m.certs || [])) {
+    let hasLive = false, allLive = true;
+    const certs = m.certs || [];
+    for (const c of certs) {
       const r = certStatus(c.exp).rank;
       if (r === 3) undatedCerts++;                 // counted, never silently dropped
       if (r === 1 || r === 2) hasLive = true;      // EXPIRING or CURRENT
+      else allLive = false;                        // EXPIRED or NO DATE
     }
     (hasLive ? covered : uncovered).push(m);
+    if (certs.length) { withCerts++; if (allLive) current++; }
   }
   return {
     // null, not 0 — "no active members" is not "nobody is covered". Callers render it as n/a.
@@ -9155,24 +9084,9 @@ function certCoverage(members, { includeProbationary = false } = {}) {
     total: inScope.length,
     uncovered,              // member rows, so callers can name who
     undatedCerts,
+    withCerts,              // members with ≥1 cert row on file
+    current,                // of withCerts: no expired, no undated cert
   };
-}
-
-/* READINESS, with n/a as a first-class input.
-
-   Weights were a fixed 40/40/20 and every component had to produce a number, which forced
-   dutyCompletion to return 100 when a department had configured no duties at all — a free 20
-   points for having set nothing up. Passing null instead drops that component and RE-NORMALISES
-   the rest over the weight that remains: with duties n/a, 0.40/0.40 over 0.80 makes certs and
-   participation 50/50. No free points, and no special case in three dashboards.
-
-   Returns null when nothing is measurable, which callers must render as a neutral ring rather
-   than 0 — `null >= 75` is false, so an unguarded null would quietly paint a red 'null%'. */
-function readinessScore(parts) {
-  const live = (parts || []).filter((p) => p && p.value != null);
-  const w = live.reduce((sum, p) => sum + p.weight, 0);
-  if (!w) return null;
-  return Math.round(live.reduce((sum, p) => sum + p.value * p.weight, 0) / w);
 }
 
 // FIRE cert-status colors for crisp dark badges — additive sibling to certStatus's light `color`; does NOT mutate it.
@@ -9955,7 +9869,7 @@ function RosterCerts({ S, members }) {
      was invisible here. That is the same blind spot the records-based percentage had, one level
      up: the screen an admin opens to find who needs chasing was structurally incapable of showing
      the people who need chasing most. certCoverage walks the ROSTER, so they appear. */
-  const cov = certCoverage(members);
+  const cov = certCoverage(members, { includeProbationary: true });
   rows.sort((a, b) => a.st.rank - b.st.rank);
   const n = (r) => rows.filter((x) => x.st.rank === r).length;
   const nextClassFor = (cert) => CLASSES.find((cl) => cl.covers.includes(cert));
@@ -10001,7 +9915,7 @@ function RosterCerts({ S, members }) {
         {tileWrap(1, <Stat S={S} dark n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} onClick={() => toggleStatus(1)} />)}
         {tileWrap(0, <Stat S={S} dark n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} onClick={() => toggleStatus(0)} />)}
         <div style={{ flex: 1, minWidth: 0, borderRadius: 12, outline: showingUncovered ? `2px solid ${FIRE.amberText}` : "none", outlineOffset: 2 }}>
-          <Stat S={S} dark n={String(cov.uncovered.length)} label="Active members not covered" warn={cov.uncovered.length > 0} onClick={() => toggleStatus(UNCOVERED)} />
+          <Stat S={S} dark n={String(cov.uncovered.length)} label="Members not covered" warn={cov.uncovered.length > 0} onClick={() => toggleStatus(UNCOVERED)} />
         </div>
       </div>
       {/* Search + active-filter summary. Counts on the tiles stay ABSOLUTE (computed from every row) —
@@ -10026,7 +9940,7 @@ function RosterCerts({ S, members }) {
       {filtering && (
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 6 }}>
           {showingUncovered
-            ? `Showing ${visibleUncovered.length} of ${cov.uncovered.length} active members without a current certification`
+            ? `Showing ${visibleUncovered.length} of ${cov.uncovered.length} active/probationary members without a current certification`
             : `Showing ${visible.length} of ${rows.length}`}
         </div>
       )}
@@ -10048,7 +9962,7 @@ function RosterCerts({ S, members }) {
         <div style={{ marginTop: 4 }}>
           {visibleUncovered.length === 0 ? (
             <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "14px 0" }}>
-              {cov.uncovered.length === 0 ? "Every active member has a current certification." : "No members match that search."}
+              {cov.uncovered.length === 0 ? "Every active and probationary member has a current certification." : "No members match that search."}
             </div>
           ) : visibleUncovered.map((m) => (
             <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
@@ -10223,11 +10137,11 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   const prob = cm.filter((m) => m.status === "Probationary").length;
   const certs = []; cm.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
-  // ROSTER COVERAGE (share of active members holding a non-expired cert), not records currency.
+  // ROSTER COVERAGE (share of active + probationary members holding a non-expired cert), not records currency.
   // cur/expg/expd stay — the report still states the record counts, which is a different and
   // genuinely useful fact; they are just no longer the headline percentage. SNAPSHOT as of today,
   // never range-scoped.
-  const cov = certCoverage(members);
+  const cov = certCoverage(members, { includeProbationary: true });
   const certPct = cov.pct;
   // Real attendance — shared deptAttendance calc, now RANGE-scoped (a period fact). Dashboards still call the year form.
   const { rows: attRows, avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, range);
@@ -10367,7 +10281,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       // Coverage first — it is the compliance claim. The record counts follow as supporting
       // detail, and the undated line is stated rather than left to be discovered, because an
       // undated cert is the one input that moves coverage without anyone touching the roster.
-      `Certification coverage: ${cov.covered} of ${cov.total} active members hold a current certification (${certPct == null ? "n/a" : certPct + "%"})`,
+      `Certification coverage: ${cov.covered} of ${cov.total} active and probationary members hold a current certification (${certPct == null ? "n/a" : certPct + "%"})`,
       `Certification records: ${cur} current, ${expg} expiring within 90 days, ${expd} expired`
         + (cov.undatedCerts ? `, ${cov.undatedCerts} missing an expiry date` : ""),
       ...(cov.uncovered.length ? [`Members without a current certification: ${cov.uncovered.map((m) => m.name).join(", ")}`] : []),
@@ -19721,7 +19635,7 @@ function CoverageNote({ cov, onShowUncovered }) {
   const n = cov.uncovered.length;
   return (
     <div style={{ fontSize: 11, color: FIRE.textMuted, lineHeight: 1.5, marginTop: 4 }}>
-      <div>{cov.covered} of {cov.total} active member{cov.total === 1 ? "" : "s"} {cov.covered === 1 ? "has" : "have"} a current cert</div>
+      <div>{cov.covered} of {cov.total} active/probationary member{cov.total === 1 ? "" : "s"} {cov.covered === 1 ? "has" : "have"} a current cert</div>
       {n > 0 && (
         <button onClick={onShowUncovered} disabled={!onShowUncovered}
                 style={{ background: "none", border: "none", padding: 0, marginTop: 2, color: FIRE.amberText, fontSize: 11, cursor: onShowUncovered ? "pointer" : "default", textAlign: "left" }}>
@@ -19737,9 +19651,35 @@ function CoverageNote({ cov, onShowUncovered }) {
   );
 }
 
+/* The dashboard cert tile's breakdown: TWO numbers, never a bare percentage. "On file" is the
+   data-entry gap (members with no cert rows at all); "current" is, of the members who did enter
+   certs, how many have nothing expired and nothing undated. Separating them stops a department
+   that simply hasn't typed its certs in from reading identically to one whose certs have lapsed.
+   The not-covered chase list and the undated line are the same as CoverageNote's. */
+function CertNote({ cov, onShowUncovered }) {
+  if (!cov || !cov.total) return null;
+  const n = cov.uncovered.length;
+  return (
+    <div style={{ fontSize: 11, color: FIRE.textMuted, lineHeight: 1.5, marginTop: 4 }}>
+      <div>{cov.withCerts} of {cov.total} {cov.withCerts === 1 ? "has" : "have"} certs on file{cov.withCerts ? ` · ${cov.current} current` : ""}</div>
+      {n > 0 && (
+        <button onClick={onShowUncovered} disabled={!onShowUncovered}
+                style={{ background: "none", border: "none", padding: 0, marginTop: 2, color: FIRE.amberText, fontSize: 11, cursor: onShowUncovered ? "pointer" : "default", textAlign: "left" }}>
+          {n} not covered: {cov.uncovered.slice(0, 3).map((m) => m.name).join(", ")}{n > 3 ? ` +${n - 3} more` : ""}
+        </button>
+      )}
+      {cov.undatedCerts > 0 && (
+        <div style={{ color: FIRE.textMuted2, marginTop: 2 }}>
+          {cov.undatedCerts} cert{cov.undatedCerts === 1 ? "" : "s"} missing an expiry date — not counted current
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Stat({ S, n, label, warn, dark, onClick, pct }) {
   const box = dark ? { ...S.stat, ...FS.card } : S.stat;
-  // pct (a percentage 0-100) → threshold color: <30 red · 30-75 amber · >75 green (same palette as the readiness ring).
+  // pct (a percentage 0-100) → threshold color: <30 red · 30-75 amber · >75 green.
   // Falls back to the existing warn/neutral coloring when pct isn't provided (count stats + every other Stat usage).
   const numColor = pct != null
     ? (pct > 75 ? FIRE.green : pct >= 30 ? FIRE.amberText : FIRE.redText)
