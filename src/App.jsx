@@ -2727,7 +2727,7 @@ function boardAttendance(members, sessions, year, range) {
 // deptAttendance calc as Reports, so a finalized drill moves these numbers immediately.
 const rolling90 = () => { const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 90); return { from: toISODate(from), to: toISODate(to) }; };
 // "Needs your attention" — the member's own two open loops: certs at/near expiry, and drills whose roll
-// is STILL OPEN that they are not on. Modelled on MyActionItems: self-contained, and renders NOTHING
+// is STILL OPEN that they are not on. Modelled on ActionItemsCard: self-contained, and renders NOTHING
 // when there is nothing, so it never becomes a permanent empty box.
 //
 // NO `role` PROP, ON PURPOSE. Audience scoping goes through rollFor(s, me), which reads me.access —
@@ -3276,17 +3276,11 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   useEffect(() => { loadBoard(); }, []);
   // Governance data (read-only; ai_outputs + action_items are leader-readable, Board included) — reuses the Minutes/Agenda/DeptAdmin patterns.
   const [minutesRow, setMinutesRow] = useState(null);
-  const [openItems, setOpenItems] = useState([]);
   useEffect(() => {
     const cols = "id, title, ai_text, current_text, created_at, edited_at, created_by, edited_by, source";
     const newest = (rows) => (rows || []).slice().sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))[0] || null;   // coalesce(edited_at, created_at) desc
     supabase.from("ai_outputs").select(cols).eq("feature", "minutes").is("deleted_at", null)
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setMinutesRow(newest(data)); });
-    supabase.from("action_items").select("*").eq("status", "open")   // full rows (text + due_date) — dept-scoped by RLS
-      .then(({ data, error }) => {
-        if (error || !data) { setLoadErr(true); return; }
-        setOpenItems(data.slice().sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99")));   // soonest due first
-      });
   }, []);
   useReconnect(() => { if (loadErr) loadBoard(); });
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
@@ -3318,35 +3312,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
           </div>
           <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "minutes")}>Read minutes <ChevronRight size={13} color={FIRE.btnIcon} /></button>
         </div>
-        {/* Action items — MY open items only: assigned-to-me or unassigned (assigned-to-others hidden). meId is members.id (same space as assigned_to) */}
-        <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-          {(() => {
-            const mine = openItems.filter((it) => it.assigned_to == null || it.assigned_to === meId);   // unassigned or mine (cf. StationDuties canCompleteThis)
-            const fmtDue = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
-            return (<>
-              <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> OPEN ACTION ITEMS{mine.length ? ` · ${mine.length}` : ""}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {mine.length === 0 ? (
-                  <div style={{ fontSize: 13, color: FIRE.textMuted }}>No action items for you.</div>
-                ) : mine.slice(0, 3).map((it) => {
-                  const yours = it.assigned_to === meId;
-                  const due = fmtDue(it.due_date);
-                  return (
-                    <div key={it.id} style={{ padding: "4px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                        <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, lineHeight: 1.35 }}>{it.text}</div>
-                        <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", padding: "1px 5px", borderRadius: 5, color: yours ? FIRE.greenText : FIRE.textMuted2, border: `0.5px solid ${yours ? FIRE.greenText + "55" : FIRE.hairline}` }}>{yours ? "Yours" : "Unassigned"}</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>{due ? `due ${due}` : "no due date"}</div>
-                    </div>
-                  );
-                })}
-                {mine.length > 3 && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 6 }}>+{mine.length - 3} more</div>}
-              </div>
-              <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View items <ChevronRight size={13} color={FIRE.btnIcon} /></button>
-            </>);
-          })()}
-        </div>
+        {/* Action items — mine + unassigned, never anyone else's (shared ActionItemsCard, same as every dashboard) */}
+        <ActionItemsCard meId={meId} go={go} />
       </div>
 
       {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
@@ -3479,7 +3446,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </div>
       </div>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
-      <MyActionItems meId={meId} />
+      <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
@@ -3688,20 +3655,11 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
 function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const yr = new Date().getFullYear();
-  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
-  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
-  const activeCount = cm.filter((m) => m.status === "Active").length;
-  // ROSTER COVERAGE, not records — see certCoverage. expdC is kept because the dashboards warn on
-  // "any expired cert exists", which is a different question from coverage and still worth flagging.
-  const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
-  const expdC = ranks.filter((r) => r === 0).length;
-  const cov = certCoverage(members, { includeProbationary: true });
-  const drillsHeld = doneThisYear.length;
+  // Health numbers are derived inside DeptHealthCharts — the same component the DA and Board dashboards render.
   const todayISO = toISODate(new Date());
   const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const [duties, setDuties] = useState([]);
+  const [dutiesLoaded, setDutiesLoaded] = useState(false);   // a failed/pending read is "—", never "No duties set"
   const [recruitNext, setRecruitNext] = useState(null);
   const [prNext, setPrNext] = useState(null);
   const [fundNext, setFundNext] = useState(null);
@@ -3718,7 +3676,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       supabase.from("fundraiser_log").select("amount"),
       supabase.from("action_items").select("*").eq("status", "open"),   // for the overdue-assignment insight
     ]).then(([du, rc, cc, fe, fl, ai]) => {
-      setDuties(du.data || []);
+      if (!du.error && du.data) { setDuties(du.data); setDutiesLoaded(true); }
       setRecruitNext(firstUpcoming(rc.data, "date"));
       setPrNext(firstUpcoming(cc.data, "date"));
       setFundNext(firstUpcoming(fe.data, "date"));
@@ -3727,10 +3685,6 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
-  // null, NOT 100. A department that has configured no duties has nothing measured, not
-  // everything done — the tile says "No duties set" rather than awarding a free 100%.
-  const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
   const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
@@ -3752,19 +3706,9 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         </div>
       </div>
       <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <div style={{ display: "grid" }}>
-          <Stat S={S} dark n={cov.total ? `${cov.withCerts}/${cov.total}` : "\u2014"} label="Certs on file" warn={expdC > 0} />
-          <CertNote cov={cov} />
-        </div>
-        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" />
-        <Stat S={S} dark n={dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`} label="Duty completion" pct={dutyCompletion} />
-        <Stat S={S} dark n={String(activeCount)} label="Active members" />
-        <Stat S={S} dark n={String(drillsHeld)} label="Drills run" />
-        <Stat S={S} dark n={`${boardPct}%`} label="Board attendance" />
-      </div>
+      <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} />
       <div style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
-      <MyActionItems meId={meId} />
+      <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
           their own certs, hours and drills, and had no route to them from this dashboard before.
           Placed between "your items" and "the department you run", matching the DeptAdmin ordering. */}
@@ -3792,42 +3736,58 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
     </div>
   );
 }
-// Read-only "my open action items" — one component for every role's dashboard, so a person sees
-// their own items regardless of which dashboard their top role lands them on. Fetches its own rows
-// (assigned_to = meId, status open); relies on the "members read own action_items" RLS policy.
-// No complete button — completion stays leader-only (complete_action_item is is_canmanage()-gated).
-function MyActionItems({ meId }) {
-  const [items, setItems] = useState([]);
+// Open action items for the viewer — ONE component on all four dashboards (DA, Board, Officer, Member).
+// THE RULE: items ASSIGNED TO THE VIEWER plus OPEN UNASSIGNED items; never an item assigned to someone else.
+// The filter is in the query itself (assigned_to = me OR assigned_to is null), not just the render, so another
+// person's items never even reach the client. RLS scopes the department; a plain member's read policy may
+// only return their own rows, in which case they simply see their own. Renders NOTHING when there are none.
+// Read-only: completion stays leader-only (complete_action_item is is_canmanage()-gated). `go` omitted →
+// no "View items" link (Members have no Meetings screen).
+function ActionItemsCard({ meId, go, style }) {
+  const [items, setItems] = useState(null);   // null = not loaded
   const [loadErr, setLoadErr] = useState(false);
   const load = () => {
     if (!meId) return;
     supabase.from("action_items")
-      .select("id, text, due_date, status")
-      .eq("assigned_to", meId).eq("status", "open")
-      .order("due_date", { ascending: true })   // soonest first; no-due-date last (Postgres ASC → nulls last)
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setItems(data); });
+      .select("id, text, due_date, status, assigned_to")
+      .eq("status", "open")
+      .or(`assigned_to.eq.${meId},assigned_to.is.null`)
+      .then(({ data, error }) => {
+        if (error || !data) { setLoadErr(true); return; }   // keep last-known; a failed read is not "nothing to do"
+        setLoadErr(false);
+        setItems(data.filter((it) => it.assigned_to == null || it.assigned_to === meId)   // belt and braces: never someone else's
+          .sort((x, y) => (x.due_date || "9999-99-99").localeCompare(y.due_date || "9999-99-99")));   // soonest due first, undated last
+      });
   };
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
   useReconnect(() => { if (loadErr) load(); });
-  if (!items.length) return null;   // empty state: render nothing (keeps every dashboard clean)
+  if (loadErr && !items) return (
+    <div style={{ ...FS.card, padding: "12px 16px", fontSize: 13, color: FIRE.textMuted, ...style }}>
+      Couldn't load action items. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={load}>Retry</button>
+    </div>
+  );
+  if (!items || items.length === 0) return null;
   const fmtDue = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
   return (
-    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> MY ACTION ITEMS · {items.length}</div>
+    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, ...style }}>
+      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> OPEN ACTION ITEMS · {items.length}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {items.map((it) => {
+        {items.slice(0, 3).map((it) => {
+          const yours = it.assigned_to === meId;
           const due = fmtDue(it.due_date);
           return (
             <div key={it.id} style={{ padding: "4px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, lineHeight: 1.35 }}>{it.text}</div>
-                <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", padding: "1px 5px", borderRadius: 5, color: FIRE.textMuted2, border: `0.5px solid ${FIRE.hairline}` }}>{it.status}</span>
+                <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", padding: "1px 5px", borderRadius: 5, color: yours ? FIRE.greenText : FIRE.textMuted2, border: `0.5px solid ${yours ? FIRE.greenText + "55" : FIRE.hairline}` }}>{yours ? "Yours" : "Unassigned"}</span>
               </div>
               <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>{due ? `due ${due}` : "no due date"}</div>
             </div>
           );
         })}
+        {items.length > 3 && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 6 }}>+{items.length - 3} more</div>}
       </div>
+      {go && <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View items <ChevronRight size={13} color={FIRE.btnIcon} /></button>}
     </div>
   );
 }
@@ -4099,22 +4059,14 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
   // ---- derived (lifted from the member Training branch; no new query/RLS) ----
   const today = new Date();
   const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
-  // per-CALENDAR-MONTH attendance rate for this member (null when a month has no recorded drills)
-  const monthRate = (Y, M) => {
-    const meLeader = isLeader(me?.access);   // score off the member's ACTUAL roles (not "View as")
-    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && !isOptionalEvent(s) && (meLeader || !isRestrictedEvent(s)) && expectedAfterJoin(me, s));
-    if (!rec.length) return null;
-    const att = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
-    return { total: rec.length, attended: att, pct: Math.round((att / rec.length) * 100) };
-  };
-  const thisMonth = monthRate(today.getFullYear(), today.getMonth());
-  const pM = today.getMonth() === 0 ? 11 : today.getMonth() - 1;
-  const pY = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
-  const lastMonth = monthRate(pY, pM);
-  const ringPct = thisMonth ? thisMonth.pct : 0;                                    // 0–100; only drawn as fill when hasThisMonth
+  // Per-CALENDAR-MONTH attendance for this member (null when a month has no drills they were expected at) —
+  // the shared memberAttendance rule, so the ring, the "vs last month" line and the trend chart agree.
+  const myMonths = useMemo(() => lastMonths(8), []);
+  const mySeries = useMemo(() => memberAttendanceSeries(me, sess, myMonths), [me, sess, myMonths]);
+  const thisMonth = memberAttendance(me, sess, myMonths[myMonths.length - 1]);
+  const lastMonth = memberAttendance(me, sess, myMonths[myMonths.length - 2]);
   const hasThisMonth = !!thisMonth;                                                 // this month has ≥1 recorded drill
   const trend = (thisMonth && lastMonth) ? thisMonth.pct - lastMonth.pct : null;    // only when BOTH months have data
-  const RING_R = 34, RING_C = 2 * Math.PI * RING_R;                                 // ring geometry (circumference for stroke-dash)
   const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
   // certs, duties and upcoming-training derivations all moved to PersonalView with the cards that
   // used them — MemberDashboard now renders that component instead of its own copy.
@@ -4122,7 +4074,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
   const [upcomingAll, setUpcomingAll] = useState([]);   // all sorted upcoming across the 4 calendar sources; nextEvent derived at render (audience-aware)
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
   const { openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);   // openSessionPlans left to PersonalView, which owns UPCOMING TRAINING
-  const [ringOn, setRingOn] = useState(false);       // attendance-ring fill animation
   useEffect(() => {
     const todayIso = toISO(today);
     Promise.all([
@@ -4142,7 +4093,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
     });
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
-  useEffect(() => { const id = setTimeout(() => setRingOn(true), 50); return () => clearTimeout(id); }, [ringPct]);   // animate ring fill on load / when the rate changes
   // Get prepared: a Training next-event's attachments come from the already-loaded sessions prop (s.plans[] from slice 1) — no extra query.
   // NEXT EVENT: a non-leader's next event skips leadership training (still shown on the calendar). Leader sees it. Scored off actual roles (me.access), not "View as".
   const nextEvent = upcomingAll.find((e) => isLeader(me?.access) || !(e.type === "Training" && isRestrictedEvent(e))) || null;
@@ -4169,25 +4119,9 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         <div style={{ ...FS.card, padding: "14px 16px" }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>ATTENDANCE</div>
           <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center" }}>
-            <div style={{ position: "relative", width: "5.25rem", height: "5.25rem", flexShrink: 0 }}>
-              <svg width="100%" height="100%" viewBox="0 0 84 84">
-                <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.track} strokeWidth="7" />
-                {hasThisMonth && (
-                  <circle cx="42" cy="42" r={RING_R} fill="none" stroke={FIRE.redBright} strokeWidth="7" strokeLinecap="round"
-                    strokeDasharray={RING_C} strokeDashoffset={ringOn ? RING_C * (1 - ringPct / 100) : RING_C}
-                    transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
-                )}
-              </svg>
-              <div style={{ position: "absolute", inset: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                {hasThisMonth ? (
-                  <>
-                    <div style={{ fontSize: "1.3125rem", fontWeight: 700, color: FIRE.textPrimary, ...FS.num }}>{ringPct}%</div>
-                    <div style={{ fontSize: "0.5rem", fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted2, textTransform: "uppercase", marginTop: 1 }}>this month</div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: "0.65625rem", fontWeight: 600, color: FIRE.textMuted, textAlign: "center", lineHeight: 1.2, padding: "0 8px" }}>No drills yet</div>
-                )}
-              </div>
+            <div style={{ flexShrink: 0, width: 120 }}>
+              {/* Shared Ring: same geometry, tone thresholds, reduced-motion handling as every other chart. */}
+              <Ring value={thisMonth ? thisMonth.attended : 0} of={thisMonth ? thisMonth.total : 0} caption="This month" sub={hasThisMonth ? "" : "No drills yet"} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               {hasThisMonth
@@ -4248,6 +4182,16 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         {moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
       </div>
       {mounts}
+      <ActionItemsCard meId={meId} style={{ marginBottom: 14 }} />
+      {/* Your attendance over time — the shared trend chart on the member's OWN monthly rates. A month with no
+          drills they were expected at is a gap, never a 0. Hidden until there's at least one month to plot. */}
+      {mySeries.some((m) => m.pct != null) && (
+        <div style={{ marginBottom: 14 }}>
+          <ChartPanel title="Your attendance" note="last 8 months">
+            <AttendanceTrend series={mySeries} />
+          </ChartPanel>
+        </div>
+      )}
       {/* 3 — the shared personal view: needs-attention, station clock, certs, duties, upcoming
           training, and the self-serve cert proposer. Previously duplicated inline here; PersonalView
           is now the single source of truth, rendered identically for members, Dept Admins and
@@ -20037,6 +19981,20 @@ const monthsBetween = (from, to, max = 12) => {
   }
   return { months: all.slice(-max), truncated: all.length > max };
 };
+// ONE member's own attendance over a date range — the member dashboard's rule set: finalized drills with a
+// roll taken, optional events excluded, leadership events counted only for leaders (scored off the member's
+// ACTUAL roles, not "View as"), and nothing before their join date. null = no drills they were expected at.
+const memberAttendance = (me, sessions, range) => {
+  const meLeader = isLeader(me?.access);
+  const rec = (sessions || []).filter((s) => { const iso = toISODate(sessDate(s)); return s.done && (s.attendance || []).length > 0 && iso >= range.from && iso <= range.to && !isOptionalEvent(s) && (meLeader || !isRestrictedEvent(s)) && expectedAfterJoin(me, s); });
+  if (!rec.length) return null;
+  const attended = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
+  return { total: rec.length, attended, pct: Math.round((attended / rec.length) * 100) };
+};
+const memberAttendanceSeries = (me, sessions, months) => months.map((m) => {
+  const r = memberAttendance(me, sessions, m);
+  return { label: m.label, partial: m.partial, drills: r ? r.total : 0, pct: r ? r.pct : null };
+});
 // Last n calendar months up to today (the dashboards' fixed windows).
 const lastMonths = (n) => { const t = new Date(); return monthsBetween(toISODate(new Date(t.getFullYear(), t.getMonth() - (n - 1), 1)), toISODate(t), n).months; };
 // Attendance series for AttendanceTrend: deptAttendance run over EACH month, so the join-date cutoff and the
