@@ -3242,20 +3242,22 @@ function Announcements({ role, members, meId, notify, style }) {
 // Soonest FUTURE restricted event (board or leadership) the VIEWER is on the roll for, for the
 // leader dashboards. Audience-aware: a board member sees the next board OR leadership event; an
 // officer (not board) sees the next leadership event only. Label reflects that event's audience.
-function NextLeadershipEventTile({ S, sessions, role, notify }) {
+// Renders NOTHING when there's no upcoming leadership/board event — an empty "nothing scheduled" card was
+// pure vertical space (DA's header already shows NEXT DEPT EVENT). The wrapper style comes in as a prop so
+// the margin/maxWidth only exist when the tile does: no leftover gap.
+function NextLeadershipEventTile({ S, sessions, role, notify, style }) {
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const todayISO = toISODate(new Date());
   const viewer = { access: role };
   const next = (sessions || []).filter((s) => !s.done && isRestrictedEvent(s) && rollFor(s, viewer) && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const kicker = next?.audience === "board" ? "NEXT BOARD MEETING" : "NEXT LEADERSHIP EVENT";
+  if (!next) return null;
   return (
-    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, ...style }}>
       <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> {kicker}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {next ? (<>
-          <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{next.title}<EventAudienceTag audience={next.audience} /></div>
-          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{fmtSess(next)}</div>
-        </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No upcoming leadership or board events.</div>}
+        <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{next.title}<EventAudienceTag audience={next.audience} /></div>
+        <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{fmtSess(next)}</div>
       </div>
       {next?.plan && <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => openSessionPlans(next)}>View plan <ChevronRight size={13} color={FIRE.btnIcon} /></button>}
       {mounts}
@@ -3334,7 +3336,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       </div>
 
       {/* FEED + CALENDAR — read-only feed (Board not in ANNOUNCE_ROLES) beside the shared station calendar; mirrors DeptAdminDashboard */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
@@ -3354,6 +3356,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [duties, setDuties] = useState([]);
   const [dutiesLoaded, setDutiesLoaded] = useState(false);   // until the read lands, duty completion is "—", not "No duties set"
   const [pendingCerts, setPendingCerts] = useState([]);
+  const [pendLoaded, setPendLoaded] = useState(false);     // "All clear" may only be said once every read has LANDED —
+  const [itemsLoaded, setItemsLoaded] = useState(false);   // a pending/failed read is not "nothing needs attention"
   const [openActions, setOpenActions] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // full open action_items rows → computeInsights
   const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
@@ -3363,9 +3367,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); setDutiesLoaded(true); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); setPendLoaded(true); });   // dept-scoped by RLS
     supabase.from("action_items").select("*").eq("status", "open")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setOpenItems(data); setOpenActions(data.length); });   // count for the stat + rows for insights
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setOpenItems(data); setOpenActions(data.length); setItemsLoaded(true); });   // count for the stat + rows for insights
   };
   useEffect(() => { loadPanels(); }, []);
   useReconnect(() => { if (loadErr) { setLoadErr(false); loadPanels(); } });
@@ -3377,6 +3381,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0 || insights.apparatusFailures.length > 0;
+  const showDutiesCard = openDuties.length > 0, showCertsCard = (expg + expd) > 0, showPendingCard = pendingCerts.length > 0;
+  const attnKnown = dutiesLoaded && pendLoaded && itemsLoaded && !loadErr;
   const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -3394,17 +3400,26 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
         </button>
       </div>
-      <div style={{ marginBottom: 12, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
+      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginBottom: 12, maxWidth: 360 }} />
       {/* DEPARTMENT HEALTH — counts as hero tiles, rates as charts (shared with BoardDashboard). */}
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go}
         extraHero={<HeroTile n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
-      <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+      {/* NEEDS YOUR ATTENTION — a zero count is not something that needs attention, so zero cards are hidden.
+          Nothing at all → one thin "All clear" line, but ONLY once duties, approvals and action items have all
+          loaded; until then (or if a read failed) say nothing rather than claim it's clear. */}
+      {attnN === 0 ? (attnKnown && (
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 12, fontSize: 13, color: FIRE.textMuted }}>
+          <CheckCircle2 size={15} color={FIRE.green} /> All clear — nothing needs your attention.
+        </div>
+      )) : (<>
+      <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 12, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
         <span style={{ marginLeft: "auto", display: "inline-flex" }}>{attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
       </button>
       {attnOpen && (<>
+      {(showDutiesCard || showCertsCard || showPendingCard) && (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
-        <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {showDutiesCard && <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
               <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{openDuties.length}</span>
@@ -3414,8 +3429,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
             {overdueDuties[0] && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("duties")}>View duties</button>
-        </div>
-        <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        </div>}
+        {showCertsCard && <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
               <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{expg}</span>
@@ -3425,8 +3440,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
             {flagged.length > 0 && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster")}>View certs</button>
-        </div>
-        <div style={{ ...FS.card, borderLeft: `3px solid #378ADD`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        </div>}
+        {showPendingCard && <div style={{ ...FS.card, borderLeft: `3px solid #378ADD`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
               <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{pendingCerts.length}</span>
@@ -3434,12 +3449,14 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
             <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: FIRE.textSecondary, marginTop: 4 }}>Pending approvals</div>
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster", "pending")}>Review approvals</button>
-        </div>
+        </div>}
       </div>
+      )}
       {hasInsights && <div style={{ ...FS.kicker, marginTop: 14, marginBottom: 8, opacity: 0.7 }}>PEOPLE TO REACH OUT TO</div>}
       <InsightCards insights={insights} go={go} bare role={role} notify={notify} onResolved={reloadFailures} />
       </>)}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, marginBottom: 6 }}>
+      </>)}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
@@ -3707,7 +3724,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       </div>
       <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH</div>
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} />
-      <div style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
+      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }} />
       <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
           their own certs, hours and drills, and had no route to them from this dashboard before.
@@ -3726,7 +3743,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           </div>
         ))}
       </div>
-      <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 18, marginBottom: 6 }}>
+      <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} />
         <div className="dash-cal" style={{ minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
@@ -5677,7 +5694,10 @@ const TIER_STYLES = {
   pill: { fontSize: 9.5,  fontWeight: 600, padding: "2px 5px", borderRadius: 999 },
   dot:  { fontSize: 9, fontWeight: 600, padding: "1px 5px 1px 4px", borderRadius: 999, display: "inline-flex", alignItems: "center", gap: 4 },
 };
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark }) {
+// compact (dashboard only): shorter cells, 2 chips per day instead of 3, slightly tighter padding. Default off,
+// so the full-page Content / Recruitment / Funding calendars are unchanged.
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact }) {
+  const chipCap = compact ? 2 : 3;
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
   const firstDow = new Date(cur.y, cur.m, 1).getDay();
@@ -5696,7 +5716,7 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
     dow: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", background: dark ? FIRE.btnBg : "#F7F6FA" },
     dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: dark ? FIRE.textMuted : "#8A8696", letterSpacing: 0.4 },
     grid: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))" },
-    cell: { minHeight: 74, minWidth: 0, borderTop: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, borderLeft: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, padding: 5, display: "flex", flexDirection: "column", gap: 3 },
+    cell: { minHeight: compact ? 52 : 74, minWidth: 0, borderTop: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, borderLeft: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, padding: compact ? 4 : 5, display: "flex", flexDirection: "column", gap: compact ? 2 : 3 },
     dnum: { fontSize: 11, color: dark ? FIRE.textMuted : "#9A96A6", fontWeight: 600, alignSelf: "flex-start" },
     dtoday: { background: todayColor, color: "#fff", borderRadius: 999, width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5 },
     chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
@@ -5718,7 +5738,7 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
             <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? (dark ? FIRE.btnBg : "#FBFAFC") : (dark ? "transparent" : "#fff") }}>
               {d != null && (<>
                 <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
-                {dayItems.slice(0, 3).map((it) => {
+                {dayItems.slice(0, chipCap).map((it) => {
                   const c = renderChip(it);
                   const isDot = c.tier === "dot";
                   return (
@@ -5728,8 +5748,8 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
                     </div>
                   );
                 })}
-                {overflowIndicator && dayItems.length > 3 && (
-                  <div style={{ fontSize: 9, color: dark ? FIRE.textMuted : "#8A8696", fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - 3} more</div>
+                {overflowIndicator && dayItems.length > chipCap && (
+                  <div style={{ fontSize: 9, color: dark ? FIRE.textMuted : "#8A8696", fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - chipCap} more</div>
                 )}
               </>)}
             </div>
@@ -6249,6 +6269,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
           todayColor={FIRE.red}
           monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
           overflowIndicator
+          compact
         />
       )}
       {detailEvent && (() => {
