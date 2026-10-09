@@ -3265,22 +3265,13 @@ function NextLeadershipEventTile({ S, sessions, role, notify }) {
 function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
-  const yr = new Date().getFullYear();
-  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);   // dept attendance % + drills
-  const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
-  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
-  const total = cm.length;
-  // ROSTER COVERAGE, not records — see certCoverage. expdC is kept because the dashboards warn on
-  // "any expired cert exists", which is a different question from coverage and still worth flagging.
-  const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
-  const expdC = ranks.filter((r) => r === 0).length;
-  const cov = certCoverage(members, { includeProbationary: true });
-  const drillsHeld = doneThisYear.length;
+  // Health numbers are derived inside DeptHealthCharts — the SAME component the DA dashboard renders.
   const [duties, setDuties] = useState([]);
+  const [dutiesLoaded, setDutiesLoaded] = useState(false);   // "—" until the read lands, never a premature "No duties set"
   const [loadErr, setLoadErr] = useState(false);
   const loadBoard = () => {
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setDuties(data); });   // dept-scoped by RLS
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setDuties(data); setDutiesLoaded(true); });   // dept-scoped by RLS
   };
   useEffect(() => { loadBoard(); }, []);
   // Governance data (read-only; ai_outputs + action_items are leader-readable, Board included) — reuses the Minutes/Agenda/DeptAdmin patterns.
@@ -3300,10 +3291,6 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   useReconnect(() => { if (loadErr) loadBoard(); });
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
-  const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
-  // null, NOT 100. A department that has configured no duties has nothing measured, not
-  // everything done — the tile says "No duties set" rather than awarding a free 100%.
-  const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       {/* HEADER */}
@@ -3365,24 +3352,9 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
           unlike things (a 0% cert, a 42% attendance, a "no duties" n/a) into one figure nobody could act on. */}
       <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH · OVERSIGHT</div>
-      <div style={{ ...FS.card, padding: "18px 20px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "14px 20px" }}>
-          {[
-            ["Certs on file", cov.total ? `${cov.withCerts}/${cov.total}` : "\u2014", <CertNote key="n" cov={cov} />],
-            ["Attendance", `${avgPart}%`],
-            ["Duty completion", dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`],
-            ["Active roster", String(total)],
-            ["Drills held", String(drillsHeld)],
-            ["Board attendance", `${boardPct}%`],
-          ].map(([label, val, note]) => (
-            <div key={label}>
-              <div style={{ fontFamily: DISPLAY, fontSize: val.length > 6 ? 18 : 26, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1, ...FS.num }}>{val}</div>
-              <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted2, marginTop: 5 }}>{label}</div>
-              {note}
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Read-only: no `go`, so no tile/panel links — same as the flat strip this replaced. Board attendance
+          leads: it's the board's own accountability number. */}
+      <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} boardFirst />
 
       {/* CHIEF'S REPORT — DA/PA open the Reports hub; everyone else lands on the read-only BoardStats */}
       <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "14px 16px", marginTop: 12, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -3407,29 +3379,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const yr = new Date().getFullYear();
-  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const { avg: boardPct, rows: boardRows, doneBoard } = boardAttendance(members, sessions, yr);   // board-event accountability track
-  const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / no board members → "—", not 0%
-  // Monthly attendance series for the trend line: deptAttendance run over EACH month's range, so the
-  // join-date cutoff and the honest per-member denominator apply month by month. No drills → null (a gap).
-  const trend = useMemo(() => lastMonths(8).map((m) => {
-    const a = deptAttendance(members, sessions, null, m);
-    const rated = a.rows.some((r) => r.pct != null);
-    return { label: m.label, partial: m.partial, drills: a.doneThisYear.length, pct: a.doneThisYear.length && rated ? a.avg : null };
-  }), [members, sessions]);
+  // Health numbers (attendance, board attendance, certs, duties, headcount) are derived inside DeptHealthCharts.
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
-  const total = cm.length;
-  // Headcount breakdown for the Members tile. The tile shows the FULL roster; the cert/attendance charts carry
-  // their own Active+Probationary denominators. Any status outside the three is listed rather than dropped.
-  const nActive = cm.filter((m) => m.status === "Active").length, nProb = cm.filter((m) => m.status === "Probationary").length;
-  const nInactive = cm.filter((m) => m.status === "Inactive").length, nOther = total - nActive - nProb - nInactive;
-  // ROSTER COVERAGE, not records — see certCoverage. expdC is kept because the dashboards warn on
-  // "any expired cert exists", which is a different question from coverage and still worth flagging.
-  const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
-  const expdC = ranks.filter((r) => r === 0).length;
-  const cov = certCoverage(members, { includeProbationary: true });
-  const drillsHeld = doneThisYear.length;
   const todayISO = toISODate(new Date());
   const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
@@ -3457,10 +3408,6 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   cm.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
   flagged.sort((a, b) => a.rank - b.rank);   // expired (0) before expiring (1)
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
-  const dutyDone = duties.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
-  // null, NOT 100. A department that has configured no duties has nothing measured, not
-  // everything done — the tile says "No duties set" rather than awarding a free 100%.
-  const dutyCompletion = duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0 || insights.apparatusFailures.length > 0;
   const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
@@ -3481,36 +3428,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </button>
       </div>
       <div style={{ marginBottom: 12, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
-      {/* DEPARTMENT HEALTH — counts as hero tiles, rates as charts. Same helpers as before; only the shape changed. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <HeroTile n={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={() => go("roster", "members")} />
-        <HeroTile n={boardRated ? `${boardPct}%` : "\u2014"} color={boardRated ? pctTone(boardPct) : FIRE.textMuted} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={() => go("training")} />
-        <HeroTile n={String(drillsHeld)} label="Drills held" sub="this year" onClick={() => go("training")} />
-        <HeroTile n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 14, marginTop: 14 }}>
-        <ChartPanel wide title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={() => go("roster", "attendance")}>
-          <AttendanceTrend series={trend} />
-        </ChartPanel>
-        <ChartPanel title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={() => go("roster", "certs")}>
-          <CertRings cov={cov} onShowUncovered={() => go("roster", "certs")} />
-        </ChartPanel>
-        <ChartPanel title="Station duties" note="this period" onOpen={() => go("duties")}>
-          <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
-            <DutyBar pct={dutyCompletion} done={dutyDone} total={duties.length} loaded={dutiesLoaded} />
-          </div>
-        </ChartPanel>
-        {moduleEnabled("apparatus", dept?.disabled_modules) && (
-          <ChartPanel wide title="Apparatus readiness" note="as of today" onOpen={() => go("apparatus")}>
-            <ApparatusReadinessBar />
-          </ChartPanel>
-        )}
-        {moduleEnabled("stationhours", dept?.disabled_modules) && (
-          <ChartPanel wide title="Station hours" note="credited · last 6 months" onOpen={() => go("stationhours")}>
-            <StationHoursBars />
-          </ChartPanel>
-        )}
-      </div>
+      {/* DEPARTMENT HEALTH — counts as hero tiles, rates as charts (shared with BoardDashboard). */}
+      <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go}
+        extraHero={<HeroTile n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
       <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
         <span style={{ marginLeft: "auto", display: "inline-flex" }}>{attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
@@ -10648,6 +10568,38 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
 
    CLIENT-SIDE SCOPING ONLY. Board and Officers can already read all of this under RLS; this screen
    just shows it instead of the generator. A failed read renders "—" with a retry, never a zero. */
+// BoardStats building blocks. MODULE-LEVEL on purpose: defined inside BoardStats they were new component
+// types every render, so React remounted their children on each state change — harmless for flat tiles,
+// but it would re-run every chart's fetch (StationHoursBars is 24 RPCs) whenever any section loaded.
+function StatsSection({ title, note, children }) {
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={FS.kicker}>{title}</div>
+        {note && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{note}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+function StatsGrid({ children }) { return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>{children}</div>; }
+function StatsCharts({ children }) { return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 14, marginTop: 12 }}>{children}</div>; }
+function StatsUnavailable({ what, retry }) {
+  return (
+    <div style={{ ...FS.card, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <AlertTriangle size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 180, fontSize: 13, color: FIRE.textSecondary }}>Couldn't load {what}. These numbers are hidden rather than shown as zero.</span>
+      {retry && <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={retry}>Try again</button>}
+    </div>
+  );
+}
+function StatsRigList({ label, rigs }) {
+  return rigs.length ? (
+    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 8, lineHeight: 1.5 }}>
+      <span style={{ fontWeight: 700, color: FIRE.textPrimary }}>{label}:</span> {rigs.map((r) => r.note ? `${r.name} (${r.note})` : r.name).join(" · ")}
+    </div>
+  ) : null;
+}
 function BoardStats({ S, role, members, sessions, dept }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const [presetKey, setPresetKey] = useState("year");
@@ -10669,7 +10621,13 @@ function BoardStats({ S, role, members, sessions, dept }) {
 
   // Attendance + drills — THIS PERIOD.
   const { avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, range);
-  const { avg: boardPct, doneBoard } = boardAttendance(members, sessions, null, range);
+  const { avg: boardPct, doneBoard, rows: boardRows } = boardAttendance(members, sessions, null, range);
+  const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / board members in the period → "—"
+  const attRated = drills.length > 0;                          // no drills in the period → "—", not 0%
+  // Charts follow the period picker: one point / one bar per month of the selected range.
+  const trendMonths = useMemo(() => monthsBetween(range.from, range.to, 24), [range.from, range.to]);
+  const trend = useMemo(() => attendanceSeries(members, sessions, trendMonths.months), [members, sessions, trendMonths]);
+  const hoursMonths = useMemo(() => monthsBetween(range.from, range.to, 12), [range.from, range.to]);
   const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
 
   // Duty completion — same read and same formula as the dashboards. null = no duties configured.
@@ -10683,7 +10641,6 @@ function BoardStats({ S, role, members, sessions, dept }) {
   useReconnect(() => { if (dutyErr) loadDuties(); });
   const dutyDone = (duties || []).filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   const dutyCompletion = duties && duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
-  const dutyLabel = duties == null ? "—" : dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`;
 
   // Station hours (period + rolling 30 days) and apparatus readiness (today) — the shared hooks.
   const sh = useStationHoursRange(range);
@@ -10722,29 +10679,6 @@ function BoardStats({ S, role, members, sessions, dept }) {
   useReconnect(() => { if (moneyErr) loadMoney(); });
   const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
 
-  const Section = ({ title, note, children }) => (
-    <div style={{ marginTop: 20 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <div style={FS.kicker}>{title}</div>
-        {note && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{note}</div>}
-      </div>
-      {children}
-    </div>
-  );
-  const Grid = ({ children }) => <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>{children}</div>;
-  const Unavailable = ({ what, retry }) => (
-    <div style={{ ...FS.card, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-      <AlertTriangle size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
-      <span style={{ flex: 1, minWidth: 180, fontSize: 13, color: FIRE.textSecondary }}>Couldn't load {what}. These numbers are hidden rather than shown as zero.</span>
-      {retry && <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={retry}>Try again</button>}
-    </div>
-  );
-  const RigList = ({ label, rigs }) => rigs.length ? (
-    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 8, lineHeight: 1.5 }}>
-      <span style={{ fontWeight: 700, color: FIRE.textPrimary }}>{label}:</span> {rigs.map((r) => r.note ? `${r.name} (${r.note})` : r.name).join(" · ")}
-    </div>
-  ) : null;
-
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
       <div style={{ marginBottom: 14 }}>
@@ -10754,104 +10688,96 @@ function BoardStats({ S, role, members, sessions, dept }) {
       </div>
       <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
 
-      <Section title="COMPLIANCE" note="Certs and duties as of today · attendance for the period">
-        <Grid>
-          <div style={{ display: "grid" }}>
-            <Stat S={S} dark n={cov.total ? `${cov.withCerts}/${cov.total}` : "—"} label="Certs on file" />
-            <CertNote cov={cov} />
-          </div>
-          <Stat S={S} dark n={dutyLabel} label="Duty completion" pct={dutyCompletion} />
-          <Stat S={S} dark n={`${avgPart}%`} label="Training attendance" pct={avgPart} />
-          <Stat S={S} dark n={doneBoard.length ? `${boardPct}%` : "—"} label={`Board attendance · ${doneBoard.length} meeting${doneBoard.length === 1 ? "" : "s"}`} />
-        </Grid>
-        {dutyErr && <div style={{ marginTop: 8 }}><Unavailable what="duties" retry={loadDuties} /></div>}
-      </Section>
+      <StatsSection title="COMPLIANCE" note="Certs and duties as of today · attendance for the period">
+        <StatsGrid>
+          <HeroTile n={boardRated ? `${boardPct}%` : "—"} color={boardRated ? pctTone(boardPct) : FIRE.textMuted} label="Board attendance" sub={`${doneBoard.length} meeting${doneBoard.length === 1 ? "" : "s"} in the period`} />
+          <HeroTile n={attRated ? `${avgPart}%` : "—"} color={attRated ? pctTone(avgPart) : FIRE.textMuted} label="Training attendance" sub={`${drills.length} drill${drills.length === 1 ? "" : "s"} in the period`} />
+        </StatsGrid>
+        <StatsCharts>
+          <ChartPanel wide title="Training attendance" note={`by month${trendMonths.truncated ? " · last 24 months of the period" : ""}`}>
+            <AttendanceTrend series={trend} />
+          </ChartPanel>
+          <ChartPanel title="Certifications" note="as of today">
+            <CertRings cov={cov} />
+          </ChartPanel>
+          <ChartPanel title="Station duties" note="this period">
+            {dutyErr ? <StatsUnavailable what="duties" retry={loadDuties} /> : <DutyBar pct={dutyCompletion} done={dutyDone} total={(duties || []).length} loaded={duties != null} />}
+          </ChartPanel>
+        </StatsCharts>
+      </StatsSection>
 
       {on("apparatus") && (
-        <Section title="APPARATUS READINESS" note="As of today · out-of-service units are not counted as ready or needing attention">
-          {ap.err ? <Unavailable what="apparatus readiness" retry={ap.retry} /> : (<>
-            <Grid>
-              <Stat S={S} dark n={ap.loaded ? String(ap.totals.ready) : "—"} label="Ready" />
-              <Stat S={S} dark n={ap.loaded ? String(ap.totals.flagged) : "—"} label="Needs attention" warn={ap.totals.flagged > 0} />
-              <Stat S={S} dark n={ap.loaded ? String(ap.totals.oos) : "—"} label="Out of service" warn={ap.totals.oos > 0} />
-              <Stat S={S} dark n={ap.loaded ? String(ap.totals.openFailures) : "—"} label="Open check failures" warn={ap.totals.openFailures > 0} />
-            </Grid>
-            {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
-              <div style={{ ...FS.card, padding: "10px 16px 12px", marginTop: 12 }}>
-                <RigList label="Needs attention" rigs={ap.flaggedRigs} />
-                <RigList label="Out of service" rigs={ap.oosRigs} />
-              </div>
-            )}
-          </>)}
-        </Section>
+        <StatsSection title="APPARATUS READINESS" note="As of today · out-of-service units are not counted as ready or needing attention">
+          {ap.err ? <StatsUnavailable what="apparatus readiness" retry={ap.retry} /> : (
+            <div style={{ ...FS.card, padding: 18 }}>
+              <ApparatusReadinessView ap={ap} />
+              {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
+                <div style={{ marginTop: 10, paddingTop: 4, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <StatsRigList label="Needs attention" rigs={ap.flaggedRigs} />
+                  <StatsRigList label="Out of service" rigs={ap.oosRigs} />
+                </div>
+              )}
+            </div>
+          )}
+        </StatsSection>
       )}
 
-      <Section title="STATION HOURS & ACTIVITY" note="For the period, unless marked otherwise">
-        <Grid>
-          {on("stationhours") && <Stat S={S} dark n={sh.loaded && !sh.err ? h1(sh.totals.credited) : "—"} label="Credited station hours" />}
-          {on("stationhours") && <Stat S={S} dark n={sh.loaded && !sh.err ? String(sh.totals.shifts) : "—"} label="Station shifts" />}
-          <Stat S={S} dark n={String(drills.length)} label="Drills held" />
-          {on("stationhours") && <Stat S={S} dark n={sh30.loaded && !sh30.err ? String(sh30.totals.members) : "—"} label="Members with station time · last 30 days" />}
-        </Grid>
-        {on("stationhours") && (sh.err || sh30.err) && <div style={{ marginTop: 8 }}><Unavailable what="station hours" retry={() => { sh.retry(); sh30.retry(); }} /></div>}
-      </Section>
+      <StatsSection title="STATION HOURS & ACTIVITY" note="For the period, unless marked otherwise">
+        <StatsGrid>
+          {on("stationhours") && <HeroTile n={sh.loaded && !sh.err ? h1(sh.totals.credited) : "—"} label="Credited station hours" />}
+          {on("stationhours") && <HeroTile n={sh.loaded && !sh.err ? String(sh.totals.shifts) : "—"} label="Station shifts" />}
+          <HeroTile n={String(drills.length)} label="Drills held" />
+          {on("stationhours") && <HeroTile n={sh30.loaded && !sh30.err ? String(sh30.totals.members) : "—"} label="Members with station time" sub="last 30 days" />}
+        </StatsGrid>
+        {on("stationhours") && (sh.err || sh30.err) && <div style={{ marginTop: 8 }}><StatsUnavailable what="station hours" retry={() => { sh.retry(); sh30.retry(); }} /></div>}
+        {on("stationhours") && (
+          <StatsCharts>
+            <ChartPanel wide title="Station hours" note={`credited · by month${hoursMonths.truncated ? " · last 12 months of the period" : ""}`}>
+              <StationHoursBars months={hoursMonths.months} />
+            </ChartPanel>
+          </StatsCharts>
+        )}
+      </StatsSection>
 
       {canSeeMoney && (
-        <Section title="FUNDING" note="Received in the period · fund progress is all-time">
-          {moneyErr ? <Unavailable what="funding" retry={loadMoney} /> : (<>
-            <Grid>
-              <Stat S={S} dark n={money(donations == null || proceeds == null ? null : donations + proceeds)} label="Total raised" />
-              <Stat S={S} dark n={money(donations)} label="Donations received" />
-              <Stat S={S} dark n={money(proceeds)} label="Fundraiser proceeds" />
-            </Grid>
+        <StatsSection title="FUNDING" note="Received in the period · fund progress is all-time">
+          {moneyErr ? <StatsUnavailable what="funding" retry={loadMoney} /> : (<>
+            <StatsGrid>
+              <HeroTile n={money(donations == null || proceeds == null ? null : donations + proceeds)} label="Total raised" sub="in the period" />
+              <HeroTile n={money(donations)} label="Donations received" />
+              <HeroTile n={money(proceeds)} label="Fundraiser proceeds" />
+            </StatsGrid>
             {funds && funds.length > 0 && (
               <div style={{ ...FS.card, padding: "6px 16px", marginTop: 12 }}>
-                {funds.map((c, i) => {
-                  const got = (raised || {})[c.id] || 0;
-                  const goal = c.goal_amount != null && Number(c.goal_amount) > 0 ? Number(c.goal_amount) : null;
-                  const pct = goal ? Math.min(100, Math.round((got / goal) * 100)) : null;
-                  return (
-                    <div key={c.id} style={{ padding: "10px 0", borderBottom: i < funds.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ flex: 1, minWidth: 140, fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{c.name}</span>
-                        <span style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>
-                          {raised == null ? "—" : `$${got.toLocaleString()}`}{goal ? ` of $${goal.toLocaleString()} · ${pct}%` : " · no target set"}
-                        </span>
-                      </div>
-                      {goal && raised != null && (
-                        <div style={{ height: 6, borderRadius: 3, background: FIRE.track, marginTop: 7, overflow: "hidden" }}>
-                          <div style={{ width: `${pct}%`, height: "100%", background: got >= goal ? FIRE.green : FIRE.red }} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {funds.map((c, i) => (
+                  <div key={c.id} style={{ borderBottom: i < funds.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                    <FundProgress name={c.name} raised={raised == null ? null : (raised[c.id] || 0)} goal={c.goal_amount} />
+                  </div>
+                ))}
               </div>
             )}
             {funds && funds.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 8 }}>No active funds.</div>}
           </>)}
-        </Section>
+        </StatsSection>
       )}
 
-      <Section title="ROSTER" note="As of today">
-        <Grid>
-          <Stat S={S} dark n={String(cm.length)} label="Members" />
-          <Stat S={S} dark n={String(byStatus("Active"))} label="Active" />
-          <Stat S={S} dark n={String(byStatus("Probationary"))} label="Probationary" />
-          <Stat S={S} dark n={String(byStatus("Inactive"))} label="Inactive" />
-          <Stat S={S} dark n={datedJoins ? String(newThisYear) : "—"} label={`Joined in ${thisYear}`} />
-        </Grid>
+      <StatsSection title="ROSTER" note="As of today">
+        <StatsGrid>
+          <HeroTile n={String(cm.length)} label="Members" sub={`${byStatus("Active")} active · ${byStatus("Probationary")} probationary · ${byStatus("Inactive")} inactive`} />
+          <HeroTile n={datedJoins ? String(newThisYear) : "—"} label={`Joined in ${thisYear}`} />
+        </StatsGrid>
+        <div style={{ ...FS.card, padding: 18, marginTop: 12 }}><RosterBreakdown members={members} /></div>
         {cm.length > 0 && datedJoins < cm.length && (
           <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>{cm.length - datedJoins} member{cm.length - datedJoins === 1 ? " has" : "s have"} no join year on file and {cm.length - datedJoins === 1 ? "isn't" : "aren't"} counted as new.</div>
         )}
-      </Section>
+      </StatsSection>
 
-      <Section title="TRAINING" note="Drills and attendance for the period">
-        <Grid>
-          <Stat S={S} dark n={String(drills.length)} label="Drills held" />
-          <Stat S={S} dark n={`${avgPart}%`} label="Average attendance" pct={avgPart} />
-          <Stat S={S} dark n={String(upcoming.length)} label={upcoming.length === 5 ? "Next 5 upcoming" : "Upcoming events"} />
-        </Grid>
+      <StatsSection title="TRAINING" note="Drills and attendance for the period">
+        <StatsGrid>
+          <HeroTile n={String(drills.length)} label="Drills held" />
+          <HeroTile n={attRated ? `${avgPart}%` : "—"} color={attRated ? pctTone(avgPart) : FIRE.textMuted} label="Average attendance" />
+          <HeroTile n={String(upcoming.length)} label={upcoming.length === 5 ? "Next 5 upcoming" : "Upcoming events"} />
+        </StatsGrid>
         <div style={{ ...FS.card, padding: "6px 16px", marginTop: 12 }}>
           {upcoming.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>Nothing scheduled.</div> : upcoming.map((s, i) => (
             <div key={s.id} style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "9px 0", borderBottom: i < upcoming.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
@@ -10860,7 +10786,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
             </div>
           ))}
         </div>
-      </Section>
+      </StatsSection>
     </div>
   );
 }
@@ -20094,16 +20020,32 @@ function CoverageNote({ cov, onShowUncovered }) {
    useApparatusReadiness, useStationHoursRange) — these only change the shape, never the math. */
 const CHART_FONT = "'Oswald', system-ui, sans-serif";
 const pctTone = (p) => (p == null ? FIRE.textMuted : p > 75 ? FIRE.green : p >= 30 ? FIRE.amberText : FIRE.redText);   // same thresholds as Stat
-// Last n calendar months, oldest first, the current month clipped to today (a month in progress is "so far").
-const lastMonths = (n) => {
-  const t = new Date(); const out = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const a = new Date(t.getFullYear(), t.getMonth() - i, 1);
-    const b = new Date(a.getFullYear(), a.getMonth() + 1, 0);
-    out.push({ from: toISODate(a), to: toISODate(b > t ? t : b), label: a.toLocaleDateString("en-US", { month: "short" }), partial: b > t });
+// Calendar months covering [from, to] (ISO), oldest first, each clipped to the range and to today; months
+// entirely in the future are dropped. Keeps the LAST `max`, and says so (truncated). A month still in
+// progress is "partial" ("so far"). Labels gain a 2-digit year when the span crosses a year boundary.
+const monthsBetween = (from, to, max = 12) => {
+  const today = toISODate(new Date());
+  const end = to && to < today ? to : today;
+  if (!from || from > end) return { months: [], truncated: false };
+  const [fy, fm] = from.split("-").map(Number), [ey, em] = end.split("-").map(Number);
+  const multiYear = fy !== ey;
+  const all = [];
+  for (let d = new Date(fy, fm - 1, 1); d <= new Date(ey, em - 1, 1); d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+    const mStart = toISODate(d), mEnd = toISODate(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+    const label = d.toLocaleDateString("en-US", { month: "short" }) + (multiYear ? ` ${String(d.getFullYear()).slice(2)}` : "");
+    all.push({ from: mStart < from ? from : mStart, to: mEnd > end ? end : mEnd, label, partial: mEnd > today });
   }
-  return out;
+  return { months: all.slice(-max), truncated: all.length > max };
 };
+// Last n calendar months up to today (the dashboards' fixed windows).
+const lastMonths = (n) => { const t = new Date(); return monthsBetween(toISODate(new Date(t.getFullYear(), t.getMonth() - (n - 1), 1)), toISODate(t), n).months; };
+// Attendance series for AttendanceTrend: deptAttendance run over EACH month, so the join-date cutoff and the
+// honest per-member denominator apply month by month. No drills (or nobody eligible) → null, a gap, never 0.
+const attendanceSeries = (members, sessions, months) => months.map((m) => {
+  const a = deptAttendance(members, sessions, null, m);
+  const rated = a.rows.some((r) => r.pct != null);
+  return { label: m.label, partial: m.partial, drills: a.doneThisYear.length, pct: a.doneThisYear.length && rated ? a.avg : null };
+});
 // Grow-in on mount, skipped entirely under prefers-reduced-motion.
 function useChartGrow() {
   const reduce = useMemo(() => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } }, []);
@@ -20138,13 +20080,14 @@ function ChartPanel({ title, note, wide, onOpen, children }) {
   );
 }
 function HeroTile({ n, label, sub, color, onClick }) {
+  const Tag = onClick ? "button" : "div";   // read-only (Board) tiles are plain boxes, not dead buttons
   return (
-    <button onClick={onClick} className="stat-cta" style={{ ...FS.card, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
+    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...FS.card, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
       <div style={{ fontFamily: CHART_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, letterSpacing: "-.01em", color: color || FIRE.textPrimary, ...FS.num }}>{n}</div>
       <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 7 }}>{label}</div>
       {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
       {onClick && <ChevronRight size={16} color={FIRE.btnIcon} style={{ position: "absolute", top: 14, right: 14 }} />}
-    </button>
+    </Tag>
   );
 }
 // Monthly training-attendance line. series: [{ label, pct (null = no drills that month), drills, partial }].
@@ -20159,7 +20102,7 @@ function AttendanceTrend({ series }) {
   series.forEach((m, i) => { if (m.pct == null) { if (cur.length) segs.push(cur); cur = []; } else cur.push(i); });
   if (cur.length) segs.push(cur);
   const lastIdx = series.map((m) => m.pct != null).lastIndexOf(true);
-  if (lastIdx < 0) return <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "20px 0" }}>No drills with attendance taken in the last {series.length} months.</div>;
+  if (lastIdx < 0) return <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "20px 0" }}>No drills with attendance taken {series.length ? `in these ${series.length} month${series.length === 1 ? "" : "s"}` : "in this period"}.</div>;
   const aria = `Training attendance by month: ${series.map((m) => `${m.label} ${m.pct == null ? "no drills" : `${m.pct}%`}`).join(", ")}.`;
   const tipText = (m) => `${m.label}${m.partial ? " (so far)" : ""} · ${m.pct == null ? "no drills" : `${m.pct}% · ${m.drills} drill${m.drills === 1 ? "" : "s"}`}`;
   return (
@@ -20242,8 +20185,10 @@ function DutyBar({ pct, done, total, loaded }) {
   );
 }
 // Apparatus readiness AS OF TODAY — one stacked bar, same split as the Apparatus screen.
-function ApparatusReadinessBar() {
-  const ap = useApparatusReadiness();
+// The bar takes the useApparatusReadiness() result, so a page that already holds it (BoardStats, for its
+// rig lists) doesn't fetch twice; ApparatusReadinessBar is the self-fetching version for the dashboards.
+function ApparatusReadinessBar() { return <ApparatusReadinessView ap={useApparatusReadiness()} />; }
+function ApparatusReadinessView({ ap }) {
   const { grown, transition } = useChartGrow();
   if (ap.err) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>— Couldn't load apparatus. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={ap.retry}>Retry</button></div>;
   if (!ap.loaded) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>—</div>;
@@ -20275,13 +20220,15 @@ function ApparatusReadinessBar() {
     </>
   );
 }
-// Credited station hours per month. Six FIXED hook calls (never a loop/conditional), one per month,
-// so each bar is exactly the de-overlapped figure the Station Hours screen shows for that month.
-function StationHoursBars() {
-  const months = useMemo(() => lastMonths(6), []);
-  const m0 = useStationHoursRange(months[0]), m1 = useStationHoursRange(months[1]), m2 = useStationHoursRange(months[2]);
-  const m3 = useStationHoursRange(months[3]), m4 = useStationHoursRange(months[4]), m5 = useStationHoursRange(months[5]);
-  const hrs = [m0, m1, m2, m3, m4, m5];
+// Credited station hours per month (up to 12 months). Twelve FIXED hook slots — never a loop or a
+// conditional, so hook order is stable — one per month; unused slots get no range and fetch nothing.
+// Each bar is exactly the de-overlapped figure the Station Hours screen shows for that month.
+function StationHoursBars({ months }) {
+  const sl = (i) => months[i] || null;
+  const m0 = useStationHoursRange(sl(0)), m1 = useStationHoursRange(sl(1)), m2 = useStationHoursRange(sl(2)), m3 = useStationHoursRange(sl(3));
+  const m4 = useStationHoursRange(sl(4)), m5 = useStationHoursRange(sl(5)), m6 = useStationHoursRange(sl(6)), m7 = useStationHoursRange(sl(7));
+  const m8 = useStationHoursRange(sl(8)), m9 = useStationHoursRange(sl(9)), m10 = useStationHoursRange(sl(10)), m11 = useStationHoursRange(sl(11));
+  const hrs = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11].slice(0, Math.min(12, months.length));
   const [hover, setHover] = useState(null);
   const { grown, transition } = useChartGrow();
   const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
@@ -20291,6 +20238,7 @@ function StationHoursBars() {
   const maxV = Math.max(0, ...vals.filter((v) => v != null));
   const niceMax = (() => { if (maxV <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(maxV))); const f = maxV / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; })();
   const W = 600, H = 180, x0 = 44, x1 = 590, base = 150, top = 26;
+  if (!months.length) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>No months in this period yet.</div>;
   const slot = (x1 - x0) / months.length, bw = Math.min(46, slot * 0.6);
   const cx = (i) => x0 + slot * i + slot / 2;
   const hAt = (v) => (v / niceMax) * (base - top);
@@ -20320,6 +20268,123 @@ function StationHoursBars() {
           text={`${months[hover].label}${months[hover].partial ? " (so far)" : ""} · ${vals[hover] == null ? "unavailable" : `${h1(vals[hover])} h · ${hrs[hover].totals.shifts} shift${hrs[hover].totals.shifts === 1 ? "" : "s"}`}`} />}
       </svg>
       {failed.length > 0 && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Some months couldn't load. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={() => failed.forEach((h) => h.retry())}>Retry</button></div>}
+    </>
+  );
+}
+// One fund's progress toward its goal (all-time raised). No goal → the amount alone, no bar to fill.
+// raised null = the read failed or hasn't landed → "—", never $0.
+function FundProgress({ name, raised, goal }) {
+  const { grown, transition } = useChartGrow();
+  const g = goal != null && Number(goal) > 0 ? Number(goal) : null;
+  const pct = g && raised != null ? Math.min(100, Math.round((raised / g) * 100)) : null;
+  const usd = (v) => `$${Math.round(v).toLocaleString()}`;
+  return (
+    <div style={{ padding: "10px 0" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ flex: 1, minWidth: 140, fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{name}</span>
+        <span style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{raised == null ? "—" : usd(raised)}{g ? ` of ${usd(g)}${pct != null ? ` · ${pct}%` : ""}` : " · no target set"}</span>
+      </div>
+      {pct != null && (
+        <svg viewBox="0 0 300 12" role="img" aria-label={`${name}: ${usd(raised)} of ${usd(g)} goal, ${pct} percent`} style={{ display: "block", width: "100%", height: "auto", marginTop: 7 }}>
+          <title>{`${usd(raised)} of ${usd(g)} (${pct}%)`}</title>
+          <rect x={0} y={2} width={300} height={8} rx={4} fill={FIRE.track} />
+          {pct > 0 && <rect x={0} y={2} width={grown ? 3 * pct : 0} height={8} rx={4} fill={pct >= 100 ? FIRE.green : FIRE.red} style={{ transition }} />}
+        </svg>
+      )}
+    </div>
+  );
+}
+// Headcount by status as one stacked bar + counted legend. Statuses outside the three are shown as "Other",
+// never dropped, so the segments always add up to the roster.
+function RosterBreakdown({ members }) {
+  const { grown, transition } = useChartGrow();
+  const cm = (members || []).filter(countsInStats);
+  const n = (st) => cm.filter((m) => m.status === st).length;
+  const active = n("Active"), prob = n("Probationary"), inactive = n("Inactive"), other = cm.length - active - prob - inactive;
+  const parts = [
+    { key: "a", n: active, label: "Active", color: FIRE.green },
+    { key: "p", n: prob, label: "Probationary", color: FIRE.amberText },
+    { key: "i", n: inactive, label: "Inactive", color: FIRE.textMuted },
+    ...(other ? [{ key: "o", n: other, label: "Other", color: FIRE.textMuted2 }] : []),
+  ];
+  if (!cm.length) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>No members on the roster yet.</div>;
+  const W = 600, gap = 4, live = parts.filter((p) => p.n > 0), usable = W - gap * (live.length - 1);
+  let x = 0;
+  const rects = live.map((p) => { const w = (p.n / cm.length) * usable; const r = { ...p, x, w }; x += w + gap; return r; });
+  return (
+    <>
+      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Roster of ${cm.length}: ${parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(", ")}`} style={{ display: "block", width: "100%", height: "auto" }}>
+        {rects.map((p) => (
+          <g key={p.key}>
+            <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={5} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${cm.length}`}</title></rect>
+            {p.w >= 22 && <text x={p.x + 10} y={21} fontFamily={CHART_FONT} fontWeight={700} fontSize={13} fill={FIRE.sidebar} pointerEvents="none" style={{ opacity: grown ? 1 : 0, transition }}>{p.n}</text>}
+          </g>
+        ))}
+      </svg>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12, fontSize: 12, color: FIRE.textSecondary }}>
+        {parts.map((p) => <span key={p.key}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, marginRight: 6, verticalAlign: "middle", background: p.color }} />{p.label} <b style={{ color: FIRE.textPrimary, fontFamily: CHART_FONT, ...FS.num }}>{p.n}</b></span>)}
+      </div>
+    </>
+  );
+}
+// DEPARTMENT HEALTH — the hero counts + charts block, shared by DeptAdminDashboard and BoardDashboard so the
+// two can never drift: every number is derived HERE, once, from the same honest helpers. The parent passes
+// the duties it already loads (it needs them for its own panels). `go` omitted = read-only: no tile or
+// panel links (the Board strip never had any). extraHero = dashboard-specific trailing tiles.
+function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero }) {
+  const yr = new Date().getFullYear();
+  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
+  const { avg: boardPct, rows: boardRows, doneBoard } = boardAttendance(members, sessions, yr);   // board-event accountability track
+  const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / no board members → "—", not 0%
+  const trend = useMemo(() => attendanceSeries(members, sessions, lastMonths(8)), [members, sessions]);
+  const hoursMonths = useMemo(() => lastMonths(6), []);
+  const cm = (members || []).filter(countsInStats);   // counted members (owner/test excluded)
+  const total = cm.length;
+  // Headcount breakdown for the Members tile. The tile shows the FULL roster; the cert/attendance charts carry
+  // their own Active+Probationary denominators. Any status outside the three is listed rather than dropped.
+  const nActive = cm.filter((m) => m.status === "Active").length, nProb = cm.filter((m) => m.status === "Probationary").length;
+  const nInactive = cm.filter((m) => m.status === "Inactive").length, nOther = total - nActive - nProb - nInactive;
+  // ROSTER COVERAGE, not records — see certCoverage. expdC is "any expired cert exists", a different question.
+  let expdC = 0; cm.forEach((m) => (m.certs || []).forEach((c) => { if (certStatus(c.exp).rank === 0) expdC++; }));
+  const cov = certCoverage(members, { includeProbationary: true });
+  const drillsHeld = doneThisYear.length;
+  const dutyList = duties || [];
+  const dutyDone = dutyList.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
+  // null, NOT 100 — a department with no duties configured has nothing measured; the bar says "No duties set".
+  const dutyCompletion = dutyList.length ? Math.round((dutyDone / dutyList.length) * 100) : null;
+  const to = (...a) => (go ? () => go(...a) : undefined);
+  const boardTile = <HeroTile key="board" n={boardRated ? `${boardPct}%` : "\u2014"} color={boardRated ? pctTone(boardPct) : FIRE.textMuted} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
+  const membersTile = <HeroTile key="members" n={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
+  const drillsTile = <HeroTile key="drills" n={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        {boardFirst ? [boardTile, membersTile, drillsTile] : [membersTile, boardTile, drillsTile]}
+        {extraHero}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 14, marginTop: 14 }}>
+        <ChartPanel wide title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
+          <AttendanceTrend series={trend} />
+        </ChartPanel>
+        <ChartPanel title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={to("roster", "certs")}>
+          <CertRings cov={cov} onShowUncovered={to("roster", "certs")} />
+        </ChartPanel>
+        <ChartPanel title="Station duties" note="this period" onOpen={to("duties")}>
+          <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
+            <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
+          </div>
+        </ChartPanel>
+        {moduleEnabled("apparatus", dept?.disabled_modules) && (
+          <ChartPanel wide title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
+            <ApparatusReadinessBar />
+          </ChartPanel>
+        )}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && (
+          <ChartPanel wide title="Station hours" note="credited · last 6 months" onOpen={to("stationhours")}>
+            <StationHoursBars months={hoursMonths} />
+          </ChartPanel>
+        )}
+      </div>
     </>
   );
 }
