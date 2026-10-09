@@ -3409,9 +3409,21 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
-  const { avg: boardPct } = boardAttendance(members, sessions, yr);   // board-event accountability track (% only)
+  const { avg: boardPct, rows: boardRows, doneBoard } = boardAttendance(members, sessions, yr);   // board-event accountability track
+  const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / no board members → "—", not 0%
+  // Monthly attendance series for the trend line: deptAttendance run over EACH month's range, so the
+  // join-date cutoff and the honest per-member denominator apply month by month. No drills → null (a gap).
+  const trend = useMemo(() => lastMonths(8).map((m) => {
+    const a = deptAttendance(members, sessions, null, m);
+    const rated = a.rows.some((r) => r.pct != null);
+    return { label: m.label, partial: m.partial, drills: a.doneThisYear.length, pct: a.doneThisYear.length && rated ? a.avg : null };
+  }), [members, sessions]);
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const total = cm.length;
+  // Headcount breakdown for the Members tile. The tile shows the FULL roster; the cert/attendance charts carry
+  // their own Active+Probationary denominators. Any status outside the three is listed rather than dropped.
+  const nActive = cm.filter((m) => m.status === "Active").length, nProb = cm.filter((m) => m.status === "Probationary").length;
+  const nInactive = cm.filter((m) => m.status === "Inactive").length, nOther = total - nActive - nProb - nInactive;
   // ROSTER COVERAGE, not records — see certCoverage. expdC is kept because the dashboards warn on
   // "any expired cert exists", which is a different question from coverage and still worth flagging.
   const ranks = []; cm.forEach((m) => (m.certs || []).forEach((c) => ranks.push(certStatus(c.exp).rank)));
@@ -3422,6 +3434,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [duties, setDuties] = useState([]);
+  const [dutiesLoaded, setDutiesLoaded] = useState(false);   // until the read lands, duty completion is "—", not "No duties set"
   const [pendingCerts, setPendingCerts] = useState([]);
   const [openActions, setOpenActions] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // full open action_items rows → computeInsights
@@ -3430,7 +3443,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [loadErr, setLoadErr] = useState(false);
   const loadPanels = () => {
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });                 // dept-scoped by RLS
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); setDutiesLoaded(true); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
     supabase.from("action_items").select("*").eq("status", "open")
@@ -3468,17 +3481,35 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         </button>
       </div>
       <div style={{ marginBottom: 12, maxWidth: 360 }}><NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} /></div>
+      {/* DEPARTMENT HEALTH — counts as hero tiles, rates as charts. Same helpers as before; only the shape changed. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <Stat S={S} dark n={String(total)} label="Members" onClick={() => go("roster", "members")} />
-        <div style={{ display: "grid" }}>
-          <Stat S={S} dark n={cov.total ? `${cov.withCerts}/${cov.total}` : "\u2014"} label="Certs on file" warn={expdC > 0} onClick={() => go("roster", "certs")} />
-          <CertNote cov={cov} onShowUncovered={() => go("roster", "certs")} />
-        </div>
-        <Stat S={S} dark n={`${avgPart}%`} label="Attendance" pct={avgPart} onClick={() => go("roster", "attendance")} />
-        <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared" style={{ display: "grid" }}><Stat S={S} dark n={dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`} label="Duty completion" pct={dutyCompletion} onClick={() => go("duties")} /></div>
-        <Stat S={S} dark n={String(drillsHeld)} label="Drills held" onClick={() => go("training")} />
-        <Stat S={S} dark n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />
-        <Stat S={S} dark n={`${boardPct}%`} label="Board attendance" pct={boardPct} onClick={() => go("training")} />
+        <HeroTile n={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={() => go("roster", "members")} />
+        <HeroTile n={boardRated ? `${boardPct}%` : "\u2014"} color={boardRated ? pctTone(boardPct) : FIRE.textMuted} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={() => go("training")} />
+        <HeroTile n={String(drillsHeld)} label="Drills held" sub="this year" onClick={() => go("training")} />
+        <HeroTile n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 14, marginTop: 14 }}>
+        <ChartPanel wide title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={() => go("roster", "attendance")}>
+          <AttendanceTrend series={trend} />
+        </ChartPanel>
+        <ChartPanel title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={() => go("roster", "certs")}>
+          <CertRings cov={cov} onShowUncovered={() => go("roster", "certs")} />
+        </ChartPanel>
+        <ChartPanel title="Station duties" note="this period" onOpen={() => go("duties")}>
+          <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
+            <DutyBar pct={dutyCompletion} done={dutyDone} total={duties.length} loaded={dutiesLoaded} />
+          </div>
+        </ChartPanel>
+        {moduleEnabled("apparatus", dept?.disabled_modules) && (
+          <ChartPanel wide title="Apparatus readiness" note="as of today" onOpen={() => go("apparatus")}>
+            <ApparatusReadinessBar />
+          </ChartPanel>
+        )}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && (
+          <ChartPanel wide title="Station hours" note="credited · last 6 months" onOpen={() => go("stationhours")}>
+            <StationHoursBars />
+          </ChartPanel>
+        )}
       </div>
       <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
@@ -20055,6 +20086,243 @@ function CoverageNote({ cov, onShowUncovered }) {
   );
 }
 
+/* ---------------- Dashboard charts (DeptAdminDashboard) ----------------
+   Hand-rolled SVG on FIRE tokens and the Oswald display face — no chart library, no new colors.
+   Every chart prints its exact number; hover (or tap) shows a point's value; an aria-label carries
+   the whole series for screen readers; prefers-reduced-motion users get no growth animation.
+   The numbers come from the same helpers as everywhere else (deptAttendance, certCoverage,
+   useApparatusReadiness, useStationHoursRange) — these only change the shape, never the math. */
+const CHART_FONT = "'Oswald', system-ui, sans-serif";
+const pctTone = (p) => (p == null ? FIRE.textMuted : p > 75 ? FIRE.green : p >= 30 ? FIRE.amberText : FIRE.redText);   // same thresholds as Stat
+// Last n calendar months, oldest first, the current month clipped to today (a month in progress is "so far").
+const lastMonths = (n) => {
+  const t = new Date(); const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const a = new Date(t.getFullYear(), t.getMonth() - i, 1);
+    const b = new Date(a.getFullYear(), a.getMonth() + 1, 0);
+    out.push({ from: toISODate(a), to: toISODate(b > t ? t : b), label: a.toLocaleDateString("en-US", { month: "short" }), partial: b > t });
+  }
+  return out;
+};
+// Grow-in on mount, skipped entirely under prefers-reduced-motion.
+function useChartGrow() {
+  const reduce = useMemo(() => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } }, []);
+  const [grown, setGrown] = useState(reduce);
+  useEffect(() => { if (reduce) return; const id = requestAnimationFrame(() => setGrown(true)); return () => cancelAnimationFrame(id); }, [reduce]);
+  return { grown, transition: reduce ? "none" : "all .6s ease-out" };
+}
+// In-SVG tooltip: a dark chip above (x, y), kept inside the viewBox.
+function SvgTip({ x, y, text, vbW }) {
+  const w = Math.round(text.length * 6.4 + 18), h = 24;
+  const left = Math.max(2, Math.min(vbW - w - 2, x - w / 2));
+  const top = Math.max(2, y - h - 10);
+  return (
+    <g pointerEvents="none">
+      <rect x={left} y={top} width={w} height={h} rx={6} fill={FIRE.sidebar} stroke={FIRE.btnBorder} />
+      <text x={left + w / 2} y={top + 16} textAnchor="middle" fontSize={11.5} fill={FIRE.textPrimary} style={FS.num}>{text}</text>
+    </g>
+  );
+}
+function ChartPanel({ title, note, wide, onOpen, children }) {
+  return (
+    <div style={{ ...FS.card, padding: 18, minWidth: 0, gridColumn: wide ? "1 / -1" : undefined }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: CHART_FONT, fontWeight: 600, fontSize: 13, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textPrimary }}>{title}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: FIRE.textMuted }}>
+          {note}
+          {onOpen && <button onClick={onOpen} aria-label={`Open ${title}`} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}><ChevronRight size={15} color={FIRE.btnIcon} /></button>}
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+function HeroTile({ n, label, sub, color, onClick }) {
+  return (
+    <button onClick={onClick} className="stat-cta" style={{ ...FS.card, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
+      <div style={{ fontFamily: CHART_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, letterSpacing: "-.01em", color: color || FIRE.textPrimary, ...FS.num }}>{n}</div>
+      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 7 }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+      {onClick && <ChevronRight size={16} color={FIRE.btnIcon} style={{ position: "absolute", top: 14, right: 14 }} />}
+    </button>
+  );
+}
+// Monthly training-attendance line. series: [{ label, pct (null = no drills that month), drills, partial }].
+// A month with no drills is a GAP in the line, never a 0.
+function AttendanceTrend({ series }) {
+  const [hover, setHover] = useState(null);
+  const { grown, transition } = useChartGrow();
+  const W = 600, H = 200, x0 = 40, x1 = 584, yTop = 16, yBot = 172;
+  const xAt = (i) => (series.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (series.length - 1));
+  const yAt = (p) => yBot - (p / 100) * (yBot - yTop);
+  const segs = []; let cur = [];
+  series.forEach((m, i) => { if (m.pct == null) { if (cur.length) segs.push(cur); cur = []; } else cur.push(i); });
+  if (cur.length) segs.push(cur);
+  const lastIdx = series.map((m) => m.pct != null).lastIndexOf(true);
+  if (lastIdx < 0) return <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "20px 0" }}>No drills with attendance taken in the last {series.length} months.</div>;
+  const aria = `Training attendance by month: ${series.map((m) => `${m.label} ${m.pct == null ? "no drills" : `${m.pct}%`}`).join(", ")}.`;
+  const tipText = (m) => `${m.label}${m.partial ? " (so far)" : ""} · ${m.pct == null ? "no drills" : `${m.pct}% · ${m.drills} drill${m.drills === 1 ? "" : "s"}`}`;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }} onMouseLeave={() => setHover(null)}>
+      {[100, 50, 0].map((p) => (
+        <g key={p}>
+          <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? FIRE.btnBorder : FIRE.track} />
+          <text x={x0 - 6} y={yAt(p) + 3} textAnchor="end" fontSize={10} fill={FIRE.textMuted}>{p}%</text>
+        </g>
+      ))}
+      <g style={{ opacity: grown ? 1 : 0, transition }}>
+        {segs.map((s) => (
+          <g key={s[0]}>
+            {s.length > 1 && <path d={`M${s.map((i) => `${xAt(i)},${yAt(series[i].pct)}`).join(" L")} L${xAt(s[s.length - 1])},${yBot} L${xAt(s[0])},${yBot} Z`} fill={FIRE.red} fillOpacity={0.12} />}
+            {s.length > 1 && <polyline points={s.map((i) => `${xAt(i)},${yAt(series[i].pct)}`).join(" ")} fill="none" stroke={FIRE.red} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />}
+          </g>
+        ))}
+        {series.map((m, i) => m.pct != null && i !== lastIdx && <circle key={i} cx={xAt(i)} cy={yAt(m.pct)} r={hover === i ? 4 : 2.6} fill={FIRE.red} />)}
+        <circle cx={xAt(lastIdx)} cy={yAt(series[lastIdx].pct)} r={5} fill={FIRE.red} stroke={FIRE.card} strokeWidth={2} />
+        <text x={xAt(lastIdx) - 8} y={yAt(series[lastIdx].pct) - 10} textAnchor="end" fontFamily={CHART_FONT} fontWeight={700} fontSize={14} fill={FIRE.textPrimary}>{series[lastIdx].pct}%</text>
+      </g>
+      {series.map((m, i) => <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize={10} fill={hover === i ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>)}
+      {series.map((m, i) => {   // full-height hit columns: easy to hover, and tappable on a phone
+        const half = series.length < 2 ? (x1 - x0) / 2 : (x1 - x0) / (series.length - 1) / 2;
+        return <rect key={i} x={xAt(i) - half} y={0} width={half * 2} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />;
+      })}
+      {hover != null && <SvgTip x={xAt(hover)} y={series[hover].pct == null ? yBot : yAt(series[hover].pct)} text={tipText(series[hover])} vbW={W} />}
+    </svg>
+  );
+}
+// One progress ring. value/of → %, with the exact counts printed under it.
+function Ring({ value, of, caption, sub }) {
+  const { grown, transition } = useChartGrow();
+  const pct = of ? Math.round((value / of) * 100) : null;
+  const r = 40, C = 2 * Math.PI * r;
+  const tone = pctTone(pct);
+  return (
+    <div style={{ flex: 1, minWidth: 120, textAlign: "center" }}>
+      <svg viewBox="0 0 110 110" width={110} height={110} role="img" aria-label={`${caption}: ${pct == null ? "not applicable" : `${pct} percent, ${value} of ${of}`}`} style={{ display: "block", margin: "0 auto" }}>
+        <title>{pct == null ? `${caption}: —` : `${caption}: ${value} of ${of} (${pct}%)`}</title>
+        <circle cx={55} cy={55} r={r} fill="none" stroke={FIRE.track} strokeWidth={10} />
+        {pct != null && pct > 0 && <circle cx={55} cy={55} r={r} fill="none" stroke={tone} strokeWidth={10} strokeLinecap="round" strokeDasharray={C} strokeDashoffset={grown ? C * (1 - pct / 100) : C} transform="rotate(-90 55 55)" style={{ transition }} />}
+        <text x={55} y={62} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={700} fontSize={22} fill={FIRE.textPrimary}>{pct == null ? "—" : `${pct}%`}</text>
+      </svg>
+      <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 6 }}>{caption}</div>
+      <div style={{ fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{sub}</div>
+    </div>
+  );
+}
+// Cert coverage: ring 1 = members with any cert on file / active+probationary roster;
+// ring 2 = of those, members whose every cert is current (undated never counts current).
+function CertRings({ cov, onShowUncovered }) {
+  return (
+    <>
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+        <Ring value={cov.withCerts} of={cov.total} caption="Have certs on file" sub={cov.total ? `${cov.withCerts} of ${cov.total} members` : "No active members"} />
+        <Ring value={cov.current} of={cov.withCerts} caption="All certs current" sub={cov.withCerts ? `${cov.current} of ${cov.withCerts} on file` : "None on file yet"} />
+      </div>
+      <CertNote cov={cov} onShowUncovered={onShowUncovered} />
+    </>
+  );
+}
+// Single horizontal bar. pct null → the bar is replaced by its honest label.
+function DutyBar({ pct, done, total, loaded }) {
+  const { grown, transition } = useChartGrow();
+  if (!loaded) return <div style={{ fontFamily: CHART_FONT, fontWeight: 700, fontSize: 30, color: FIRE.textMuted }}>—</div>;
+  if (pct == null) return <div style={{ fontFamily: CHART_FONT, fontWeight: 700, fontSize: 22, color: FIRE.textMuted }}>No duties set</div>;
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
+        <span style={{ fontFamily: CHART_FONT, fontWeight: 700, fontSize: 30, color: pctTone(pct), ...FS.num }}>{pct}%</span>
+        <span style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{done} of {total} done</span>
+      </div>
+      <svg viewBox="0 0 300 20" role="img" aria-label={`Duty completion ${pct} percent, ${done} of ${total} done`} style={{ display: "block", width: "100%", height: "auto" }}>
+        <title>{`${done} of ${total} duties done this period (${pct}%)`}</title>
+        <rect x={0} y={4} width={300} height={12} rx={6} fill={FIRE.track} />
+        {pct > 0 && <rect x={0} y={4} width={grown ? 3 * pct : 0} height={12} rx={6} fill={pctTone(pct)} style={{ transition }} />}
+      </svg>
+    </>
+  );
+}
+// Apparatus readiness AS OF TODAY — one stacked bar, same split as the Apparatus screen.
+function ApparatusReadinessBar() {
+  const ap = useApparatusReadiness();
+  const { grown, transition } = useChartGrow();
+  if (ap.err) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>— Couldn't load apparatus. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={ap.retry}>Retry</button></div>;
+  if (!ap.loaded) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>—</div>;
+  const { total, ready, flagged, oos } = ap.totals;
+  if (!total) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>No apparatus on the roster yet.</div>;
+  const parts = [
+    { key: "ready", n: ready, label: "Ready", color: FIRE.green },
+    { key: "flagged", n: flagged, label: "Needs attention", color: FIRE.amberText },
+    { key: "oos", n: oos, label: "Out of service", color: FIRE.redText },
+  ];
+  const W = 600, gap = 4, live = parts.filter((p) => p.n > 0);
+  const usable = W - gap * (live.length - 1);
+  let x = 0;
+  const rects = live.map((p) => { const w = (p.n / total) * usable; const r = { ...p, x, w }; x += w + gap; return r; });
+  return (
+    <>
+      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Apparatus: ${ready} ready, ${flagged} need attention, ${oos} out of service, of ${total}`} style={{ display: "block", width: "100%", height: "auto" }}>
+        {rects.map((p) => (
+          <g key={p.key}>
+            <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={5} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${total}`}</title></rect>
+            {p.w >= 22 && <text x={p.x + 10} y={21} fontFamily={CHART_FONT} fontWeight={700} fontSize={13} fill={FIRE.sidebar} pointerEvents="none" style={{ opacity: grown ? 1 : 0, transition }}>{p.n}</text>}
+          </g>
+        ))}
+      </svg>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12, fontSize: 12, color: FIRE.textSecondary }}>
+        {parts.map((p) => <span key={p.key}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, marginRight: 6, verticalAlign: "middle", background: p.color }} />{p.label} <b style={{ color: FIRE.textPrimary, fontFamily: CHART_FONT, ...FS.num }}>{p.n}</b></span>)}
+        {ap.totals.openFailures > 0 && <span style={{ color: FIRE.amberText }}>{ap.totals.openFailures} open check failure{ap.totals.openFailures === 1 ? "" : "s"}</span>}
+      </div>
+    </>
+  );
+}
+// Credited station hours per month. Six FIXED hook calls (never a loop/conditional), one per month,
+// so each bar is exactly the de-overlapped figure the Station Hours screen shows for that month.
+function StationHoursBars() {
+  const months = useMemo(() => lastMonths(6), []);
+  const m0 = useStationHoursRange(months[0]), m1 = useStationHoursRange(months[1]), m2 = useStationHoursRange(months[2]);
+  const m3 = useStationHoursRange(months[3]), m4 = useStationHoursRange(months[4]), m5 = useStationHoursRange(months[5]);
+  const hrs = [m0, m1, m2, m3, m4, m5];
+  const [hover, setHover] = useState(null);
+  const { grown, transition } = useChartGrow();
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
+  const val = (h) => (h.err || !h.loaded ? null : Number(h.totals.credited) || 0);   // null = unknown, never 0
+  const vals = hrs.map(val);
+  const failed = hrs.filter((h) => h.err);
+  const maxV = Math.max(0, ...vals.filter((v) => v != null));
+  const niceMax = (() => { if (maxV <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(maxV))); const f = maxV / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; })();
+  const W = 600, H = 180, x0 = 44, x1 = 590, base = 150, top = 26;
+  const slot = (x1 - x0) / months.length, bw = Math.min(46, slot * 0.6);
+  const cx = (i) => x0 + slot * i + slot / 2;
+  const hAt = (v) => (v / niceMax) * (base - top);
+  const aria = `Credited station hours by month: ${months.map((m, i) => `${m.label} ${vals[i] == null ? "unavailable" : `${h1(vals[i])} hours`}`).join(", ")}.`;
+  return (
+    <>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }} onMouseLeave={() => setHover(null)}>
+        {[niceMax, niceMax / 2, 0].map((v) => (
+          <g key={v}>
+            <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? FIRE.btnBorder : FIRE.track} />
+            <text x={x0 - 6} y={base - hAt(v) + 3} textAnchor="end" fontSize={10} fill={FIRE.textMuted}>{Math.round(v)}</text>
+          </g>
+        ))}
+        {months.map((m, i) => {
+          const v = vals[i];
+          const bh = v == null ? 0 : hAt(v);
+          return (
+            <g key={m.from}>
+              {v != null && v > 0 && <rect x={cx(i) - bw / 2} y={grown ? base - bh : base} width={bw} height={grown ? bh : 0} rx={4} fill={FIRE.red} fillOpacity={i === months.length - 1 || hover === i ? 1 : 0.7} style={{ transition }} />}
+              <text x={cx(i)} y={(v == null ? base : base - bh) - 6} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={600} fontSize={11} fill={v == null ? FIRE.textMuted : FIRE.textSecondary} style={FS.num}>{v == null ? "—" : h1(v)}</text>
+              <text x={cx(i)} y={H - 12} textAnchor="middle" fontSize={10} fill={hover === i ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>
+              <rect x={cx(i) - slot / 2} y={0} width={slot} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
+            </g>
+          );
+        })}
+        {hover != null && <SvgTip x={cx(hover)} y={vals[hover] == null ? base : base - hAt(vals[hover])} vbW={W}
+          text={`${months[hover].label}${months[hover].partial ? " (so far)" : ""} · ${vals[hover] == null ? "unavailable" : `${h1(vals[hover])} h · ${hrs[hover].totals.shifts} shift${hrs[hover].totals.shifts === 1 ? "" : "s"}`}`} />}
+      </svg>
+      {failed.length > 0 && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Some months couldn't load. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={() => failed.forEach((h) => h.retry())}>Retry</button></div>}
+    </>
+  );
+}
 /* The dashboard cert tile's breakdown: TWO numbers, never a bare percentage. "On file" is the
    data-entry gap (members with no cert rows at all); "current" is, of the members who did enter
    certs, how many have nothing expired and nothing undated. Separating them stops a department
