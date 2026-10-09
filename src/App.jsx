@@ -1325,7 +1325,7 @@ const NAV = [
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: LEADERSHIP },   // Board/DA/Officer sign items; DA/PA edit the list; a member reaches their own read-only view from the dashboard card
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
-  { key: "equipment", label: "Equipment", Icon: Briefcase, roles: ROLES },
+  { key: "equipment", label: "Equipment", Icon: Briefcase, roles: LEADERSHIP },   // full log: leadership + active equipment managers (isEqMgr in App); members use My Equipment
   { key: "myequipment", label: "My Equipment", Icon: HardHat, roles: ROLES },
   { key: "stationhours", label: "Station Hours", Icon: Clock, roles: ROLES },
   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
@@ -1995,6 +1995,18 @@ export default function App() {
     });
     return () => { cancelled = true; };
   }, [myMemberId, members]);
+  /* Equipment managers can be plain Members (Equipment's eligibleForMgr is any Active member), and they
+     issue gear and confirm returns from the full Equipment screen — is_equipment_manager() lets them in
+     server-side. So the leadership-only gate on that screen has to let an active manager through too.
+     Keyed on the REAL member id, not "View as". A failed read keeps the last-known answer. */
+  const [isEqMgr, setIsEqMgr] = useState(false);
+  useEffect(() => {
+    if (!myMemberId) { setIsEqMgr(false); return; }
+    let off = false;
+    supabase.from("equipment_manager").select("id").eq("member_id", myMemberId).is("removed_at", null).limit(1)
+      .then(({ data, error }) => { if (!off && !error && data) setIsEqMgr(data.length > 0); });
+    return () => { off = true; };
+  }, [myMemberId]);
   const [dept, setDept] = useState(null);   // real department identity (name + logo_url) — header crest + sidebar
   useEffect(() => {
     if (!authEmail) { setDept(null); return; }
@@ -2510,7 +2522,7 @@ export default function App() {
   const disabledModules = Array.isArray(dept?.disabled_modules) ? dept.disabled_modules : [];   // null/absent column → nothing disabled
   const visibleNav = (isProjectAdminOnly
     ? NAV.filter((n) => PA_NAV.includes(n.key))
-    : NAV.filter((n) => hasAny(role, n.roles))
+    : NAV.filter((n) => hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr))
   ).filter((n) => moduleEnabled(n.key, disabledModules));
   // Closes the hole the nav filter can't: go() is called from dashboard tiles and CTAs, and ?checkin=/
   // ?handoff= set the screen directly, so a disabled module stays reachable without passing the sidebar.
@@ -2595,7 +2607,7 @@ export default function App() {
             hatch is a white screen with extra steps. */}
         <main style={S.content}>
           <ErrorBoundary key={screen}>
-          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} />}
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
@@ -2612,7 +2624,11 @@ export default function App() {
             ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />
             : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} />)}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
-          {screen === "equipment" && <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
+          {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
+              deep-link, a stale screen) gets their own My Equipment instead — never the department log. */}
+          {screen === "equipment" && ((isLeader(role) || isEqMgr)
+            ? <Equipment S={S} role={role} members={members} meId={myMemberId} notify={notify} />
+            : <MyEquipment S={S} meId={myMemberId} notify={notify} />)}
           {screen === "myequipment" && <MyEquipment S={S} meId={myMemberId} notify={notify} />}
           {screen === "stationhours" && <StationHours S={S} dept={dept} notify={notify} />}
           {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
@@ -3864,9 +3880,9 @@ function MyActionItems({ meId }) {
     </div>
   );
 }
-function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept }) {
+function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept, isEqMgr }) {
   if (hasAny(role, ["Project Admin"])) return <ProgramOverview S={S} role={role} notify={notify} go={go} />;   // PA home = Program Overview (must be FIRST — PA also passes isDeptAdmin)
-  if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
+  if (!isLeader(role)) return <MemberDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />;
   if (isDeptAdmin(role)) return <DeptAdminDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   if (isBoard(role) && !hasAny(role, ['Officer'])) return <BoardDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
   return <OfficerDashboard S={S} role={role} members={members} go={go} meId={meId} sessions={sessions} notify={notify} dept={dept} />;
@@ -3913,8 +3929,8 @@ const QUICK = {
   request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
   admin:   { accent: "#B11E2A", blurb: "Publish new monthly materials to the library." },
 };
-function QuickAccess({ S, role, go }) {
-  const items = NAV.filter((n) => n.key !== "dashboard" && hasAny(role, n.roles));
+function QuickAccess({ S, role, go, isEqMgr }) {
+  const items = NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)));   // same equipment-manager exception as the sidebar (visibleNav)
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ ...FS.kicker, marginBottom: 8 }}>EXPLORE THE PLATFORM</div>
@@ -4123,7 +4139,7 @@ function StationClockCard({ S, dept, go }) {
     </div>
   );
 }
-function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
+function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, isEqMgr }) {
   // NOTE: no useProofViewer here any more — PersonalView owns the certs card and its own proof viewer.
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
@@ -4300,7 +4316,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
       <div style={{ ...FS.card, padding: 18 }}>
         <div style={FS.kicker}>QUICK ACTIONS</div>
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-          {NAV.filter((n) => n.key !== "dashboard" && hasAny(role, n.roles)).map((n) => (
+          {NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr))).map((n) => (   // same equipment-manager exception as the sidebar
             <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
               <n.Icon size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: FIRE.btnText }}>{n.label}</span>
