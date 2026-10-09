@@ -3988,20 +3988,41 @@ function StationClockCard({ S, dept, go }) {
     return () => { alive = false; };
   }, [openId]);
 
+  // Live elapsed timer — ticks once a second, and ONLY while on the clock. Display-only: the Station Hours
+  // screen still owns the punch. Ticking isn't decorative motion, so it runs under reduced-motion too;
+  // the pulse is decorative and the .duty-pulse CSS turns it off there.
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => { if (!open) return; const t = setInterval(() => setTick(Date.now()), 1000); return () => clearInterval(t); }, [open]);
   if (!loaded || failed) return null;   // a read that failed is not "clocked out" — say nothing rather than something wrong
   const onClock = !!open;
   const since = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+  const elapsed = (() => {
+    const ms = onClock ? tick - new Date(open.checked_in_at).getTime() : NaN;
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    const t = Math.floor(ms / 1000), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+    const p = (n) => String(n).padStart(2, "0");
+    return `${h}:${p(m)}:${p(sec)}`;
+  })();
   return (
-    <div style={{ ...FS.card, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+    <div style={{ ...FS.card, padding: "14px 16px", borderTop: `3px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Clock size={14} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
         <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>STATION HOURS</div>
+        {/* on/off state pill — the dot pulses while on duty */}
+        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: ".1em",
+                       color: onClock ? FIRE.greenText : FIRE.textMuted, border: `0.5px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
+          <span className={onClock ? "duty-pulse" : undefined} style={{ width: 7, height: 7, borderRadius: 999, background: onClock ? FIRE.green : FIRE.textMuted }} />
+          {onClock ? "ON DUTY" : "OFF DUTY"}
+        </span>
       </div>
       {onClock ? (
         <>
-          <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, marginTop: 9 }}>On the clock since {since(open.checked_in_at)}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: 12, fontWeight: 600, color: open.verified ? FIRE.greenText : FIRE.amberText }}>
-            {open.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{open.verified ? "Verified" : "Not verified"}
+          <div role="timer" aria-label={elapsed ? `On the clock for ${elapsed}` : "On the clock"} style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontWeight: 700, fontSize: 34, lineHeight: 1, color: FIRE.textPrimary, marginTop: 12, ...FS.num }}>{elapsed || "—"}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6, fontSize: 12.5, color: FIRE.textSecondary }}>
+            <span>Since {since(open.checked_in_at)}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600, color: open.verified ? FIRE.greenText : FIRE.amberText }}>
+              {open.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{open.verified ? "Verified" : "Not verified"}
+            </span>
           </div>
           {/* The nudge. Tapping goes to the member's own Station Hours screen, which is as far as
               the member can take it — a backdated close is close_open_shift(), which is admin-gated,
@@ -4037,7 +4058,10 @@ function StationClockCard({ S, dept, go }) {
           )}
         </>
       ) : (
-        <div style={{ fontSize: 14, color: FIRE.textMuted, marginTop: 9 }}>Not on the clock</div>
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontWeight: 700, fontSize: 22, lineHeight: 1.1, color: FIRE.textMuted2 }}>Not on the clock</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Clock in when you get to the station.</div>
+        </div>
       )}
       {/* Shown in both states: off the clock it's the promise that arriving is enough, on the
           clock it's the reason the row appeared without anyone tapping anything. */}
@@ -4047,7 +4071,10 @@ function StationClockCard({ S, dept, go }) {
           <span>Presence tracked automatically at the station.</span>
         </div>
       )}
-      <button style={{ ...FS.btn, marginTop: 12 }} onClick={() => go("stationhours")}>{onClock ? "Clock out →" : "Clock in →"}</button>
+      {/* Prominent, but it NAVIGATES — the Station Hours screen does the actual punch (location check included). */}
+      <button style={{ ...(onClock ? FS.btn : FS.btnPrimary), width: "100%", justifyContent: "center", marginTop: 12, padding: "10px 14px", fontSize: 13.5 }} onClick={() => go("stationhours")}>
+        <Clock size={15} /> {onClock ? "Clock out" : "Clock in"} <ChevronRight size={14} />
+      </button>
     </div>
   );
 }
@@ -4185,13 +4212,16 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       <ActionItemsCard meId={meId} style={{ marginBottom: 14 }} />
       {/* Your attendance over time — the shared trend chart on the member's OWN monthly rates. A month with no
           drills they were expected at is a gap, never a 0. Hidden until there's at least one month to plot. */}
-      {mySeries.some((m) => m.pct != null) && (
-        <div style={{ marginBottom: 14 }}>
+      {/* Your attendance + your station hours — side by side on desktop, stacked on a phone. Each hides
+          itself until it has something to plot. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
+        {mySeries.some((m) => m.pct != null) && (
           <ChartPanel title="Your attendance" note="last 8 months">
             <AttendanceTrend series={mySeries} />
           </ChartPanel>
-        </div>
-      )}
+        )}
+        {moduleEnabled("stationhours", dept?.disabled_modules) && <MyStationHoursPanel />}
+      </div>
       {/* 3 — the shared personal view: needs-attention, station clock, certs, duties, upcoming
           training, and the self-serve cert proposer. Previously duplicated inline here; PersonalView
           is now the single source of truth, rendered identically for members, Dept Admins and
@@ -5558,11 +5588,14 @@ function Documents({ S, role, notify, uploaderName, members }) {
             <div key={d.id}>
               <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
                 <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span></div>
-                <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDoc(d)}><Download size={14} /> Open</button>
-                <button style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => toggleHistory(d)}><Clock size={14} /> History <span style={{ display: "inline-flex" }}>{historyFor === d.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span></button>
-                {isDA && <label style={{ ...FS.btn, padding: "6px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }} title="Replace with a new version"><Upload size={14} /> Replace<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) doReplace(d, f); }} /></label>}
-                {isDA && <button title="Move to trash" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => deleteDoc(d)}><X size={14} color={FIRE.deleteRed} /></button>}
+                <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span></div>
+                {/* ONE flex group: inline on desktop, drops below the title as a unit on a phone (no overlap) */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+                  <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDoc(d)}><Download size={14} /> Open</button>
+                  <button style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => toggleHistory(d)}><Clock size={14} /> History <span style={{ display: "inline-flex" }}>{historyFor === d.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span></button>
+                  {isDA && <label style={{ ...FS.btn, padding: "6px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }} title="Replace with a new version"><Upload size={14} /> Replace<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) doReplace(d, f); }} /></label>}
+                  {isDA && <button title="Move to trash" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => deleteDoc(d)}><X size={14} color={FIRE.deleteRed} /></button>}
+                </div>
               </div>
               {historyFor === d.id && (
                 <div style={{ ...FS.card, padding: 12, marginTop: 6, marginBottom: 8 }}>
@@ -5592,12 +5625,14 @@ function Documents({ S, role, notify, uploaderName, members }) {
             : trashed.map((d) => (
               <div key={d.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
                 <Trash2 size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
                   <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>Trashed {d.deletedWhen}{d.deletedBy ? ` · ${nameById.get(d.deletedBy) || "An admin"}` : ""}</div>
                 </div>
-                <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => restoreDoc(d)}><RefreshCw size={14} /> Restore</button>
-                {isPA && canDeleteShared && <button title="Permanently delete" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => hardDeleteDoc(d)}><Trash2 size={14} color={FIRE.deleteRed} /></button>}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+                  <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => restoreDoc(d)}><RefreshCw size={14} /> Restore</button>
+                  {isPA && canDeleteShared && <button title="Permanently delete" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => hardDeleteDoc(d)}><Trash2 size={14} color={FIRE.deleteRed} /></button>}
+                </div>
               </div>
             ))
           )}
@@ -9660,7 +9695,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
         {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> :
           certs.map((c, i) => (
-            <div key={c.id} style={{ ...S.certRow, borderBottom: i === certs.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, ...(assign && editingCertId === c.id ? { flexWrap: "wrap" } : {}) }}>
+            <div key={c.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: i === certs.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
               <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
               {assign && editingCertId === c.id ? (<>
                 <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
@@ -9668,14 +9703,16 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
               </>) : (<>
-                <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
-                <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
-                {/* only when a proof is on file — a leader-entered cert legitimately has none */}
-                {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
-                {assign && (<>
-                  <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
-                  <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
-                </>)}
+                <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+                  <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                  {/* only when a proof is on file — a leader-entered cert legitimately has none */}
+                  {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
+                  {assign && (<>
+                    <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
+                    <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
+                  </>)}
+                </div>
               </>)}
             </div>
           ))}
@@ -9931,14 +9968,16 @@ function RosterCerts({ S, members }) {
           return (
             <div key={i} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
               <Award size={15} color={CERT_FIRE[r.st.label]} style={{ flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
                 <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.cert}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {r.member}</span>
                 <div style={{ fontSize: 12, color: CERT_FIRE[r.st.label], marginTop: 1 }}>{expPhrase(r.exp)}</div>
                 {cl && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
               </div>
-              <Pill S={S} color={CERT_FIRE[r.st.label]}>{r.st.label}</Pill>
-              {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
-              {r.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(r.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+                <Pill S={S} color={CERT_FIRE[r.st.label]}>{r.st.label}</Pill>
+                {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
+                {r.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(r.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
+              </div>
             </div>
           );
         })}
@@ -9993,15 +10032,17 @@ function RosterPending({ S, members, notify }) {
       {rows.map((r) => (
         <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
           <Award size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
             <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {nameFor(r.member_id)}</span>
             <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
           </div>
-          {r.proof_path
-            ? <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === r.id} onClick={() => viewProof(r)}>View proof</button>
-            : <span style={{ fontSize: 11.5, color: FIRE.textMuted, alignSelf: "center" }}>no proof</span>}
-          <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.green }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
-          <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+            {r.proof_path
+              ? <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === r.id} onClick={() => viewProof(r)}>View proof</button>
+              : <span style={{ fontSize: 11.5, color: FIRE.textMuted, alignSelf: "center" }}>no proof</span>}
+            <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.green }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
+            <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
+          </div>
         </div>
       ))}
       {viewerProof && <DocViewer url={viewerProof.url} name={viewerProof.name} onClose={() => setViewerProof(null)} />}
@@ -14301,16 +14342,18 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
         {sorted.map((i) => (
           <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
             <Wrench size={15} color={MAINT_FIRE[i.status]} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
               <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{i.task}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {i.unit}</span>
               <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{i.cadence} · last done {i.last}</div>
             </div>
-            <Pill S={S} color={MAINT_FIRE[i.status]}>{i.status.toUpperCase()}</Pill>
-            {/* DA/Officer only — the INSERT/UPDATE RLS rejects anyone else, so an ungated button was a dead click */}
-            {canManage && <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDone(i)}><ClipboardCheck size={14} /> Mark done</button>}
-            <button title="Completion history" style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => toggleHistory(i.id)}><List size={14} color={FIRE.btnIcon} /> History{histFor === i.id ? " ▾" : ""}</button>
-            {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-            {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+              <Pill S={S} color={MAINT_FIRE[i.status]}>{i.status.toUpperCase()}</Pill>
+              {/* DA/Officer only — the INSERT/UPDATE RLS rejects anyone else, so an ungated button was a dead click */}
+              {canManage && <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDone(i)}><ClipboardCheck size={14} /> Mark done</button>}
+              <button title="Completion history" style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => toggleHistory(i.id)}><List size={14} color={FIRE.btnIcon} /> History{histFor === i.id ? " ▾" : ""}</button>
+              {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditMaint(i)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
+              {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
+            </div>
             {doneFor === i.id && (
               <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div style={{ flexBasis: "100%", fontSize: 12.5, color: FIRE.textSecondary }}>Recording <strong style={{ color: FIRE.textPrimary }}>{i.task}</strong> as done today — notes and cost are optional.</div>
@@ -15049,10 +15092,8 @@ function StationHours({ S, dept, notify }) {
   // number. An unverified punch is still recorded and shown below, but it earns nothing official, and the
   // member should see that plainly rather than counting on hours that won't be credited.
   const vShifts    = myShifts.filter((s) => s.verified);
-  const myStandby  = vShifts.filter((s) => s.kind !== "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
-  const myTraining = vShifts.filter((s) => s.kind === "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
-  const myTotal    = myStandby + myTraining;
-  const myUnverified = myShifts.filter((s) => !s.verified).reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  // myHoursTotals is the shared rule (the dashboard's "Your station hours" panel reads it too).
+  const { standby: myStandby, training: myTraining, total: myTotal, unverified: myUnverified } = myHoursTotals(myShifts);
   // ---- which house (B3b) ---- a label on the same rows, never a filter on them
   const stationOf = (s) => s.station_name || "Unassigned";
   // ONE house — the single-station department, and the member who only worked one — means the
@@ -19963,6 +20004,24 @@ function CoverageNote({ cov, onShowUncovered }) {
    The numbers come from the same helpers as everywhere else (deptAttendance, certCoverage,
    useApparatusReadiness, useStationHoursRange) — these only change the shape, never the math. */
 const CHART_FONT = "'Oswald', system-ui, sans-serif";
+// Line + bar charts draw at the panel's REAL pixel width (measured) and a fixed height, so a 10px label is
+// 10px on a phone and on a wide desktop panel alike — nothing scales up into a tall slab or down into mush.
+const CHART_SVG = (h) => ({ display: "block", width: "100%", height: h, overflow: "visible" });
+function useChartWidth(fallback = 340) {
+  const ref = useRef(null);
+  const [w, setW] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => { const cw = Math.round(e.contentRect.width); if (cw > 0) setW(cw); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, Math.max(240, w)];
+}
+// Thin horizontal bars (duty, fund, stacked) keep a FIXED pixel height at any width: preserveAspectRatio="none"
+// stretches them horizontally only, so a wide desktop panel doesn't turn a progress bar into a slab.
+const BAR_SVG = (h) => ({ display: "block", width: "100%", height: h });
 const pctTone = (p) => (p == null ? FIRE.textMuted : p > 75 ? FIRE.green : p >= 30 ? FIRE.amberText : FIRE.redText);   // same thresholds as Stat
 // Calendar months covering [from, to] (ISO), oldest first, each clipped to the range and to today; months
 // entirely in the future are dropped. Keeps the LAST `max`, and says so (truncated). A month still in
@@ -20025,8 +20084,8 @@ function SvgTip({ x, y, text, vbW }) {
 }
 function ChartPanel({ title, note, wide, onOpen, children }) {
   return (
-    <div style={{ ...FS.card, padding: 18, minWidth: 0, gridColumn: wide ? "1 / -1" : undefined }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+    <div style={{ ...FS.card, padding: "14px 16px", minWidth: 0, gridColumn: wide ? "1 / -1" : undefined }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <span style={{ fontFamily: CHART_FONT, fontWeight: 600, fontSize: 13, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textPrimary }}>{title}</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: FIRE.textMuted }}>
           {note}
@@ -20053,18 +20112,21 @@ function HeroTile({ n, label, sub, color, onClick }) {
 function AttendanceTrend({ series }) {
   const [hover, setHover] = useState(null);
   const { grown, transition } = useChartGrow();
-  const W = 600, H = 200, x0 = 40, x1 = 584, yTop = 16, yBot = 172;
+  const [wrapRef, W] = useChartWidth();
+  // Short on purpose: the chart supports the numbers, it shouldn't own the screen.
+  const H = 130, x0 = 32, x1 = W - 12, yTop = 14, yBot = 104;
   const xAt = (i) => (series.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (series.length - 1));
   const yAt = (p) => yBot - (p / 100) * (yBot - yTop);
   const segs = []; let cur = [];
   series.forEach((m, i) => { if (m.pct == null) { if (cur.length) segs.push(cur); cur = []; } else cur.push(i); });
   if (cur.length) segs.push(cur);
   const lastIdx = series.map((m) => m.pct != null).lastIndexOf(true);
-  if (lastIdx < 0) return <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "20px 0" }}>No drills with attendance taken {series.length ? `in these ${series.length} month${series.length === 1 ? "" : "s"}` : "in this period"}.</div>;
+  if (lastIdx < 0) return <div ref={wrapRef} style={{ fontSize: 13, color: FIRE.textMuted, padding: "20px 0" }}>No drills with attendance taken {series.length ? `in these ${series.length} month${series.length === 1 ? "" : "s"}` : "in this period"}.</div>;
   const aria = `Training attendance by month: ${series.map((m) => `${m.label} ${m.pct == null ? "no drills" : `${m.pct}%`}`).join(", ")}.`;
   const tipText = (m) => `${m.label}${m.partial ? " (so far)" : ""} · ${m.pct == null ? "no drills" : `${m.pct}% · ${m.drills} drill${m.drills === 1 ? "" : "s"}`}`;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }} onMouseLeave={() => setHover(null)}>
+    <div ref={wrapRef}>
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={CHART_SVG(H)} onMouseLeave={() => setHover(null)}>
       {[100, 50, 0].map((p) => (
         <g key={p}>
           <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? FIRE.btnBorder : FIRE.track} />
@@ -20089,6 +20151,7 @@ function AttendanceTrend({ series }) {
       })}
       {hover != null && <SvgTip x={xAt(hover)} y={series[hover].pct == null ? yBot : yAt(series[hover].pct)} text={tipText(series[hover])} vbW={W} />}
     </svg>
+    </div>
   );
 }
 // One progress ring. value/of → %, with the exact counts printed under it.
@@ -20134,7 +20197,7 @@ function DutyBar({ pct, done, total, loaded }) {
         <span style={{ fontFamily: CHART_FONT, fontWeight: 700, fontSize: 30, color: pctTone(pct), ...FS.num }}>{pct}%</span>
         <span style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{done} of {total} done</span>
       </div>
-      <svg viewBox="0 0 300 20" role="img" aria-label={`Duty completion ${pct} percent, ${done} of ${total} done`} style={{ display: "block", width: "100%", height: "auto" }}>
+      <svg viewBox="0 0 300 20" preserveAspectRatio="none" role="img" aria-label={`Duty completion ${pct} percent, ${done} of ${total} done`} style={BAR_SVG(14)}>
         <title>{`${done} of ${total} duties done this period (${pct}%)`}</title>
         <rect x={0} y={4} width={300} height={12} rx={6} fill={FIRE.track} />
         {pct > 0 && <rect x={0} y={4} width={grown ? 3 * pct : 0} height={12} rx={6} fill={pctTone(pct)} style={{ transition }} />}
@@ -20163,11 +20226,10 @@ function ApparatusReadinessView({ ap }) {
   const rects = live.map((p) => { const w = (p.n / total) * usable; const r = { ...p, x, w }; x += w + gap; return r; });
   return (
     <>
-      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Apparatus: ${ready} ready, ${flagged} need attention, ${oos} out of service, of ${total}`} style={{ display: "block", width: "100%", height: "auto" }}>
+      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Apparatus: ${ready} ready, ${flagged} need attention, ${oos} out of service, of ${total}`} preserveAspectRatio="none" style={BAR_SVG(22)}>
         {rects.map((p) => (
           <g key={p.key}>
-            <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={5} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${total}`}</title></rect>
-            {p.w >= 22 && <text x={p.x + 10} y={21} fontFamily={CHART_FONT} fontWeight={700} fontSize={13} fill={FIRE.sidebar} pointerEvents="none" style={{ opacity: grown ? 1 : 0, transition }}>{p.n}</text>}
+            <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={3} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${total}`}</title></rect>
           </g>
         ))}
       </svg>
@@ -20178,55 +20240,135 @@ function ApparatusReadinessView({ ap }) {
     </>
   );
 }
-// Credited station hours per month (up to 12 months). Twelve FIXED hook slots — never a loop or a
-// conditional, so hook order is stable — one per month; unused slots get no range and fetch nothing.
-// Each bar is exactly the de-overlapped figure the Station Hours screen shows for that month.
-function StationHoursBars({ months }) {
-  const sl = (i) => months[i] || null;
-  const m0 = useStationHoursRange(sl(0)), m1 = useStationHoursRange(sl(1)), m2 = useStationHoursRange(sl(2)), m3 = useStationHoursRange(sl(3));
-  const m4 = useStationHoursRange(sl(4)), m5 = useStationHoursRange(sl(5)), m6 = useStationHoursRange(sl(6)), m7 = useStationHoursRange(sl(7));
-  const m8 = useStationHoursRange(sl(8)), m9 = useStationHoursRange(sl(9)), m10 = useStationHoursRange(sl(10)), m11 = useStationHoursRange(sl(11));
-  const hrs = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11].slice(0, Math.min(12, months.length));
+// Credited hours + shift count for each month, in ONE round-trip: dept_iso_hours_by_month is a SQL wrapper
+// that calls dept_iso_hours / dept_station_shifts once per window, so each month is exactly the
+// de-overlapped figure the Station Hours screen shows for it (credited = Σ iso_total_hours, shifts = row
+// count — the same two numbers mergeStationHours yields). Windows are sent as LOCAL-midnight boundaries,
+// identical to useStationHoursRange's. If the wrapper is missing (rolled back / not yet applied), falls
+// back to the per-month RPC pair through mergeStationHours. Returns { rows: [{credited, shifts}|null], err, retry }.
+function useStationHoursByMonth(months) {
+  const [rows, setRows] = useState(null);   // null = loading; a null ENTRY = that month unknown ("—")
+  const [err, setErr] = useState("");
+  const reqRef = useRef(0);
+  const key = months.map((m) => `${m.from}~${m.to}`).join("|");
+  const load = () => {
+    const my = ++reqRef.current;
+    setErr("");
+    if (!months.length) { setRows([]); return; }
+    const win = months.map((m) => { const st = new Date(`${m.from}T00:00:00`); const en = new Date(`${m.to}T00:00:00`); en.setDate(en.getDate() + 1); return [st.toISOString(), en.toISOString()]; });
+    const perMonth = () => Promise.all(win.map(([a, b]) => Promise.all([
+      supabase.rpc("dept_station_shifts", { p_from: a, p_to: b }),
+      supabase.rpc("dept_iso_hours", { p_from: a, p_to: b }),
+    ]))).then((res) => {
+      if (my !== reqRef.current) return;
+      const bad = res.find(([x, y]) => x.error || y.error);
+      if (bad) { setErr((bad[0].error || bad[1].error).message || "Please try again."); return; }
+      setRows(res.map(([x, y]) => { const t = mergeStationHours(x.data || [], y.data || []).totals; return { credited: t.credited, shifts: t.shifts }; }));
+    });
+    supabase.rpc("dept_iso_hours_by_month", { p_starts: win.map((w) => w[0]), p_ends: win.map((w) => w[1]) }).then(({ data, error }) => {
+      if (my !== reqRef.current) return;
+      if (error && (error.code === "PGRST202" || /dept_iso_hours_by_month/.test(error.message || ""))) { perMonth(); return; }   // wrapper not deployed
+      if (error || !Array.isArray(data)) { setErr(error?.message || "Please try again."); return; }
+      const byIdx = new Map(data.map((r) => [Number(r.idx), r]));
+      setRows(months.map((_, i) => { const r = byIdx.get(i + 1); return r ? { credited: Number(r.credited) || 0, shifts: Number(r.shifts) || 0 } : null; }));
+    });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
+  useReconnect(() => { if (err) load(); });
+  return { rows, err, retry: load };
+}
+// Monthly bar chart — the ONE renderer behind department station hours and a member's own hours.
+// vals[i] null = that month unknown → "—", never a zero bar. tip(i) = tooltip text for a month.
+function MonthlyBars({ months, vals, tip, aria }) {
   const [hover, setHover] = useState(null);
   const { grown, transition } = useChartGrow();
   const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
-  const val = (h) => (h.err || !h.loaded ? null : Number(h.totals.credited) || 0);   // null = unknown, never 0
-  const vals = hrs.map(val);
-  const failed = hrs.filter((h) => h.err);
   const maxV = Math.max(0, ...vals.filter((v) => v != null));
   const niceMax = (() => { if (maxV <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(maxV))); const f = maxV / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; })();
-  const W = 600, H = 180, x0 = 44, x1 = 590, base = 150, top = 26;
-  if (!months.length) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>No months in this period yet.</div>;
-  const slot = (x1 - x0) / months.length, bw = Math.min(46, slot * 0.6);
+  const [wrapRef, W] = useChartWidth();
+  const H = 124, x0 = 30, x1 = W - 6, base = 100, top = 18;
+  if (!months.length) return <div ref={wrapRef} style={{ fontSize: 13, color: FIRE.textMuted }}>No months in this period yet.</div>;
+  const slot = (x1 - x0) / months.length, bw = Math.min(34, slot * 0.6);
   const cx = (i) => x0 + slot * i + slot / 2;
   const hAt = (v) => (v / niceMax) * (base - top);
-  const aria = `Credited station hours by month: ${months.map((m, i) => `${m.label} ${vals[i] == null ? "unavailable" : `${h1(vals[i])} hours`}`).join(", ")}.`;
+  return (
+    <div ref={wrapRef}>
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={CHART_SVG(H)} onMouseLeave={() => setHover(null)}>
+      {[niceMax, niceMax / 2, 0].map((v) => (
+        <g key={v}>
+          <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? FIRE.btnBorder : FIRE.track} />
+          <text x={x0 - 5} y={base - hAt(v) + 3} textAnchor="end" fontSize={9.5} fill={FIRE.textMuted}>{Math.round(v)}</text>
+        </g>
+      ))}
+      {months.map((m, i) => {
+        const v = vals[i];
+        const bh = v == null ? 0 : hAt(v);
+        return (
+          <g key={m.from}>
+            {v != null && v > 0 && <rect x={cx(i) - bw / 2} y={grown ? base - bh : base} width={bw} height={grown ? bh : 0} rx={3} fill={FIRE.red} fillOpacity={i === months.length - 1 || hover === i ? 1 : 0.7} style={{ transition }} />}
+            <text x={cx(i)} y={(v == null ? base : base - bh) - 5} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={600} fontSize={10} fill={v == null ? FIRE.textMuted : FIRE.textSecondary} style={FS.num}>{v == null ? "—" : h1(v)}</text>
+            <text x={cx(i)} y={H - 8} textAnchor="middle" fontSize={9.5} fill={hover === i ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>
+            <rect x={cx(i) - slot / 2} y={0} width={slot} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
+          </g>
+        );
+      })}
+      {hover != null && <SvgTip x={cx(hover)} y={vals[hover] == null ? base : base - hAt(vals[hover])} vbW={W} text={tip(hover)} />}
+    </svg>
+    </div>
+  );
+}
+const hoursTip = (m, v, extra) => `${m.label}${m.partial ? " (so far)" : ""} · ${v == null ? "unavailable" : `${(Math.round(v * 10) / 10).toFixed(1)} h${extra ? ` · ${extra}` : ""}`}`;
+const hoursAria = (who, months, vals) => `${who} credited station hours by month: ${months.map((m, i) => `${m.label} ${vals[i] == null ? "unavailable" : `${(Math.round(vals[i] * 10) / 10).toFixed(1)} hours`}`).join(", ")}.`;
+// DEPARTMENT credited station hours per month (up to 12) — one round-trip via useStationHoursByMonth.
+function StationHoursBars({ months: monthsIn }) {
+  const months = monthsIn.slice(-12);
+  const hm = useStationHoursByMonth(months);
+  const hrs = months.map((_, i) => (hm.err || !hm.rows ? null : hm.rows[i]));   // null = unknown, never 0
+  const vals = hrs.map((h) => (h ? h.credited : null));
   return (
     <>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }} onMouseLeave={() => setHover(null)}>
-        {[niceMax, niceMax / 2, 0].map((v) => (
-          <g key={v}>
-            <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? FIRE.btnBorder : FIRE.track} />
-            <text x={x0 - 6} y={base - hAt(v) + 3} textAnchor="end" fontSize={10} fill={FIRE.textMuted}>{Math.round(v)}</text>
-          </g>
-        ))}
-        {months.map((m, i) => {
-          const v = vals[i];
-          const bh = v == null ? 0 : hAt(v);
-          return (
-            <g key={m.from}>
-              {v != null && v > 0 && <rect x={cx(i) - bw / 2} y={grown ? base - bh : base} width={bw} height={grown ? bh : 0} rx={4} fill={FIRE.red} fillOpacity={i === months.length - 1 || hover === i ? 1 : 0.7} style={{ transition }} />}
-              <text x={cx(i)} y={(v == null ? base : base - bh) - 6} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={600} fontSize={11} fill={v == null ? FIRE.textMuted : FIRE.textSecondary} style={FS.num}>{v == null ? "—" : h1(v)}</text>
-              <text x={cx(i)} y={H - 12} textAnchor="middle" fontSize={10} fill={hover === i ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>
-              <rect x={cx(i) - slot / 2} y={0} width={slot} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
-            </g>
-          );
-        })}
-        {hover != null && <SvgTip x={cx(hover)} y={vals[hover] == null ? base : base - hAt(vals[hover])} vbW={W}
-          text={`${months[hover].label}${months[hover].partial ? " (so far)" : ""} · ${vals[hover] == null ? "unavailable" : `${h1(vals[hover])} h · ${hrs[hover].totals.shifts} shift${hrs[hover].totals.shifts === 1 ? "" : "s"}`}`} />}
-      </svg>
-      {failed.length > 0 && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Some months couldn't load. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={() => failed.forEach((h) => h.retry())}>Retry</button></div>}
+      <MonthlyBars months={months} vals={vals} aria={hoursAria("Department", months, vals)}
+        tip={(i) => hoursTip(months[i], vals[i], hrs[i] ? `${hrs[i].shifts} shift${hrs[i].shifts === 1 ? "" : "s"}` : "")} />
+      {hm.err && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Couldn't load station hours — shown as "—", not zero. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={hm.retry}>Retry</button></div>}
     </>
+  );
+}
+// A member's OWN credited hours from their own shift rows — the Station Hours screen's "My hours" rule,
+// lifted here so that screen and the dashboard panel can't disagree: VERIFIED shifts are credited (standby +
+// training); unverified punches are recorded but earn nothing official.
+const myHoursTotals = (shifts) => {
+  const v = (shifts || []).filter((s) => s.verified);
+  const standby = v.filter((s) => s.kind !== "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  const training = v.filter((s) => s.kind === "training").reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  const unverified = (shifts || []).filter((s) => !s.verified).reduce((a, s) => a + (Number(s.hours) || 0), 0);
+  return { standby, training, total: standby + training, unverified, verifiedShifts: v.length };
+};
+// The member's own credited hours per month: ONE my_station_shifts call over the whole window (it scopes to
+// the caller, every house), grouped by the LOCAL month each shift started in. Hidden until there's at least
+// one shift to plot; a failed read shows "—" + retry rather than hiding.
+function MyStationHoursPanel() {
+  const months = useMemo(() => lastMonths(6), []);
+  const [shifts, setShifts] = useState(null);
+  const [err, setErr] = useState("");
+  const load = () => {
+    setErr("");
+    const st = new Date(`${months[0].from}T00:00:00`);
+    const en = new Date(`${months[months.length - 1].to}T00:00:00`); en.setDate(en.getDate() + 1);
+    supabase.rpc("my_station_shifts", { p_from: st.toISOString(), p_to: en.toISOString() })
+      .then(({ data, error }) => { if (error) { setErr(error.message || "Please try again."); return; } setShifts(Array.isArray(data) ? data : []); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useReconnect(() => { if (err) load(); });
+  if (!err && (!shifts || shifts.length === 0)) return null;
+  const inMonth = (m) => (shifts || []).filter((s) => { const iso = s.checked_in_at ? toISODate(new Date(s.checked_in_at)) : ""; return iso >= m.from && iso <= m.to; });
+  const per = months.map((m) => (shifts ? myHoursTotals(inMonth(m)) : null));
+  const vals = per.map((t) => (err || !t ? null : t.total));
+  return (
+    <ChartPanel title="Your station hours" note="credited · last 6 months">
+      <MonthlyBars months={months} vals={vals} aria={hoursAria("Your", months, vals)}
+        tip={(i) => hoursTip(months[i], vals[i], per[i] && per[i].unverified > 0 ? `${(Math.round(per[i].unverified * 10) / 10).toFixed(1)} h unverified` : "")} />
+      {err && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Couldn't load your hours — shown as "—", not zero. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={load}>Retry</button></div>}
+    </ChartPanel>
   );
 }
 // One fund's progress toward its goal (all-time raised). No goal → the amount alone, no bar to fill.
@@ -20243,7 +20385,7 @@ function FundProgress({ name, raised, goal }) {
         <span style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{raised == null ? "—" : usd(raised)}{g ? ` of ${usd(g)}${pct != null ? ` · ${pct}%` : ""}` : " · no target set"}</span>
       </div>
       {pct != null && (
-        <svg viewBox="0 0 300 12" role="img" aria-label={`${name}: ${usd(raised)} of ${usd(g)} goal, ${pct} percent`} style={{ display: "block", width: "100%", height: "auto", marginTop: 7 }}>
+        <svg viewBox="0 0 300 12" preserveAspectRatio="none" role="img" aria-label={`${name}: ${usd(raised)} of ${usd(g)} goal, ${pct} percent`} style={{ ...BAR_SVG(9), marginTop: 7 }}>
           <title>{`${usd(raised)} of ${usd(g)} (${pct}%)`}</title>
           <rect x={0} y={2} width={300} height={8} rx={4} fill={FIRE.track} />
           {pct > 0 && <rect x={0} y={2} width={grown ? 3 * pct : 0} height={8} rx={4} fill={pct >= 100 ? FIRE.green : FIRE.red} style={{ transition }} />}
@@ -20271,11 +20413,10 @@ function RosterBreakdown({ members }) {
   const rects = live.map((p) => { const w = (p.n / cm.length) * usable; const r = { ...p, x, w }; x += w + gap; return r; });
   return (
     <>
-      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Roster of ${cm.length}: ${parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(", ")}`} style={{ display: "block", width: "100%", height: "auto" }}>
+      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Roster of ${cm.length}: ${parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(", ")}`} preserveAspectRatio="none" style={BAR_SVG(22)}>
         {rects.map((p) => (
           <g key={p.key}>
-            <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={5} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${cm.length}`}</title></rect>
-            {p.w >= 22 && <text x={p.x + 10} y={21} fontFamily={CHART_FONT} fontWeight={700} fontSize={13} fill={FIRE.sidebar} pointerEvents="none" style={{ opacity: grown ? 1 : 0, transition }}>{p.n}</text>}
+            <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={3} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${cm.length}`}</title></rect>
           </g>
         ))}
       </svg>
@@ -20320,8 +20461,10 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
         {boardFirst ? [boardTile, membersTile, drillsTile] : [membersTile, boardTile, drillsTile]}
         {extraHero}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 14, marginTop: 14 }}>
-        <ChartPanel wide title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
+      {/* Desktop: a compact multi-column grid (2–3 across) so the section fits on about one screen.
+          Phone: min(300px, 100%) collapses it to one column with no horizontal scroll. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
+        <ChartPanel title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
           <AttendanceTrend series={trend} />
         </ChartPanel>
         <ChartPanel title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={to("roster", "certs")}>
@@ -20333,12 +20476,12 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
           </div>
         </ChartPanel>
         {moduleEnabled("apparatus", dept?.disabled_modules) && (
-          <ChartPanel wide title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
+          <ChartPanel title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
             <ApparatusReadinessBar />
           </ChartPanel>
         )}
         {moduleEnabled("stationhours", dept?.disabled_modules) && (
-          <ChartPanel wide title="Station hours" note="credited · last 6 months" onOpen={to("stationhours")}>
+          <ChartPanel title="Station hours" note="credited · last 6 months" onOpen={to("stationhours")}>
             <StationHoursBars months={hoursMonths} />
           </ChartPanel>
         )}
@@ -20414,6 +20557,9 @@ function Fonts() {
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
       * { box-sizing: border-box; } body { margin: 0; }
       .spin { animation: spin .9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+      .duty-pulse { animation: dutyPulse 2s ease-out infinite; }
+      @keyframes dutyPulse { 0% { box-shadow: 0 0 0 0 rgba(63,184,96,.55); } 70% { box-shadow: 0 0 0 7px rgba(63,184,96,0); } 100% { box-shadow: 0 0 0 0 rgba(63,184,96,0); } }
+      @media (prefers-reduced-motion: reduce) { .duty-pulse { animation: none; } }
       input:focus, select:focus, textarea:focus { outline: 2px solid #1F4E79; outline-offset: 1px; }
       button:focus-visible { outline: 2px solid #1F4E79; outline-offset: 2px; }
       .stat-cta { transition: filter .15s ease, transform .08s ease; }
