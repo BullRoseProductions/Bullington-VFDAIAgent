@@ -3929,8 +3929,9 @@ const QUICK = {
   request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
   admin:   { accent: "#B11E2A", blurb: "Publish new monthly materials to the library." },
 };
-function QuickAccess({ S, role, go, isEqMgr }) {
-  const items = NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)));   // same equipment-manager exception as the sidebar (visibleNav)
+function QuickAccess({ S, role, go, isEqMgr, disabledModules }) {
+  const items = NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)))   // same equipment-manager exception as the sidebar (visibleNav)
+    .filter((n) => moduleEnabled(n.key, disabledModules));                                                                // and the same module gate — no tile for a module the department turned off
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ ...FS.kicker, marginBottom: 8 }}>EXPLORE THE PLATFORM</div>
@@ -4316,7 +4317,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       <div style={{ ...FS.card, padding: 18 }}>
         <div style={FS.kicker}>QUICK ACTIONS</div>
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-          {NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr))).map((n) => (   // same equipment-manager exception as the sidebar
+          {NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)))   // same equipment-manager exception as the sidebar
+            .filter((n) => moduleEnabled(n.key, dept?.disabled_modules)).map((n) => (                                 // and the same module gate (dept is already a prop here)
             <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
               <n.Icon size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: FIRE.btnText }}>{n.label}</span>
