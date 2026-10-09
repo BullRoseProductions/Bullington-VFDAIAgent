@@ -1333,7 +1333,7 @@ const NAV = [
   { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
   { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
-  { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },
+  { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },   // DA/PA land on the generator; Board/Officer on read-only BoardStats (routed in App)
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
@@ -2611,7 +2611,10 @@ export default function App() {
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} initialMode={navArg} />}
-          {screen === "reports" && <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />}
+          {/* Report GENERATION is DA/PA only. Every other leader who taps Reports gets the read-only stats. */}
+          {screen === "reports" && (isDeptAdmin(role)
+            ? <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />
+            : <BoardStats S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />)}
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} meId={myMemberId} notify={notify} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} go={go} />}
@@ -3344,14 +3347,14 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
         </div>
       </div>
 
-      {/* CHIEF'S REPORT — board-facing summary; opens the Reports hub (Chief's Report card lives there) */}
+      {/* CHIEF'S REPORT — DA/PA open the Reports hub; everyone else lands on the read-only BoardStats */}
       <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "14px 16px", marginTop: 12, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <BarChart3 size={20} color={FIRE.red} style={{ flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>Chief's Report</div>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>The board-facing summary — readiness, certs, training, finances.</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{isDeptAdmin(role) ? "Chief's Report" : "Department stats"}</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>{isDeptAdmin(role) ? "The board-facing summary — readiness, certs, training, finances." : "The numbers behind the Chief's Report — compliance, apparatus, hours, funding, roster, training."}</div>
         </div>
-        <button style={{ ...FS.btn, flexShrink: 0 }} onClick={() => go("reports")}>Open report <ChevronRight size={14} color={FIRE.btnIcon} /></button>
+        <button style={{ ...FS.btn, flexShrink: 0 }} onClick={() => go("reports")}>{isDeptAdmin(role) ? "Open report" : "View stats"} <ChevronRight size={14} color={FIRE.btnIcon} /></button>
       </div>
 
       {/* FEED + CALENDAR — read-only feed (Board not in ANNOUNCE_ROLES) beside the shared station calendar; mirrors DeptAdminDashboard */}
@@ -10560,6 +10563,234 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
     </div>
   );
 }
+/* ---------------- Board Stats (read-only) ----------------
+   What Board Members and Officers see when they tap Reports. Report GENERATION (the hub, the Chief's
+   Report, every PDF) is Department Admin + Project Admin only; everyone else in leadership gets the
+   numbers behind those reports, with nothing to generate, download or edit.
+
+   NO NEW DERIVATIONS. Every figure comes from the same helper the Department Admin dashboard and the
+   Chief's Report use — certCoverage, deptAttendance, boardAttendance, isDoneThisPeriod,
+   useStationHoursRange, useApparatusReadiness — so a Board member and the chief quoting the same
+   stat are quoting the same number by construction.
+
+   CLIENT-SIDE SCOPING ONLY. Board and Officers can already read all of this under RLS; this screen
+   just shows it instead of the generator. A failed read renders "—" with a retry, never a zero. */
+function BoardStats({ S, role, members, sessions, dept }) {
+  const DISPLAY = "'Oswald', system-ui, sans-serif";
+  const [presetKey, setPresetKey] = useState("year");
+  const [range, setRange] = useState(() => presetRange("year"));   // same default period as the Chief's Report
+  const [last30] = useState(() => { const to = new Date(), from = new Date(); from.setDate(from.getDate() - 30); return { from: toISODate(from), to: toISODate(to) }; });
+  const todayISO = toISODate(new Date());
+  const thisYear = new Date().getFullYear();
+  const on = (k) => moduleEnabled(k, dept?.disabled_modules);
+
+  // Compliance + roster — AS OF TODAY.
+  const cm = members.filter(countsInStats);
+  const byStatus = (st) => cm.filter((m) => m.status === st).length;
+  const cov = certCoverage(members, { includeProbationary: true });
+  // `joined` is free text on the roster; only a leading 4-digit year is trusted. Anything else is
+  // not counted as new rather than guessed into this year.
+  const joinedYear = (m) => { const y = /^(\d{4})/.exec(String(m.joined || "").trim()); return y ? Number(y[1]) : null; };
+  const datedJoins = cm.filter((m) => joinedYear(m) != null).length;
+  const newThisYear = cm.filter((m) => joinedYear(m) === thisYear).length;
+
+  // Attendance + drills — THIS PERIOD.
+  const { avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, range);
+  const { avg: boardPct, doneBoard } = boardAttendance(members, sessions, null, range);
+  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
+
+  // Duty completion — same read and same formula as the dashboards. null = no duties configured.
+  const [duties, setDuties] = useState(null);   // null = not loaded yet
+  const [dutyErr, setDutyErr] = useState(false);
+  const loadDuties = () => {
+    supabase.from("duties").select("id, done, done_at, recurrence")
+      .then(({ data, error }) => { if (error || !data) { setDutyErr(true); return; } setDutyErr(false); setDuties(data); });
+  };
+  useEffect(() => { loadDuties(); }, []);
+  useReconnect(() => { if (dutyErr) loadDuties(); });
+  const dutyDone = (duties || []).filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
+  const dutyCompletion = duties && duties.length ? Math.round((dutyDone / duties.length) * 100) : null;
+  const dutyLabel = duties == null ? "—" : dutyCompletion == null ? "No duties set" : `${dutyCompletion}%`;
+
+  // Station hours (period + rolling 30 days) and apparatus readiness (today) — the shared hooks.
+  const sh = useStationHoursRange(range);
+  const sh30 = useStationHoursRange(last30);
+  const ap = useApparatusReadiness();
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  // Funding — is_canmanage() RLS (Board/DA/Officer). Same reads as the Funding hub and the funds list.
+  const canSeeMoney = canManage(role) && on("funding");
+  const [donations, setDonations] = useState(null);     // contributions in the period; null = unknown
+  const [proceeds, setProceeds] = useState(null);       // fundraiser proceeds in the period
+  const [funds, setFunds] = useState(null);             // active donation campaigns
+  const [raised, setRaised] = useState(null);           // campaign_id -> all-time contributions
+  const [moneyErr, setMoneyErr] = useState(false);
+  const loadMoney = () => {
+    if (!canSeeMoney) return;
+    setMoneyErr(false);
+    const fail = () => setMoneyErr(true);
+    supabase.from("donation_activity").select("amount").eq("kind", "contribution")
+      .gte("occurred_on", range.from).lte("occurred_on", range.to)
+      .then(({ data, error }) => { if (error || !data) return fail(); setDonations(data.reduce((t, r) => t + (Number(r.amount) || 0), 0)); });
+    supabase.from("fundraisers").select("proceeds")
+      .gte("target_date", range.from).lte("target_date", range.to)
+      .then(({ data, error }) => { if (error || !data) return fail(); setProceeds(data.reduce((t, r) => t + (Number(r.proceeds) || 0), 0)); });
+    supabase.from("donation_campaigns").select("id, name, status, goal_amount, sort, created_at")
+      .order("sort", { ascending: true }).order("created_at", { ascending: true })
+      .then(({ data, error }) => { if (error || !data) return fail(); setFunds(data.filter((c) => c.status !== "archived")); });
+    supabase.from("donation_activity").select("campaign_id, amount").eq("kind", "contribution").not("campaign_id", "is", null)
+      .then(({ data, error }) => {
+        if (error || !data) return fail();
+        const m = {}; for (const r of data) m[r.campaign_id] = (m[r.campaign_id] || 0) + (Number(r.amount) || 0);
+        setRaised(m);
+      });
+  };
+  useEffect(() => { loadMoney(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [canSeeMoney, range.from, range.to]);
+  useReconnect(() => { if (moneyErr) loadMoney(); });
+  const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
+
+  const Section = ({ title, note, children }) => (
+    <div style={{ marginTop: 20 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={FS.kicker}>{title}</div>
+        {note && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{note}</div>}
+      </div>
+      {children}
+    </div>
+  );
+  const Grid = ({ children }) => <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>{children}</div>;
+  const Unavailable = ({ what, retry }) => (
+    <div style={{ ...FS.card, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <AlertTriangle size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 180, fontSize: 13, color: FIRE.textSecondary }}>Couldn't load {what}. These numbers are hidden rather than shown as zero.</span>
+      {retry && <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={retry}>Try again</button>}
+    </div>
+  );
+  const RigList = ({ label, rigs }) => rigs.length ? (
+    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 8, lineHeight: 1.5 }}>
+      <span style={{ fontWeight: 700, color: FIRE.textPrimary }}>{label}:</span> {rigs.map((r) => r.note ? `${r.name} (${r.note})` : r.name).join(" · ")}
+    </div>
+  ) : null;
+
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ marginBottom: 14 }}>
+        <div style={FS.kicker}>{dept?.name ? `DEPARTMENT STATS · ${dept.name}` : "DEPARTMENT STATS"}</div>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Department at a glance</h1>
+        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The live numbers behind the Chief's Report — the same figures your Department Admin sees. Read-only.</div>
+      </div>
+      <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
+
+      <Section title="COMPLIANCE" note="Certs and duties as of today · attendance for the period">
+        <Grid>
+          <div style={{ display: "grid" }}>
+            <Stat S={S} dark n={cov.total ? `${cov.withCerts}/${cov.total}` : "—"} label="Certs on file" />
+            <CertNote cov={cov} />
+          </div>
+          <Stat S={S} dark n={dutyLabel} label="Duty completion" pct={dutyCompletion} />
+          <Stat S={S} dark n={`${avgPart}%`} label="Training attendance" pct={avgPart} />
+          <Stat S={S} dark n={doneBoard.length ? `${boardPct}%` : "—"} label={`Board attendance · ${doneBoard.length} meeting${doneBoard.length === 1 ? "" : "s"}`} />
+        </Grid>
+        {dutyErr && <div style={{ marginTop: 8 }}><Unavailable what="duties" retry={loadDuties} /></div>}
+      </Section>
+
+      {on("apparatus") && (
+        <Section title="APPARATUS READINESS" note="As of today · out-of-service units are not counted as ready or needing attention">
+          {ap.err ? <Unavailable what="apparatus readiness" retry={ap.retry} /> : (<>
+            <Grid>
+              <Stat S={S} dark n={ap.loaded ? String(ap.totals.ready) : "—"} label="Ready" />
+              <Stat S={S} dark n={ap.loaded ? String(ap.totals.flagged) : "—"} label="Needs attention" warn={ap.totals.flagged > 0} />
+              <Stat S={S} dark n={ap.loaded ? String(ap.totals.oos) : "—"} label="Out of service" warn={ap.totals.oos > 0} />
+              <Stat S={S} dark n={ap.loaded ? String(ap.totals.openFailures) : "—"} label="Open check failures" warn={ap.totals.openFailures > 0} />
+            </Grid>
+            {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
+              <div style={{ ...FS.card, padding: "10px 16px 12px", marginTop: 12 }}>
+                <RigList label="Needs attention" rigs={ap.flaggedRigs} />
+                <RigList label="Out of service" rigs={ap.oosRigs} />
+              </div>
+            )}
+          </>)}
+        </Section>
+      )}
+
+      <Section title="STATION HOURS & ACTIVITY" note="For the period, unless marked otherwise">
+        <Grid>
+          {on("stationhours") && <Stat S={S} dark n={sh.loaded && !sh.err ? h1(sh.totals.credited) : "—"} label="Credited station hours" />}
+          {on("stationhours") && <Stat S={S} dark n={sh.loaded && !sh.err ? String(sh.totals.shifts) : "—"} label="Station shifts" />}
+          <Stat S={S} dark n={String(drills.length)} label="Drills held" />
+          {on("stationhours") && <Stat S={S} dark n={sh30.loaded && !sh30.err ? String(sh30.totals.members) : "—"} label="Members with station time · last 30 days" />}
+        </Grid>
+        {on("stationhours") && (sh.err || sh30.err) && <div style={{ marginTop: 8 }}><Unavailable what="station hours" retry={() => { sh.retry(); sh30.retry(); }} /></div>}
+      </Section>
+
+      {canSeeMoney && (
+        <Section title="FUNDING" note="Received in the period · fund progress is all-time">
+          {moneyErr ? <Unavailable what="funding" retry={loadMoney} /> : (<>
+            <Grid>
+              <Stat S={S} dark n={money(donations == null || proceeds == null ? null : donations + proceeds)} label="Total raised" />
+              <Stat S={S} dark n={money(donations)} label="Donations received" />
+              <Stat S={S} dark n={money(proceeds)} label="Fundraiser proceeds" />
+            </Grid>
+            {funds && funds.length > 0 && (
+              <div style={{ ...FS.card, padding: "6px 16px", marginTop: 12 }}>
+                {funds.map((c, i) => {
+                  const got = (raised || {})[c.id] || 0;
+                  const goal = c.goal_amount != null && Number(c.goal_amount) > 0 ? Number(c.goal_amount) : null;
+                  const pct = goal ? Math.min(100, Math.round((got / goal) * 100)) : null;
+                  return (
+                    <div key={c.id} style={{ padding: "10px 0", borderBottom: i < funds.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ flex: 1, minWidth: 140, fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{c.name}</span>
+                        <span style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>
+                          {raised == null ? "—" : `$${got.toLocaleString()}`}{goal ? ` of $${goal.toLocaleString()} · ${pct}%` : " · no target set"}
+                        </span>
+                      </div>
+                      {goal && raised != null && (
+                        <div style={{ height: 6, borderRadius: 3, background: FIRE.track, marginTop: 7, overflow: "hidden" }}>
+                          <div style={{ width: `${pct}%`, height: "100%", background: got >= goal ? FIRE.green : FIRE.red }} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {funds && funds.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 8 }}>No active funds.</div>}
+          </>)}
+        </Section>
+      )}
+
+      <Section title="ROSTER" note="As of today">
+        <Grid>
+          <Stat S={S} dark n={String(cm.length)} label="Members" />
+          <Stat S={S} dark n={String(byStatus("Active"))} label="Active" />
+          <Stat S={S} dark n={String(byStatus("Probationary"))} label="Probationary" />
+          <Stat S={S} dark n={String(byStatus("Inactive"))} label="Inactive" />
+          <Stat S={S} dark n={datedJoins ? String(newThisYear) : "—"} label={`Joined in ${thisYear}`} />
+        </Grid>
+        {cm.length > 0 && datedJoins < cm.length && (
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>{cm.length - datedJoins} member{cm.length - datedJoins === 1 ? " has" : "s have"} no join year on file and {cm.length - datedJoins === 1 ? "isn't" : "aren't"} counted as new.</div>
+        )}
+      </Section>
+
+      <Section title="TRAINING" note="Drills and attendance for the period">
+        <Grid>
+          <Stat S={S} dark n={String(drills.length)} label="Drills held" />
+          <Stat S={S} dark n={`${avgPart}%`} label="Average attendance" pct={avgPart} />
+          <Stat S={S} dark n={String(upcoming.length)} label={upcoming.length === 5 ? "Next 5 upcoming" : "Upcoming events"} />
+        </Grid>
+        <div style={{ ...FS.card, padding: "6px 16px", marginTop: 12 }}>
+          {upcoming.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>Nothing scheduled.</div> : upcoming.map((s, i) => (
+            <div key={s.id} style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "9px 0", borderBottom: i < upcoming.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+              <span style={{ fontSize: 12.5, color: FIRE.textMuted, minWidth: 150, ...FS.num }}>{fmtSess(s)}</span>
+              <span style={{ flex: 1, minWidth: 140, fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{s.title}<EventAudienceTag audience={s.audience} /></span>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
 // Yearly attendance — per-member aggregation from sessions + session_attendance.
 // Source pool excludes done drills with NO recorded attendance (roll never taken → missing data, not absence).
 // eligible denominator is PER MEMBER (audience-aware): leadership-only events count only for leaders.
@@ -13502,10 +13733,11 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
                         deliberately: the items are lazy-loaded on expand, so a button on the
                         collapsed row would fire with items === undefined and hand the county a
                         checklist with nothing on it — a wrong document rather than a failed one.
-                        canResolve is canManage(role), the same gate as Resolve above; every member
-                        can already READ this check, so this narrows who files paperwork, not who
-                        sees data. */}
-                    {canResolve && dept && resultsById[c.id] && (
+                        Gated to isDeptAdmin (DA/PA) — the same people who can reach the Reports hub
+                        copy, since filing county paperwork is report generation. Resolve stays on
+                        canResolve. Every member can already READ this check, so this narrows who
+                        files paperwork, not who sees data. */}
+                    {isDeptAdmin(role) && dept && resultsById[c.id] && (
                       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
                         <button
                           onClick={() => downloadApparatusCheck({
