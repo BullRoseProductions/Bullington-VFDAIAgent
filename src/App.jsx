@@ -1893,7 +1893,11 @@ export default function App() {
     return Promise.all([
       supabase.from("members_view").select("*"),
       supabase.from("certs").select("id, member_id, name, exp, proof_path"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
-    ]).then(([membersRes, certsRes]) => {
+      supabase.from("celebrations").select("member_id, joined_date"),   // full join date (dept-scoped, all-members-readable) → joinCutoff
+    ]).then(([membersRes, certsRes, celebRes]) => {
+      // A failed read here leaves joinedOn null, which falls back to the year in `joined` (or no cutoff) —
+      // never a wrong exclusion.
+      const joinById = new Map((!celebRes.error && celebRes.data ? celebRes.data : []).filter((c) => c.joined_date).map((c) => [c.member_id, c.joined_date]));
       // Group certs by member_id into a lookup of { id, name, exp } arrays.
       const certsByMember = new Map();
       if (!certsRes.error && certsRes.data) {
@@ -1915,6 +1919,7 @@ export default function App() {
             phone: m.phone,
             email: m.email,
             joined: m.joined,
+            joinedOn: joinById.get(m.id) || null,
             participation: m.participation,
             mentorId: m.mentor_id,
             certs: certsByMember.get(m.id) || [],
@@ -1975,14 +1980,15 @@ export default function App() {
     Promise.all([
       supabase.from("members").select("*").eq("id", myMemberId).single(),
       supabase.from("certs").select("id, member_id, name, exp, proof_path").eq("member_id", myMemberId),
-    ]).then(([selfRes, certsRes]) => {
+      supabase.from("celebrations").select("joined_date").eq("member_id", myMemberId).maybeSingle(),
+    ]).then(([selfRes, certsRes, celebRes]) => {
       if (cancelled) return;
       const s = selfRes.data;
       if (selfRes.error || !s) return;
       const certs = (certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null }));
       const selfRow = {
         id: s.id, department_id: s.department_id, name: s.name, role: s.role, access: s.access,
-        status: s.status, phone: s.phone, email: s.email, joined: s.joined,
+        status: s.status, phone: s.phone, email: s.email, joined: s.joined, joinedOn: celebRes.data?.joined_date || null,
         participation: s.participation, mentorId: s.mentor_id, certs, notes: [],
       };
       setMembers((cur) => cur.some((m) => m.id === s.id) ? cur : [...cur, selfRow]);
@@ -2649,6 +2655,17 @@ const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, 
 // Distinct predicate from countsInStats (assignable vs. counted) though it shares the id set today.
 const isAssignable = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, ['Project Admin']);   // never a selectable assignee (owner/test by id + any Project Admin by role)
 const assignableMembers = (ms) => (ms || []).filter(isAssignable);
+/* JOIN-DATE CUTOFF. A drill held before someone joined was never theirs to attend: it renders "—"
+   (not expected) and stays out of their denominator, everywhere attendance is computed.
+   Full join date if on file; else Jan 1 of a leading 4-digit `joined` year; else NO cutoff
+   (eligible from the start — missing join info must never wrongly exclude). */
+const joinCutoff = (m) => {
+  const d = String(m?.joinedOn || "");
+  if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+  const y = /^\s*(\d{4})/.exec(String(m?.joined ?? ""));
+  return y ? `${y[1]}-01-01` : null;
+};
+const expectedAfterJoin = (m, s) => { const c = joinCutoff(m); return !c || toISODate(sessDate(s)) >= c; };
 function deptAttendance(members, sessions, year, range) {
   // scope by date range {from,to} (ISO) when given (empty bound = unbounded); else the original year filter — backward-compatible for dashboards
   const inScope = range
@@ -2657,7 +2674,7 @@ function deptAttendance(members, sessions, year, range) {
   const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && countsTowardRate(s));   // TRAINING only — leadership EVENTS + optional (off-hours/one-off) sessions excluded from the rate; people/roles untouched
   const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
     const memberLeader = isLeader(m.access);
-    const eligible = doneThisYear;   // all remaining are audience='everyone' → eligible for everyone (the memberLeader/audience filter is now redundant)
+    const eligible = doneThisYear.filter((s) => expectedAfterJoin(m, s));   // audience='everyone' → everyone, but only drills on/after this member's join date
     const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
     const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
     return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
@@ -2678,9 +2695,10 @@ function boardAttendance(members, sessions, year, range) {
   const doneBoard = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && s.audience === "board");   // board EVENTS with a roll taken
   const board = (members || []).filter((m) => countsInStats(m) && isBoard(m.access) && m.status === "Active");   // accountable group: Board Members only (PA/owner/test excluded)
   const rows = board.map((m) => {
-    const attended = doneBoard.filter((s) => (s.attendance || []).includes(m.id)).length;
-    const pct = doneBoard.length ? Math.round((attended / doneBoard.length) * 100) : null;
-    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: doneBoard.length, pct };
+    const eligible = doneBoard.filter((s) => expectedAfterJoin(m, s));   // only board events on/after their join date
+    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
+    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
+    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct };
   });
   const rated = rows.filter((r) => r.pct != null);
   const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
@@ -2711,7 +2729,7 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
   // in is still possible (scan the QR / see the training officer). A `done` session is locked and there
   // is nothing left to act on, so it is deliberately excluded: this is a to-do list, not a scolding.
   const unsigned = (sessions || [])
-    .filter((s) => !s.done && sessDate(s) <= t0 && rollFor(s, me) && !(s.attendance || []).includes(meId))
+    .filter((s) => !s.done && sessDate(s) <= t0 && rollFor(s, me) && expectedAfterJoin(me, s) && !(s.attendance || []).includes(meId))
     .sort(sessSort);
   if (certs.length === 0 && unsigned.length === 0) return null;
   return (
@@ -3519,7 +3537,7 @@ const REMINDER_SYS = "You're a volunteer fire department officer writing a brief
 function computeInsights({ sessions, members, openItems, openFailures, todayISO }) {
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const dayDiff = (isoA, isoB) => Math.round((Date.parse(isoA) - Date.parse(isoB)) / 86400000);   // whole days A − B (both YYYY-MM-DD)
-  const eligibleFor = (m, s) => !isRestrictedEvent(s);   // TRAINING-gap only — leadership EVENTS excluded (event filter, not person); leaders' regular-training gaps still count
+  const eligibleFor = (m, s) => !isRestrictedEvent(s) && expectedAfterJoin(m, s);   // on/after join date; TRAINING-gap only — leadership EVENTS excluded (event filter, not person); leaders' regular-training gaps still count
   /* A CHECK-IN COUNTS THE MOMENT IT IS WRITTEN, not only once the officer finalizes the drill.
      member_check_in inserts the session_attendance row as the member scans, but this list used to
      require s.done as well — so someone who signed into tonight's drill still read as "42 days
@@ -4113,7 +4131,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept })
   // per-CALENDAR-MONTH attendance rate for this member (null when a month has no recorded drills)
   const monthRate = (Y, M) => {
     const meLeader = isLeader(me?.access);   // score off the member's ACTUAL roles (not "View as")
-    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && !isOptionalEvent(s) && (meLeader || !isRestrictedEvent(s)));
+    const rec = sess.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === Y && s.m === M && !isOptionalEvent(s) && (meLeader || !isRestrictedEvent(s)) && expectedAfterJoin(me, s));
     if (!rec.length) return null;
     const att = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
     return { total: rec.length, attended: att, pct: Math.round((att / rec.length) * 100) };
@@ -9586,7 +9604,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: deptId, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
     setSaving(false);
-    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, mentorId: form.mentor_id || null, email });
+    onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, joinedOn: jd, mentorId: form.mentor_id || null, email });
     setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
     setEditing(false);
     notify({ kind: "success", text: "Member updated." });
@@ -9751,20 +9769,22 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       {(() => {
         const memberLeader = isLeader(member.access);   // score + list off the VIEWED member's actual roles
         const done = (sessions || []).filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a));   // TRAINING only — leadership EVENTS excluded (event filter; the member is still fully counted for regular training)
-        const went = done.filter((s) => (s.attendance || []).includes(member.id)).length;
+        const expected = done.filter((s) => expectedAfterJoin(member, s));   // pre-join drills listed as "—", not counted
+        const went = expected.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
             <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</div>
             <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
               {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
-                <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{done.length}</b> recorded sessions.</div>
+                <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{expected.length}</b> recorded sessions{expected.length < done.length ? ` since joining` : ""}.</div>
                 {done.map((s, i) => {
                   const present = (s.attendance || []).includes(member.id);
+                  const preJoin = !present && !expectedAfterJoin(member, s);
                   return (
                     <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                      <CalendarCheck size={15} color={present ? FIRE.green : FIRE.redBright} style={{ flexShrink: 0 }} />
+                      <CalendarCheck size={15} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright} style={{ flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
-                      <Pill S={S} color={present ? FIRE.green : FIRE.redBright}>{present ? "PRESENT" : "ABSENT"}</Pill>
+                      <Pill S={S} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright}>{present ? "PRESENT" : preJoin ? "—" : "ABSENT"}</Pill>
                     </div>
                   );
                 })}
@@ -12216,9 +12236,10 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const chron = [...doneThisYear].sort(sessSort);   // chronological columns
   const gridCols = fullYear ? chron : chron.slice(-10);                        // screen default = recent 10 (CSV always exports full)
   // Audience-aware cell state — SAME predicate as the summary's eligible denominator, applied per session:
-  const cellState = (r, s) => (r.leader || !isRestrictedEvent(s))
+  const memberById = new Map((members || []).map((m) => [m.id, m]));
+  const cellState = (r, s) => ((r.leader || !isRestrictedEvent(s)) && expectedAfterJoin(memberById.get(r.id), s))   // same test as the summary's denominator
     ? ((s.attendance || []).includes(r.id) ? "present" : "absent")            // eligible → attended / eligible-but-absent
-    : "na";                                                                    // not eligible → not expected (leadership session, non-leader)
+    : "na";                                                                    // not expected: before they joined, or leadership session for a non-leader
   const CELL = { present: { ch: "✓", c: FIRE.green }, absent: { ch: "✗", c: FIRE.redText }, na: { ch: "—", c: FIRE.textMuted } };
   const colLabel = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const csvField = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -17503,7 +17524,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const catOf = (s) => plan.find((p) => String(p.id) === String(s.planId));
     // DATA HONESTY: a session only "has a record" once attendance was actually taken (non-empty).
     // Attendance doesn't persist yet, so today every array is empty → these fall to clean empty states.
-    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s) && countsTowardRate(s));   // TRAINING only — leadership EVENTS + optional sessions excluded from a member's training %
+    const recorded = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && inWindow(s) && countsTowardRate(s) && expectedAfterJoin(me, s));   // TRAINING only, on/after join date — leadership EVENTS + optional sessions excluded from a member's training %
     const totalRecorded = recorded.length;
     const attendedCount = recorded.filter((s) => (s.attendance || []).includes(me?.id)).length;
     const pct = totalRecorded ? Math.round((attendedCount / totalRecorded) * 100) : 0;
