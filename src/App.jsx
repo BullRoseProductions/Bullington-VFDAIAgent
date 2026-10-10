@@ -16516,12 +16516,15 @@ function useMyOnboarding(meId) {
   useReconnect(() => { if (err) load(); });
   return { items, prog, err, reload: load };
 }
-// MemberDashboard card: Probationary AND checklist incomplete → progress + next open items. Hidden once complete.
+// MemberDashboard card: checklist incomplete AND (Probationary OR already started) → progress + next
+// open items. A member promoted mid-checklist keeps it until done; one never onboarded never sees it.
 function OnboardingCard({ S, me, go, dept }) {
-  const on = moduleEnabled("onboarding", dept?.disabled_modules) && me?.status === "Probationary";
-  const { items, prog, err, reload } = useMyOnboarding(on ? me?.id : null);
-  if (!on) return null;
-  if (err && !items) return (
+  const moduleOn = moduleEnabled("onboarding", dept?.disabled_modules);
+  const { items, prog, err, reload } = useMyOnboarding(moduleOn ? me?.id : null);
+  if (!moduleOn) return null;
+  // Retry card only for Probationary: for anyone else a failed read can't say whether they've started,
+  // and a long-time member shouldn't get an onboarding error on every flaky resume.
+  if (err && !items) return me?.status !== "Probationary" ? null : (
     <div style={{ ...FS.card, padding: 16, marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>
       Couldn't load your onboarding checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button>
     </div>
@@ -16530,6 +16533,7 @@ function OnboardingCard({ S, me, go, dept }) {
   const open = items.filter((it) => !onboardingDone(it, me, prog));
   if (open.length === 0) return null;
   const done = items.length - open.length;
+  if (me?.status !== "Probationary" && done === 0) return null;
   const pct = Math.round((done / items.length) * 100);
   return (
     <button onClick={() => go("onboarding")} style={{ ...FS.card, padding: 16, marginBottom: 14, width: "100%", textAlign: "left", cursor: "pointer", display: "block" }}>
