@@ -10,11 +10,12 @@
 -- earlier version, so it MUST be dropped before recreate (Postgres
 -- can't change a function's RETURNS TABLE via CREATE OR REPLACE).
 --
--- KEPT IN STEP WITH PRODUCTION as of 2026-10-11 (Phase 1a, applied via
--- sql/pa_department_radar_phase1a.sql): + open_long_shifts_count, and the
--- f3ec6dd Project Admin exclusion, which had been lost from the live
--- function after Jul 7. The DB is the source of truth — before rebuilding,
--- diff this against pg_get_functiondef('pa_department_radar'::regproc).
+-- KEPT IN STEP WITH PRODUCTION as of 2026-10-11. Applied by hand, in order:
+--   sql/pa_department_radar_phase1a.sql         + open_long_shifts_count, and the
+--       f3ec6dd Project Admin exclusion (lost from the live function after Jul 7)
+--   sql/pa_department_radar_profile_missing.sql + profile_missing
+-- The DB is the source of truth — before rebuilding, diff this against
+-- pg_get_functiondef('pa_department_radar'::regproc).
 -- ============================================================
 
 -- ============================================================
@@ -45,7 +46,7 @@ GRANT EXECUTE ON FUNCTION public.is_project_admin() TO authenticated;
 --    departments (bypasses the per-dept RLS), but only a Project Admin
 --    can get past the gate.
 --
---    Return signature changed (admin_name/admin_email; then open_long_shifts_count) → DROP first.
+--    Return signature changed (admin_name/admin_email; open_long_shifts_count; profile_missing) → DROP first.
 --    DROP resets the ACL: the REVOKE/GRANT at the end restore it.
 -- ============================================================
 DROP FUNCTION IF EXISTS public.pa_department_radar();
@@ -77,7 +78,8 @@ CREATE OR REPLACE FUNCTION public.pa_department_radar()
    expired_certs_count      bigint,      -- already lapsed
    overdue_duties_count     bigint,
    open_action_items_count  bigint,
-   open_long_shifts_count   bigint       -- open station_presence shifts (any source) checked in > 24h ago
+   open_long_shifts_count   bigint,      -- open station_presence shifts (any source) checked in > 24h ago
+   profile_missing          text[]       -- unmet profile_complete clauses; empty iff profile_complete
  )
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
@@ -193,7 +195,16 @@ begin
       (select count(*) from station_presence sp
          where sp.department_id = d.id
            and sp.checked_out_at is null
-           and sp.checked_in_at < now() - interval '24 hours') as open_long_shifts_count
+           and sp.checked_in_at < now() - interval '24 hours') as open_long_shifts_count,
+
+      -- One label per UNMET profile_complete condition, each the exact negation of its clause above,
+      -- so the array is empty exactly when profile_complete is true. Keep the two in lockstep.
+      array_remove(array[
+        case when d.tagline is not null and btrim(d.tagline) <> ''          then null else 'Tagline' end,
+        case when d.voice is not null and btrim(d.voice) <> ''              then null else 'Voice' end,
+        case when d.primary_color is not null and d.primary_color <> '#B11E2A' then null else 'Custom primary color' end,
+        case when d.accent_color is not null and d.accent_color <> '#1F4E79'   then null else 'Custom accent color' end
+      ], null) as profile_missing
 
     from departments d
   )
@@ -225,7 +236,8 @@ begin
     b.expired_certs_count,
     b.overdue_duties_count,
     b.open_action_items_count,
-    b.open_long_shifts_count
+    b.open_long_shifts_count,
+    b.profile_missing
   from base b
   order by
     -- worst health first, then most stale — the "needs attention" stuff floats up
