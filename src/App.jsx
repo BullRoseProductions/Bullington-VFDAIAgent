@@ -11995,6 +11995,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         <Stat S={S} dark n={`${dept_vpct}%`} label="Verified at station" pct={dept_vpct} />
       </div>
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 14 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
+      {/* Monthly trend of the credited figure above — fixed trailing window, independent of the range chips. */}
+      <DeptHoursByMonthPanel multiStation={multiStation} />
       {/* on station right now */}
       <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
         <div style={FS.kicker}>ON STATION RIGHT NOW</div>
@@ -20362,7 +20364,9 @@ function ApparatusReadinessView({ ap }) {
 // count — the same two numbers mergeStationHours yields). Windows are sent as LOCAL-midnight boundaries,
 // identical to useStationHoursRange's. If the wrapper is missing (rolled back / not yet applied), falls
 // back to the per-month RPC pair through mergeStationHours. Returns { rows: [{credited, shifts}|null], err, retry }.
-function useStationHoursByMonth(months) {
+// endAtNow: the in-progress month ends NOW instead of midnight tonight — the leadership report's window, so its
+// last bar matches the "This month" credited tile even while a shift is open. The dashboards leave it off.
+function useStationHoursByMonth(months, endAtNow = false) {
   const [rows, setRows] = useState(null);   // null = loading; a null ENTRY = that month unknown ("—")
   const [err, setErr] = useState("");
   const reqRef = useRef(0);
@@ -20371,7 +20375,7 @@ function useStationHoursByMonth(months) {
     const my = ++reqRef.current;
     setErr("");
     if (!months.length) { setRows([]); return; }
-    const win = months.map((m) => { const st = new Date(`${m.from}T00:00:00`); const en = new Date(`${m.to}T00:00:00`); en.setDate(en.getDate() + 1); return [st.toISOString(), en.toISOString()]; });
+    const win = months.map((m) => { const st = new Date(`${m.from}T00:00:00`); let en = new Date(`${m.to}T00:00:00`); en.setDate(en.getDate() + 1); if (endAtNow && m.to === toISODate(new Date())) en = new Date(); return [st.toISOString(), en.toISOString()]; });
     const perMonth = () => Promise.all(win.map(([a, b]) => Promise.all([
       supabase.rpc("dept_station_shifts", { p_from: a, p_to: b }),
       supabase.rpc("dept_iso_hours", { p_from: a, p_to: b }),
@@ -20436,9 +20440,9 @@ function MonthlyBars({ months, vals, tip, aria }) {
 const hoursTip = (m, v, extra) => `${m.label}${m.partial ? " (so far)" : ""} · ${v == null ? "unavailable" : `${(Math.round(v * 10) / 10).toFixed(1)} h${extra ? ` · ${extra}` : ""}`}`;
 const hoursAria = (who, months, vals) => `${who} credited station hours by month: ${months.map((m, i) => `${m.label} ${vals[i] == null ? "unavailable" : `${(Math.round(vals[i] * 10) / 10).toFixed(1)} hours`}`).join(", ")}.`;
 // DEPARTMENT credited station hours per month (up to 12) — one round-trip via useStationHoursByMonth.
-function StationHoursBars({ months: monthsIn }) {
+function StationHoursBars({ months: monthsIn, endAtNow }) {
   const months = monthsIn.slice(-12);
-  const hm = useStationHoursByMonth(months);
+  const hm = useStationHoursByMonth(months, !!endAtNow);
   const hrs = months.map((_, i) => (hm.err || !hm.rows ? null : hm.rows[i]));   // null = unknown, never 0
   const vals = hrs.map((h) => (h ? h.credited : null));
   return (
@@ -20447,6 +20451,24 @@ function StationHoursBars({ months: monthsIn }) {
         tip={(i) => hoursTip(months[i], vals[i], hrs[i] ? `${hrs[i].shifts} shift${hrs[i].shifts === 1 ? "" : "s"}` : "")} />
       {hm.err && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Couldn't load station hours — shown as "—", not zero. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={hm.retry}>Retry</button></div>}
     </>
+  );
+}
+// The leadership Station Hours report's monthly panel: the SAME StationHoursBars the dashboards render
+// (useStationHoursByMonth → dept_iso_hours_by_month), same trailing 6 months. Its bars are Σ iso_total_hours —
+// the figure the report's "Verified hours (credited)" tile shows, and its current month ends at NOW like the
+// report's "This month" range — so with that range selected the last bar equals the tile. DEPARTMENT-WIDE: the RPC has no station argument, so at a multi-house department it says "all stations"
+// rather than let it be read as the shift log's station filter. A module-level component so its memoized
+// window can't disturb the report's own hook order.
+function DeptHoursByMonthPanel({ multiStation }) {
+  const months = useMemo(() => lastMonths(6), []);
+  return (
+    <Card style={{ marginBottom: 14, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <SectionLabel>STATION HOURS BY MONTH</SectionLabel>
+        <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>credited · last 6 months{multiStation ? " · all stations" : ""}</span>
+      </div>
+      <StationHoursBars months={months} endAtNow />
+    </Card>
   );
 }
 // A member's OWN credited hours from their own shift rows — the Station Hours screen's "My hours" rule,
