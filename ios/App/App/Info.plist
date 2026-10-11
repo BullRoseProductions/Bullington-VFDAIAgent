@@ -63,24 +63,17 @@
 	<key>NSMotionUsageDescription</key>
 	<string>B4C's location features are built on a framework that includes Apple's motion APIs. B4C does not collect or use motion data — station arrivals and departures are detected from location alone.</string>
 
-	<!-- Background execution. "location" ONLY.
-	     iOS wakes a terminated app for a region transition through CLLocationManager, which is
-	     what this mode covers and what geofence-only monitoring actually depends on.
-
-	     NOT ADDED, on purpose: "fetch" and "processing", which the vendor's general setup guide
-	     lists, serve the SDK's BackgroundFetch/BGTaskScheduler integration — its scheduler and
-	     heartbeat features. We use neither; we register one geofence and respond to its
-	     transitions. "audio" is listed there only to keep debug sound effects alive, and
-	     debug is false.
-
-	     HONEST LIMIT: the vendor's docs do NOT distinguish geofence-only from continuous
-	     tracking, so this is reasoned from what the modes are for rather than quoted from a
-	     line that says "geofence-only needs exactly this". A compile cannot test it either.
-	     If TSBackgroundFetch complains at init on a real device, "processing" (and possibly
-	     "fetch") is the first thing to add. -->
+	<!-- Background execution: "fetch" + "processing" ONLY. NO "location".
+	     "location" was removed in 2.2.3 (build 12) after App Review rejected the Oct 4
+	     submission under Guideline 2.5.4: that mode is for apps doing continuous location in
+	     the background, and B4C is geofence-only (startGeofences, never start()). Region
+	     monitoring does not need it — iOS relaunches a suspended or terminated app for a
+	     region transition through CLLocationManager on its own, with Always authorization.
+	     This is the plugin vendor's documented fix for this exact rejection.
+	     Do NOT add "location" back unless the app gains a real continuous-tracking feature
+	     (bg.start()), and then expect to justify it to App Review. -->
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>location</string>
 		<!-- fetch + processing are REQUIRED, and their absence is why iOS compiled but never
 		     registered a fence. TSBackgroundFetch ships as a hard dependency of the geolocation
 		     SDK and registers BGTaskScheduler work at launch: the binary uses BGAppRefreshTask
