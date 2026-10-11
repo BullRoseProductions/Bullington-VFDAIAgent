@@ -9,6 +9,12 @@
 -- (CREATE OR REPLACE). pa_department_radar() adds columns over its
 -- earlier version, so it MUST be dropped before recreate (Postgres
 -- can't change a function's RETURNS TABLE via CREATE OR REPLACE).
+--
+-- KEPT IN STEP WITH PRODUCTION as of 2026-10-11 (Phase 1a, applied via
+-- sql/pa_department_radar_phase1a.sql): + open_long_shifts_count, and the
+-- f3ec6dd Project Admin exclusion, which had been lost from the live
+-- function after Jul 7. The DB is the source of truth — before rebuilding,
+-- diff this against pg_get_functiondef('pa_department_radar'::regproc).
 -- ============================================================
 
 -- ============================================================
@@ -39,7 +45,8 @@ GRANT EXECUTE ON FUNCTION public.is_project_admin() TO authenticated;
 --    departments (bypasses the per-dept RLS), but only a Project Admin
 --    can get past the gate.
 --
---    Return signature changed (added admin_name/admin_email) → DROP first.
+--    Return signature changed (admin_name/admin_email; then open_long_shifts_count) → DROP first.
+--    DROP resets the ACL: the REVOKE/GRANT at the end restore it.
 -- ============================================================
 DROP FUNCTION IF EXISTS public.pa_department_radar();
 
@@ -69,7 +76,8 @@ CREATE OR REPLACE FUNCTION public.pa_department_radar()
    expiring_certs_count     bigint,      -- 0..3 months out
    expired_certs_count      bigint,      -- already lapsed
    overdue_duties_count     bigint,
-   open_action_items_count  bigint
+   open_action_items_count  bigint,
+   open_long_shifts_count   bigint       -- open station_presence shifts (any source) checked in > 24h ago
  )
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
@@ -178,7 +186,14 @@ begin
                                        and du.due_date < current_date) as overdue_duties_count,
 
       (select count(*) from action_items ai where ai.department_id = d.id
-                                            and ai.status = 'open') as open_action_items_count
+                                            and ai.status = 'open') as open_action_items_count,
+
+      -- Clocks left running: every open shift (manual or gps_geofence, any kind) past 24h.
+      -- Broader than dept_open_long_shifts() on purpose — that one is the DA's fenced-only work list.
+      (select count(*) from station_presence sp
+         where sp.department_id = d.id
+           and sp.checked_out_at is null
+           and sp.checked_in_at < now() - interval '24 hours') as open_long_shifts_count
 
     from departments d
   )
@@ -209,7 +224,8 @@ begin
     b.expiring_certs_count,
     b.expired_certs_count,
     b.overdue_duties_count,
-    b.open_action_items_count
+    b.open_action_items_count,
+    b.open_long_shifts_count
   from base b
   order by
     -- worst health first, then most stale — the "needs attention" stuff floats up
@@ -224,4 +240,7 @@ begin
 end;
 $function$;
 
-GRANT EXECUTE ON FUNCTION public.pa_department_radar() TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.pa_department_radar() FROM anon, public;
+GRANT  EXECUTE ON FUNCTION public.pa_department_radar() TO authenticated;
+
+NOTIFY pgrst, 'reload schema';
