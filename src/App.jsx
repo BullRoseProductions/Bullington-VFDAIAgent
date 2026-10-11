@@ -19428,154 +19428,170 @@ function AddDepartment({ S, role, notify, go }) {
 }
 
 /* ---------------- Program Overview (Project-Admin-only, cross-department health/issue radar) ---------------- */
+// Attention health for one radar row, derived client-side from the columns pa_department_radar() returns.
+// The SQL `health` column is recency only; this one also weighs what's actually wrong.
+//   red   — a shift open > 24h, an expired cert, or no activity in 30+ days (or none ever)
+//   amber — a cert expiring within 3 months, an overdue duty, or 14–30 days since activity
+//   green — otherwise
+// Overdue DUTIES, not action items: the radar has no overdue-action-item count (open_action_items_count is
+// every open item). Its duty count uses "done ever", the radar's deliberate meaning — not the app's per-period one.
+const radarNum = (v) => Number(v) || 0;
+function radarHealth(d) {
+  const days = d.days_since_activity;
+  if (radarNum(d.open_long_shifts_count) > 0 || radarNum(d.expired_certs_count) > 0 || days == null || days > 30) return "red";
+  if (radarNum(d.expiring_certs_count) > 0 || radarNum(d.overdue_duties_count) > 0 || days >= 14) return "amber";
+  return "green";
+}
+const RADAR_RANK = { red: 0, amber: 1, green: 2 };
+const RADAR_LABEL = { red: "Needs attention", amber: "Watch", green: "Healthy" };
+const lastActiveLabel = (d) => d.days_since_activity == null ? "No activity ever recorded"
+  : d.days_since_activity === 0 ? "Active today"
+  : `Last active ${d.days_since_activity} day${d.days_since_activity === 1 ? "" : "s"} ago`;
+
 function ProgramOverview({ S, role, notify, go }) {
-  const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const [rows, setRows] = useState(null);   // null = loading, [] = loaded/empty
+  const [rows, setRows] = useState(null);   // null = not loaded yet
   const [err, setErr] = useState(null);
   const isPA = hasAny(role, ["Project Admin"]);   // PA-only; belt-and-suspenders with the DB self-gate
   const load = () => {
     supabase.rpc("pa_department_radar").then(({ data, error }) => {
-      if (error) { setErr(error.message); setRows([]); return; }
+      if (error) { setErr(error.message); return; }   // keep last-known rows: a failed read is not "no departments"
       setErr(null); setRows(data || []);
     });
   };
   useEffect(() => { if (isPA) load(); }, []);   // refetched by cards via refresh() after a fix
 
   // Screen-level PA gate (nav already filters, but guard the render too — mirrors the DB self-gate)
-  if (!isPA) return <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>This dashboard is available to Project Admins only.</div>;
+  if (!isPA) return <Card padding={24} style={{ color: FIRE.textMuted }}>This dashboard is available to Project Admins only.</Card>;
+
+  // Worst first; within a tone, most recently active first (never-active last).
+  const sorted = (rows || []).map((d) => ({ d, h: radarHealth(d) })).sort((x, y) =>
+    (RADAR_RANK[x.h] - RADAR_RANK[y.h]) || ((x.d.days_since_activity ?? Infinity) - (y.d.days_since_activity ?? Infinity)));
+  // Program rollup. Until the first read lands every tile is "—", never a 0.
+  const sum = (k) => (rows ? rows.reduce((t, d) => t + radarNum(d[k]), 0) : null);
+  const show = (n) => (n == null ? "—" : String(n));
+  const problem = (n, tone) => (n > 0 ? tone : undefined);
+  const needing = rows ? sorted.filter((x) => x.h === "red").length : null;
+  const stuck = sum("open_long_shifts_count"), expired = sum("expired_certs_count"), expiring = sum("expiring_certs_count");
 
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>PROJECT ADMIN</div>
-        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "6px 0 4px", letterSpacing: "-0.01em" }}>Program overview</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Issues to act on across your departments — surfaced from live data, so you can catch problems before anyone reports them.</div>
+    <PageShell kicker="PROGRAM OVERSIGHT" title="All departments"
+      sub="Issues to act on across your departments — surfaced from live data, so you can catch problems before anyone reports them.">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
+        <StatTile value={show(rows ? rows.length : null)} label="Departments" />
+        <StatTile value={show(sum("member_count"))} label="Total members" />
+        <StatTile value={show(needing)} tone={problem(needing, "red")} label="Needing attention" />
+        <StatTile value={show(stuck)} tone={problem(stuck, "red")} label="Open stuck shifts" sub="open > 24h" />
+        <StatTile value={show(expired)} tone={problem(expired, "red")} label="Expired certs" />
+        <StatTile value={show(expiring)} tone={problem(expiring, "amber")} label="Expiring certs" sub="within 3 months" />
       </div>
 
-      {err && <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", color: FIRE.redText, marginBottom: 12 }}>Couldn't load the overview: {err}</div>}
-      {rows === null && !err && <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading program data…</div>}
-      {rows !== null && rows.length === 0 && !err && <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>No departments found.</div>}
+      {err && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.red}`, color: FIRE.redText, marginBottom: 12 }}>Couldn't load the overview: {err} <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={load}>Retry</button></Card>}
+      {rows === null && !err && <Card padding={24} style={{ color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading program data…</Card>}
+      {rows !== null && rows.length === 0 && <Card padding={24} style={{ color: FIRE.textMuted }}>No departments found.</Card>}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {(rows || []).map((d) => <ProgramDeptCard key={d.department_id} S={S} d={d} notify={notify} refresh={load} go={go} />)}
+        {sorted.map(({ d, h }) => <ProgramDeptCard key={d.department_id} S={S} d={d} health={h} notify={notify} refresh={load} go={go} />)}
       </div>
-    </div>
+    </PageShell>
   );
 }
 
-function ProgramDeptCard({ S, d, notify, refresh, go }) {
-  const DISPLAY = "'Oswald', system-ui, sans-serif";
+function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
   const [showNoEmail, setShowNoEmail] = useState(false);
-  const healthColor = d.health === "GREEN" ? FIRE.green : d.health === "YELLOW" ? FIRE.amberText : FIRE.redText;
-  const healthLabel = d.health === "GREEN" ? "Healthy" : d.health === "YELLOW" ? "Slowing" : "Needs attention";
 
-  // Issue flags — only pushed when count > 0, so a clean dept shows an "all clear" state.
+  // Needs-attention flags — only the non-zero ones, worst first. Stuck shifts lead: a clock left running
+  // is the one that's wrong right now, and it's credited time the department hasn't reviewed.
   const flags = [];
-  if (d.members_no_email_count  > 0) flags.push({ n: d.members_no_email_count,  tone: "red",   label: "members can't log in (no email)", action: "noemail" });
-  if (d.documents_no_text_count > 0) flags.push({ n: d.documents_no_text_count, tone: "amber", label: "SOPs with no readable text (AI grounding off)" });
-  if (d.expired_certs_count     > 0) flags.push({ n: d.expired_certs_count,     tone: "red",   label: "expired certifications" });
-  if (d.expiring_certs_count    > 0) flags.push({ n: d.expiring_certs_count,    tone: "amber", label: "certs expiring within 3 months" });
-  if (d.overdue_duties_count    > 0) flags.push({ n: d.overdue_duties_count,    tone: "amber", label: "overdue station duties" });
-  const toneNum = (t) => (t === "red" ? FIRE.redText : FIRE.amberText);
+  const n = (k) => radarNum(d[k]);
+  if (n("open_long_shifts_count")  > 0) flags.push({ n: n("open_long_shifts_count"),  tone: "red",   label: "Open > 24h", lead: true });
+  if (n("expired_certs_count")     > 0) flags.push({ n: n("expired_certs_count"),     tone: "red",   label: "expired certifications" });
+  if (n("members_no_email_count")  > 0) flags.push({ n: n("members_no_email_count"),  tone: "red",   label: "members can't log in (no email)", action: "noemail" });
+  if (n("expiring_certs_count")    > 0) flags.push({ n: n("expiring_certs_count"),    tone: "amber", label: "certs expiring within 3 months" });
+  if (n("overdue_duties_count")    > 0) flags.push({ n: n("overdue_duties_count"),    tone: "amber", label: "overdue station duties" });
+  if (n("documents_no_text_count") > 0) flags.push({ n: n("documents_no_text_count"), tone: "amber", label: "SOPs with no readable text (AI grounding off)" });
+  // Recency is only a flag once it's a problem (14+ days, or never); the header always shows it.
+  if (d.days_since_activity == null || d.days_since_activity >= 14) flags.push({ n: d.days_since_activity == null ? "—" : d.days_since_activity, tone: d.days_since_activity == null || d.days_since_activity > 30 ? "red" : "amber", label: d.days_since_activity == null ? "no activity ever recorded" : "days since last activity" });
   const toneBar = (t) => (t === "red" ? FIRE.red : FIRE.amberText);
-
-  const daysLabel = d.last_activity == null ? "No activity ever recorded"
-    : d.days_since_activity === 0 ? "Active today"
-    : `${d.days_since_activity} day${d.days_since_activity === 1 ? "" : "s"} since last activity`;
+  const flagNum = (f) => <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: f.lead ? 30 : 26, lineHeight: 1, color: TONE[f.tone], ...FS.num }}>{f.n}</span>;
 
   return (
-    <div style={{ ...FS.card, padding: "18px 20px" }}>
-      {/* Header: health dot + department */}
+    <Card padding="18px 20px">
+      {/* Header: crest + health dot + department; admin support underneath */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <span style={{ width: 12, height: 12, borderRadius: "50%", background: healthColor, boxShadow: `0 0 0 4px ${healthColor}22`, flexShrink: 0 }} />
-        <h2 style={{ fontFamily: DISPLAY, fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em" }}>{d.department_name}</h2>
-        {(d.station || d.city) && <span style={{ fontSize: 12.5, color: FIRE.textMuted }}>{[d.station, d.city].filter(Boolean).join(" · ")}</span>}
-        <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: healthColor }}>{healthLabel}</span>
-      </div>
-      {go && (
-        <div style={{ marginTop: 10 }}>
-          <button onClick={() => go("department", { id: d.department_id, name: d.department_name })} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}><Building2 size={14} color={FIRE.btnIcon} /> Open department</button>
+        <DeptCrest dept={{ name: d.department_name }} />
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <HealthDot tone={health} size={12} style={{ boxShadow: `0 0 0 4px ${TONE[health]}22` }} />
+            <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", overflowWrap: "anywhere" }}>{d.department_name}</h2>
+            {(d.station || d.city) && <span style={{ fontSize: 12.5, color: FIRE.textMuted }}>{[d.station, d.city].filter(Boolean).join(" · ")}</span>}
+          </div>
+          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>{lastActiveLabel(d)}</div>
         </div>
-      )}
-
-      {/* Support: primary admin + resend login link — ONLY when a DA with an email exists.
-          When admin_email is null, this hides and the no-email fix below is what applies. */}
-      {d.admin_email && (
-        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: TONE[health] }}>{RADAR_LABEL[health]}</span>
+      </div>
+      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        {go && <button onClick={() => go("department", { id: d.department_id, name: d.department_name })} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}><Building2 size={14} color={FIRE.btnIcon} /> Open department</button>}
+        {/* Support: primary admin + resend login link — ONLY when a DA with an email exists.
+            When admin_email is null, this hides and the no-email fix below is what applies. */}
+        {d.admin_email && <>
           <span style={{ fontSize: 12, color: FIRE.textMuted }}>Admin: {d.admin_name || d.admin_email}</span>
           <ResendLink email={d.admin_email} notify={notify} />
-        </div>
-      )}
+        </>}
+      </div>
 
-      {/* NEEDS ATTENTION — the star */}
+      {/* NEEDS ATTENTION */}
       <div style={{ marginTop: 16 }}>
-        <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
           <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> NEEDS ATTENTION{flags.length > 0 ? ` (${flags.length})` : ""}
-        </div>
+        </SectionLabel>
         {flags.length === 0 ? (
-          <div style={{ ...FS.card, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.green}`, padding: "12px 16px", color: FIRE.greenText, fontSize: 13.5, display: "flex", alignItems: "center", gap: 9 }}>
-            <CheckCircle2 size={16} /> All clear — nothing needs attention.
-          </div>
+          <EmptyState text="All clear — nothing needs attention." />
         ) : (
           <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(230px, 100%), 1fr))", gap: 10 }}>
             {flags.map((f, i) => f.action === "noemail" ? (
               // the ONLY actionable flag → toggles the inline fix panel
-              <button key={i} onClick={() => setShowNoEmail((v) => !v)} style={{ ...FS.card, borderLeft: `3px solid ${toneBar(f.tone)}`, padding: "12px 15px", display: "flex", alignItems: "baseline", gap: 10, cursor: "pointer", textAlign: "left", width: "100%", fontFamily: "inherit" }}>
-                <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 26, lineHeight: 1, color: toneNum(f.tone), ...FS.num }}>{f.n}</span>
+              <Card as="button" key={i} onClick={() => setShowNoEmail((v) => !v)} padding="12px 15px" style={{ borderLeft: `3px solid ${toneBar(f.tone)}`, display: "flex", alignItems: "baseline", gap: 10, cursor: "pointer", textAlign: "left", width: "100%", fontFamily: "inherit" }}>
+                {flagNum(f)}
                 <span style={{ flex: 1, fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
                 <span style={{ fontSize: 11.5, fontWeight: 700, color: FIRE.btnText, whiteSpace: "nowrap" }}>{showNoEmail ? "Close" : "Fix →"}</span>
-              </button>
+              </Card>
             ) : (
-              // every other flag stays informational (non-clickable), exactly as today
-              <div key={i} style={{ ...FS.card, borderLeft: `3px solid ${toneBar(f.tone)}`, padding: "12px 15px", display: "flex", alignItems: "baseline", gap: 10 }}>
-                <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 26, lineHeight: 1, color: toneNum(f.tone), ...FS.num }}>{f.n}</span>
-                <span style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
-              </div>
+              <Card key={i} padding="12px 15px" style={{ borderLeft: `3px solid ${toneBar(f.tone)}`, display: "flex", alignItems: "baseline", gap: 10 }}>
+                {flagNum(f)}
+                <span style={{ fontSize: f.lead ? 13.5 : 13, fontWeight: f.lead ? 700 : 400, color: f.lead ? FIRE.textPrimary : FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
+              </Card>
             ))}
           </div>
-          {showNoEmail && d.members_no_email_count > 0 && (
+          {showNoEmail && n("members_no_email_count") > 0 && (
             <NoEmailFixPanel S={S} deptId={d.department_id} notify={notify} onFixed={refresh} />
           )}
           </>
         )}
       </div>
 
-      {/* HEALTH PULSE */}
+      {/* ACTIVITY & SETUP */}
       <div style={{ marginTop: 16 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>HEALTH PULSE</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-          <div style={{ ...S.stat, ...FS.card }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: healthColor, flexShrink: 0 }} />
-              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary }}>{healthLabel}</span>
-            </div>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>{daysLabel}</div>
-          </div>
-          {/* warn when ≤1 active → surfaces the "only one person using it" problem */}
-          <Stat S={S} dark n={String(d.active_members_30d)} label="Active members (30d)" warn={Number(d.active_members_30d) <= 1} />
-        </div>
-      </div>
-
-      {/* SETUP & ACTIVITY */}
-      <div style={{ marginTop: 16 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>SETUP &amp; ACTIVITY</div>
+        <SectionLabel style={{ marginBottom: 8 }}>ACTIVITY &amp; SETUP</SectionLabel>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-          <Stat S={S} dark n={String(d.member_count)}            label="Members" />
-          <Stat S={S} dark n={String(d.documents_count)}         label="SOPs / documents" />
-          <Stat S={S} dark n={String(d.apparatus_count)}         label="Apparatus" />
-          <Stat S={S} dark n={String(d.training_sessions_count)} label="Meetings / drills" />
-          <Stat S={S} dark n={String(d.open_action_items_count)} label="Open action items" />
-          <div style={{ ...S.stat, ...FS.card }}>
+          {/* amber when ≤1 active → surfaces the "only one person using it" problem */}
+          <StatTile value={String(n("active_members_30d"))} tone={n("active_members_30d") <= 1 ? "amber" : undefined} label="Active members (30d)" />
+          <StatTile value={String(n("member_count"))} label="Members" />
+          <StatTile value={String(n("documents_count"))} label="SOPs / documents" />
+          <StatTile value={String(n("apparatus_count"))} label="Apparatus" />
+          <StatTile value={String(n("training_sessions_count"))} label="Meetings / drills" />
+          <StatTile value={String(n("open_action_items_count"))} label="Open action items" />
+          {/* A word, not a number — too long for StatTile's 34px figure, so it keeps its icon + 20px word. */}
+          <Card padding="16px 18px">
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               {d.profile_complete ? <CheckCircle2 size={18} color={FIRE.green} /> : <AlertTriangle size={18} color={FIRE.amberText} />}
-              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary }}>{d.profile_complete ? "Complete" : "Incomplete"}</span>
+              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary }}>{d.profile_complete ? "Complete" : "Incomplete"}</span>
             </div>
-            <div style={{ ...S.statLabel, color: FIRE.textMuted }}>Dept profile</div>
-          </div>
+            <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 7 }}>Dept profile</div>
+          </Card>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
