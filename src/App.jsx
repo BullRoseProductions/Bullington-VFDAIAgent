@@ -92,6 +92,97 @@ const FS = {
   rowActions: { display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginLeft: "auto" },
 };
 
+/* ---------------- Shared visual kit (2.3 Phase 0) ----------------
+   The dashboard's look as a handful of PRESENTATIONAL components, so every page can adopt it the same
+   way. Every value comes from FIRE / FS — this block introduces no colors. Each component takes a
+   `style` passthrough for placement (margins, grid spans, an accent edge); the LOOK lives here.
+   Proof the kit is right: the dashboards render through it and look exactly as they did before. */
+const DISPLAY_FONT = "'Oswald', system-ui, sans-serif";
+// Named health tones → the existing health colors (same as pctTone's thresholds and the PA health pulse).
+const TONE = { green: FIRE.green, amber: FIRE.amberText, red: FIRE.redText, muted: FIRE.textMuted };
+const pctToneName = (p) => (p == null ? "muted" : p > 75 ? "green" : p >= 30 ? "amber" : "red");
+// fitToScreen: the content region's height is the viewport minus wherever it starts (measured, so the app's
+// top bar, safe areas and the page header are all accounted for) minus the shell's bottom padding.
+function useFitHeight(on) {
+  const ref = useRef(null);
+  const [top, setTop] = useState(null);
+  useEffect(() => {
+    if (!on) return;
+    const measure = () => { const el = ref.current; if (el) setTop(Math.round(el.getBoundingClientRect().top)); };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [on]);
+  return [ref, top];
+}
+// The page frame: red kicker + Oswald title (+ optional lead mark, sub-line, right-aligned actions), then the
+// content. fitToScreen pins the header and scrolls the content region internally — the no-scroll guardrail.
+function PageShell({ kicker, title, sub, lead, actions, fitToScreen, children }) {
+  const [bodyRef, top] = useFitHeight(!!fitToScreen);
+  const fit = fitToScreen && top != null
+    ? { height: `calc(100dvh - ${top}px - 22px - env(safe-area-inset-bottom))`, overflowY: "auto", minHeight: 0 }
+    : null;
+  return (
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
+        {lead}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={FS.kicker}>{kicker}</div>
+          <h1 style={{ fontFamily: DISPLAY_FONT, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{title}</h1>
+          {sub && <div style={{ fontSize: 14, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>{sub}</div>}
+        </div>
+        {actions}
+      </div>
+      <div ref={bodyRef} style={fit || undefined}>{children}</div>
+    </div>
+  );
+}
+// The department crest PageShell takes as `lead`: logo when set, monogram otherwise.
+function DeptCrest({ dept }) {
+  return (
+    <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+      {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
+    </div>
+  );
+}
+// Red uppercase tracked label. `as="button"` for a collapsible section header.
+function SectionLabel({ as: Tag = "div", style, children, ...rest }) {
+  return <Tag style={{ ...FS.kicker, ...style }} {...rest}>{children}</Tag>;
+}
+// The card surface. `as="button"` for a whole-card link; `style` for an accent edge or layout.
+function Card({ as: Tag = "div", padding = "14px 16px", style, children, ...rest }) {
+  return <Tag style={{ ...FS.card, padding, ...style }} {...rest}>{children}</Tag>;
+}
+// Big tabular number + label + optional sub-line. tone: green | amber | red | muted (default: primary text).
+// onClick makes it a button with the chevron; without it it's a plain box (read-only views).
+function StatTile({ label, value, sub, tone, onClick }) {
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...FS.card, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, letterSpacing: "-.01em", color: TONE[tone] || FIRE.textPrimary, ...FS.num }}>{value}</div>
+      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 7 }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+      {onClick && <ChevronRight size={16} color={FIRE.btnIcon} style={{ position: "absolute", top: 14, right: 14 }} />}
+    </Tag>
+  );
+}
+function HealthDot({ tone = "green", size = 10, className, style }) {
+  return <span className={className} style={{ display: "inline-block", width: size, height: size, borderRadius: 999, background: TONE[tone] || TONE.muted, flexShrink: 0, ...style }} />;
+}
+// Thin rounded bar on the dark track. pct is clamped to 0–100.
+function ProgressBar({ pct, tone = "green", style }) {
+  const w = Math.max(0, Math.min(100, Number(pct) || 0));
+  return (
+    <div style={{ height: 7, borderRadius: 99, background: FIRE.track, overflow: "hidden", marginTop: 5, ...style }}>
+      <div style={{ height: "100%", borderRadius: 99, width: `${w}%`, background: TONE[tone] || TONE.green }} />
+    </div>
+  );
+}
+// One "all clear" / empty treatment. icon defaults to the green check; pass icon={null} for text only.
+function EmptyState({ icon = <CheckCircle2 size={15} color={FIRE.green} />, text, style }) {
+  return <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: FIRE.textMuted, ...style }}>{icon}{text}</div>;
+}
+
 /* ---------------- ErrorBoundary ----------------
    WHY THIS EXISTS. Twice now a single render-time TypeError has taken the entire app to a white
    screen — once from a stale lucide import, once from calling a boolean (`canManage(role)` where
@@ -3253,19 +3344,18 @@ function NextLeadershipEventTile({ S, sessions, role, notify, style }) {
   const kicker = next?.audience === "board" ? "NEXT BOARD MEETING" : "NEXT LEADERSHIP EVENT";
   if (!next) return null;
   return (
-    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, ...style }}>
-      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> {kicker}</div>
+    <Card style={{ display: "flex", flexDirection: "column", gap: 8, ...style }}>
+      <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> {kicker}</SectionLabel>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{next.title}<EventAudienceTag audience={next.audience} /></div>
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{fmtSess(next)}</div>
       </div>
       {next?.plan && <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => openSessionPlans(next)}>View plan <ChevronRight size={13} color={FIRE.btnIcon} /></button>}
       {mounts}
-    </div>
+    </Card>
   );
 }
 function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
-  const DISPLAY = "'Oswald', system-ui, sans-serif";
   const me = members.find((m) => m.id === meId) || null;
   // Health numbers are derived inside DeptHealthCharts — the SAME component the DA dashboard renders.
   const [duties, setDuties] = useState([]);
@@ -3288,52 +3378,44 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {/* HEADER */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={FS.kicker}>{dept?.name ? `BOARD · ${dept.name}` : "BOARD"}</div>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
-          <div style={{ fontSize: 14, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>Department oversight at a glance.</div>
-        </div>
-      </div>
+    <PageShell kicker={dept?.name ? `BOARD · ${dept.name}` : "BOARD"} title={dashboardGreeting(me)} sub="Department oversight at a glance.">
 
       {/* MEETINGS & GOVERNANCE — governance leads for Board (read-only; ai_outputs/action_items are leader-readable) */}
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>MEETINGS &amp; GOVERNANCE</div>
+      <SectionLabel style={{ marginBottom: 8 }}>MEETINGS &amp; GOVERNANCE</SectionLabel>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
         {/* Next leadership event — soonest future audience='leadership' session (Piece 4; repointed from the old agenda-draft NEXT MEETING) */}
         <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
         {/* Recent minutes — newest minutes draft */}
-        <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><FileText size={13} color={FIRE.red} /> RECENT MINUTES</div>
+        <Card style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><FileText size={13} color={FIRE.red} /> RECENT MINUTES</SectionLabel>
           <div style={{ flex: 1, minWidth: 0 }}>
             {minutesRow ? (<>
               <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{minutesRow.title || "Untitled minutes"}{minutesRow.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
               <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{govDate(minutesRow)}{minutesAuthor ? ` · by ${minutesAuthor}` : ""}</div>
-            </>) : <div style={{ fontSize: 13, color: FIRE.textMuted }}>No minutes yet.</div>}
+            </>) : <EmptyState icon={null} text="No minutes yet." />}
           </div>
           <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "minutes")}>Read minutes <ChevronRight size={13} color={FIRE.btnIcon} /></button>
-        </div>
+        </Card>
         {/* Action items — mine + unassigned, never anyone else's (shared ActionItemsCard, same as every dashboard) */}
         <ActionItemsCard meId={meId} go={go} />
       </div>
 
       {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
           unlike things (a 0% cert, a 42% attendance, a "no duties" n/a) into one figure nobody could act on. */}
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH · OVERSIGHT</div>
+      <SectionLabel style={{ marginBottom: 8 }}>DEPARTMENT HEALTH · OVERSIGHT</SectionLabel>
       {/* Read-only: no `go`, so no tile/panel links — same as the flat strip this replaced. Board attendance
           leads: it's the board's own accountability number. */}
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} boardFirst />
 
       {/* CHIEF'S REPORT — DA/PA open the Reports hub; everyone else lands on the read-only BoardStats */}
-      <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "14px 16px", marginTop: 12, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <Card style={{ borderLeft: `3px solid ${FIRE.red}`, marginTop: 12, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <BarChart3 size={20} color={FIRE.red} style={{ flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 180 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{isDeptAdmin(role) ? "Chief's Report" : "Department stats"}</div>
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>{isDeptAdmin(role) ? "The board-facing summary — readiness, certs, training, finances." : "The numbers behind the Chief's Report — compliance, apparatus, hours, funding, roster, training."}</div>
         </div>
         <button style={{ ...FS.btn, flexShrink: 0 }} onClick={() => go("reports")}>{isDeptAdmin(role) ? "Open report" : "View stats"} <ChevronRight size={14} color={FIRE.btnIcon} /></button>
-      </div>
+      </Card>
 
       {/* FEED + CALENDAR — read-only feed (Board not in ANNOUNCE_ROLES) beside the shared station calendar; mirrors DeptAdminDashboard */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
@@ -3342,12 +3424,11 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
-  const DISPLAY = "'Oswald', system-ui, sans-serif";
   // Health numbers (attendance, board attendance, certs, duties, headcount) are derived inside DeptHealthCharts.
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const todayISO = toISODate(new Date());
@@ -3385,74 +3466,64 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const attnKnown = dutiesLoaded && pendLoaded && itemsLoaded && !loadErr;
   const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
-          {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={FS.kicker}>{dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"}</div>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
-        </div>
+    <PageShell lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
         <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
           {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
           <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
         </button>
-      </div>
+      }>
       <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginBottom: 12, maxWidth: 360 }} />
       {/* DEPARTMENT HEALTH — counts as hero tiles, rates as charts (shared with BoardDashboard). */}
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go}
-        extraHero={<HeroTile n={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
+        extraHero={<StatTile value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
       {/* NEEDS YOUR ATTENTION — a zero count is not something that needs attention, so zero cards are hidden.
           Nothing at all → one thin "All clear" line, but ONLY once duties, approvals and action items have all
           loaded; until then (or if a read failed) say nothing rather than claim it's clear. */}
       {attnN === 0 ? (attnKnown && (
-        <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 12, fontSize: 13, color: FIRE.textMuted }}>
-          <CheckCircle2 size={15} color={FIRE.green} /> All clear — nothing needs your attention.
-        </div>
+        <EmptyState text=" All clear — nothing needs your attention." style={{ marginTop: 12 }} />
       )) : (<>
-      <button onClick={() => setAttnOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 12, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+      <SectionLabel as="button" onClick={() => setAttnOpen((v) => !v)} style={{ marginTop: 12, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
         <span style={{ marginLeft: "auto", display: "inline-flex" }}>{attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
-      </button>
+      </SectionLabel>
       {attnOpen && (<>
       {(showDutiesCard || showCertsCard || showPendingCard) && (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
-        {showDutiesCard && <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.red}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {showDutiesCard && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
-              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{openDuties.length}</span>
+              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{openDuties.length}</span>
               {overdueDuties.length > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: FIRE.redText }}>· {overdueDuties.length} overdue</span>}
             </div>
             <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: FIRE.textSecondary, marginTop: 4 }}>Open duties</div>
             {overdueDuties[0] && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6 }}>⚠ {overdueDuties[0].duty}{overdueDuties[0].assigned_to ? ` · ${nameById.get(overdueDuties[0].assigned_to) || "Unassigned"}` : ""}{overdueDuties[0].due_date ? ` · due ${overdueDuties[0].due_date}` : ""}</div>}
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("duties")}>View duties</button>
-        </div>}
-        {showCertsCard && <div style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        </Card>}
+        {showCertsCard && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
-              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{expg}</span>
+              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{expg}</span>
               {expd > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: FIRE.redText }}>· {expd} expired</span>}
             </div>
             <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: FIRE.textSecondary, marginTop: 4 }}>Expiring certs</div>
             {flagged.length > 0 && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 6 }}>{flagged.slice(0, 3).map((f) => `${f.member} · ${f.cert} (${f.phrase})`).join("  ·  ")}{flagged.length > 3 ? `  · +${flagged.length - 3} more` : ""}</div>}
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster")}>View certs</button>
-        </div>}
-        {showPendingCard && <div style={{ ...FS.card, borderLeft: `3px solid #378ADD`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        </Card>}
+        {showPendingCard && <Card padding="12px 16px" style={{ borderLeft: `3px solid #378ADD`, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{pendingCerts.length}</span>
+              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{pendingCerts.length}</span>
             </div>
             <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: FIRE.textSecondary, marginTop: 4 }}>Pending approvals</div>
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster", "pending")}>Review approvals</button>
-        </div>}
+        </Card>}
       </div>
       )}
-      {hasInsights && <div style={{ ...FS.kicker, marginTop: 14, marginBottom: 8, opacity: 0.7 }}>PEOPLE TO REACH OUT TO</div>}
+      {hasInsights && <SectionLabel style={{ marginTop: 14, marginBottom: 8, opacity: 0.7 }}>PEOPLE TO REACH OUT TO</SectionLabel>}
       <InsightCards insights={insights} go={go} bare role={role} notify={notify} onResolved={reloadFailures} />
       </>)}
       </>)}
@@ -3464,7 +3535,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       </div>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
       <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</div>
+      <SectionLabel style={{ marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</SectionLabel>
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
           const n = NAV.find((x) => x.key === k); if (!n) return null;
@@ -3481,7 +3552,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           );
         })}
       </div>
-    </div>
+    </PageShell>
   );
 }
 /* ---- Shared 'Needs your attention' insights (Officer + DeptAdmin) ---- */
@@ -3597,20 +3668,20 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
   return (
     <>
       {!bare && (
-        <button onClick={() => setOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 18, marginBottom: open ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+        <SectionLabel as="button" onClick={() => setOpen((v) => !v)} style={{ marginTop: 18, marginBottom: open ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
           <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attendanceGaps.length + overdueItems.length + apparatusFailures.length})
           <span style={{ marginLeft: "auto", display: "inline-flex" }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
-        </button>
+        </SectionLabel>
       )}
       {(bare || open) && (isEmpty ? (
-        <div style={{ ...FS.card, padding: "14px 16px", fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={15} color={FIRE.green} /> All caught up — no attendance gaps or overdue assignments.</div>
+        <Card><EmptyState text=" All caught up — no attendance gaps or overdue assignments." /></Card>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
           {apparatusFailures.map((ins) => {
             const editing = resolveFor === ins.resultId;
             const when = ins.markedAt ? new Date(ins.markedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
             return (
-            <div key={`af-${ins.resultId}`} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redBright}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <Card key={`af-${ins.resultId}`} padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.redBright}`, display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.rig}</b> — “{ins.item}” failed its check</div>
                 {ins.note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, fontStyle: "italic" }}>“{ins.note}”</div>}
@@ -3629,14 +3700,14 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
               ) : (
                 <button onClick={() => { setResolveFor(ins.resultId); setResolveNote(""); }} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }}><CheckCircle2 size={14} color={FIRE.green} /> Resolve</button>
               ))}
-            </div>
+            </Card>
             );
           })}
           {overdueItems.map((ins) => {
             const key = `o-${ins.itemId}`;
             const ctx = `Assignee: ${ins.assigneeName}. Task: ${ins.task}. Overdue by ${ins.daysOverdue} day${ins.daysOverdue === 1 ? "" : "s"}.${ins.sourceLabel ? ` Context: ${ins.sourceLabel}.` : ""}`;
             return (
-            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.redText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <Card key={key} padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.redText}`, display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.assigneeName}</b>'s “{ins.task}” was due {ins.daysOverdue} day{ins.daysOverdue === 1 ? "" : "s"} ago</div>
                 {ins.sourceLabel && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{ins.sourceLabel}</div>}
@@ -3646,14 +3717,14 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
                 <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, REMINDER_SYS, ctx)}>Draft reminder</button>
               </div>
               {draftFor === key && draftBox(key, REMINDER_SYS, ctx)}
-            </div>
+            </Card>
             );
           })}
           {attendanceGaps.map((ins) => {
             const key = `a-${ins.memberId}`;
             const ctx = `Member: ${ins.memberName}. Hasn't been to training in ${ins.days} days.`;
             return (
-            <div key={key} style={{ ...FS.card, borderLeft: `3px solid ${FIRE.amberText}`, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <Card key={key} padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.4 }}><b>{ins.memberName}</b> hasn't been to training in {ins.days} days</div>
               </div>
@@ -3661,7 +3732,7 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
                 <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={() => runDraft(key, CHECKIN_SYS, ctx)}>Draft check-in</button>
               </div>
               {draftFor === key && draftBox(key, CHECKIN_SYS, ctx)}
-            </div>
+            </Card>
             );
           })}
         </div>
@@ -3671,7 +3742,6 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
 }
 function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
-  const DISPLAY = "'Oswald', system-ui, sans-serif";
   // Health numbers are derived inside DeptHealthCharts — the same component the DA and Board dashboards render.
   const todayISO = toISODate(new Date());
   const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
@@ -3712,17 +3782,8 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
     { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: "#9A6B12", snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
   ];
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
-          {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={FS.kicker}>{dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"}</div>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "4px 0 0", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
-        </div>
-      </div>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>DEPARTMENT HEALTH</div>
+    <PageShell lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"} title={dashboardGreeting(me)}>
+      <SectionLabel style={{ marginBottom: 8 }}>DEPARTMENT HEALTH</SectionLabel>
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} />
       <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }} />
       <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
@@ -3730,17 +3791,17 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           their own certs, hours and drills, and had no route to them from this dashboard before.
           Placed between "your items" and "the department you run", matching the DeptAdmin ordering. */}
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</div>
+      <SectionLabel style={{ marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</SectionLabel>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
         {cards.map((c) => (
-          <div key={c.key} style={{ ...FS.card, padding: "14px 16px", borderTop: `3px solid ${c.accent}`, display: "flex", flexDirection: "column" }}>
+          <Card key={c.key} style={{ borderTop: `3px solid ${c.accent}`, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><c.Icon size={16} color={c.accent} /><span style={{ fontWeight: 700, color: FIRE.textPrimary }}>{c.title}</span></div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              {c.snap ? <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.4 }}>{c.snap}</div> : <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled</div>}
+              {c.snap ? <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.4 }}>{c.snap}</div> : <EmptyState icon={null} text="Nothing scheduled" />}
               {c.extra && <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.greenText, marginTop: 4 }}>{c.extra}</div>}
             </div>
             <button style={{ ...FS.btn, marginTop: 10, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12.5 }} onClick={() => go(c.nav)}>Open <ChevronRight size={14} /></button>
-          </div>
+          </Card>
         ))}
       </div>
       <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 12, marginBottom: 6 }}>
@@ -3750,7 +3811,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         </div>
       </div>
       <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
-    </div>
+    </PageShell>
   );
 }
 // Open action items for the viewer — ONE component on all four dashboards (DA, Board, Officer, Member).
@@ -3779,15 +3840,15 @@ function ActionItemsCard({ meId, go, style }) {
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
   useReconnect(() => { if (loadErr) load(); });
   if (loadErr && !items) return (
-    <div style={{ ...FS.card, padding: "12px 16px", fontSize: 13, color: FIRE.textMuted, ...style }}>
+    <Card padding="12px 16px" style={{ fontSize: 13, color: FIRE.textMuted, ...style }}>
       Couldn't load action items. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={load}>Retry</button>
-    </div>
+    </Card>
   );
   if (!items || items.length === 0) return null;
   const fmtDue = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
   return (
-    <div style={{ ...FS.card, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, ...style }}>
-      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> OPEN ACTION ITEMS · {items.length}</div>
+    <Card style={{ display: "flex", flexDirection: "column", gap: 8, ...style }}>
+      <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> OPEN ACTION ITEMS · {items.length}</SectionLabel>
       <div style={{ flex: 1, minWidth: 0 }}>
         {items.slice(0, 3).map((it) => {
           const yours = it.assigned_to === meId;
@@ -3805,7 +3866,7 @@ function ActionItemsCard({ meId, go, style }) {
         {items.length > 3 && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 6 }}>+{items.length - 3} more</div>}
       </div>
       {go && <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("minutes", "action-items")}>View items <ChevronRight size={13} color={FIRE.btnIcon} /></button>}
-    </div>
+    </Card>
   );
 }
 function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, notify, dept, isEqMgr }) {
@@ -4028,7 +4089,7 @@ function StationClockCard({ S, dept, go }) {
         {/* on/off state pill — the dot pulses while on duty */}
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: ".1em",
                        color: onClock ? FIRE.greenText : FIRE.textMuted, border: `0.5px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
-          <span className={onClock ? "duty-pulse" : undefined} style={{ width: 7, height: 7, borderRadius: 999, background: onClock ? FIRE.green : FIRE.textMuted }} />
+          <HealthDot tone={onClock ? "green" : "muted"} size={7} className={onClock ? "duty-pulse" : undefined} />
           {onClock ? "ON DUTY" : "OFF DUTY"}
         </span>
       </div>
@@ -4160,7 +4221,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginBottom: 14 }}>
         {/* attendance ring (per-CALENDAR-MONTH rate) + supporting stats; muted "No drills yet" state, not a red 0% */}
-        <div style={{ ...FS.card, padding: "14px 16px" }}>
+        <Card>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>ATTENDANCE</div>
           <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center" }}>
             <div style={{ flexShrink: 0, width: 120 }}>
@@ -4180,9 +4241,9 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
               })()}
             </div>
           </div>
-        </div>
+        </Card>
         {/* next event: soonest across all 4 calendar sources; "Get prepared" surfaces a Training's attachments (members read-only) */}
-        <div style={{ ...FS.card, padding: "14px 16px" }}>
+        <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT EVENT</div>
@@ -4193,7 +4254,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
                   <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}<EventAudienceTag audience={nextEvent.audience} /></div>
                 </>
               ) : (
-                <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 10 }}>Nothing scheduled</div>
+                <EmptyState icon={null} text="Nothing scheduled" style={{ marginTop: 10 }} />
               )}
             </div>
             {nextPlans.length > 0 && (
@@ -4218,7 +4279,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
               ))}
             </div>
           )}
-        </div>
+        </Card>
         {/* third stat box — station clock status, back in its original above-the-fold spot. During the
             pilot this is the first thing a member needs, so it stays here rather than in the personal
             strip below; PersonalView is passed showClockCard={false} so it renders in exactly one
@@ -4249,9 +4310,9 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
-          <div style={{ ...FS.card, padding: 16 }}>
+          <Card padding={16}>
             <DashboardCalendar S={S} notify={notify} />
-          </div>
+          </Card>
         </div>
       </div>
 
@@ -16525,9 +16586,9 @@ function OnboardingCard({ S, me, go, dept }) {
   // Retry card only for Probationary: for anyone else a failed read can't say whether they've started,
   // and a long-time member shouldn't get an onboarding error on every flaky resume.
   if (err && !items) return me?.status !== "Probationary" ? null : (
-    <div style={{ ...FS.card, padding: 16, marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>
+    <Card padding={16} style={{ marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>
       Couldn't load your onboarding checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button>
-    </div>
+    </Card>
   );
   if (!items || items.length === 0) return null;
   const open = items.filter((it) => !onboardingDone(it, me, prog));
@@ -16536,14 +16597,14 @@ function OnboardingCard({ S, me, go, dept }) {
   if (me?.status !== "Probationary" && done === 0) return null;
   const pct = Math.round((done / items.length) * 100);
   return (
-    <button onClick={() => go("onboarding")} style={{ ...FS.card, padding: 16, marginBottom: 14, width: "100%", textAlign: "left", cursor: "pointer", display: "block" }}>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><UserPlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR ONBOARDING</div>
+    <Card as="button" onClick={() => go("onboarding")} padding={16} style={{ marginBottom: 14, width: "100%", textAlign: "left", cursor: "pointer", display: "block" }}>
+      <SectionLabel style={{ marginBottom: 8 }}><UserPlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR ONBOARDING</SectionLabel>
       <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>{done} of {items.length} complete</span><span>{pct}%</span></div>
-      <Bar S={S} pct={pct} color={pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
+      <ProgressBar pct={pct} tone={pct >= 50 ? "amber" : "red"} />
       <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: FIRE.textMuted, letterSpacing: ".06em" }}>NEXT UP</div>
       {open.slice(0, 3).map((it) => <div key={it.id} style={{ fontSize: 13.5, color: FIRE.textPrimary, padding: "3px 0" }}>· {it.label}</div>)}
       <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 4 }}>See your full checklist <ChevronRight size={14} color={FIRE.btnIcon} /></div>
-    </button>
+    </Card>
   );
 }
 // The member's own checklist, read-only. Officers sign items on the Onboarding screen; nothing here writes.
@@ -20047,7 +20108,7 @@ function useChartWidth(fallback = 340) {
 // Thin horizontal bars (duty, fund, stacked) keep a FIXED pixel height at any width: preserveAspectRatio="none"
 // stretches them horizontally only, so a wide desktop panel doesn't turn a progress bar into a slab.
 const BAR_SVG = (h) => ({ display: "block", width: "100%", height: h });
-const pctTone = (p) => (p == null ? FIRE.textMuted : p > 75 ? FIRE.green : p >= 30 ? FIRE.amberText : FIRE.redText);   // same thresholds as Stat
+const pctTone = (p) => TONE[pctToneName(p)];   // same thresholds as Stat; names + colors live with the visual kit
 // Calendar months covering [from, to] (ISO), oldest first, each clipped to the range and to today; months
 // entirely in the future are dropped. Keeps the LAST `max`, and says so (truncated). A month still in
 // progress is "partial" ("so far"). Labels gain a 2-digit year when the span crosses a year boundary.
@@ -20109,7 +20170,7 @@ function SvgTip({ x, y, text, vbW }) {
 }
 function ChartPanel({ title, note, wide, onOpen, children }) {
   return (
-    <div style={{ ...FS.card, padding: "14px 16px", minWidth: 0, gridColumn: wide ? "1 / -1" : undefined }}>
+    <Card style={{ minWidth: 0, gridColumn: wide ? "1 / -1" : undefined }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <span style={{ fontFamily: CHART_FONT, fontWeight: 600, fontSize: 13, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textPrimary }}>{title}</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: FIRE.textMuted }}>
@@ -20118,19 +20179,14 @@ function ChartPanel({ title, note, wide, onOpen, children }) {
         </span>
       </div>
       {children}
-    </div>
+    </Card>
   );
 }
+// Pre-kit name, kept so screens not yet converted (BoardStats) render unchanged: same tile, via StatTile.
+// Its callers pass a pctTone color or FIRE.textMuted, both of which are TONE values.
 function HeroTile({ n, label, sub, color, onClick }) {
-  const Tag = onClick ? "button" : "div";   // read-only (Board) tiles are plain boxes, not dead buttons
-  return (
-    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...FS.card, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
-      <div style={{ fontFamily: CHART_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, letterSpacing: "-.01em", color: color || FIRE.textPrimary, ...FS.num }}>{n}</div>
-      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 7 }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
-      {onClick && <ChevronRight size={16} color={FIRE.btnIcon} style={{ position: "absolute", top: 14, right: 14 }} />}
-    </Tag>
-  );
+  const tone = Object.keys(TONE).find((k) => TONE[k] === color);
+  return <StatTile value={n} label={label} sub={sub} tone={tone} onClick={onClick} />;
 }
 // Monthly training-attendance line. series: [{ label, pct (null = no drills that month), drills, partial }].
 // A month with no drills is a GAP in the line, never a 0.
@@ -20477,9 +20533,9 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
   // null, NOT 100 — a department with no duties configured has nothing measured; the bar says "No duties set".
   const dutyCompletion = dutyList.length ? Math.round((dutyDone / dutyList.length) * 100) : null;
   const to = (...a) => (go ? () => go(...a) : undefined);
-  const boardTile = <HeroTile key="board" n={boardRated ? `${boardPct}%` : "\u2014"} color={boardRated ? pctTone(boardPct) : FIRE.textMuted} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
-  const membersTile = <HeroTile key="members" n={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
-  const drillsTile = <HeroTile key="drills" n={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
+  const boardTile = <StatTile key="board" value={boardRated ? `${boardPct}%` : "\u2014"} tone={boardRated ? pctToneName(boardPct) : "muted"} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
+  const membersTile = <StatTile key="members" value={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
+  const drillsTile = <StatTile key="drills" value={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
