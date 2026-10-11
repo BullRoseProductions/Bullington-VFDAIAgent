@@ -117,13 +117,15 @@ function useFitHeight(on) {
 }
 // The page frame: red kicker + Oswald title (+ optional lead mark, sub-line, right-aligned actions), then the
 // content. fitToScreen pins the header and scrolls the content region internally — the no-scroll guardrail.
-function PageShell({ kicker, title, sub, lead, actions, fitToScreen, children }) {
+// `above` renders before the header (a "Back to …" link on a drill-down page).
+function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, children }) {
   const [bodyRef, top] = useFitHeight(!!fitToScreen);
   const fit = fitToScreen && top != null
     ? { height: `calc(100dvh - ${top}px - 22px - env(safe-area-inset-bottom))`, overflowY: "auto", minHeight: 0 }
     : null;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+      {above}
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
         {lead}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -9422,12 +9424,8 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   const rosterList = members.filter(countsInStats);
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} />;
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>ROSTER</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your people, all in one place</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}</div>
-      </div>
+    <PageShell kicker="ROSTER" title="Your people, all in one place"
+      sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
       <div style={S.segRow}>
         {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
@@ -9435,7 +9433,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
       {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
-    </div>
+    </PageShell>
   );
 }
 function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
@@ -9496,7 +9494,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
   return (
     <div>
       {canAdd && (adding ? (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank</span><input style={FS.input} value={rl} onChange={(e) => setRl(e.target.value)} placeholder="Firefighter" /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span><input style={FS.input} value={ph} onChange={(e) => setPh(e.target.value)} /></label>
@@ -9525,13 +9523,13 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
             <span style={{ fontSize: 13, color: FIRE.textPrimary }}>Email them a login link now</span>
           </label>
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
-        </div>
+        </Card>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
-      <div style={{ ...S.searchBox, ...FS.card, marginBottom: 10 }}>
+      <Card padding="11px 14px" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
         <Search size={16} color={FIRE.textMuted} />
         <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search members by name, email, or role…" value={query} onChange={(e) => setQuery(e.target.value)} />
         {query && <button style={S.clearBtn} onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
-      </div>
+      </Card>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
         {canPrint && <button onClick={handlePrint} title="Print or save the roster as a PDF" style={{ ...FS.btn, marginLeft: "auto", padding: "6px 11px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }}><Printer size={14} color={FIRE.btnIcon} /> Print roster</button>}
@@ -9541,11 +9539,11 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
           <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
         </div>
       )}
-      {filtered.length === 0 && <div style={{ ...S.opCard, ...FS.card, textAlign: "center", color: FIRE.textMuted }}>{query ? `No members match "${query}".` : "No members to show."}</div>}
+      {filtered.length === 0 && <Card padding="15px 16px" style={{ textAlign: "center", color: FIRE.textMuted }}>{query ? `No members match "${query}".` : "No members to show."}</Card>}
       <div style={S.opGrid}>
         {/* Owner + test + Project Admin hidden via countsInStats; search + inactive toggle compose (AND) */}
         {filtered.map((m) => (
-          <div key={m.id} style={{ ...S.opCard, ...FS.card, ...(onOpen ? { cursor: "pointer" } : {}) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+          <Card key={m.id} padding="15px 16px" style={onOpen ? { cursor: "pointer" } : undefined} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <Initials S={S} dark name={m.name} />
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -9565,7 +9563,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
                 <Mail size={13} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</span>
               </div>
             )}
-          </div>
+          </Card>
         ))}
       </div>
     </div>
@@ -9679,25 +9677,21 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     setDraft({ name: "", exp: "" });
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>
-      <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <Initials S={S} dark name={member.name} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ ...S.personName, fontSize: 19, color: FIRE.textPrimary }}>{member.name}</div>
-            <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{member.role} · since {member.joined} · {member.phone}</div>
-          </div>
-          <Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>
-        </div>
-        <div style={{ marginTop: 14 }}>
+    <PageShell
+      above={<button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>}
+      lead={<Initials S={S} dark name={member.name} />}
+      kicker="MEMBER FILE" title={member.name} sub={`${member.role} · since ${member.joined} · ${member.phone}`}
+      actions={<Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>}>
+      <Card padding="15px 16px" style={{ marginBottom: 16 }}>
+        <div>
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{part90 == null ? "—" : `${part90}%`}</span></div>
-          {part90 != null && <Bar S={S} pct={part90} track={FIRE.track} color={part90 >= 75 ? FIRE.green : part90 >= 50 ? FIRE.amberText : FIRE.redText} />}
+          {/* Same thresholds as before (75 / 50), not pctTone's 75 / 30 — a reskin, not a re-grade. */}
+          {part90 != null && <ProgressBar pct={part90} tone={part90 >= 75 ? "green" : part90 >= 50 ? "amber" : "red"} />}
         </div>
         {assign && !editing && (
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <div style={FS.kicker}>PROFILE · LEADERSHIP ONLY</div>
+              <SectionLabel>PROFILE · LEADERSHIP ONLY</SectionLabel>
               <div style={{ display: "flex", gap: 8 }}>
                 {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
                 <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={startEditForm}>Edit member</button>
@@ -9737,7 +9731,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
         )}
         {assign && editing && (
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
-            <div style={{ ...FS.kicker, marginBottom: 10 }}>EDIT MEMBER</div>
+            <SectionLabel style={{ marginBottom: 10 }}>EDIT MEMBER</SectionLabel>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email <span style={{ color: FIRE.deleteRed }}>*</span></span><input type="email" style={FS.input} value={form.email || ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></label>
@@ -9771,10 +9765,12 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</div>
-      <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
+      <SectionLabel style={{ marginBottom: 8 }}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</SectionLabel>
+      {/* Cert rows unchanged inside the Card — including the phone-overlap fix (title flex:"1 1 160px" +
+          overflowWrap:"anywhere"; controls in one wrapping group that drops below the title). */}
+      <Card padding="15px 16px" style={{ marginBottom: 16 }}>
         {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> :
           certs.map((c, i) => (
             <div key={c.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: i === certs.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
@@ -9798,7 +9794,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               </>)}
             </div>
           ))}
-      </div>
+      </Card>
 
       <ProposeCert S={S} role={role} member={member} notify={notify} />
 
@@ -9809,8 +9805,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
         const went = expected.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
-            <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</div>
-            <div style={{ ...S.opCard, ...FS.card, marginBottom: 16 }}>
+            <SectionLabel style={{ marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</SectionLabel>
+            <Card padding="15px 16px" style={{ marginBottom: 16 }}>
               {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
                 <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{expected.length}</b> recorded sessions{expected.length < done.length ? ` since joining` : ""}.</div>
                 {done.map((s, i) => {
@@ -9825,14 +9821,14 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                   );
                 })}
               </>)}
-            </div>
+            </Card>
           </>
         );
       })()}
 
       {assign && (<>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — DEPT ADMINS ONLY</div>
-      <div style={{ ...S.opCard, ...FS.card }}>
+      <SectionLabel style={{ marginBottom: 8 }}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — DEPT ADMINS ONLY</SectionLabel>
+      <Card padding="15px 16px">
         <div style={{ display: "flex", gap: 8, marginBottom: notes.length ? 14 : 0 }}>
           <input style={{ ...FS.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
           <button style={FS.btnPrimary} onClick={addNote}>Add</button>
@@ -9843,10 +9839,10 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
           </div>
         ))}
         {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to department admins only — never to the member.</div>}
-      </div>
+      </Card>
       </>)}
       {proofMount}
-    </div>
+    </PageShell>
   );
 }
 function ProposeCert({ S, role, member, notify }) {
@@ -9890,14 +9886,14 @@ function ProposeCert({ S, role, member, notify }) {
 
   if (!canPropose || !member) return null;
   return open ? (
-    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
       <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Proof (required)</span><input type="file" accept=".pdf,image/*" onChange={(e) => setCFile(e.target.files?.[0] || null)} style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
       <button style={{ ...FS.btnPrimary, flex: "0 0 auto", opacity: (busy || !cFile || !cName.trim()) ? 0.55 : 1 }} disabled={busy || !cFile || !cName.trim()} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
       {!cFile && <div style={{ width: "100%", fontSize: 11.5, color: FIRE.amberText }}>Proof required — attach a PDF or photo to submit.</div>}
-    </div>
+    </Card>
   ) : (
     <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setOpen(true)}>+ Propose certification</button>
   );
