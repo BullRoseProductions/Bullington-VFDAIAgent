@@ -19498,6 +19498,11 @@ function ProgramOverview({ S, role, notify, go }) {
 
 function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
   const [showNoEmail, setShowNoEmail] = useState(false);
+  const [showProfileGaps, setShowProfileGaps] = useState(false);
+  // What an incomplete profile still needs. null until the radar returns the column (older function):
+  // the tile then stays a plain "Incomplete" box rather than offering a list it can't fill.
+  const profileMissing = Array.isArray(d.profile_missing) ? d.profile_missing : null;
+  const canShowGaps = !d.profile_complete && profileMissing && profileMissing.length > 0;
 
   // Needs-attention flags — only the non-zero ones, worst first. Stuck shifts lead: a clock left running
   // is the one that's wrong right now, and it's credited time the department hasn't reviewed.
@@ -19581,7 +19586,14 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
           <StatTile value={String(n("apparatus_count"))} label="Apparatus" />
           <StatTile value={String(n("training_sessions_count"))} label="Meetings / drills" />
           <StatTile value={String(n("open_action_items_count"))} label="Open action items" />
-          {/* A word, not a number — too long for StatTile's 34px figure, so it keeps its icon + 20px word. */}
+          {canShowGaps ? (
+            // Incomplete: how many items are missing, tap for which ones. A count, not the word — "Incomplete"
+            // doesn't fit StatTile's 34px figure in a 140px tile.
+            <StatTile value={String(profileMissing.length)} tone="amber" label="Dept profile"
+              sub={`item${profileMissing.length === 1 ? "" : "s"} missing · ${showProfileGaps ? "hide" : "show"}`}
+              onClick={() => setShowProfileGaps((v) => !v)} />
+          ) : (
+          // Complete (or the radar hasn't sent profile_missing yet): a plain tile with its icon + 20px word.
           <Card padding="16px 18px">
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               {d.profile_complete ? <CheckCircle2 size={18} color={FIRE.green} /> : <AlertTriangle size={18} color={FIRE.amberText} />}
@@ -19589,7 +19601,14 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
             </div>
             <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 7 }}>Dept profile</div>
           </Card>
+          )}
         </div>
+        {canShowGaps && showProfileGaps && (
+          <div style={{ marginTop: 10, fontSize: 13, color: FIRE.textSecondary, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+            <AlertTriangle size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+            <span><b style={{ color: FIRE.textPrimary }}>Still needs:</b> {profileMissing.join(" · ")}</span>
+          </div>
+        )}
       </div>
     </Card>
   );
