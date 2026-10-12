@@ -2873,6 +2873,7 @@ const rolling90 = () => { const to = new Date(); const from = new Date(); from.s
 // Derived from the `me` / `sessions` App already loaded rather than re-fetched: this card sits inches
 // from UPCOMING TRAINING and MY CERTIFICATIONS, and a second read could render the two disagreeing.
 function NeedsAttention({ S, me, meId, sessions, go }) {
+  const noir = React.useContext(NoirCtx), face = useCardFace();   // Noir (DA dashboard): card face + CardHead
   // rank 0 = EXPIRED, 1 = EXPIRING (<=3mo). rank 2 CURRENT and rank 3 NO DATE are both fine — a cert
   // with no expiry date is not an open loop, it just has nothing to count down.
   const certs = (me?.certs || [])
@@ -2888,9 +2889,9 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
     .sort(sessSort);
   if (certs.length === 0 && unsigned.length === 0) return null;
   return (
-    <div style={{ ...FS.card, padding: 18, borderLeft: `3px solid ${FIRE.amberText}`, marginBottom: 12 }}>
-      <div style={FS.kicker}>NEEDS YOUR ATTENTION</div>
-      <div style={{ marginTop: 10 }}>
+    <div style={{ ...face, padding: noir ? "12px 14px" : 18, borderLeft: `3px solid ${FIRE.amberText}`, marginBottom: noir ? 8 : 12 }}>
+      {noir ? <CardHead icon={AlertTriangle} title="Needs your attention" style={{ marginBottom: 0 }} /> : <div style={FS.kicker}>NEEDS YOUR ATTENTION</div>}
+      <div style={{ marginTop: noir ? 6 : 10 }}>
         {certs.map((c, i) => (
           <div key={c.id ?? `c${i}`} style={{ ...FS.row, padding: "9px 0" }}>
             <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
@@ -2933,6 +2934,7 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
 // Training card / NEXT DEPT EVENT tile, plus the dashboard calendar), so the list here is redundant
 // for them. A plain member has no operations view — this is their ONLY copy, so it stays by default.
 function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard = true, showUpcomingTraining = true }) {
+  const noir = React.useContext(NoirCtx), face = useCardFace();   // Noir (DA dashboard): card face + CardHead
   const { openProof, proofMount } = useProofViewer(notify);   // "View proof" on the member's own approved certs
   const { openSessionPlans, mounts } = usePlanViewer(S, notify, dept);
   const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
@@ -3000,22 +3002,25 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
   const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
   return (
     <>
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>
+      {noir
+        ? <CardHead icon={LayoutDashboard} title="Your personal view" style={{ marginTop: 14 }} />
+        : <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>}
       {/* Open loops first — it self-hides when there are none, so it costs nothing on a clean record. */}
       <NeedsAttention S={S} me={me} meId={meId} sessions={sessions} go={go} />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: noir ? 8 : 12, marginBottom: noir ? 8 : 14 }}>
         {/* Station clock — behind the SAME module gate as the nav entry and the old member-dashboard
             mount, so a department that has turned station hours off sees no dead control. PWA station
             hours is pilot/interim and gets switched off per-station once geofence ships, so this gate
             is load-bearing, not decoration. Display-only by design: "Clock out →" routes to the page
             that owns the punch, so there is never a second live copy of shift state to disagree. */}
         {showClockCard && moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
-        <div style={{ ...FS.card, padding: 18 }}>
+        <div style={{ ...face, padding: noir ? "12px 14px" : 18 }}>
+          {noir ? <CardHead icon={Award} title="My certifications" style={{ marginBottom: 0 }} right={<span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color, ...FS.num }}>{certsCurrent}/{certsTotal} · {certAlert.text}</span>} /> : (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={FS.kicker}>MY CERTIFICATIONS</div>
             <span style={{ fontSize: 11, fontWeight: 700, color: certAlert.color, ...FS.num }}>{certsCurrent}/{certsTotal} · {certAlert.text}</span>
-          </div>
-          <div style={{ marginTop: 10 }}>
+          </div>)}
+          <div style={{ marginTop: noir ? 6 : 10 }}>
             {certsAll.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>No certifications on file yet.</div>) : certsAll.map((c, i) => (
               <div key={c.id ?? i} style={{ ...FS.row, padding: "9px 0" }}>
                 <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
@@ -3030,12 +3035,13 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
             ))}
           </div>
         </div>
-        <div style={{ ...FS.card, padding: 18 }}>
+        <div style={{ ...face, padding: noir ? "12px 14px" : 18 }}>
+          {noir ? <CardHead icon={ClipboardCheck} title="Assigned duties" style={{ marginBottom: 0 }} right={(mineOpen.length + mineDone.length) > 0 ? <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted2, ...FS.num }}>{mineDone.length} of {mineOpen.length + mineDone.length} done</span> : null} /> : (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={FS.kicker}>ASSIGNED DUTIES</div>
             {(mineOpen.length + mineDone.length) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted2, ...FS.num }}>{mineDone.length} of {mineOpen.length + mineDone.length} done</span>}
-          </div>
-          <div style={{ marginTop: 10 }}>
+          </div>)}
+          <div style={{ marginTop: noir ? 6 : 10 }}>
             {(mineOpen.length + mineDone.length) === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>No duties assigned to you.</div>) : (<>
               {mineOpen.map((d) => {
                 let badge = null;
@@ -3113,8 +3119,8 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
           </div>
         </div>
         {showUpcomingTraining && (
-        <div style={{ ...FS.card, padding: 18 }}>
-          <div style={FS.kicker}>UPCOMING TRAINING</div>
+        <div style={{ ...face, padding: noir ? "12px 14px" : 18 }}>
+          {noir ? <CardHead icon={CalendarCheck} title="Upcoming training" style={{ marginBottom: 0 }} /> : <div style={FS.kicker}>UPCOMING TRAINING</div>}
           <div style={{ marginTop: 10 }}>
             {upcoming.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>) : upcoming.map((s) => (
               <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
@@ -3607,15 +3613,17 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
+      <NoirSkin>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
+      </NoirSkin>
       <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
-      <SectionLabel style={{ marginBottom: 8, marginTop: 18 }}>QUICK ACTIONS</SectionLabel>
+      <CardHead icon={Wand2} title="Quick actions" style={{ marginTop: 14 }} />
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
           const n = NAV.find((x) => x.key === k); if (!n) return null;
           const q = QUICK[n.key] || {};
           return (
-            <button key={k} style={{ ...S.quickCard, ...FS.card }} onClick={() => go(k)}>
+            <button key={k} style={{ ...S.quickCard, ...FS.cardNoir }} onClick={() => go(k)}>
               <span style={{ ...S.quickIcon, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}` }}><n.Icon size={18} color={FIRE.redText} /></span>
               <div style={{ flex: 1 }}>
                 <div style={{ ...S.quickTitle, color: FIRE.textPrimary }}>{n.label}</div>
@@ -4050,6 +4058,7 @@ function deptMonogram(name) {
 }
 // Member self-propose a cert with mandatory proof + a status view (pending/approved/rejected). Member-facing.
 function CertProposals({ S, notify }) {
+  const noir = React.useContext(NoirCtx), face = useCardFace();   // Noir (DA dashboard): card face + CardHead
   const [ids, setIds] = useState(null);   // { memberId, deptId } from my_member_id()/my_department_id() — match the RLS guards
   const [subs, setSubs] = useState([]);
   const [name, setName] = useState(""); const [exp, setExp] = useState(""); const [note, setNote] = useState("");
@@ -4089,9 +4098,9 @@ function CertProposals({ S, notify }) {
   const pendingCount = subs.filter((s) => s.status === "pending").length;
   if (ids && !ids.memberId) return null;   // no member profile → no self-propose (e.g. a non-member admin)
   return (
-    <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
+    <div style={{ ...face, padding: noir ? "12px 14px" : 18, marginBottom: noir ? 8 : 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-        <div style={FS.kicker}>PROPOSE A CERTIFICATION</div>
+        {noir ? <CardHead icon={FilePlus} title="Propose a certification" style={{ marginBottom: 0, width: "auto" }} /> : <div style={FS.kicker}>PROPOSE A CERTIFICATION</div>}
         {open
           ? <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => setOpen(false)}><X size={13} color={FIRE.btnIcon} /> Cancel</button>
           : <button style={{ ...FS.btn, padding: "5px 12px", fontSize: 12.5 }} onClick={() => setOpen(true)}><Plus size={14} color={FIRE.btnIcon} /> Propose a certification</button>}
@@ -4116,6 +4125,7 @@ function CertProposals({ S, notify }) {
 // Self-fetching like CertProposals, and renders null until the read lands — a status that hasn't
 // arrived must never paint as "Not on the clock".
 function StationClockCard({ S, dept, go }) {
+  const noir = React.useContext(NoirCtx), face = useCardFace();   // Noir (DA dashboard): card face + CardHead
   const [open, setOpen] = useState(null);     // the open station_presence row, or null when clocked out
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -4178,10 +4188,11 @@ function StationClockCard({ S, dept, go }) {
     return `${h}:${p(m)}:${p(sec)}`;
   })();
   return (
-    <div style={{ ...FS.card, padding: "14px 16px", borderTop: `3px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
+    <div style={{ ...face, padding: noir ? "12px 14px" : "14px 16px", borderTop: `3px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {noir ? <CardHead icon={Clock} title="Station hours" style={{ marginBottom: 0, width: "auto" }} /> : (<>
         <Clock size={14} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>STATION HOURS</div>
+        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>STATION HOURS</div></>)}
         {/* on/off state pill — the dot pulses while on duty */}
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: ".1em",
                        color: onClock ? FIRE.greenText : FIRE.textMuted, border: `0.5px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
