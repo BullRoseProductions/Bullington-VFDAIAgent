@@ -69,12 +69,18 @@ const FIRE = {
   neverLogged: "#D08A8F",
   deleteRed: "#C8606A",
   white: "#fff",
+  // --- Industrial Noir (DA dashboard skin, v11 mock) ---
+  cardNoir: "linear-gradient(180deg, #0F131A, #0B0E13)",          // card face: faint top-to-bottom falloff
+  cardShadowNoir: "0 10px 24px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.03)",
+  heroGlow: "radial-gradient(90% 140% at 100% 0%, rgba(200,50,58,.26) 0%, rgba(200,50,58,.08) 38%, rgba(200,50,58,0) 62%)",   // FIRE.red, fading out
 };
 
 /* ---------------- Fire-luxury shared style recipes (reference FIRE tokens; reused across reskinned pages) ---------------- */
 const FS = {
   kicker: { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 },
   card: { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
+  // Industrial Noir card (DA dashboard): gradient face, 1px hairline, 12px radius, soft drop shadow.
+  cardNoir: { background: FIRE.cardNoir, border: `1px solid ${FIRE.hairline}`, borderRadius: 12, boxShadow: FIRE.cardShadowNoir },
   num: { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" },
   btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
   btnPrimary: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: FIRE.white, border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
@@ -118,7 +124,7 @@ function useFitHeight(on) {
 // The page frame: red kicker + Oswald title (+ optional lead mark, sub-line, right-aligned actions), then the
 // content. fitToScreen pins the header and scrolls the content region internally — the no-scroll guardrail.
 // `above` renders before the header (a "Back to …" link on a drill-down page).
-function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, children }) {
+function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, children }) {
   const [bodyRef, top] = useFitHeight(!!fitToScreen);
   // Below the content region sit the shell's own bottom padding (22px) and the app frame's content padding
   // (S.content: 26px + the safe area). Subtract both, or the outer page keeps a 26px scroll of its own.
@@ -126,8 +132,26 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, chil
     ? { height: `calc(100dvh - ${top}px - 48px - env(safe-area-inset-bottom))`, overflowY: "auto", minHeight: 0 }
     : null;
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: band ? "14px 14px" : "22px 20px", margin: "-6px -2px 0" }}>
       {above}
+      {band ? (
+        /* Industrial Noir hero band: the red glow in the top-right corner over the card gradient, a faint
+           B4C watermark and the four pillars, kicker → Oswald greeting → short red accent bar. */
+        <div style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${FIRE.hairline}`, background: `${FIRE.heroGlow}, ${FIRE.cardNoir}`, boxShadow: FIRE.cardShadowNoir, padding: "18px 20px 16px", marginBottom: 12 }}>
+          <div aria-hidden="true" style={{ position: "absolute", right: -6, bottom: -26, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 132, lineHeight: 1, letterSpacing: "-.02em", color: FIRE.textPrimary, opacity: 0.035, pointerEvents: "none", userSelect: "none" }}>B4C</div>
+          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            {lead}
+            <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+              <div style={FS.kicker}>{kicker}</div>
+              <h1 style={{ fontFamily: DISPLAY_FONT, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, margin: "5px 0 0", letterSpacing: "-0.01em", lineHeight: 1.1 }}>{title}</h1>
+              <div style={{ width: 34, height: 3, borderRadius: 2, background: FIRE.red, marginTop: 9 }} />
+              <div aria-hidden="true" style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10.5, letterSpacing: ".32em", color: FIRE.textMuted, opacity: 0.55, marginTop: 10, whiteSpace: "nowrap", overflow: "hidden" }}>PREPARE · DEVELOP · SUPPORT · SERVE</div>
+              {sub && <div style={{ fontSize: 14, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>{sub}</div>}
+            </div>
+            {actions}
+          </div>
+        </div>
+      ) : (
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
         {lead}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -137,6 +161,7 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, chil
         </div>
         {actions}
       </div>
+      )}
       <div ref={bodyRef} style={fit || undefined}>{children}</div>
     </div>
   );
@@ -149,20 +174,42 @@ function DeptCrest({ dept }) {
     </div>
   );
 }
+// Industrial Noir skin switch. A page wraps its content in <NoirSkin> and every Card / StatTile / ChartPanel
+// inside it takes the Noir card face and header treatment; everywhere else renders exactly as before.
+const NoirCtx = React.createContext(false);
+const NoirSkin = ({ children }) => <NoirCtx.Provider value>{children}</NoirCtx.Provider>;
+const useCardFace = () => (React.useContext(NoirCtx) ? FS.cardNoir : FS.card);
+// Noir card header: small red icon, Oswald title, short red underline; `right` sits at the far end.
+function CardHead({ icon: Icon, title, right, as: Tag = "div", style, ...rest }) {
+  return (
+    <Tag style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap", width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", ...style }} {...rest}>
+      <span style={{ display: "inline-flex", alignItems: "flex-start", gap: 8 }}>
+        {Icon && <Icon size={15} color={FIRE.redBright} style={{ marginTop: 1, flexShrink: 0 }} />}
+        <span>
+          <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 14, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textPrimary, lineHeight: 1.15 }}>{title}</span>
+          <span style={{ display: "block", width: 22, height: 2, borderRadius: 2, background: FIRE.red, marginTop: 6 }} />
+        </span>
+      </span>
+      {right != null && <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: FIRE.textMuted, marginLeft: "auto" }}>{right}</span>}
+    </Tag>
+  );
+}
 // Red uppercase tracked label. `as="button"` for a collapsible section header.
 function SectionLabel({ as: Tag = "div", style, children, ...rest }) {
   return <Tag style={{ ...FS.kicker, ...style }} {...rest}>{children}</Tag>;
 }
 // The card surface. `as="button"` for a whole-card link; `style` for an accent edge or layout.
 function Card({ as: Tag = "div", padding = "14px 16px", style, children, ...rest }) {
-  return <Tag style={{ ...FS.card, padding, ...style }} {...rest}>{children}</Tag>;
+  const face = useCardFace();
+  return <Tag style={{ ...face, padding, ...style }} {...rest}>{children}</Tag>;
 }
 // Big tabular number + label + optional sub-line. tone: green | amber | red | muted (default: primary text).
 // onClick makes it a button with the chevron; without it it's a plain box (read-only views).
 function StatTile({ label, value, sub, tone, onClick }) {
   const Tag = onClick ? "button" : "div";
+  const face = useCardFace();
   return (
-    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...FS.card, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
+    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...face, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, letterSpacing: "-.01em", color: TONE[tone] || FIRE.textPrimary, ...FS.num }}>{value}</div>
       <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 7 }}>{label}</div>
       {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
@@ -3486,10 +3533,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const actionCenter = (
     <Card className="dash-ov-ac" style={{ minWidth: 0 }}>
       <div className="dash-ov-ac-body">
-      <SectionLabel as="button" onClick={() => setAttnOpen((v) => !v)} disabled={attnN === 0} style={{ marginBottom: attnOpen || attnN === 0 ? 10 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: attnN === 0 ? "default" : "pointer", textAlign: "left" }}>
-        <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />ACTION CENTER{attnN > 0 ? ` (${attnN})` : ""}
-        {attnN > 0 && <span style={{ marginLeft: "auto", display: "inline-flex" }}>{attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>}
-      </SectionLabel>
+      <CardHead as="button" onClick={() => setAttnOpen((v) => !v)} disabled={attnN === 0} icon={AlertTriangle} title={`Action Center${attnN > 0 ? ` (${attnN})` : ""}`}
+        right={attnN > 0 ? (attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : null}
+        style={{ marginBottom: attnOpen || attnN === 0 ? 12 : 0, cursor: attnN === 0 ? "default" : "pointer" }} />
       {attnN === 0 ? (attnKnown
         ? <EmptyState text=" All clear — nothing needs your attention." />
         : <EmptyState icon={null} text="—" />
@@ -3536,9 +3582,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     </Card>
   );
   return (
-    <PageShell lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, marginLeft: "auto", maxWidth: 300 }}>
-          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 500, fontSize: 14.5, lineHeight: 1.3, color: FIRE.textSecondary, textAlign: "right", borderRight: `2px solid ${FIRE.red}`, paddingRight: 10 }}>{dailyQuote()}</div>
+    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 12, marginLeft: "auto", maxWidth: 280 }}>
+          <div style={{ fontStyle: "italic", fontSize: 12.5, lineHeight: 1.45, color: FIRE.textMuted2, textAlign: "right" }}>&ldquo;{dailyQuote()}&rdquo;</div>
           <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
             {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
@@ -3548,8 +3594,10 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       }>
       {/* DEPARTMENT HEALTH — overview layout: the two live charts, then stats 2×2 beside the Action Center,
           then the remaining panels. Same numbers and sources as the Board/Officer layouts. */}
+      <NoirSkin>
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} overview actionCenter={actionCenter}
         extraHero={<StatTile value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
+      </NoirSkin>
       <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 12, maxWidth: 360 }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
@@ -20139,7 +20187,14 @@ function SvgTip({ x, y, text, vbW }) {
     </g>
   );
 }
-function ChartPanel({ title, note, wide, onOpen, children }) {
+function ChartPanel({ title, note, wide, onOpen, icon, children }) {
+  const noir = React.useContext(NoirCtx);
+  if (noir) return (
+    <Card style={{ minWidth: 0, gridColumn: wide ? "1 / -1" : undefined }}>
+      <CardHead icon={icon} title={title} right={<>{note}{onOpen && <button onClick={onOpen} aria-label={`Open ${title}`} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}><ChevronRight size={15} color={FIRE.btnIcon} /></button>}</>} />
+      {children}
+    </Card>
+  );
   return (
     <Card style={{ minWidth: 0, gridColumn: wide ? "1 / -1" : undefined }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
@@ -20645,7 +20700,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
   const to = (...a) => (go ? () => go(...a) : undefined);
   // Two panels the DA dashboard orders differently (hoursBeforeCerts) — built once, placed below.
   const certsPanel = (
-    <ChartPanel title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={to("roster", "certs")}>
+    <ChartPanel icon={Award} title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={to("roster", "certs")}>
       <CertRings cov={cov} onShowUncovered={to("roster", "certs")} />
     </ChartPanel>
   );
@@ -20673,34 +20728,34 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
             {[6, 12].map(seg)}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 10 }}>
           {hoursOn && (
-            <ChartPanel title="Station hours" note={`credited · de-overlapped · ${ovSpan} mo`} onOpen={to("stationhours")}>
+            <ChartPanel icon={Clock} title="Station hours" note={`credited · de-overlapped · ${ovSpan} mo`} onOpen={to("stationhours")}>
               <StationHoursBars months={ovMonths} />
             </ChartPanel>
           )}
-          <ChartPanel title="Training attendance" note={drillsHeld ? `${ovSpan} mo · ${avgPart}% this year` : `${ovSpan} mo`} onOpen={to("roster", "attendance")}>
+          <ChartPanel icon={GraduationCap} title="Training attendance" note={drillsHeld ? `${ovSpan} mo · ${avgPart}% this year` : `${ovSpan} mo`} onOpen={to("roster", "attendance")}>
             <AttendanceTrend series={ovTrend} />
           </ChartPanel>
         </div>
         {/* Stats as a 2×2 block beside the Action Center; on a wide screen the Action Center takes the stats'
             height and scrolls inside it (dash-ov-* in Fonts()), on a phone the two simply stack. */}
-        <div className="dash-ov-row" style={{ display: "grid", gap: 12, marginTop: 12 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, alignContent: "start" }}>
+        <div className="dash-ov-row" style={{ display: "grid", gap: 10, marginTop: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, alignContent: "start" }}>
             {boardFirst ? [boardTile, membersTile, drillsTile] : [membersTile, boardTile, drillsTile]}
             {extraHero}
           </div>
           {actionCenter}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 10, marginTop: 10 }}>
           {certsPanel}
-          <ChartPanel title="Station duties" note="this period" onOpen={to("duties")}>
+          <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
             <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
               <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
             </div>
           </ChartPanel>
           {moduleEnabled("apparatus", dept?.disabled_modules) && (
-            <ChartPanel title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
+            <ChartPanel icon={Truck} title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
               <ApparatusReadinessBar />
             </ChartPanel>
           )}
