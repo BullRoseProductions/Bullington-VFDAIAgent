@@ -102,7 +102,7 @@ const DISPLAY_FONT = "'Oswald', system-ui, sans-serif";
 const TONE = { green: FIRE.green, amber: FIRE.amberText, red: FIRE.redText, muted: FIRE.textMuted };
 const pctToneName = (p) => (p == null ? "muted" : p > 75 ? "green" : p >= 30 ? "amber" : "red");
 // fitToScreen: the content region's height is the viewport minus wherever it starts (measured, so the app's
-// top bar, safe areas and the page header are all accounted for) minus the shell's bottom padding.
+// top bar, safe areas and the page header are all accounted for) minus the padding below it.
 function useFitHeight(on) {
   const ref = useRef(null);
   const [top, setTop] = useState(null);
@@ -120,8 +120,10 @@ function useFitHeight(on) {
 // `above` renders before the header (a "Back to …" link on a drill-down page).
 function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, children }) {
   const [bodyRef, top] = useFitHeight(!!fitToScreen);
+  // Below the content region sit the shell's own bottom padding (22px) and the app frame's content padding
+  // (S.content: 26px + the safe area). Subtract both, or the outer page keeps a 26px scroll of its own.
   const fit = fitToScreen && top != null
-    ? { height: `calc(100dvh - ${top}px - 22px - env(safe-area-inset-bottom))`, overflowY: "auto", minHeight: 0 }
+    ? { height: `calc(100dvh - ${top}px - 48px - env(safe-area-inset-bottom))`, overflowY: "auto", minHeight: 0 }
     : null;
   return (
     <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
@@ -172,11 +174,18 @@ function HealthDot({ tone = "green", size = 10, className, style }) {
   return <span className={className} style={{ display: "inline-block", width: size, height: size, borderRadius: 999, background: TONE[tone] || TONE.muted, flexShrink: 0, ...style }} />;
 }
 // Thin rounded bar on the dark track. pct is clamped to 0–100.
-function ProgressBar({ pct, tone = "green", style }) {
+// size="lg": the feature version — taller, hairline-edged track, the fill a soft left-to-right ramp into the
+// tone with a faint glow. Same TONE colour throughout (alpha only), so it stays on-palette.
+function ProgressBar({ pct, tone = "green", size, style }) {
   const w = Math.max(0, Math.min(100, Number(pct) || 0));
+  const c = TONE[tone] || TONE.green;
+  const lg = size === "lg";
   return (
-    <div style={{ height: 7, borderRadius: 99, background: FIRE.track, overflow: "hidden", marginTop: 5, ...style }}>
-      <div style={{ height: "100%", borderRadius: 99, width: `${w}%`, background: TONE[tone] || TONE.green }} />
+    <div style={{ height: lg ? 10 : 7, borderRadius: 99, background: FIRE.track, overflow: "hidden", marginTop: lg ? 8 : 5,
+                  ...(lg ? { border: `0.5px solid ${FIRE.hairline}` } : null), ...style }}>
+      <div style={{ height: "100%", borderRadius: 99, width: `${w}%`,
+                    background: lg ? `linear-gradient(90deg, ${c}80, ${c})` : c,
+                    ...(lg ? { boxShadow: `0 0 10px ${c}40` } : null) }} />
     </div>
   );
 }
@@ -3477,7 +3486,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       }>
       <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginBottom: 12, maxWidth: 360 }} />
       {/* DEPARTMENT HEALTH — counts as hero tiles, rates as charts (shared with BoardDashboard). */}
-      <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go}
+      <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} hoursBeforeCerts
         extraHero={<StatTile value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
       {/* NEEDS YOUR ATTENTION — a zero count is not something that needs attention, so zero cards are hidden.
           Nothing at all → one thin "All clear" line, but ONLY once duties, approvals and action items have all
@@ -4220,6 +4229,9 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
         </div>
       </div>
+      {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
+          (it renders nothing once complete); only its place in the order changed. */}
+      <OnboardingCard S={S} me={me} go={go} dept={dept} />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginBottom: 14 }}>
         {/* attendance ring (per-CALENDAR-MONTH rate) + supporting stats; muted "No drills yet" state, not a red 0% */}
@@ -4306,7 +4318,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           training, and the self-serve cert proposer. Previously duplicated inline here; PersonalView
           is now the single source of truth, rendered identically for members, Dept Admins and
           Officers. It renders its own "YOUR PERSONAL VIEW" kicker and module gate. */}
-      <OnboardingCard S={S} me={me} go={go} dept={dept} />
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showClockCard={false} />
       {/* 5 — announcements feed + station calendar, two-column (matches DeptAdmin: feed narrower & bounded/internal-scroll, calendar wider; wraps on narrow) */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
@@ -9422,7 +9433,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   // so the self-row now merged into `members` (to fix me-lookups) never surfaces the PA/owner
   // in their own roster. Identity/detail paths (selected, update, MemberDetail) keep full array.
   const rosterList = members.filter(countsInStats);
-  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} />;
+  if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} dept={dept} />;
   return (
     <PageShell kicker="ROSTER" title="Your people, all in one place"
       sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
@@ -9575,7 +9586,7 @@ function fmtLongDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1]} ${d}, ${y}`;
 }
-function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members, meId }) {
+function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members, meId, dept }) {
   const { openProof, proofMount } = useProofViewer(notify);   // inspector-facing: open the proof on file for an approved cert
   const assign = hasAny(role, DEPT_ADMIN_ROLES);
   const [note, setNote] = useState("");
@@ -9589,6 +9600,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   useEditorOpen(editing);   // cert editor: a roster refresh must not swap the row being edited
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [showMissed, setShowMissed] = useState(false);   // TRAINING HISTORY: absent sessions collapsed by default
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
   // Live 90-day participation — same deptAttendance calc as the roster + Reports; NOT the stale stored field.
   const part90 = deptAttendance(members, sessions, null, rolling90()).rows.find((r) => r.id === member.id)?.pct ?? null;
@@ -9680,13 +9692,15 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     <PageShell
       above={<button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>}
       lead={<Initials S={S} dark name={member.name} />}
-      kicker="MEMBER FILE" title={member.name} sub={`${member.role} · since ${member.joined} · ${member.phone}`}
+      kicker="MEMBER FILE" title={member.name}
+      // No join year → drop the "since" segment rather than print "since null" (JOINED below shows "—" the same way).
+      sub={[member.role, member.joined ? `since ${member.joined}` : null, member.phone].filter(Boolean).join(" · ")}
       actions={<Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>}>
       <Card padding="15px 16px" style={{ marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{part90 == null ? "—" : `${part90}%`}</span></div>
           {/* Same thresholds as before (75 / 50), not pctTone's 75 / 30 — a reskin, not a re-grade. */}
-          {part90 != null && <ProgressBar pct={part90} tone={part90 >= 75 ? "green" : part90 >= 50 ? "amber" : "red"} />}
+          {part90 != null && <ProgressBar size="lg" pct={part90} tone={part90 >= 75 ? "green" : part90 >= 50 ? "amber" : "red"} />}
         </div>
         {assign && !editing && (
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
@@ -9767,6 +9781,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
         )}
       </Card>
 
+      {moduleEnabled("stationhours", dept?.disabled_modules) && <MemberHoursPanel memberId={member.id} />}
+
       <SectionLabel style={{ marginBottom: 8 }}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</SectionLabel>
       {/* Cert rows unchanged inside the Card — including the phone-overlap fix (title flex:"1 1 160px" +
           overflowWrap:"anywhere"; controls in one wrapping group that drops below the title). */}
@@ -9809,17 +9825,35 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             <Card padding="15px 16px" style={{ marginBottom: 16 }}>
               {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
                 <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{expected.length}</b> recorded sessions{expected.length < done.length ? ` since joining` : ""}.</div>
-                {done.map((s, i) => {
-                  const present = (s.attendance || []).includes(member.id);
-                  const preJoin = !present && !expectedAfterJoin(member, s);
-                  return (
-                    <div key={s.id} style={{ ...S.certRow, borderBottom: i === done.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                      <CalendarCheck size={15} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
-                      <Pill S={S} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright}>{present ? "PRESENT" : preJoin ? "—" : "ABSENT"}</Pill>
-                    </div>
-                  );
-                })}
+                {(() => {
+                  // Shown by default: everything except a MISS. Absent sessions sit behind the toggle; the
+                  // "Attended N of M" line above still counts them. Pre-join rows ("—") aren't misses.
+                  const row = (s, i, arr) => {
+                    const present = (s.attendance || []).includes(member.id);
+                    const preJoin = !present && !expectedAfterJoin(member, s);
+                    return (
+                      <div key={s.id} style={{ ...S.certRow, borderBottom: i === arr.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                        <CalendarCheck size={15} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright} style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
+                        <Pill S={S} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright}>{present ? "PRESENT" : preJoin ? "—" : "ABSENT"}</Pill>
+                      </div>
+                    );
+                  };
+                  const missed = done.filter((s) => !(s.attendance || []).includes(member.id) && expectedAfterJoin(member, s));
+                  const shown = done.filter((s) => !missed.includes(s));
+                  return (<>
+                    {shown.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "4px 0 8px" }}>No sessions attended yet.</div>}
+                    {shown.map(row)}
+                    {missed.length > 0 && (<>
+                      {/* The kit's collapsible header (as on NEEDS YOUR ATTENTION): SectionLabel as a button + chevron. */}
+                      <SectionLabel as="button" onClick={() => setShowMissed((v) => !v)} aria-expanded={showMissed}
+                        style={{ marginTop: 12, marginBottom: showMissed ? 6 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+                        {showMissed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{showMissed ? "Hide" : "Show"} {missed.length} missed
+                      </SectionLabel>
+                      {showMissed && missed.map(row)}
+                    </>)}
+                  </>);
+                })()}
               </>)}
             </Card>
           </>
@@ -19472,7 +19506,7 @@ function ProgramOverview({ S, role, notify, go }) {
   const stuck = sum("open_long_shifts_count"), expired = sum("expired_certs_count"), expiring = sum("expiring_certs_count");
 
   return (
-    <PageShell kicker="PROGRAM OVERSIGHT" title="All departments"
+    <PageShell kicker="PROGRAM OVERSIGHT" title="All departments" fitToScreen
       sub="Issues to act on across your departments — surfaced from live data, so you can catch problems before anyone reports them.">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
         <StatTile value={show(rows ? rows.length : null)} label="Departments" />
@@ -20467,6 +20501,115 @@ function DeptHoursByMonthPanel({ multiStation }) {
     </Card>
   );
 }
+// ONE member's credited hours per month, for the member file — the Station Hours Report's per-member figure
+// (mergeStationHours row.total = that member's dept_iso_hours iso_total_hours) for each window, via the
+// dept_member_iso_hours_by_month wrapper. Until that wrapper is applied, falls back to one dept_iso_hours call
+// per month and picks the member's row — the same numbers, just more round-trips. The current month ends NOW,
+// like the report's "This month". Leadership-gated by dept_iso_hours itself. vals: null = loading/unknown.
+function useMemberHoursByMonth(memberId, months) {
+  const [vals, setVals] = useState(null);
+  const [err, setErr] = useState("");
+  const reqRef = useRef(0);
+  const key = `${memberId}|${months.map((m) => `${m.from}~${m.to}`).join("|")}`;
+  const load = () => {
+    const my = ++reqRef.current;
+    setErr("");
+    if (!memberId || !months.length) { setVals([]); return; }
+    const today = toISODate(new Date());
+    const win = months.map((m) => { const st = new Date(`${m.from}T00:00:00`); let en = new Date(`${m.to}T00:00:00`); en.setDate(en.getDate() + 1); if (m.to === today) en = new Date(); return [st.toISOString(), en.toISOString()]; });
+    const perMonth = () => Promise.all(win.map(([a, b]) => supabase.rpc("dept_iso_hours", { p_from: a, p_to: b }))).then((res) => {
+      if (my !== reqRef.current) return;
+      const bad = res.find((r) => r.error);
+      if (bad) { setErr(bad.error.message || "Please try again."); return; }
+      setVals(res.map((r) => Number((r.data || []).find((x) => x.member_id === memberId)?.iso_total_hours) || 0));
+    });
+    supabase.rpc("dept_member_iso_hours_by_month", { p_member_id: memberId, p_starts: win.map((w) => w[0]), p_ends: win.map((w) => w[1]) }).then(({ data, error }) => {
+      if (my !== reqRef.current) return;
+      if (error && (error.code === "PGRST202" || /dept_member_iso_hours_by_month/.test(error.message || ""))) { perMonth(); return; }   // wrapper not applied yet
+      if (error || !Array.isArray(data)) { setErr(error?.message || "Please try again."); return; }
+      const byIdx = new Map(data.map((r) => [Number(r.idx), r]));
+      setVals(months.map((_, i) => { const r = byIdx.get(i + 1); return r ? Number(r.credited) || 0 : null; }));
+    });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
+  useReconnect(() => { if (err) load(); });
+  return { vals, err, retry: load };
+}
+// Line + soft area for hours by month — the member file's trend. Green line, fill fading to nothing, tabular
+// labels on each point. Draws at the panel's measured width like the other charts; a null month is a gap.
+function HoursTrend({ months, vals }) {
+  const [hover, setHover] = useState(null);
+  const { grown, transition } = useChartGrow();
+  const [wrapRef, W] = useChartWidth();
+  const gid = React.useId().replace(/:/g, "");
+  const H = 132, x0 = 30, x1 = W - 14, base = 104, top = 22;
+  const maxV = Math.max(0, ...vals.filter((v) => v != null));
+  const niceMax = (() => { if (maxV <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(maxV))); const f = maxV / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; })();
+  const xAt = (i) => (months.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (months.length - 1));
+  const yAt = (v) => base - (v / niceMax) * (base - top);
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
+  const pts = vals.map((v, i) => (v == null ? null : [xAt(i), yAt(v)]));
+  const segs = []; let cur = [];
+  pts.forEach((p) => { if (p) cur.push(p); else if (cur.length) { segs.push(cur); cur = []; } });
+  if (cur.length) segs.push(cur);
+  const line = (seg) => seg.map(([x, y], j) => `${j ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = (seg) => `${line(seg)} L${seg[seg.length - 1][0].toFixed(1)},${base} L${seg[0][0].toFixed(1)},${base} Z`;
+  return (
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" style={CHART_SVG(H)} onMouseLeave={() => setHover(null)}
+        aria-label={`Credited station hours by month: ${months.map((m, i) => `${m.label} ${vals[i] == null ? "unavailable" : `${h1(vals[i])} hours`}`).join(", ")}.`}>
+        <defs>
+          <linearGradient id={`ht-${gid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={FIRE.green} stopOpacity={0.32} />
+            <stop offset="100%" stopColor={FIRE.green} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        {[niceMax, niceMax / 2, 0].map((v) => (
+          <g key={v}>
+            <line x1={x0} y1={yAt(v)} x2={x1} y2={yAt(v)} stroke={v === 0 ? FIRE.btnBorder : FIRE.track} />
+            <text x={x0 - 5} y={yAt(v) + 3} textAnchor="end" fontSize={9.5} fill={FIRE.textMuted}>{Math.round(v)}</text>
+          </g>
+        ))}
+        <g style={{ opacity: grown ? 1 : 0, transition }}>
+          {segs.map((seg, k) => seg.length > 1 && <path key={`a${k}`} d={area(seg)} fill={`url(#ht-${gid})`} />)}
+          {segs.map((seg, k) => seg.length > 1 && <path key={`l${k}`} d={line(seg)} fill="none" stroke={FIRE.green} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />)}
+          {pts.map((p, i) => p && <circle key={i} cx={p[0]} cy={p[1]} r={hover === i || i === months.length - 1 ? 4 : 3} fill={FIRE.card} stroke={FIRE.green} strokeWidth={2} />)}
+        </g>
+        {months.map((m, i) => (
+          <g key={m.from}>
+            <text x={xAt(i)} y={(pts[i] ? pts[i][1] : base) - 9} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={600} fontSize={10} fill={vals[i] == null ? FIRE.textMuted : FIRE.textSecondary} style={FS.num}>{vals[i] == null ? "—" : h1(vals[i])}</text>
+            <text x={xAt(i)} y={H - 8} textAnchor="middle" fontSize={9.5} fill={hover === i ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>
+            <rect x={xAt(i) - (x1 - x0) / Math.max(1, months.length) / 2} y={0} width={(x1 - x0) / Math.max(1, months.length)} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
+          </g>
+        ))}
+        {hover != null && <SvgTip x={xAt(hover)} y={pts[hover] ? pts[hover][1] : base} vbW={W} text={hoursTip(months[hover], vals[hover])} />}
+      </svg>
+    </div>
+  );
+}
+// Member file: this member's credited station hours, last 6 months. No hours at all → the kit EmptyState.
+function MemberHoursPanel({ memberId }) {
+  const months = useMemo(() => lastMonths(6), []);
+  const { vals, err, retry } = useMemberHoursByMonth(memberId, months);
+  const none = Array.isArray(vals) && vals.every((v) => !v);
+  return (
+    <Card style={{ marginBottom: 16, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <SectionLabel><Clock size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION HOURS</SectionLabel>
+        <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>credited · last 6 months</span>
+      </div>
+      {err ? (
+        <div style={{ fontSize: 12.5, color: FIRE.amberText }}>Couldn't load station hours — not shown as zero. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={retry}>Retry</button></div>
+      ) : vals == null ? (
+        <div style={{ fontSize: 13, color: FIRE.textMuted }}>—</div>
+      ) : none ? (
+        <EmptyState icon={null} text="No credited station hours in the last 6 months." />
+      ) : (
+        <HoursTrend months={months} vals={vals} />
+      )}
+    </Card>
+  );
+}
 // A member's OWN credited hours from their own shift rows — the Station Hours screen's "My hours" rule,
 // lifted here so that screen and the dashboard panel can't disagree: VERIFIED shifts are credited (standby +
 // training); unverified punches are recorded but earn nothing official.
@@ -20564,7 +20707,7 @@ function RosterBreakdown({ members }) {
 // two can never drift: every number is derived HERE, once, from the same honest helpers. The parent passes
 // the duties it already loads (it needs them for its own panels). `go` omitted = read-only: no tile or
 // panel links (the Board strip never had any). extraHero = dashboard-specific trailing tiles.
-function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero }) {
+function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero, hoursBeforeCerts }) {
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
   const { avg: boardPct, rows: boardRows, doneBoard } = boardAttendance(members, sessions, yr);   // board-event accountability track
@@ -20586,6 +20729,17 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
   // null, NOT 100 — a department with no duties configured has nothing measured; the bar says "No duties set".
   const dutyCompletion = dutyList.length ? Math.round((dutyDone / dutyList.length) * 100) : null;
   const to = (...a) => (go ? () => go(...a) : undefined);
+  // Two panels the DA dashboard orders differently (hoursBeforeCerts) — built once, placed below.
+  const certsPanel = (
+    <ChartPanel title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={to("roster", "certs")}>
+      <CertRings cov={cov} onShowUncovered={to("roster", "certs")} />
+    </ChartPanel>
+  );
+  const hoursPanel = moduleEnabled("stationhours", dept?.disabled_modules) ? (
+    <ChartPanel title="Station hours" note="credited · last 6 months" onOpen={to("stationhours")}>
+      <StationHoursBars months={hoursMonths} />
+    </ChartPanel>
+  ) : null;
   const boardTile = <StatTile key="board" value={boardRated ? `${boardPct}%` : "\u2014"} tone={boardRated ? pctToneName(boardPct) : "muted"} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
   const membersTile = <StatTile key="members" value={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
   const drillsTile = <StatTile key="drills" value={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
@@ -20601,9 +20755,9 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
         <ChartPanel title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
           <AttendanceTrend series={trend} />
         </ChartPanel>
-        <ChartPanel title="Certifications" note={expdC > 0 ? <span style={{ color: FIRE.redText }}>{expdC} expired</span> : "as of today"} onOpen={to("roster", "certs")}>
-          <CertRings cov={cov} onShowUncovered={to("roster", "certs")} />
-        </ChartPanel>
+        {/* DA dashboard (hoursBeforeCerts): Station hours takes the Certifications slot and Certifications
+            takes Station hours' old place, last. Board and Officer keep the original order. */}
+        {hoursBeforeCerts ? hoursPanel : certsPanel}
         <ChartPanel title="Station duties" note="this period" onOpen={to("duties")}>
           <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
             <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
@@ -20614,11 +20768,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
             <ApparatusReadinessBar />
           </ChartPanel>
         )}
-        {moduleEnabled("stationhours", dept?.disabled_modules) && (
-          <ChartPanel title="Station hours" note="credited · last 6 months" onOpen={to("stationhours")}>
-            <StationHoursBars months={hoursMonths} />
-          </ChartPanel>
-        )}
+        {hoursBeforeCerts ? certsPanel : hoursPanel}
       </div>
     </>
   );
