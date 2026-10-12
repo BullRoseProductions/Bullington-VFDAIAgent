@@ -20994,11 +20994,14 @@ function baseStyles() {
       paddingBottom: 0,
       position: "sticky", top: 0, zIndex: 20,
     },
-    menuBtn: { display: "none", alignItems: "center", justifyContent: "center", width: 38, height: 38, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: INK },
+    menuBtn: { display: "none", alignItems: "center", justifyContent: "center", width: 38, height: 38, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 8, background: FIRE.card2Noir, cursor: "pointer", color: FIRE.textPrimary },
     chevronBand: { flex: 1, height: 8, borderRadius: 2, background: chevron, opacity: .9 },
     viewAs: { display: "flex", alignItems: "center", gap: 8 },
-    viewAsLabel: { fontSize: 11, color: MUTED, fontFamily: mono, letterSpacing: ".5px" },
-    select: { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: body, background: "#fff", color: INK },
+    viewAsLabel: { fontSize: 11, color: FIRE.textMuted, fontFamily: mono, letterSpacing: ".5px" },
+    // Top-bar selectors (View as, Station): the mock's dark context pill — card2 fill, hairline, 8px radius, primary
+    // text, a muted chevron. Native <select> kept on purpose (keyboard + the phone's own picker); color-scheme dark
+    // and the option colors in index.html make the OPEN list dark too.
+    select: { border: `1px solid ${FIRE.lineNoir}`, borderRadius: 8, padding: "7px 30px 7px 11px", fontSize: 12.5, fontWeight: 600, fontFamily: body, background: `${FIRE.card2Noir} url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237E8794' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center`, color: FIRE.textPrimary, colorScheme: "dark", appearance: "none", WebkitAppearance: "none", cursor: "pointer" },
     logout: { width: 36, height: 36, border: `1px solid ${LINE}`, borderRadius: 8, background: "#fff", cursor: "pointer", color: SLATE, display: "grid", placeItems: "center" },
     /* SAFE AREA (app-shell level — individual screens stay untouched). topbar/sidebar already pad the
        TOP inset; this covers the other three edges, which is what bleeds on a notched iPhone: content

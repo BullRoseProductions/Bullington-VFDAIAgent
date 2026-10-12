@@ -60,7 +60,9 @@ export const AUTH = {
     .b4c-input:focus { outline: none; border-color: ${FIRE.red}; box-shadow: 0 0 0 3px rgba(200,50,58,.25); }
     .b4c-input::placeholder { color: ${FIRE.textMuted}; }`,
   page: { minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: FIRE.pageBg, fontFamily: "'Public Sans', system-ui, sans-serif", color: FIRE.textPrimary, padding: 20, paddingTop: "calc(20px + env(safe-area-inset-top))", paddingBottom: "calc(20px + env(safe-area-inset-bottom))" },
-  card: { position: "relative", overflow: "hidden", background: `${FIRE.heroGlowNoir}, ${FIRE.cardNoir}`, borderRadius: 14, border: `1px solid ${FIRE.lineNoir}`, padding: 26, boxShadow: FIRE.cardShadowNoir },
+  // A subtle hint of red in the top-right corner only (the dashboard banner's glow is sized for a wide band and
+  // floods a narrow card).
+  card: { position: "relative", overflow: "hidden", background: `radial-gradient(60% 45% at 100% 0%, rgba(224,58,68,.2), rgba(200,50,58,.06) 45%, rgba(200,50,58,0) 70%), ${FIRE.cardNoir}`, borderRadius: 14, border: `1px solid ${FIRE.lineNoir}`, padding: 26, boxShadow: FIRE.cardShadowNoir },
   logo: { display: "block", height: 54, width: "auto", margin: "0 auto 10px" },
   brandLine: { fontFamily: DISPLAY, fontWeight: 600, fontSize: 10.5, letterSpacing: ".32em", textTransform: "uppercase", color: FIRE.textMuted2, textAlign: "center", margin: "0 0 18px" },
   heading: { fontFamily: DISPLAY, fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, textAlign: "center", margin: "0 0 6px", letterSpacing: "-0.01em" },

@@ -7,6 +7,7 @@ import { SetNewPassword } from "./SetPassword.jsx";
 import { capturePendingScan } from "./pendingScan";
 import { markBundleHealthy, watchLiveUpdates } from "./liveUpdate";
 import { DestructiveConfirmHost } from "./ConfirmDestructive.jsx";
+import { FIRE } from "./theme.js";
 
 /* ---------------- Password-recovery URL capture ----------------
  * A reset link lands with `#...type=recovery` in the hash. The auth SDK's
@@ -64,10 +65,10 @@ function showUpdateBanner() {
   const bar = document.createElement("div");
   bar.id = "b4c-update-banner";
   bar.setAttribute("role", "status");
-  bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:2147483647;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:#0F1B33;color:#fff;font:600 14px system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.4)";
+  bar.style.cssText = `position:fixed;left:0;right:0;bottom:0;z-index:2147483647;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:${FIRE.card2Noir};border-top:1px solid ${FIRE.line2Noir};color:${FIRE.textPrimary};font:600 14px system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.4)`;
   bar.appendChild(Object.assign(document.createElement("span"), { textContent: "A new version of B4C is available." }));
   const btn = Object.assign(document.createElement("button"), { textContent: "Update now" });
-  btn.style.cssText = "background:#fff;color:#0F1B33;border:none;border-radius:999px;padding:8px 16px;font:700 14px system-ui,sans-serif;cursor:pointer";
+  btn.style.cssText = `background:${FIRE.red};color:${FIRE.white};border:none;border-radius:999px;padding:8px 16px;font:700 14px system-ui,sans-serif;cursor:pointer`;
   btn.onclick = () => location.reload();
   bar.appendChild(btn);
   document.body.appendChild(bar);
@@ -169,7 +170,7 @@ function Root() {
   }
 
   const loading = (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", color: "#6A7178" }}>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", color: FIRE.textMuted, background: FIRE.pageBg }}>
       Loading…
     </div>
   );
@@ -207,9 +208,10 @@ function Root() {
    because those render outside it. This catches that, and deliberately offers only a reload: there
    is no menu left to navigate with, so pretending otherwise would be a dead end.
 
-   Styles are inline literals rather than the FIRE tokens: those live in App.jsx, and importing
-   them here would mean this fallback depends on the very module most likely to be the thing that
-   just failed to evaluate. A last resort should have no interesting dependencies. */
+   Styles are inline literals rather than the FIRE tokens: a last resort should have no interesting
+   dependencies, so it doesn't lean on even src/theme.js. The literals ARE the Industrial Noir palette —
+   page #0A0B0E, card gradient #0F131A→#0B0E13, hairline rgba(255,255,255,.07), text #F7F8FA / #B6BDC8 /
+   #7E8794, FIRE.red #C8323A — keep them in step if the palette moves. */
 class RootBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
@@ -217,17 +219,17 @@ class RootBoundary extends React.Component {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "#0E1014", color: "#F7F8FA", fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif" }}>
-        <div style={{ maxWidth: 460 }}>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "#0A0B0E", color: "#F7F8FA", fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif" }}>
+        <div style={{ maxWidth: 460, background: "linear-gradient(180deg, #0F131A, #0B0E13)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 12, padding: "22px 22px 18px", boxShadow: "0 10px 30px rgba(0,0,0,.45)" }}>
           <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>B4C couldn't load.</div>
-          <div style={{ fontSize: 14, color: "#A8B0BC", lineHeight: 1.55, marginBottom: 16 }}>
+          <div style={{ fontSize: 14, color: "#B6BDC8", lineHeight: 1.55, marginBottom: 16 }}>
             Something went wrong starting the app. Your data is safe. Reloading usually clears it.
           </div>
           <button onClick={() => window.location.reload()}
-                  style={{ background: "#B11E2A", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Reload</button>
+                  style={{ background: "#C8323A", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Reload</button>
           <details style={{ marginTop: 14 }}>
-            <summary style={{ fontSize: 12, color: "#7C8798", cursor: "pointer" }}>Technical details</summary>
-            <div style={{ fontSize: 12, color: "#7C8798", marginTop: 6, fontFamily: "ui-monospace, Menlo, monospace", wordBreak: "break-word" }}>
+            <summary style={{ fontSize: 12, color: "#7E8794", cursor: "pointer" }}>Technical details</summary>
+            <div style={{ fontSize: 12, color: "#7E8794", marginTop: 6, fontFamily: "ui-monospace, Menlo, monospace", wordBreak: "break-word" }}>
               {String(this.state.error?.message || this.state.error)}
             </div>
           </details>
