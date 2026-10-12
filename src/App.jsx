@@ -4356,17 +4356,12 @@ function Library({ S, library, openPacket }) {
     return okT && okQ;
   }), [library, q, track]);
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>TRAINING LIBRARY</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Find a packet</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Search by topic or filter by track. Every packet is ready to run tonight.</div>
-      </div>
-      <div style={{ ...S.searchBox, ...FS.card, marginBottom: 14 }}>
+    <PageShell kicker="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight.">
+      <Card padding="11px 14px" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         <Search size={18} color={FIRE.btnIcon} />
         <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
         {q && <button style={{ ...S.clearBtn, color: FIRE.textMuted }} onClick={() => setQ("")}><X size={15} /></button>}
-      </div>
+      </Card>
       <div style={S.chipRow}>
         {[["All", "All", null], ...Object.keys(TRACKS).map((k) => [k, TRACKS[k].label, TRACKS[k].accent])].map(([k, label, accent]) => {
           const on = track === k;
@@ -4374,11 +4369,11 @@ function Library({ S, library, openPacket }) {
         })}
       </div>
       {results.length === 0 ? (
-        <div style={{ ...FS.card, padding: 36, textAlign: "center", color: FIRE.textMuted }}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</div>
+        <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</Card>
       ) : (
         <div style={S.cardGrid}>{results.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} />)}</div>
       )}
-    </div>
+    </PageShell>
   );
 }
 function RunCard({ S, p, onClick }) {
@@ -5623,16 +5618,12 @@ function Documents({ S, role, notify, uploaderName, members }) {
     catch { setErr("Couldn't draft that just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>STATION DOCUMENTS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your SOPs and guidelines, in one place</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>{leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."}</div>
-      </div>
+    <PageShell above={loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
+      kicker="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place"
+      sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."}>
 
       {canManageDocs && (<>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</div>
+        <SectionLabel style={{ marginBottom: 8 }}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</SectionLabel>
         <label style={{ ...S.field, maxWidth: 240, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type for these uploads</span>
           <select style={{ ...FS.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
             {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -5646,9 +5637,9 @@ function Documents({ S, role, notify, uploaderName, members }) {
           <input type="file" multiple style={{ display: "none" }} onChange={onFiles} />
         </label>
 
-        <button onClick={() => setDraftOpen((v) => !v)} style={{ ...FS.kicker, marginTop: 24, marginBottom: draftOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><FilePlus size={13} style={{ verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT<span style={{ marginLeft: "auto", display: "inline-flex" }}>{draftOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+        <SectionLabel as="button" onClick={() => setDraftOpen((v) => !v)} style={{ marginTop: 24, marginBottom: draftOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><FilePlus size={13} style={{ verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT<span style={{ marginLeft: "auto", display: "inline-flex" }}>{draftOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></SectionLabel>
         {draftOpen && (<>
-        <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+        <Card padding={22} style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 22 }}>
           <div style={{ flex: 1 }}>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Document type</span>
               <select style={{ ...FS.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -5662,19 +5653,21 @@ function Documents({ S, role, notify, uploaderName, members }) {
             {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
             {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact dark /><RichOutput S={S} text={out} dark /></div>}
           </div>
-        </div>
+        </Card>
         </>)}
       </>)}
 
-      <div style={{ ...FS.kicker, marginTop: 24, marginBottom: 8 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</div>
+      <SectionLabel style={{ marginTop: 24, marginBottom: 8 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</SectionLabel>
       {!docsLoading && docs.length === 0 ? (
-        <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>
+        <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
           {canManageDocs
             ? "No documents yet — upload your first above."
             : "No documents have been added yet."}
-        </div>
+        </Card>
       ) : (
-        <div>
+        // The rows inside are unchanged, including the phone-overlap fix: title flex:"1 1 160px" +
+        // overflowWrap:"anywhere", and Open/History/Replace/Trash in ONE wrapping group.
+        <Card padding="2px 14px">
           {docs.map((d) => (
             <div key={d.id}>
               <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
@@ -5689,8 +5682,8 @@ function Documents({ S, role, notify, uploaderName, members }) {
                 </div>
               </div>
               {historyFor === d.id && (
-                <div style={{ ...FS.card, padding: 12, marginTop: 6, marginBottom: 8 }}>
-                  <div style={{ ...FS.kicker, marginBottom: 6 }}>VERSION HISTORY</div>
+                <Card padding={12} style={{ marginTop: 6, marginBottom: 8, boxShadow: "none" }}>
+                  <SectionLabel style={{ marginBottom: 6 }}>VERSION HISTORY</SectionLabel>
                   {historyLoading ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>
                    : history.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>No previous versions — this is the original.</div>
                    : history.map((v) => (
@@ -5700,20 +5693,20 @@ function Documents({ S, role, notify, uploaderName, members }) {
                        <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }} onClick={() => openDoc(v)}><Download size={13} /> View</button>
                      </div>
                    ))}
-                </div>
+                </Card>
               )}
             </div>
           ))}
-        </div>
+        </Card>
       )}
 
       {isDA && (
         <div style={{ marginTop: 24 }}>
-          <button onClick={() => { const n = !showTrash; setShowTrash(n); if (n) loadTrashed(); }} style={{ ...FS.kicker, marginBottom: showTrash ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Trash2 size={13} style={{ verticalAlign: "-2px" }} />TRASH<span style={{ marginLeft: "auto", display: "inline-flex" }}>{showTrash ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          <SectionLabel as="button" onClick={() => { const n = !showTrash; setShowTrash(n); if (n) loadTrashed(); }} style={{ marginBottom: showTrash ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Trash2 size={13} style={{ verticalAlign: "-2px" }} />TRASH<span style={{ marginLeft: "auto", display: "inline-flex" }}>{showTrash ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></SectionLabel>
           {showTrash && (
-            trashLoading ? <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>Loading…</div>
-            : trashed.length === 0 ? <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>Trash is empty.</div>
-            : trashed.map((d) => (
+            trashLoading ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Loading…</Card>
+            : trashed.length === 0 ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Trash is empty.</Card>
+            : <Card padding="2px 14px">{trashed.map((d) => (
               <div key={d.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
                 <Trash2 size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
                 <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
@@ -5725,12 +5718,12 @@ function Documents({ S, role, notify, uploaderName, members }) {
                   {isPA && canDeleteShared && <button title="Permanently delete" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => hardDeleteDoc(d)}><Trash2 size={14} color={FIRE.deleteRed} /></button>}
                 </div>
               </div>
-            ))
+            ))}</Card>
           )}
         </div>
       )}
       {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} onClose={() => setViewerDoc(null)} />}
-    </div>
+    </PageShell>
   );
 }
 
@@ -10000,11 +9993,11 @@ function RosterCerts({ S, members }) {
   return (
     <div>
       <div style={S.statRow}>
-        {tileWrap(2, <Stat S={S} dark n={String(n(2))} label="Certs current" onClick={() => toggleStatus(2)} />)}
-        {tileWrap(1, <Stat S={S} dark n={String(n(1))} label="Expiring within 90 days" warn={n(1) > 0} onClick={() => toggleStatus(1)} />)}
-        {tileWrap(0, <Stat S={S} dark n={String(n(0))} label="Expired — action needed" warn={n(0) > 0} onClick={() => toggleStatus(0)} />)}
+        {tileWrap(2, <StatTile value={String(n(2))} label="Certs current" onClick={() => toggleStatus(2)} />)}
+        {tileWrap(1, <StatTile value={String(n(1))} tone={n(1) > 0 ? "red" : undefined} label="Expiring within 90 days" onClick={() => toggleStatus(1)} />)}
+        {tileWrap(0, <StatTile value={String(n(0))} tone={n(0) > 0 ? "red" : undefined} label="Expired — action needed" onClick={() => toggleStatus(0)} />)}
         <div style={{ flex: 1, minWidth: 0, borderRadius: 12, outline: showingUncovered ? `2px solid ${FIRE.amberText}` : "none", outlineOffset: 2 }}>
-          <Stat S={S} dark n={String(cov.uncovered.length)} label="Members not covered" warn={cov.uncovered.length > 0} onClick={() => toggleStatus(UNCOVERED)} />
+          <StatTile value={String(cov.uncovered.length)} tone={cov.uncovered.length > 0 ? "red" : undefined} label="Members not covered" onClick={() => toggleStatus(UNCOVERED)} />
         </div>
       </div>
       {/* Search + active-filter summary. Counts on the tiles stay ABSOLUTE (computed from every row) —
@@ -10033,9 +10026,9 @@ function RosterCerts({ S, members }) {
             : `Showing ${visible.length} of ${rows.length}`}
         </div>
       )}
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <Card padding={22} style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 22 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</div>
+          <SectionLabel style={{ marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</SectionLabel>
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Stay ahead of every renewal</h3>
           <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
@@ -10044,11 +10037,11 @@ function RosterCerts({ S, members }) {
           {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
         </div>
-      </div>
+      </Card>
       {/* The not-covered list REPLACES the cert rows when its tile is active: these are members,
           not certifications, and interleaving the two would make the list mean two things at once. */}
       {showingUncovered && (
-        <div style={{ marginTop: 4 }}>
+        <Card padding="2px 14px" style={{ marginTop: 4 }}>
           {visibleUncovered.length === 0 ? (
             <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "14px 0" }}>
               {cov.uncovered.length === 0 ? "Every active and probationary member has a current certification." : "No members match that search."}
@@ -10067,9 +10060,11 @@ function RosterCerts({ S, members }) {
               <span style={{ fontSize: 12.5, color: FIRE.textMuted2 }}>{m.role || "Member"}</span>
             </div>
           ))}
-        </div>
+        </Card>
       )}
-      <div style={{ marginTop: 4, display: showingUncovered ? "none" : undefined }}>
+      {/* Cert rows unchanged inside the Card — phone-overlap fix kept: title flex:"1 1 160px" +
+          overflowWrap:"anywhere"; status pill + View proof in one wrapping group. */}
+      <Card padding="2px 14px" style={{ marginTop: 4, display: showingUncovered ? "none" : undefined }}>
         {visible.length === 0 && (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "14px 0" }}>
             {rows.length === 0 ? "No certifications on file yet." : "No certifications match that filter."}
@@ -10093,7 +10088,7 @@ function RosterCerts({ S, members }) {
             </div>
           );
         })}
-      </div>
+      </Card>
       {proofMount}
     </div>
   );
@@ -10186,8 +10181,8 @@ function RosterAttendance({ S, members, sessions, plan }) {
     }));
   return (
     <div>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</div>
-      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
+      <SectionLabel style={{ marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</SectionLabel>
+      <Card padding="4px 16px" style={{ marginBottom: 22 }}>
         {recentEvents.length === 0 ? <div style={{ padding: "12px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
           recentEvents.map((e) => {
           const pct = e.total ? Math.min(100, Math.round((e.present / e.total) * 100)) : 0;   // cap display + bar at 100%; raw present/total shown as-is
@@ -10201,24 +10196,24 @@ function RosterAttendance({ S, members, sessions, plan }) {
                   <EventOptionalTag optional={e.optional} />
                 </div>
               </div>
-              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total}{e.optional ? "" : ` (${pct}%)`}</div><Bar S={S} pct={pct} track={FIRE.track} color={e.optional ? FIRE.textMuted : (pct >= 75 ? FIRE.green : FIRE.amberText)} /></div>
+              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total}{e.optional ? "" : ` (${pct}%)`}</div><ProgressBar pct={pct} tone={e.optional ? "muted" : (pct >= 75 ? "green" : "amber")} /></div>
             </div>
           );
         })}
-      </div>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>MEMBER PARTICIPATION (LAST 90 DAYS)</div>
-      <div style={{ ...FS.card, padding: "4px 16px" }}>
+      </Card>
+      <SectionLabel style={{ marginBottom: 8 }}>MEMBER PARTICIPATION (LAST 90 DAYS)</SectionLabel>
+      <Card padding="4px 16px">
         {people.map((m) => {
           const p = pctById.get(m.id) ?? null;   // live 90-day pct (null = no eligible drills in window → "—")
           return (
           <div key={m.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
             <Initials S={S} dark name={m.name} />
             <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}</div></div>
-            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{p == null ? "—" : `${p}%`}</div>{p != null && <Bar S={S} pct={p} track={FIRE.track} color={p >= 75 ? FIRE.green : (p >= 50 ? FIRE.amberText : FIRE.redText)} />}</div>
+            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{p == null ? "—" : `${p}%`}</div>{p != null && <ProgressBar pct={p} tone={p >= 75 ? "green" : (p >= 50 ? "amber" : "red")} />}</div>
           </div>
           );
         })}
-      </div>
+      </Card>
     </div>
   );
 }
@@ -17761,14 +17756,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const num = FS.num;
 
     return (
-      <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-        {mounts}
-        {/* 1 — header */}
-        <div style={{ marginBottom: 18 }}>
-          <div style={kick}>MY TRAINING</div>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Your training calendar</h1>
-          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>See what's scheduled, what you've missed, and where your attendance stands.</div>
-        </div>
+      <PageShell above={mounts} kicker="MY TRAINING" title="Your training calendar"
+        sub="See what's scheduled, what you've missed, and where your attendance stands.">
 
         {/* 2 — attendance progress */}
         <div style={card}>
@@ -17879,7 +17868,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             })}
           </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
@@ -17909,13 +17898,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
 
   return (
-    <div>
-      {/* header — readable on dark */}
-      <div style={{ marginBottom: 18 }}>
-        <div style={Lkick}>TRAINING</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: "#F7F8FA", margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Keep training on schedule</h1>
-        <div style={{ fontSize: 14, color: "#9AA1AC", lineHeight: 1.5 }}>Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.</div>
-      </div>
+    <PageShell kicker="TRAINING" title="Keep training on schedule"
+      sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
 
       {/* TOP ROW — three dark cards (replaces the 3 Stat tiles) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
@@ -18308,7 +18292,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <div style={{ color: "rgba(255,255,255,.6)", fontSize: 14, marginTop: 8 }}>{fmtSess(expandQR.s)} · Code {expandQR.token} · tap anywhere to close</div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
 
