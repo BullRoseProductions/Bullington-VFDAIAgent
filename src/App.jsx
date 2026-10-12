@@ -17028,7 +17028,7 @@ const CADENCES = ["Weekly", "Bi-weekly", "Monthly", "Quarterly", "Semi-annual", 
 const TRAIN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function dueInfo(item) {
-  if (item.cadence === "One-off") return { label: item.lastISO ? "Done" : "Not logged", color: item.lastISO ? "#2E7D52" : "#B11E2A", rel: item.lastISO ? "one-off" : "never logged", nextLabel: "—", urgent: !item.lastISO };
+  if (item.cadence === "One-off") return { label: item.lastISO ? "Done" : "Not logged", color: item.lastISO ? FIRE.green : FIRE.redText, rel: item.lastISO ? "one-off" : "never logged", nextLabel: "—", urgent: !item.lastISO };
   const days = CADENCE_DAYS[item.cadence] || 30;
   if (!item.lastISO) return { label: "Not logged", color: FIRE.redText, rel: "never logged", nextLabel: "—", urgent: true };
   const last = new Date(item.lastISO + "T00:00:00");
