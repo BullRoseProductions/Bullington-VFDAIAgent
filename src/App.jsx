@@ -4338,29 +4338,20 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
   const nextSession = nextEvent?.type === "Training" ? sess.find((x) => String(x.id) === String(nextEvent.id)) : null;
   const nextPlans = nextSession?.plans || [];
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {/* 1 — greeting + dept crest (real logo_url when set; monogram fallback until logo persistence exists) */}
-      <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 18 }}>
-        <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, display: "grid", placeItems: "center", background: FIRE.card, border: `1.5px solid ${FIRE.red}`, boxShadow: "0 0 14px rgba(200,50,58,.30)", overflow: "hidden" }}>
-          {dept?.logo_url
-            ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-            : <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={FS.kicker}>{dept?.name ? `MY STATION · ${dept.name}` : "MY STATION"}</div>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dashboardGreeting(me)}</h1>
-          <div style={{ fontSize: 14, color: FIRE.textMuted2, lineHeight: 1.5 }}>Here's exactly where you stand — and what's coming up for you.</div>
-        </div>
-      </div>
+    /* 1 — the standard page frame with the Noir hero band: dept crest (logo_url when set, monogram otherwise),
+       greeting and sub-line, pillars + daily quote on the right — same as the other dashboards. */
+    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `MY STATION · ${dept.name}` : "MY STATION"} title={dashboardGreeting(me)}
+      sub="Here's exactly where you stand — and what's coming up for you." actions={<HeroAside />}>
+      <NoirSkin>
       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
           (it renders nothing once complete); only its place in the order changed. */}
       <OnboardingCard S={S} me={me} go={go} dept={dept} />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, marginBottom: 8 }}>
         {/* attendance ring (per-CALENDAR-MONTH rate) + supporting stats; muted "No drills yet" state, not a red 0% */}
-        <Card>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>ATTENDANCE</div>
-          <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center" }}>
+        <Card padding="12px 14px">
+          <CardHead icon={CalendarCheck} title="Attendance" style={{ marginBottom: 0 }} />
+          <div style={{ display: "flex", gap: 16, marginTop: 6, alignItems: "center" }}>
             <div style={{ flexShrink: 0, width: 120 }}>
               {/* Shared Ring: same geometry, tone thresholds, reduced-motion handling as every other chart. */}
               <Ring value={thisMonth ? thisMonth.attended : 0} of={thisMonth ? thisMonth.total : 0} caption="This month" sub={hasThisMonth ? "" : "No drills yet"} />
@@ -4380,10 +4371,10 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           </div>
         </Card>
         {/* next event: soonest across all 4 calendar sources; "Get prepared" surfaces a Training's attachments (members read-only) */}
-        <Card>
+        <Card padding="12px 14px">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT EVENT</div>
+              <CardHead icon={Calendar} title="Next event" style={{ marginBottom: 0 }} />
               {nextEvent ? (
                 <>
                   <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div>
@@ -4424,14 +4415,14 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         {moduleEnabled("stationhours", dept?.disabled_modules) && <StationClockCard S={S} dept={dept} go={go} />}
       </div>
       {mounts}
-      <ActionItemsCard meId={meId} style={{ marginBottom: 14 }} />
+      <ActionItemsCard meId={meId} style={{ marginBottom: 8 }} />
       {/* Your attendance over time — the shared trend chart on the member's OWN monthly rates. A month with no
           drills they were expected at is a gap, never a 0. Hidden until there's at least one month to plot. */}
       {/* Your attendance + your station hours — side by side on desktop, stacked on a phone. Each hides
           itself until it has something to plot. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginBottom: 8 }}>
         {mySeries.some((m) => m.pct != null) && (
-          <ChartPanel title="Your attendance" note="last 8 months">
+          <ChartPanel icon={GraduationCap} title="Your attendance" note="last 8 months">
             <AttendanceTrend series={mySeries} />
           </ChartPanel>
         )}
@@ -4442,6 +4433,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           is now the single source of truth, rendered identically for members, Dept Admins and
           Officers. It renders its own "YOUR PERSONAL VIEW" kicker and module gate. */}
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showClockCard={false} />
+      </NoirSkin>
       {/* 5 — announcements feed + station calendar, two-column (matches DeptAdmin: feed narrower & bounded/internal-scroll, calendar wider; wraps on narrow) */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
@@ -4452,10 +4444,10 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         </div>
       </div>
 
-      {/* 6 — quick actions (member-filtered NAV; new FS styling, shared QuickAccess untouched) */}
-      <div style={{ ...FS.card, padding: 18 }}>
-        <div style={FS.kicker}>QUICK ACTIONS</div>
-        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+      {/* 6 — quick actions (member-filtered NAV), on the Noir card with a CardHead header */}
+      <div style={{ ...FS.cardNoir, padding: "12px 14px" }}>
+        <CardHead icon={Wand2} title="Quick actions" style={{ marginBottom: 0 }} />
+        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
           {NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)))   // same equipment-manager exception as the sidebar
             .filter((n) => moduleEnabled(n.key, dept?.disabled_modules)).map((n) => (                                 // and the same module gate (dept is already a prop here)
             <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
@@ -4466,7 +4458,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           ))}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -16672,6 +16664,7 @@ function useMyOnboarding(meId) {
 // MemberDashboard card: checklist incomplete AND (Probationary OR already started) → progress + next
 // open items. A member promoted mid-checklist keeps it until done; one never onboarded never sees it.
 function OnboardingCard({ S, me, go, dept }) {
+  const noir = React.useContext(NoirCtx);   // Noir dashboards: CardHead header
   const moduleOn = moduleEnabled("onboarding", dept?.disabled_modules);
   const { items, prog, err, reload } = useMyOnboarding(moduleOn ? me?.id : null);
   if (!moduleOn) return null;
@@ -16690,7 +16683,7 @@ function OnboardingCard({ S, me, go, dept }) {
   const pct = Math.round((done / items.length) * 100);
   return (
     <Card as="button" onClick={() => go("onboarding")} padding={16} style={{ marginBottom: 14, width: "100%", textAlign: "left", cursor: "pointer", display: "block" }}>
-      <SectionLabel style={{ marginBottom: 8 }}><UserPlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR ONBOARDING</SectionLabel>
+      {noir ? <CardHead icon={UserPlus} title="Your onboarding" /> : <SectionLabel style={{ marginBottom: 8 }}><UserPlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR ONBOARDING</SectionLabel>}
       <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>{done} of {items.length} complete</span><span>{pct}%</span></div>
       <ProgressBar pct={pct} tone={pct >= 50 ? "amber" : "red"} />
       <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: FIRE.textMuted, letterSpacing: ".06em" }}>NEXT UP</div>
@@ -20700,7 +20693,7 @@ function MyStationHoursPanel() {
   const per = months.map((m) => (shifts ? myHoursTotals(inMonth(m)) : null));
   const vals = per.map((t) => (err || !t ? null : t.total));
   return (
-    <ChartPanel title="Your station hours" note="credited · last 6 months">
+    <ChartPanel icon={Clock} title="Your station hours" note="credited · last 6 months">
       <MonthlyBars months={months} vals={vals} aria={hoursAria("Your", months, vals)}
         tip={(i) => hoursTip(months[i], vals[i], per[i] && per[i].unverified > 0 ? `${(Math.round(per[i].unverified * 10) / 10).toFixed(1)} h unverified` : "")} />
       {err && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Couldn't load your hours — shown as "—", not zero. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={load}>Retry</button></div>}
