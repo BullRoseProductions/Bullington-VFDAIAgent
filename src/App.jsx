@@ -316,10 +316,10 @@ const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
 const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
 
 const TRACKS = {
-  Fire:        { label: "Fire",        accent: "#B11E2A", Icon: Flame },
-  EMS:         { label: "EMS",         accent: "#1F4E79", Icon: HeartPulse },
-  Leadership:  { label: "Leadership",  accent: "#3A4750", Icon: GraduationCap },
-  Operations:  { label: "Operations",  accent: "#54506B", Icon: Briefcase },
+  Fire:        { label: "Fire",        accent: FIRE.red,       Icon: Flame },        // Industrial Noir categorical set
+  EMS:         { label: "EMS",         accent: FIRE.catBlue,   Icon: HeartPulse },
+  Leadership:  { label: "Leadership",  accent: FIRE.catViolet, Icon: GraduationCap },
+  Operations:  { label: "Operations",  accent: FIRE.catTeal,   Icon: Briefcase },
 };
 
 const DISCLAIMER =
@@ -4506,35 +4506,41 @@ function RunCard({ S, p, onClick }) {
 /* ---------------- Packet ---------------- */
 function Packet({ S, packet, back }) {
   const T = TRACKS[packet.track];
+  // Industrial Noir: the light baseStyles text colours are overridden onto the FIRE palette here, and every block
+  // is a Noir card. Content, order and controls are exactly as before.
+  const body = { ...S.body, color: FIRE.textSecondary }, list = { ...S.list, color: FIRE.textSecondary };
   return (
     <div>
-      <button style={S.backBtn} onClick={back}><ArrowLeft size={16} /> Back to library</button>
-      <div style={S.packetHead}>
+      <button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to library</button>
+      <div style={{ ...S.packetHead, ...FS.cardNoir, marginBottom: 12 }}>
         <div style={{ ...S.packetStripe, background: T.accent }} />
-        <div style={S.packetHeadInner}>
+        <div style={{ ...S.packetHeadInner, padding: "18px 20px" }}>
           <div style={S.metaRow}><span style={{ ...S.runCode, color: T.accent }}>{packet.code}</span><TrackPill S={S} track={packet.track} /></div>
-          <h1 style={S.packetTitle}>{packet.title}</h1>
-          <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} /><Meta Icon={Users} text={packet.level} /></div>
-          <button style={S.primaryBtn}><Download size={16} /> Download packet (PDF)</button>
+          <h1 style={{ ...S.packetTitle, color: FIRE.textPrimary }}>{packet.title}</h1>
+          <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} dark /><Meta Icon={Users} text={packet.level} dark /></div>
+          <button style={FS.btnPrimary}><Download size={16} /> Download packet (PDF)</button>
         </div>
       </div>
-      <Disclaimer S={S} />
-      <Section S={S} Icon={ClipboardList} title="Objective"><p style={S.body}>{packet.objective}</p></Section>
-      <Section S={S} Icon={Wrench} title="Required equipment"><ul style={S.list}>{packet.equipment.map((e, i) => <li key={i}>{e}</li>)}</ul></Section>
-      <Section S={S} Icon={GraduationCap} title="Instructor guide"><p style={S.body}>{packet.instructorGuide}</p></Section>
+      <Disclaimer S={S} dark />
+      <Section S={S} Icon={ClipboardList} title="Objective"><p style={body}>{packet.objective}</p></Section>
+      <Section S={S} Icon={Wrench} title="Required equipment"><ul style={list}>{packet.equipment.map((e, i) => <li key={i}>{e}</li>)}</ul></Section>
+      <Section S={S} Icon={GraduationCap} title="Instructor guide"><p style={body}>{packet.instructorGuide}</p></Section>
       <Section S={S} Icon={FileText} title="Step-by-step lesson plan">
         <div style={S.steps}>{packet.steps.map((s, i) => (
-          <div key={i} style={S.step}><span style={S.stepNum}>{String(i + 1).padStart(2, "0")}</span>
-            <div style={{ flex: 1 }}><div style={S.stepTitle}>{s.t} <span style={S.stepMin}>{s.m} min</span></div><div style={S.stepDetail}>{s.d}</div></div></div>
+          <div key={i} style={S.step}><span style={{ ...S.stepNum, background: FIRE.red, color: FIRE.white }}>{String(i + 1).padStart(2, "0")}</span>
+            <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.t} <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.m} min</span></div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.d}</div></div></div>
         ))}</div>
       </Section>
-      <Section S={S} Icon={Flame} title="Scenario / drill setup"><p style={S.body}>{packet.scenario}</p></Section>
-      <div style={S.safetyBox}><div style={S.safetyHead}><ShieldAlert size={18} /> Safety considerations</div><ul style={S.list}>{packet.safety.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
-      <Section S={S} Icon={Users} title="Discussion questions"><ul style={S.list}>{packet.discussion.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
+      <Section S={S} Icon={Flame} title="Scenario / drill setup"><p style={body}>{packet.scenario}</p></Section>
+      <div style={{ ...S.safetyBox, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.amberText}`, padding: "14px 16px", marginBottom: 10 }}>
+        <CardHead icon={ShieldAlert} title="Safety considerations" />
+        <ul style={list}>{packet.safety.map((s, i) => <li key={i}>{s}</li>)}</ul>
+      </div>
+      <Section S={S} Icon={Users} title="Discussion questions"><ul style={list}>{packet.discussion.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
       <Section S={S} Icon={CheckCircle2} title="Evaluation checklist">
-        <div style={S.checklist}>{packet.evaluation.map((e, i) => <label key={i} style={S.check}><input type="checkbox" /> <span>{e}</span></label>)}</div>
+        <div style={S.checklist}>{packet.evaluation.map((e, i) => <label key={i} style={{ ...S.check, color: FIRE.textSecondary }}><input type="checkbox" style={{ accentColor: FIRE.red }} /> <span>{e}</span></label>)}</div>
       </Section>
-      <Section S={S} Icon={ClipboardList} title="Debrief questions"><ul style={S.list}>{packet.debrief.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
+      <Section S={S} Icon={ClipboardList} title="Debrief questions"><ul style={list}>{packet.debrief.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
     </div>
   );
 }
@@ -20961,7 +20967,8 @@ function Chip({ S, active, accent, onClick, children }) {
   return <button onClick={onClick} style={{ ...S.chip, background: active ? (accent || "#191C20") : "#fff", color: active ? "#fff" : "#3A4750", borderColor: active ? (accent || "#191C20") : "#D2D5D8" }}>{children}</button>;
 }
 function Section({ S, Icon, title, children }) {
-  return <div style={S.section}><div style={S.sectionHead}><Icon size={16} color="#54506B" /> {title}</div>{children}</div>;
+  // Training Library packet sections: a Noir card with the CardHead header (S kept for the call sites).
+  return <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 10 }}><CardHead icon={Icon} title={title} />{children}</div>;
 }
 function Disclaimer({ S, compact, dark }) {
   return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
