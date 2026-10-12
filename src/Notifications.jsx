@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, ClipboardList, Settings, Lock } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { useAutoRefresh } from "./useReconnect";
+import { FIRE } from "./theme.js";
 
 /* Notification centre — reads the STORED notifications table (not a recomputed list), so read/unread
    survives a refresh and the department keeps a "we told them, on this date" record.
@@ -17,7 +18,7 @@ import { useAutoRefresh } from "./useReconnect";
 // like a bug nobody filed.
 const ICON = { cert: Award, gear: HardHat, maint: Wrench, event: CalendarClock, task: ClipboardCheck, duty: ClipboardList };
 const iconFor = (type) => ICON[String(type || "").split("_")[0]] || AlertTriangle;
-const COLOR = { critical: "#E58A90", warning: "#D6A95E", info: "#8FA3C4" };
+const COLOR = { critical: "#E58A90", warning: "#D6A95E", info: FIRE.catBlue };   // info: the noir blue
 
 function timeAgo(iso) {
   const t = Date.parse(iso);

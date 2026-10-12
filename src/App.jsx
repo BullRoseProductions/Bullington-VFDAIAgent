@@ -1976,31 +1976,31 @@ function StationPicker({ S, notify }) {
 function Notification({ S, kind, title, text, details, action, onClose }) {
   const [showDetails, setShowDetails] = useState(false);
   const isErr = kind === "error";
-  const accent = isErr ? "#B11E2A" : "#2E7D52";                 // ENGINE red / success green — app palette
+  const accent = isErr ? FIRE.redText : FIRE.green;             // the status set: red = bad, green = good
   const Icon = isErr ? AlertTriangle : CheckCircle2;
   return (
-    <div style={{ position: "fixed", top: "calc(18px + env(safe-area-inset-top))", right: "calc(18px + env(safe-area-inset-right))", zIndex: 60, width: "min(380px, calc(100vw - 36px))", background: "#fff", border: `1px solid ${accent}44`, borderLeft: `4px solid ${accent}`, borderRadius: 10, boxShadow: "0 8px 26px rgba(20,16,24,.16)", padding: "13px 14px", display: "flex", gap: 10, alignItems: "flex-start", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
+    <div style={{ position: "fixed", top: "calc(18px + env(safe-area-inset-top))", right: "calc(18px + env(safe-area-inset-right))", zIndex: 60, width: "min(380px, calc(100vw - 36px))", background: FIRE.cardNoir, border: `1px solid ${FIRE.line2Noir}`, borderLeft: `4px solid ${accent}`, borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,.55)", padding: "13px 14px", display: "flex", gap: 10, alignItems: "flex-start", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
       <Icon size={18} color={accent} style={{ flexShrink: 0, marginTop: 1 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         {isErr ? (<>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "#191C20" }}>{title}</div>
-          {text && <div style={{ fontSize: 13, color: "#3A4750", marginTop: 2 }}>{text}</div>}
+          <div style={{ fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{title}</div>
+          {text && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>{text}</div>}
           {details && (<>
             <button onClick={() => setShowDetails((v) => !v)} style={{ marginTop: 8, border: "none", background: "transparent", color: accent, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
               {showDetails ? "Hide details" : "Show details"}
             </button>
             {showDetails && (
-              <div style={{ marginTop: 6, padding: "8px 9px", background: "#F7F6FA", border: "1px solid #E7E5EE", borderRadius: 6, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, color: "#3A4750", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div>
+              <div style={{ marginTop: 6, padding: "8px 9px", background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 6, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, color: FIRE.textSecondary, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div>
             )}
           </>)}
         </>) : (
-          <div style={{ fontWeight: 600, fontSize: 13.5, color: "#191C20" }}>{text || title}</div>
+          <div style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary }}>{text || title}</div>
         )}
         {action && (
-          <button onClick={() => { action.onClick(); onClose(); }} style={{ marginTop: 9, border: "none", background: accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 13px", borderRadius: 7, fontFamily: "inherit" }}>{action.label}</button>
+          <button onClick={() => { action.onClick(); onClose(); }} style={{ marginTop: 9, border: "none", background: isErr ? FIRE.red : FIRE.green, color: FIRE.white, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 13px", borderRadius: 7, fontFamily: "inherit" }}>{action.label}</button>
         )}
       </div>
-      <button onClick={onClose} title="Dismiss" aria-label="Dismiss" style={{ border: "none", background: "transparent", color: "#6A7178", cursor: "pointer", padding: 0, flexShrink: 0, display: "inline-flex" }}>
+      <button onClick={onClose} title="Dismiss" aria-label="Dismiss" style={{ border: "none", background: "transparent", color: FIRE.textMuted, cursor: "pointer", padding: 0, flexShrink: 0, display: "inline-flex" }}>
         <X size={16} />
       </button>
     </div>
@@ -2692,7 +2692,7 @@ export default function App() {
           {visibleNav.map((n) => {
             const active = screen === n.key || (screen === "packet" && n.key === "library");
             return (
-              <button key={n.key} onClick={() => go(n.key)} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
+              <button key={n.key} onClick={() => go(n.key)} className={active ? "dr-nav-on" : undefined} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
                 <n.Icon size={18} /><span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
                 {n.premium && <span style={S.premiumTag}>AI</span>}
               </button>
@@ -20942,8 +20942,10 @@ function Fonts() {
       .duty-pulse { animation: dutyPulse 2s ease-out infinite; }
       @keyframes dutyPulse { 0% { box-shadow: 0 0 0 0 rgba(63,184,96,.55); } 70% { box-shadow: 0 0 0 7px rgba(63,184,96,0); } 100% { box-shadow: 0 0 0 0 rgba(63,184,96,0); } }
       @media (prefers-reduced-motion: reduce) { .duty-pulse { animation: none; } }
-      input:focus, select:focus, textarea:focus { outline: 2px solid #1F4E79; outline-offset: 1px; }
-      button:focus-visible { outline: 2px solid #1F4E79; outline-offset: 2px; }
+      input:focus, select:focus, textarea:focus { outline: 2px solid ${FIRE.red}; outline-offset: 1px; }
+      button:focus-visible { outline: 2px solid ${FIRE.red}; outline-offset: 2px; }
+      .dr-nav-on::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2.5px; border-radius: 0 2px 2px 0; background: ${FIRE.redBright}; }
+      .dr-nav-on svg { color: ${FIRE.redBright}; }
       .stat-cta { transition: filter .15s ease, transform .08s ease; }
       .stat-cta:hover { filter: brightness(1.08); }
       .stat-cta:active { transform: translateY(1px); }
@@ -20987,8 +20989,10 @@ function baseStyles() {
     brandSub: { fontSize: 10, color: "#8A929B", letterSpacing: ".9px", marginTop: 3, fontFamily: mono },
     nav: { display: "flex", flexDirection: "column", gap: 3, marginTop: 18, flex: 1, minHeight: 0, overflowY: "auto" },
     navItem: { display: "flex", alignItems: "center", gap: 11, padding: "11px 12px", borderRadius: 8, border: "none", background: "transparent", color: "#C3C8CE", fontSize: 14, fontFamily: body, cursor: "pointer", fontWeight: 500 },
-    navItemActive: { background: "#262B31", color: "#fff", boxShadow: "inset 3px 0 0 #B11E2A" },
-    premiumTag: { fontSize: 9, fontFamily: mono, background: "#54506B", color: "#fff", padding: "2px 6px", borderRadius: 3, letterSpacing: ".5px" },
+    // The mock's active item: a red wash fading right, a short red bar at the left (.dr-nav-on::before in Fonts()),
+    // and the icon in bright red.
+    navItemActive: { position: "relative", background: "linear-gradient(90deg, rgba(224,58,68,.16), rgba(224,58,68,0) 85%)", color: FIRE.textPrimary },
+    premiumTag: { fontSize: 9, fontFamily: mono, background: "rgba(224,58,68,.14)", border: "1px solid rgba(224,58,68,.35)", color: FIRE.kickerNoir, padding: "1px 6px", borderRadius: 4, letterSpacing: ".5px" },
     deptCard: { background: "#262B31", borderRadius: 10, padding: 14, marginTop: 12 },
     deptLabel: { fontSize: 9.5, fontFamily: mono, color: "#8A929B", letterSpacing: ".8px" },
     deptName: { fontFamily: display, fontWeight: 600, fontSize: 16, marginTop: 4 },
