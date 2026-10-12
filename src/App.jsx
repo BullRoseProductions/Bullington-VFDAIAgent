@@ -3388,6 +3388,7 @@ function Announcements({ role, members, meId, notify, style }) {
 // pure vertical space (DA's header already shows NEXT DEPT EVENT). The wrapper style comes in as a prop so
 // the margin/maxWidth only exist when the tile does: no leftover gap.
 function NextLeadershipEventTile({ S, sessions, role, notify, style }) {
+  const noir = React.useContext(NoirCtx);   // Noir dashboards: CardHead header
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const todayISO = toISODate(new Date());
   const viewer = { access: role };
@@ -3396,7 +3397,9 @@ function NextLeadershipEventTile({ S, sessions, role, notify, style }) {
   if (!next) return null;
   return (
     <Card style={{ display: "flex", flexDirection: "column", gap: 8, ...style }}>
-      <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> {kicker}</SectionLabel>
+      {noir
+        ? <CardHead icon={Calendar} title={kicker === "NEXT BOARD MEETING" ? "Next board meeting" : "Next leadership event"} style={{ marginBottom: 0 }} />
+        : <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><Calendar size={13} color={FIRE.red} /> {kicker}</SectionLabel>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{next.title}<EventAudienceTag audience={next.audience} /></div>
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{fmtSess(next)}</div>
@@ -3490,6 +3493,19 @@ const DAILY_QUOTES = [
   "Together prepared, together stronger.", "Discipline today, confidence on the call.",
   "The best response starts with the best preparation.", "We answer the call because we trained for it.",
 ];
+// The Noir hero's right side: the four pillars beside the daily quote, with an optional block (e.g. the next
+// event) beneath the quote. Shared by every dashboard's hero band.
+function HeroAside({ children }) {
+  return (
+    <div className="noir-hero-side" style={{ display: "flex", gap: 20, alignItems: "flex-start", flexShrink: 0, textAlign: "right" }}>
+      <div aria-hidden="true" style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10, letterSpacing: ".26em", lineHeight: 1.95, textTransform: "uppercase", color: FIRE.textPrimary, opacity: 0.42 }}>Prepare<br />Develop<br />Support<br />Serve</div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 }}>
+        <div style={{ maxWidth: 150, fontStyle: "italic", fontSize: 11.5, lineHeight: 1.5, color: FIRE.textPrimary, opacity: 0.55 }}>&ldquo;{dailyQuote()}&rdquo;</div>
+        {children}
+      </div>
+    </div>
+  );
+}
 const dailyQuote = (d = new Date()) => {
   const doy = Math.floor((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(d.getFullYear(), 0, 0)) / 86400000);
   return DAILY_QUOTES[doy % DAILY_QUOTES.length];
@@ -3588,17 +3604,13 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   );
   return (
     <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
-        <div className="noir-hero-side" style={{ display: "flex", gap: 20, alignItems: "flex-start", flexShrink: 0, textAlign: "right" }}>
-          <div aria-hidden="true" style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10, letterSpacing: ".26em", lineHeight: 1.95, textTransform: "uppercase", color: FIRE.textPrimary, opacity: 0.42 }}>Prepare<br />Develop<br />Support<br />Serve</div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 }}>
-          <div style={{ maxWidth: 150, fontStyle: "italic", fontSize: 11.5, lineHeight: 1.5, color: FIRE.textPrimary, opacity: 0.55 }}>&ldquo;{dailyQuote()}&rdquo;</div>
+        <HeroAside>
           <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
             {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
             <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
           </button>
-          </div>
-        </div>
+        </HeroAside>
       }>
       {/* DEPARTMENT HEALTH — overview layout: the two live charts, then stats 2×2 beside the Action Center,
           then the remaining panels. Same numbers and sources as the Board/Officer layouts. */}
@@ -3750,7 +3762,11 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
   if (bare && isEmpty) return null;   // bare (DA): no kicker, no empty-state — render nothing when there's nothing
   return (
     <>
-      {!bare && (
+      {!bare && compact && (
+        <CardHead as="button" onClick={() => setOpen((v) => !v)} icon={AlertTriangle} title="Needs your attention" count={attendanceGaps.length + overdueItems.length + apparatusFailures.length}
+          right={open ? <ChevronUp size={14} /> : <ChevronDown size={14} />} style={{ marginTop: 14, marginBottom: open ? 8 : 0, cursor: "pointer" }} />
+      )}
+      {!bare && !compact && (
         <SectionLabel as="button" onClick={() => setOpen((v) => !v)} style={{ marginTop: 18, marginBottom: open ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
           <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attendanceGaps.length + overdueItems.length + apparatusFailures.length})
           <span style={{ marginLeft: "auto", display: "inline-flex" }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
@@ -3880,26 +3896,28 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const cards = [
-    { key: "training",  title: "Training",         Icon: GraduationCap, accent: "#1F4E79", snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}` : null, nav: "training" },
-    { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: "#0E6B62", snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
-    { key: "pr",        title: "Public Relations", Icon: Calendar,      accent: "#54506B", snap: prNext ? `${fmtISO(prNext.date)} · ${prNext.caption}` : null, nav: "visibility" },
-    { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: "#9A6B12", snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
+    { key: "training",  title: "Training",         Icon: GraduationCap, accent: FIRE.catBlue, snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}` : null, nav: "training" },
+    { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: FIRE.catGreen, snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
+    { key: "pr",        title: "Public Relations", Icon: Calendar,      accent: FIRE.catViolet, snap: prNext ? `${fmtISO(prNext.date)} · ${prNext.caption}` : null, nav: "visibility" },
+    { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: FIRE.catAmber, snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
   ];
   return (
-    <PageShell lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"} title={dashboardGreeting(me)}>
-      <SectionLabel style={{ marginBottom: 8 }}>DEPARTMENT HEALTH</SectionLabel>
+    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"} title={dashboardGreeting(me)} actions={<HeroAside />}>
+      {/* Noir skin, as on the DA dashboard: CardHead headers + the gradient card face on everything inside. */}
+      <NoirSkin>
+      <CardHead icon={HeartPulse} title="Department health" />
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} />
-      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 12, marginBottom: 6, maxWidth: 360 }} />
-      <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
+      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 8, marginBottom: 4, maxWidth: 360 }} />
+      <ActionItemsCard meId={meId} go={go} style={{ marginTop: 8, marginBottom: 8 }} />
       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
           their own certs, hours and drills, and had no route to them from this dashboard before.
           Placed between "your items" and "the department you run", matching the DeptAdmin ordering. */}
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
-      <SectionLabel style={{ marginBottom: 8, marginTop: 18 }}>YOUR OPERATIONS</SectionLabel>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+      <CardHead icon={Briefcase} title="Your operations" style={{ marginTop: 14 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8 }}>
         {cards.map((c) => (
-          <Card key={c.key} style={{ borderTop: `3px solid ${c.accent}`, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><c.Icon size={16} color={c.accent} /><span style={{ fontWeight: 700, color: FIRE.textPrimary }}>{c.title}</span></div>
+          <Card key={c.key} padding="12px 14px" style={{ borderTop: `3px solid ${c.accent}`, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}><c.Icon size={16} color={c.accent} /><span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14.5, letterSpacing: ".02em", color: FIRE.textPrimary }}>{c.title}</span></div>
             <div style={{ flex: 1, minWidth: 0 }}>
               {c.snap ? <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.4 }}>{c.snap}</div> : <EmptyState icon={null} text="Nothing scheduled" />}
               {c.extra && <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.greenText, marginTop: 4 }}>{c.extra}</div>}
@@ -3908,13 +3926,16 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           </Card>
         ))}
       </div>
+      </NoirSkin>
       <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} />
         <div className="dash-cal" style={{ minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
+      <NoirSkin>
       <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -20776,7 +20797,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
     </ChartPanel>
   );
   const hoursPanel = moduleEnabled("stationhours", dept?.disabled_modules) ? (
-    <ChartPanel title="Station hours" note="credited · last 6 months" onOpen={to("stationhours")}>
+    <ChartPanel icon={Clock} title="Station hours" note="credited · last 6 months" onOpen={to("stationhours")}>
       <StationHoursBars months={hoursMonths} />
     </ChartPanel>
   ) : null;
@@ -20850,19 +20871,19 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
       {/* Desktop: a compact multi-column grid (2–3 across) so the section fits on about one screen.
           Phone: min(300px, 100%) collapses it to one column with no horizontal scroll. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
-        <ChartPanel title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
+        <ChartPanel icon={GraduationCap} title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
           <AttendanceTrend series={trend} />
         </ChartPanel>
         {/* DA dashboard (hoursBeforeCerts): Station hours takes the Certifications slot and Certifications
             takes Station hours' old place, last. Board and Officer keep the original order. */}
         {hoursBeforeCerts ? hoursPanel : certsPanel}
-        <ChartPanel title="Station duties" note="this period" onOpen={to("duties")}>
+        <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
           <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
             <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
           </div>
         </ChartPanel>
         {moduleEnabled("apparatus", dept?.disabled_modules) && (
-          <ChartPanel title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
+          <ChartPanel icon={Truck} title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
             <ApparatusReadinessBar />
           </ChartPanel>
         )}
