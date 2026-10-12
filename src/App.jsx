@@ -3426,6 +3426,22 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
     </PageShell>
   );
 }
+// The DA dashboard's hero line. Rotates DAILY: day-of-year (local) indexes the list, so it's the same all day and
+// changes each morning.
+const DAILY_QUOTES = [
+  "A stronger tomorrow starts with the work we do today.", "Readiness is a habit, not a moment.",
+  "The call is won long before it comes.", "Trained hands, steady hearts.", "We prepare so others can be safe.",
+  "Small drills build big courage.", "Show up. Train hard. Stand ready.", "Every shift makes the whole stronger.",
+  "Preparation is the quietest form of courage.", "Strong people build ready departments.",
+  "The work we do today protects tomorrow.", "Ready before the bell, every time.",
+  "Service is the standard, not the exception.", "Minutes of training save lives in seconds.",
+  "Together prepared, together stronger.", "Discipline today, confidence on the call.",
+  "The best response starts with the best preparation.", "We answer the call because we trained for it.",
+];
+const dailyQuote = (d = new Date()) => {
+  const doy = Math.floor((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(d.getFullYear(), 0, 0)) / 86400000);
+  return DAILY_QUOTES[doy % DAILY_QUOTES.length];
+};
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   // Health numbers (attendance, board attendance, certs, duties, headcount) are derived inside DeptHealthCharts.
@@ -3464,31 +3480,22 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const showDutiesCard = openDuties.length > 0, showCertsCard = (expg + expd) > 0, showPendingCard = pendingCerts.length > 0;
   const attnKnown = dutiesLoaded && pendLoaded && itemsLoaded && !loadErr;
   const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
-  return (
-    <PageShell lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
-        <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
-          {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
-          <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
-        </button>
-      }>
-      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginBottom: 12, maxWidth: 360 }} />
-      {/* DEPARTMENT HEALTH — counts as hero tiles, rates as charts (shared with BoardDashboard). */}
-      <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} hoursBeforeCerts
-        extraHero={<StatTile value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
-      {/* NEEDS YOUR ATTENTION — a zero count is not something that needs attention, so zero cards are hidden.
-          Nothing at all → one thin "All clear" line, but ONLY once duties, approvals and action items have all
-          loaded; until then (or if a read failed) say nothing rather than claim it's clear. */}
-      {attnN === 0 ? (attnKnown && (
-        <EmptyState text=" All clear — nothing needs your attention." style={{ marginTop: 12 }} />
-      )) : (<>
-      <SectionLabel as="button" onClick={() => setAttnOpen((v) => !v)} style={{ marginTop: 12, marginBottom: attnOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
-        <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />NEEDS YOUR ATTENTION ({attnN})
-        <span style={{ marginLeft: "auto", display: "inline-flex" }}>{attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+  // ACTION CENTER — the old NEEDS YOUR ATTENTION section in a card beside the stats. A zero count is not something
+  // that needs attention, so zero cards stay hidden; "All clear" only once duties, approvals and action items have
+  // all LANDED — until then (or if a read failed) a dash, never a claim that it's clear.
+  const actionCenter = (
+    <Card className="dash-ov-ac" style={{ minWidth: 0 }}>
+      <div className="dash-ov-ac-body">
+      <SectionLabel as="button" onClick={() => setAttnOpen((v) => !v)} disabled={attnN === 0} style={{ marginBottom: attnOpen || attnN === 0 ? 10 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: attnN === 0 ? "default" : "pointer", textAlign: "left" }}>
+        <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} />ACTION CENTER{attnN > 0 ? ` (${attnN})` : ""}
+        {attnN > 0 && <span style={{ marginLeft: "auto", display: "inline-flex" }}>{attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>}
       </SectionLabel>
-      {attnOpen && (<>
+      {attnN === 0 ? (attnKnown
+        ? <EmptyState text=" All clear — nothing needs your attention." />
+        : <EmptyState icon={null} text="—" />
+      ) : attnOpen && (<>
       {(showDutiesCard || showCertsCard || showPendingCard) && (
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: 12 }}>
         {showDutiesCard && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
@@ -3525,7 +3532,25 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       {hasInsights && <SectionLabel style={{ marginTop: 14, marginBottom: 8, opacity: 0.7 }}>PEOPLE TO REACH OUT TO</SectionLabel>}
       <InsightCards insights={insights} go={go} bare role={role} notify={notify} onResolved={reloadFailures} />
       </>)}
-      </>)}
+      </div>
+    </Card>
+  );
+  return (
+    <PageShell lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, marginLeft: "auto", maxWidth: 300 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 500, fontSize: 14.5, lineHeight: 1.3, color: FIRE.textSecondary, textAlign: "right", borderRight: `2px solid ${FIRE.red}`, paddingRight: 10 }}>{dailyQuote()}</div>
+          <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
+            {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
+            <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
+          </button>
+        </div>
+      }>
+      {/* DEPARTMENT HEALTH — overview layout: the two live charts, then stats 2×2 beside the Action Center,
+          then the remaining panels. Same numbers and sources as the Board/Officer layouts. */}
+      <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} overview actionCenter={actionCenter}
+        extraHero={<StatTile value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
+      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 12, maxWidth: 360 }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
@@ -20149,6 +20174,8 @@ function AttendanceTrend({ series }) {
   if (cur.length) segs.push(cur);
   const lastIdx = series.map((m) => m.pct != null).lastIndexOf(true);
   if (lastIdx < 0) return <div ref={wrapRef} style={{ fontSize: 13, color: FIRE.textMuted, padding: "20px 0" }}>No drills with attendance taken {series.length ? `in these ${series.length} month${series.length === 1 ? "" : "s"}` : "in this period"}.</div>;
+  // Crowded (12 months on a phone): label every other month, always keeping the current one.
+  const labelStep = series.length > 1 && (x1 - x0) / (series.length - 1) < 32 ? 2 : 1;
   const aria = `Training attendance by month: ${series.map((m) => `${m.label} ${m.pct == null ? "no drills" : `${m.pct}%`}`).join(", ")}.`;
   const tipText = (m) => `${m.label}${m.partial ? " (so far)" : ""} · ${m.pct == null ? "no drills" : `${m.pct}% · ${m.drills} drill${m.drills === 1 ? "" : "s"}`}`;
   return (
@@ -20171,7 +20198,7 @@ function AttendanceTrend({ series }) {
         <circle cx={xAt(lastIdx)} cy={yAt(series[lastIdx].pct)} r={5} fill={FIRE.red} stroke={FIRE.card} strokeWidth={2} />
         <text x={xAt(lastIdx) - 8} y={yAt(series[lastIdx].pct) - 10} textAnchor="end" fontFamily={CHART_FONT} fontWeight={700} fontSize={14} fill={FIRE.textPrimary}>{series[lastIdx].pct}%</text>
       </g>
-      {series.map((m, i) => <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize={10} fill={hover === i ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>)}
+      {series.map((m, i) => (i === series.length - 1 || (series.length - 1 - i) % labelStep === 0) && <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize={10} fontWeight={i === series.length - 1 ? 700 : 400} fill={hover === i || i === series.length - 1 ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>)}
       {series.map((m, i) => {   // full-height hit columns: easy to hover, and tappable on a phone
         const half = series.length < 2 ? (x1 - x0) / 2 : (x1 - x0) / (series.length - 1) / 2;
         return <rect key={i} x={xAt(i) - half} y={0} width={half * 2} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />;
@@ -20320,6 +20347,9 @@ function MonthlyBars({ months, vals, tip, aria }) {
   const slot = (x1 - x0) / months.length, bw = Math.min(34, slot * 0.6);
   const cx = (i) => x0 + slot * i + slot / 2;
   const hAt = (v) => (v / niceMax) * (base - top);
+  // Crowded (12 months on a phone): value labels only where they fit, month labels every other month —
+  // the current (last) month always keeps both. Hover/tap still gives every month's exact figure.
+  const last = months.length - 1, roomy = slot >= 30, labelStep = slot < 32 ? 2 : 1;
   return (
     <div ref={wrapRef}>
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={CHART_SVG(H)} onMouseLeave={() => setHover(null)}>
@@ -20335,8 +20365,8 @@ function MonthlyBars({ months, vals, tip, aria }) {
         return (
           <g key={m.from}>
             {v != null && v > 0 && <rect x={cx(i) - bw / 2} y={grown ? base - bh : base} width={bw} height={grown ? bh : 0} rx={3} fill={FIRE.red} fillOpacity={i === months.length - 1 || hover === i ? 1 : 0.7} style={{ transition }} />}
-            <text x={cx(i)} y={(v == null ? base : base - bh) - 5} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={600} fontSize={10} fill={v == null ? FIRE.textMuted : FIRE.textSecondary} style={FS.num}>{v == null ? "—" : h1(v)}</text>
-            <text x={cx(i)} y={H - 8} textAnchor="middle" fontSize={9.5} fill={hover === i ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>
+            {(roomy || i === last) && <text x={cx(i)} y={(v == null ? base : base - bh) - 5} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={i === last ? 700 : 600} fontSize={10} fill={v == null ? FIRE.textMuted : i === last ? FIRE.textPrimary : FIRE.textSecondary} style={FS.num}>{v == null ? "—" : h1(v)}</text>}
+            {(i === last || (last - i) % labelStep === 0) && <text x={cx(i)} y={H - 8} textAnchor="middle" fontSize={9.5} fontWeight={i === last ? 700 : 400} fill={hover === i || i === last ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>}
             <rect x={cx(i) - slot / 2} y={0} width={slot} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
           </g>
         );
@@ -20586,13 +20616,18 @@ function RosterBreakdown({ members }) {
 // two can never drift: every number is derived HERE, once, from the same honest helpers. The parent passes
 // the duties it already loads (it needs them for its own panels). `go` omitted = read-only: no tile or
 // panel links (the Board strip never had any). extraHero = dashboard-specific trailing tiles.
-function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero, hoursBeforeCerts }) {
+function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero, hoursBeforeCerts, overview, actionCenter }) {
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
   const { avg: boardPct, rows: boardRows, doneBoard } = boardAttendance(members, sessions, yr);   // board-event accountability track
   const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / no board members → "—", not 0%
   const trend = useMemo(() => attendanceSeries(members, sessions, lastMonths(8)), [members, sessions]);
   const hoursMonths = useMemo(() => lastMonths(6), []);
+  // DA overview: ONE 6 Mo / 12 Mo window shared by both live charts. Same sources as below — the hours bars
+  // read dept_iso_hours_by_month (useStationHoursByMonth), attendance is attendanceSeries over the roster.
+  const [ovSpan, setOvSpan] = useState(6);
+  const ovMonths = useMemo(() => lastMonths(ovSpan), [ovSpan]);
+  const ovTrend = useMemo(() => (overview ? attendanceSeries(members, sessions, ovMonths) : null), [overview, members, sessions, ovMonths]);
   const cm = (members || []).filter(countsInStats);   // counted members (owner/test excluded)
   const total = cm.length;
   // Headcount breakdown for the Members tile. The tile shows the FULL roster; the cert/attendance charts carry
@@ -20622,6 +20657,57 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
   const boardTile = <StatTile key="board" value={boardRated ? `${boardPct}%` : "\u2014"} tone={boardRated ? pctToneName(boardPct) : "muted"} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
   const membersTile = <StatTile key="members" value={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
   const drillsTile = <StatTile key="drills" value={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
+  if (overview) {
+    const hoursOn = moduleEnabled("stationhours", dept?.disabled_modules);
+    const seg = (n) => (
+      <button key={n} onClick={() => setOvSpan(n)} aria-pressed={ovSpan === n}
+        style={{ border: "none", borderRadius: 7, padding: "4px 10px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
+                 background: ovSpan === n ? FIRE.red : "transparent", color: ovSpan === n ? FIRE.white : FIRE.navLabel }}>{n} Mo</button>
+    );
+    return (
+      <>
+        {/* OVERVIEW — the two live charts, full width, side by side (stacked on a phone), one shared window. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+          <SectionLabel>OVERVIEW</SectionLabel>
+          <div role="group" aria-label="Chart window" style={{ display: "inline-flex", gap: 2, padding: 2, borderRadius: 9, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>
+            {[6, 12].map(seg)}
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12 }}>
+          {hoursOn && (
+            <ChartPanel title="Station hours" note={`credited · de-overlapped · ${ovSpan} mo`} onOpen={to("stationhours")}>
+              <StationHoursBars months={ovMonths} />
+            </ChartPanel>
+          )}
+          <ChartPanel title="Training attendance" note={drillsHeld ? `${ovSpan} mo · ${avgPart}% this year` : `${ovSpan} mo`} onOpen={to("roster", "attendance")}>
+            <AttendanceTrend series={ovTrend} />
+          </ChartPanel>
+        </div>
+        {/* Stats as a 2×2 block beside the Action Center; on a wide screen the Action Center takes the stats'
+            height and scrolls inside it (dash-ov-* in Fonts()), on a phone the two simply stack. */}
+        <div className="dash-ov-row" style={{ display: "grid", gap: 12, marginTop: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, alignContent: "start" }}>
+            {boardFirst ? [boardTile, membersTile, drillsTile] : [membersTile, boardTile, drillsTile]}
+            {extraHero}
+          </div>
+          {actionCenter}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
+          {certsPanel}
+          <ChartPanel title="Station duties" note="this period" onOpen={to("duties")}>
+            <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
+              <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
+            </div>
+          </ChartPanel>
+          {moduleEnabled("apparatus", dept?.disabled_modules) && (
+            <ChartPanel title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
+              <ApparatusReadinessBar />
+            </ChartPanel>
+          )}
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
@@ -20736,6 +20822,14 @@ function Fonts() {
            Desktop (>900px) keeps the inline 1fr 1.7fr grid untouched. */
         .dash-cal-2col { grid-template-columns: 1fr !important; }
         .dash-cal-2col > .dash-cal { order: -1; }
+      }
+      /* DA overview: stats 2x2 | Action Center. Wide → two columns, the Action Center matches the stats'
+         height and scrolls inside; narrower → stacked, the Action Center at its natural height. */
+      .dash-ov-row { grid-template-columns: 1fr; }
+      @media (min-width: 1100px) {
+        .dash-ov-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+        .dash-ov-ac { position: relative; min-height: 220px; }
+        .dash-ov-ac > .dash-ov-ac-body { position: absolute; inset: 0; overflow-y: auto; padding: inherit; }
       }
     `}</style>
   );
