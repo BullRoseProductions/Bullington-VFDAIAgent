@@ -15299,6 +15299,7 @@ function StationHours({ S, dept, notify }) {
   const fmtHm2 = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
   return (
     <PageShell kicker="STATION HOURS" title="Your time at the station" sub="Clock in when you get to the station, out when you leave. If your phone shares its location we check it against the station and mark the shift verified — the location itself is never stored.">
+      <NoirSkin>
       {!tried ? null : (
         <>
           {err && (
@@ -15312,10 +15313,10 @@ function StationHours({ S, dept, notify }) {
             </Card>
           )}
           {ready && (open ? (
-            <Card padding="20px 18px">
+            <Card padding="14px 16px">
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <span style={{ width: 9, height: 9, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
-                <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>On the clock</div>
+                <div style={{ fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, letterSpacing: ".02em", color: FIRE.textPrimary }}>On the clock</div>
                 {open.verified
                   ? <span style={{ ...BADGE, color: FIRE.greenText, border: `1px solid ${FIRE.greenText}55` }}>Verified ✓</span>
                   : <span style={{ ...BADGE, color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55` }}>Not verified</span>}
@@ -15344,10 +15345,10 @@ function StationHours({ S, dept, notify }) {
               <button disabled={busy === "out"} onClick={clockOut} style={{ ...FS.btnPrimary, marginTop: 12, opacity: busy === "out" ? 0.7 : 1 }}>{busy === "out" ? <><Loader2 size={16} className="spin" /> Clocking out…</> : <><Clock size={16} /> Clock out</>}</button>
             </Card>
           ) : (
-            <Card padding="20px 18px">
+            <Card padding="14px 16px">
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ width: 9, height: 9, borderRadius: 999, background: FIRE.textMuted2, flexShrink: 0 }} />
-                <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>Not on the clock</div>
+                <div style={{ fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, letterSpacing: ".02em", color: FIRE.textPrimary }}>Not on the clock</div>
               </div>
               <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 6 }}>Clock in when you arrive at the station.</div>
               {/* Ad-hoc off-site check-in was removed in C2. Off-site is now decided at PLANNING on a
@@ -15359,12 +15360,12 @@ function StationHours({ S, dept, notify }) {
           {geoNote && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 12, lineHeight: 1.45 }}>{geoNote}</div>}
           {ready && !stationSet && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.45 }}>Your department hasn't set a station location yet, so shifts can't be marked verified. An admin can add it under Settings &amp; Support.</div>}
           {/* ---- my hours ---- chips stay put while a range reloads; only the figures below are gated on the read */}
-          <Card padding={18} style={{ marginTop: 14 }}>
-            <SectionLabel>MY HOURS</SectionLabel>
+          <Card padding="14px 16px" style={{ marginTop: 10 }}>
+            <CardHead icon={BarChart3} title="My hours" style={{ marginBottom: 0 }} />
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "10px 0 12px" }}>
               {Object.entries(RANGES).map(([k, fn]) => {
                 const on = rangeKey === k;
-                return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
+                return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(on ? { background: "rgba(224,58,68,.16)", borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
               })}
             </div>
             {hoursFailed ? (
@@ -15430,6 +15431,7 @@ function StationHours({ S, dept, notify }) {
           </Card>
         </>
       )}
+      </NoirSkin>
     </PageShell>
   );
 }
