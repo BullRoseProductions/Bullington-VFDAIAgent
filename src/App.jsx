@@ -17030,16 +17030,16 @@ function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padSta
 function dueInfo(item) {
   if (item.cadence === "One-off") return { label: item.lastISO ? "Done" : "Not logged", color: item.lastISO ? "#2E7D52" : "#B11E2A", rel: item.lastISO ? "one-off" : "never logged", nextLabel: "—", urgent: !item.lastISO };
   const days = CADENCE_DAYS[item.cadence] || 30;
-  if (!item.lastISO) return { label: "Not logged", color: "#B11E2A", rel: "never logged", nextLabel: "—", urgent: true };
+  if (!item.lastISO) return { label: "Not logged", color: FIRE.redText, rel: "never logged", nextLabel: "—", urgent: true };
   const last = new Date(item.lastISO + "T00:00:00");
   const next = new Date(last.getTime() + days * 86400000);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const diff = Math.round((next - today) / 86400000);
   const nextLabel = next.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  if (diff < 0) return { label: "Overdue", color: "#B11E2A", rel: `${-diff} day${-diff === 1 ? "" : "s"} overdue`, nextLabel, next, urgent: true };
+  if (diff < 0) return { label: "Overdue", color: FIRE.redText, rel: `${-diff} day${-diff === 1 ? "" : "s"} overdue`, nextLabel, next, urgent: true };
   const window = Math.min(Math.round(days * 0.25), 30);
-  if (diff <= window) return { label: "Due soon", color: "#9A6B12", rel: `in ${diff} day${diff === 1 ? "" : "s"}`, nextLabel, next };
-  return { label: "On track", color: "#2E7D52", rel: `due ${nextLabel}`, nextLabel, next };
+  if (diff <= window) return { label: "Due soon", color: FIRE.amberText, rel: `in ${diff} day${diff === 1 ? "" : "s"}`, nextLabel, next };
+  return { label: "On track", color: FIRE.green, rel: `due ${nextLabel}`, nextLabel, next };
 }
 const TRAIN_PLAN_SEED = [
   { id: 1, name: "SCBA refresher", cadence: "Quarterly", lastISO: "2026-04-10" },
@@ -19077,8 +19077,8 @@ function StationDuties({ S, role, members, meId, notify }) {
       if (!items.length) return null;
       const dn = items.filter((d) => d.done).length;
       return (
-        <div key={cat} style={{ marginBottom: 16 }}>
-          <SectionLabel style={{ display: "flex", alignItems: "center", marginBottom: 8 }}><ClipboardCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{cat.toUpperCase()}<span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary }}>{dn}/{items.length}</span></SectionLabel>
+        <div key={cat} style={{ marginBottom: 12 }}>
+          <CardHead icon={ClipboardCheck} title={cat} right={<span style={{ fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{dn}/{items.length}</span>} />
           {items.map((a) => {
             const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
             return (
@@ -19162,6 +19162,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   };
   return (
     <PageShell above={loadErr && <OfflineNotice onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />} kicker="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own.">
+      <NoirSkin>
 
       {canManage && (
         <div style={{ display: "inline-flex", gap: 6, marginBottom: 14 }}>
@@ -19173,7 +19174,7 @@ function StationDuties({ S, role, members, meId, notify }) {
       )}
 
       {view === "checklist" && (<>
-      <Card padding={16} style={{ marginBottom: 14 }}>
+      <Card padding="14px 16px" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 4, ...FS.num }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: FIRE.textPrimary }}>{doneCount}</b> of {duties.length} done</span></div>
@@ -19224,7 +19225,7 @@ function StationDuties({ S, role, members, meId, notify }) {
         ))
       ) : renderDutyCategories(periodDuties)}
 
-      <SectionLabel style={{ marginTop: 22, marginBottom: 8 }}><CheckCircle2 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />OTHER WORK LOGGED</SectionLabel>
+      <CardHead icon={CheckCircle2} title="Other work logged" style={{ marginTop: 14 }} />
       <p style={{ ...S.helpP, color: FIRE.textMuted }}>{allMode ? "Work logged across every house. Go to a station to add an entry." : "Did something that isn't on the checklist? Log it here so it's on the record — anyone can add."}</p>
       {/* The log form stamps the STORED station, so in all-houses mode it would file the entry
           under whichever house happened to be active — hide it and label the rows instead. */}
@@ -19273,7 +19274,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             </Card>
             <div>
               {currentWeek.duties.length > 0 && (<>
-                <SectionLabel style={{ marginBottom: 6 }}>CHECKLIST COMPLETED</SectionLabel>
+                <CardHead icon={CheckCircle2} title="Checklist completed" />
                 {currentWeek.duties.map((e) => {
                   const names = [e.doneBy, ...(e.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
                   return (
@@ -19289,7 +19290,7 @@ function StationDuties({ S, role, members, meId, notify }) {
               </>)}
               {currentWeek.other.length > 0 && (<>
                 {/* done_by_member_id when set (authoritative, survives renames), else the snapshotted name */}
-                <SectionLabel style={{ marginTop: currentWeek.duties.length ? 16 : 0, marginBottom: 6 }}>OTHER WORK LOGGED</SectionLabel>
+                <CardHead icon={ClipboardList} title="Other work logged" style={{ marginTop: currentWeek.duties.length ? 14 : 0 }} />
                 {currentWeek.other.map((e) => (
                   <div key={e.id} style={FS.row}>
                     <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0 }} />
@@ -19304,6 +19305,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           </>
         )
       )}
+      </NoirSkin>
     </PageShell>
   );
 }
