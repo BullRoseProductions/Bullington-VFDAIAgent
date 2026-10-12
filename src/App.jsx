@@ -567,7 +567,7 @@ function YourSix({ S, role, meId, members, notify }) {
   const formCard = (onSave, saveLabel) => {
     const isBiz = formKind === "business";
     return (
-    <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+    <Card padding={12} style={{ background: FIRE.btnBg, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} placeholder={isBiz ? "e.g. Miller's Hardware" : "e.g. Chaplain Dave, or Peer support"} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
         {!isBiz && <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><input style={FS.input} list="ys-cats" value={form.category} placeholder="e.g. Department wellness" onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} /><datalist id="ys-cats">{allCategories.map((c) => <option key={c} value={c} />)}</datalist></label>}
@@ -588,7 +588,7 @@ function YourSix({ S, role, meId, members, notify }) {
         <button style={{ ...FS.btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={onSave}>{busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> {saveLabel}</>}</button>
         <button style={FS.btn} onClick={cancelForm} disabled={busy}>Cancel</button>
       </div>
-    </div>
+    </Card>
   ); };
   // ONE card language for every resource (crisis / health / business). Crisis gets a small CALM accent
   // (thin left border + LifeBuoy) so it's findable without shouting; national vs local vs sponsor and the
@@ -640,19 +640,13 @@ function YourSix({ S, role, meId, members, notify }) {
     return cats.map((cat) => ({ cat, items: byCat.get(cat).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name)) }));
   }, [resources]);
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={FS.kicker}>YOUR SIX</div>
-          <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Support &amp; resources</h1>
-          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Help is here when you need it — for you, or someone on your crew. Every line below is real and answered.</div>
-        </div>
-        {canManage && resources && (
+    <PageShell kicker="YOUR SIX" title={<>Support &amp; resources</>}
+      sub="Help is here when you need it — for you, or someone on your crew. Every line below is real and answered."
+      actions={canManage && resources && (
           <button onClick={toggleEditMode} style={{ ...FS.btn, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
             {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit resources</>}
           </button>
-        )}
-      </div>
+        )}>
       {resources === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
       ) : (<>
@@ -675,16 +669,16 @@ function YourSix({ S, role, meId, members, notify }) {
               </div>
               <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, marginBottom: 14 }}>You don't have to carry it alone. Start with a person — a 24/7 line is always here too.</div>
               {reachPerson && (<>
-                <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", marginBottom: 6 }}>Your person</div>
-                <div style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.greenText}` }}>
+                <SectionLabel style={{ textTransform: "none", letterSpacing: "normal", marginBottom: 6 }}>Your person</SectionLabel>
+                <Card padding={0} style={{ ...YS_CARD, borderLeft: `3px solid ${FIRE.greenText}` }}>
                   <div style={YS_CARD_NAME}>{reachPerson.name}</div>
                   <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
                     <a href={`tel:${telDigits(reachPerson.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call {reachPerson.name.split(" ")[0]}</a>
                   </div>
-                </div>
+                </Card>
               </>)}
               {wellnessContacts.length > 0 && (<>
-                <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", margin: reachPerson ? "12px 0 6px" : "0 0 6px" }}>Department wellness contacts</div>
+                <SectionLabel style={{ textTransform: "none", letterSpacing: "normal", margin: reachPerson ? "12px 0 6px" : "0 0 6px" }}>Department wellness contacts</SectionLabel>
                 {wellnessContacts.map((r) => (
                   <div key={r.id} style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.greenText}` }}>
                     <div style={YS_CARD_NAME}>{r.name}</div>
@@ -697,7 +691,7 @@ function YourSix({ S, role, meId, members, notify }) {
                 ))}
               </>)}
               {/* Crisis lines — always seeded, so the flow is NEVER empty. Calm, below the people. */}
-              <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", margin: (reachPerson || wellnessContacts.length) ? "12px 0 6px" : "0 0 6px", display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Crisis lines · 24/7</div>
+              <SectionLabel style={{ textTransform: "none", letterSpacing: "normal", margin: (reachPerson || wellnessContacts.length) ? "12px 0 6px" : "0 0 6px", display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Crisis lines · 24/7</SectionLabel>
               {crisisItems.map((r) => (
                 <div key={r.id} style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.redText}` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}><LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0 }} /><span style={YS_CARD_NAME}>{r.name}</span></div>
@@ -711,34 +705,34 @@ function YourSix({ S, role, meId, members, notify }) {
         {/* Crisis lines: same unified card as everywhere, calm accent, at top so they're findable. */}
         {crisisItems.length > 0 && (
           <div style={{ marginBottom: 18 }}>
-            <div style={{ ...FS.kicker, textTransform: "none", letterSpacing: "normal", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Support lines · always here</div>
+            <SectionLabel style={{ textTransform: "none", letterSpacing: "normal", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Support lines · always here</SectionLabel>
             <div style={YS_GRID}>{crisisItems.map(renderCard)}</div>
           </div>
         )}
         {/* Gentle nudge: set the department's wellness contacts so members can reach a real person. */}
         {canManage && !hasWellness && (
-          <div style={{ ...FS.card, padding: "14px 16px", marginBottom: 16, borderLeft: `3px solid ${FIRE.amberText}` }}>
+          <Card padding="14px 16px" style={{ marginBottom: 16, borderLeft: `3px solid ${FIRE.amberText}` }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 4 }}>Add your department's wellness contacts</div>
             <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, marginBottom: 10 }}>These are your crew's real people — a chaplain, a peer supporter, an officer — who members can reach when they're struggling. They appear first in the “Reach out” flow, so a member always reaches a person before a hotline.</div>
             <button style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddWellness}><Plus size={14} color={FIRE.btnIcon} /> Add a wellness contact</button>
-          </div>
+          </Card>
         )}
         {/* Edit mode: panel-level Add (resources). */}
         {canManage && editMode && (adding && formKind === "resource" ? formCard(addResource, "Add resource") : (
           <button style={{ ...FS.btn, marginBottom: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => { setEditingId(null); setFormKind("resource"); setForm(YS_BLANK_FORM); setAdding(true); }}><Plus size={15} color={FIRE.btnIcon} /> Add resource</button>
         ))}
         {groups.length === 0 && crisisItems.length === 0 ? (
-          <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</div>
+          <Card padding={24} style={{ color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</Card>
         ) : groups.map(({ cat, items }) => (
           <div key={cat} style={{ marginBottom: 18 }}>
-            <div style={{ ...FS.kicker, marginBottom: 8 }}>{cat.toUpperCase()}</div>
+            <SectionLabel style={{ marginBottom: 8 }}>{cat.toUpperCase()}</SectionLabel>
             <div style={YS_GRID}>{items.map(renderCard)}</div>
           </div>
         ))}
         {/* Businesses who support us — bottom section. Sponsors (national) pinned top per ordering (B). */}
         {(businessItems.length > 0 || (canManage && editMode)) && (
           <div style={{ marginTop: 4, marginBottom: 18 }}>
-            <div style={{ ...FS.kicker, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Briefcase size={12} color={FIRE.btnIcon} /> BUSINESSES WHO SUPPORT US</div>
+            <SectionLabel style={{ marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Briefcase size={12} color={FIRE.btnIcon} /> BUSINESSES WHO SUPPORT US</SectionLabel>
             {canManage && editMode && (adding && formKind === "business" ? formCard(addResource, "Add business") : (
               <button style={{ ...FS.btn, marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddBusiness}><Plus size={14} color={FIRE.btnIcon} /> Add business</button>
             ))}
@@ -747,7 +741,7 @@ function YourSix({ S, role, meId, members, notify }) {
           </div>
         )}
       </>)}
-    </div>
+    </PageShell>
   );
 }
 // Member's optional "reach out" person — private, self-only. Reads the current value via a
@@ -1338,11 +1332,10 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   const isDA = isDeptAdmin(role);
   const back = () => setView(null);
   const backBtn = <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Settings &amp; Support</button>;
-  const shell = (node) => <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>{node}</div>;
-  const doc = (title, body) => shell(<>{backBtn}<h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "0 0 12px", letterSpacing: "-0.01em" }}>{title}</h1><div style={{ ...FS.card, padding: 18, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>{body}</div></>);
+  const doc = (title, body) => <PageShell above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title={title}><Card padding={18} style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>{body}</Card></PageShell>;
   // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
-  if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><div style={{ ...FS.card, padding: 18, marginTop: 12 }}><div style={FS.kicker}>CONTACT SUPPORT</div><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></div></div>;
+  if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><Card padding={18} style={{ marginTop: 12 }}><SectionLabel>CONTACT SUPPORT</SectionLabel><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></Card></div>;
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
   if (view === "about") return doc("About", <>Before the Call<br />© 2026 Big Bull Technologies, LLC. All rights reserved.</>);
@@ -1352,7 +1345,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
      would walk somebody straight past it. */
   if (view === "aftercall" && canManage(role)) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<AfterCallSettings S={S} role={role} dept={dept} setDept={setDept} notify={notify} /></div>;
   const card = (key, Icon, title, desc) => (
-    <div style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
+    <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView(key)}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
         <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
         <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
@@ -1361,14 +1354,9 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
       <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
         <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
       </div>
-    </div>
+    </Card>
   );
-  return shell(<>
-    <div style={{ marginBottom: 16 }}>
-      <div style={FS.kicker}>SETTINGS &amp; SUPPORT</div>
-      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Settings &amp; Support</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Your department settings, brand, and help — all in one place.</div>
-    </div>
+  return (<PageShell kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Settings &amp; Support</>} sub="Your department settings, brand, and help — all in one place.">
     <div style={S.opGrid}>
       {card("person", HeartHandshake, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
       {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
@@ -1395,8 +1383,8 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
     {/* Legal & Trust — external links to the public documentation center. No role gate: every member sees these. */}
     <div style={{ marginTop: 18 }}>
       <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
-      <div style={FS.kicker}>LEGAL &amp; TRUST</div>
-      <div style={{ ...FS.card, padding: "4px 14px", marginTop: 8 }}>
+      <SectionLabel>LEGAL &amp; TRUST</SectionLabel>
+      <Card padding="4px 14px" style={{ marginTop: 8 }}>
         {[
           { label: "Terms of Service", href: "https://b4thecall.com/legal/terms", Icon: FileText },
           { label: "Privacy Policy", href: "https://b4thecall.com/legal/privacy", Icon: ShieldAlert },
@@ -1411,14 +1399,14 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
             <ExternalLink size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
           </a>
         ))}
-      </div>
+      </Card>
     </div>
     {/* Build id — matches the deployed commit's short hash + /version.json. Lets anyone confirm a
         phone actually picked up a new deploy (vs. running a stale cached bundle). Tap to force a fresh reload. */}
     <div onClick={() => location.reload()} title="Tap to reload the latest version" style={{ marginTop: 18, textAlign: "center", fontSize: 11, color: FIRE.textMuted2, letterSpacing: ".03em", cursor: "pointer", ...FS.num }}>
       Build {typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev"}
     </div>
-  </>);
+  </PageShell>);
 }
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
@@ -8138,11 +8126,11 @@ function Funding({ S, role, notify, dept, meId, members }) {
      half-loaded block says exactly which half it knows. */
   const raisedTotal = (donationsYtd == null || fundraisersYtd == null) ? null : donationsYtd + fundraisersYtd;
   const stat = (label, value, caption, color) => (
-    <div style={{ ...FS.card, padding: 14, flex: "1 1 210px", minWidth: 180 }}>
-      <div style={{ ...FS.kicker, marginBottom: 6 }}>{label}</div>
+    <Card padding={14} style={{ flex: "1 1 210px", minWidth: 180 }}>
+      <SectionLabel style={{ marginBottom: 6 }}>{label}</SectionLabel>
       <div style={{ fontSize: 22, fontWeight: 800, color, ...FS.num, lineHeight: 1.1 }}>{value}</div>
       <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.45 }}>{caption}</div>
-    </div>
+    </Card>
   );
 
   if (view === "fundraisers") {
@@ -8152,9 +8140,8 @@ function Funding({ S, role, notify, dept, meId, members }) {
     return <Donations S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} back={() => setView(null)} />;
   }
 
-  const shell = (node) => <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>{node}</div>;
   const card = (key, Icon, title, desc) => (
-    <div key={key} style={{ ...S.opCard, ...FS.card, cursor: "pointer" }} onClick={() => setView(key)}>
+    <Card key={key} padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView(key)}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
         <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
         <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
@@ -8163,28 +8150,23 @@ function Funding({ S, role, notify, dept, meId, members }) {
       <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
         <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
       </div>
-    </div>
+    </Card>
   );
 
-  return shell(<>
-    <div style={{ marginBottom: 16 }}>
-      <div style={FS.kicker}>FUNDING</div>
-      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Money in, and where it came from</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Plan and run fundraisers, and keep track of the people and businesses who give.</div>
-    </div>
+  return (<PageShell kicker="FUNDING" title="Money in, and where it came from" sub="Plan and run fundraisers, and keep track of the people and businesses who give.">
     {/* Headline, then the two dated figures it is made of — see the note above for what it does
         and does not include. Whole block gated: a PA gets no money figures rather than a false $0. */}
     {canSeeDonations && (
       <div style={{ marginBottom: 18 }}>
-        <div style={{ ...FS.card, padding: "16px 18px", marginBottom: 10 }}>
-          <div style={{ ...FS.kicker, marginBottom: 6 }}>RAISED THIS YEAR</div>
+        <Card padding="16px 18px" style={{ marginBottom: 10 }}>
+          <SectionLabel style={{ marginBottom: 6 }}>RAISED THIS YEAR</SectionLabel>
           <div style={{ fontSize: 34, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.05 }}>{money(raisedTotal)}</div>
           <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
             {raisedTotal == null
               ? `Waiting on ${donationsYtd == null ? "donations" : "fundraiser proceeds"} — the total is held back rather than shown short.`
               : `Donations and fundraiser proceeds dated in ${year}. The quick-log on the Fundraisers page isn't dated by year, so it isn't counted here.`}
           </div>
-        </div>
+        </Card>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {stat(`Donations · ${year}`, money(donationsYtd), `Gifts logged with a date in ${year}.`, FIRE.red)}
           {stat(`Fundraisers · ${year}`, money(fundraisersYtd), `Proceeds recorded on fundraisers with a ${year} target date.`, FIRE.amberText)}
@@ -8201,7 +8183,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
           (donor PII is department business), so the tile follows the DATA rule, not the nav rule. */}
       {canManage(role) && card("donations", HeartHandshake, "Donations", "Track who gives — pledges, gifts received, and where each conversation stands.")}
     </div>
-  </>);
+  </PageShell>);
 }
 
 /* ---------------- Donations — campaigns list (slice 3) ----------------
