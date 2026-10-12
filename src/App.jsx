@@ -19525,24 +19525,27 @@ function ProgramOverview({ S, role, notify, go }) {
   const stuck = sum("open_long_shifts_count"), expired = sum("expired_certs_count"), expiring = sum("expiring_certs_count");
 
   return (
-    <PageShell kicker="PROGRAM OVERSIGHT" title="All departments" fitToScreen
+    <PageShell band kicker="PROGRAM OVERSIGHT" title="All departments" fitToScreen actions={<HeroAside />}
       sub="Issues to act on across your departments — surfaced from live data, so you can catch problems before anyone reports them.">
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
-        <StatTile value={show(rows ? rows.length : null)} label="Departments" />
-        <StatTile value={show(sum("member_count"))} label="Total members" />
-        <StatTile value={show(needing)} tone={problem(needing, "red")} label="Needing attention" />
-        <StatTile value={show(stuck)} tone={problem(stuck, "red")} label="Open stuck shifts" sub="open > 24h" />
-        <StatTile value={show(expired)} tone={problem(expired, "red")} label="Expired certs" />
-        <StatTile value={show(expiring)} tone={problem(expiring, "amber")} label="Expiring certs" sub="within 3 months" />
+      {/* Noir skin, as on the dashboards: icon tiles, CardHead headers and the gradient card face throughout. */}
+      <NoirSkin>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 10 }}>
+        <StatTile icon={Building2} value={show(rows ? rows.length : null)} label="Departments" />
+        <StatTile icon={Users} value={show(sum("member_count"))} label="Total members" />
+        <StatTile icon={AlertTriangle} value={show(needing)} tone={problem(needing, "red")} label="Needing attention" />
+        <StatTile icon={Clock} value={show(stuck)} tone={problem(stuck, "red")} label="Open stuck shifts" sub="open > 24h" />
+        <StatTile icon={Award} value={show(expired)} tone={problem(expired, "red")} label="Expired certs" />
+        <StatTile icon={CalendarCheck} value={show(expiring)} tone={problem(expiring, "amber")} label="Expiring certs" sub="within 3 months" />
       </div>
 
       {err && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.red}`, color: FIRE.redText, marginBottom: 12 }}>Couldn't load the overview: {err} <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={load}>Retry</button></Card>}
       {rows === null && !err && <Card padding={24} style={{ color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading program data…</Card>}
       {rows !== null && rows.length === 0 && <Card padding={24} style={{ color: FIRE.textMuted }}>No departments found.</Card>}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {sorted.map(({ d, h }) => <ProgramDeptCard key={d.department_id} S={S} d={d} health={h} notify={notify} refresh={load} go={go} />)}
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -19571,7 +19574,7 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
   const flagNum = (f) => <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: f.lead ? 30 : 26, lineHeight: 1, color: TONE[f.tone], ...FS.num }}>{f.n}</span>;
 
   return (
-    <Card padding="18px 20px">
+    <Card padding="14px 16px">
       {/* Header: crest + health dot + department; admin support underneath */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <DeptCrest dept={{ name: d.department_name }} />
@@ -19596,10 +19599,8 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
       </div>
 
       {/* NEEDS ATTENTION */}
-      <div style={{ marginTop: 16 }}>
-        <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-          <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> NEEDS ATTENTION{flags.length > 0 ? ` (${flags.length})` : ""}
-        </SectionLabel>
+      <div style={{ marginTop: 12 }}>
+        <CardHead icon={AlertTriangle} title="Needs attention" count={flags.length} />
         {flags.length === 0 ? (
           <EmptyState text="All clear — nothing needs attention." />
         ) : (
@@ -19627,9 +19628,9 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
       </div>
 
       {/* ACTIVITY & SETUP */}
-      <div style={{ marginTop: 16 }}>
-        <SectionLabel style={{ marginBottom: 8 }}>ACTIVITY &amp; SETUP</SectionLabel>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+      <div style={{ marginTop: 12 }}>
+        <CardHead icon={BarChart3} title="Activity & setup" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
           {/* amber when ≤1 active → surfaces the "only one person using it" problem */}
           <StatTile value={String(n("active_members_30d"))} tone={n("active_members_30d") <= 1 ? "amber" : undefined} label="Active members (30d)" />
           <StatTile value={String(n("member_count"))} label="Members" />
@@ -19645,7 +19646,7 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
               onClick={() => setShowProfileGaps((v) => !v)} />
           ) : (
           // Complete (or the radar hasn't sent profile_missing yet): a plain tile with its icon + 20px word.
-          <Card padding="16px 18px">
+          <Card padding="11px 13px">
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               {d.profile_complete ? <CheckCircle2 size={18} color={FIRE.green} /> : <AlertTriangle size={18} color={FIRE.amberText} />}
               <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary }}>{d.profile_complete ? "Complete" : "Incomplete"}</span>
