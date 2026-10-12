@@ -1854,8 +1854,8 @@ function StationSectionHead({ station, notify }) {
     if (typeof window !== "undefined") window.location.reload();
   }
   return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "16px 0 7px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textPrimary }}>{station.name}</div>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 0 8px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+      <CardHead icon={Building2} title={station.name} style={{ marginBottom: 0, width: "auto" }} />
       {station.label && <span style={{ fontSize: 12, color: FIRE.textMuted }}>{station.label}</span>}
       {station.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2 }}>DEFAULT</span>}
       <button onClick={go} disabled={busy} style={{ ...FS.btn, marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, opacity: busy ? 0.6 : 1 }}>{busy ? "Switching…" : "Go to this station"}</button>
@@ -12949,7 +12949,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
 
       {/* ---- the running log ---- */}
       <Card padding="8px 0">
-        <SectionLabel style={{ padding: "10px 14px 4px" }}>CHECKLIST HISTORY</SectionLabel>
+        <CardHead icon={ClipboardList} title="Checklist history" />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
           Grouped by day, newest first. Times are Central. Tap one to see what was done and what wasn&rsquo;t.
         </div>
@@ -13233,10 +13233,10 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
     const outOfService = !r.inService;   // availability dimension (separate from Pass/Needs-attention readiness)
     return (
-      <div key={r.id} style={{ ...S.opCard, ...FS.card, opacity: outOfService ? 0.68 : 1 }}>
+      <div key={r.id} style={{ ...S.opCard, ...FS.cardNoir, opacity: outOfService ? 0.68 : 1 }}>
         <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
           <Truck size={20} color={outOfService ? FIRE.textMuted2 : FIRE.btnIcon} style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, letterSpacing: ".02em", color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
           {outOfService
             ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
             : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
@@ -13297,6 +13297,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   }
   return (
     <PageShell above={loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />} kicker={<>APPARATUS & EQUIPMENT</>} title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}>
+      <NoirSkin>
       <div style={S.statRow}>
         <StatTile value={String(ready)} label="Ready to roll" />
         <StatTile value={String(flagged)} tone={flagged > 0 ? "red" : undefined} label="Needs attention" />
@@ -13315,7 +13316,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           choosing the apparatus twice. */}
       {dept?.aftercall_enabled && canCheck && (
         <div onClick={() => setAftercallOpen(true)}
-             style={{ ...FS.card, padding: "14px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", borderLeft: `3px solid ${FIRE.btnIcon}` }}>
+             style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", borderLeft: `3px solid ${FIRE.btnIcon}` }}>
           <ClipboardCheck size={18} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>After-Call Checklist</div>
@@ -13405,6 +13406,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         </Card>
       )}
       {checkingRig && <CheckRunModal S={S} rig={checkingRig} meId={meId} notify={notify} canManage={canManage} onClose={() => setCheckingRig(null)} onFinalized={() => { loadRigs(); setHistoryKey((k) => k + 1); }} />}
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -13549,7 +13551,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
       {photoOpen && checkPhoto && <PhotoDotEditor S={S} url={photoUrls[checkPhoto.id]} photo={checkPhoto}
         dots={dotsFor(checkPhoto.id)} unplaced={[]} marks={marks} editable={false}
         tabs={photoTabs} checkPanel={checkPanel} onClose={() => setPhotoOpen(false)} busy={false} />}
-      <div style={{ ...FS.card, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ ...FS.cardNoir, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
           <Truck size={18} color={FIRE.btnIcon} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -13757,7 +13759,7 @@ function ApparatusChecklist({ S, rig, notify }) {
             </div>
           )}
           {(editMode || (items && items.length === 0)) && (adding ? (
-            <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={label} placeholder="e.g. SCBA pressure" onChange={(e) => setLabel(e.target.value)} /></label>
               <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={location} onChange={setLocation} /></div>
               <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={description} placeholder="Optional detail, shown on tap" onChange={(e) => setDescription(e.target.value)} /></label>
@@ -13789,7 +13791,7 @@ function ApparatusChecklist({ S, rig, notify }) {
                     </div>
                     {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 8px", lineHeight: 1.45 }}>{it.description}</div>}
                     {editingId === it.id && (
-                      <div style={{ ...FS.card, background: FIRE.btnBg, padding: 12, margin: "6px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 12, margin: "6px 0", display: "flex", flexDirection: "column", gap: 10 }}>
                         <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={editBuf.label} onChange={(e) => setEditBuf((b) => ({ ...b, label: e.target.value }))} /></label>
                         <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={editBuf.location} onChange={(v) => setEditBuf((b) => ({ ...b, location: v }))} /></div>
                         <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={editBuf.description} onChange={(e) => setEditBuf((b) => ({ ...b, description: e.target.value }))} /></label>
@@ -13896,7 +13898,7 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
           ) : (checks || []).map((c) => {
             const failed = c.outcome === "fail"; const isOpen = expanded === c.id;
             return (
-              <div key={c.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "9px 12px", marginBottom: 6 }}>
+              <div key={c.id} style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: "9px 12px", marginBottom: 6 }}>
                 <button onClick={() => toggleCheck(c.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
                   <Pill S={S} color={failed ? FIRE.redBright : FIRE.green}>{failed ? "FAIL" : "PASS"}</Pill>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -14005,7 +14007,7 @@ function ApparatusServiceHistory({ S, rig }) {
           ) : (periods || []).map((p) => {
             const stillOut = !p.back_at;
             return (
-              <div key={p.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "8px 12px", marginBottom: 6, fontSize: 12.5 }}>
+              <div key={p.id} style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: "8px 12px", marginBottom: 6, fontSize: 12.5 }}>
                 <div style={{ color: FIRE.textPrimary }}>{stillOut ? `Out of service since ${fmtD(p.out_at)}` : `Out of service ${fmtD(p.out_at)} – ${fmtD(p.back_at)}`}</div>
                 <div style={{ color: FIRE.textSecondary, marginTop: 2 }}>{p.out_reason}</div>
                 <div style={{ color: FIRE.textMuted, marginTop: 2 }}>Out by {p.out_by_name || "—"}{p.back_at ? ` · back by ${p.back_by_name || "—"}` : ""}</div>
@@ -14320,7 +14322,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                 const editingDots = editDotsId === p.id;
                 return (
                 <div key={p.id} style={{ marginBottom: 6 }}>
-                  <div style={{ ...FS.card, background: FIRE.btnBg, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     {urls[p.id]
                       ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
                       : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
@@ -14395,7 +14397,7 @@ function maintStatus(cadence, lastDoneAt) {
   if (days >= interval * 0.8) return "Due soon";      // within the last 20% before it's due
   return "Current";
 }
-const MAINT_COLOR = { Overdue: "#B11E2A", "Due soon": "#9A6B12", Current: "#2E7D52" };
+const MAINT_COLOR = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.green };   // the status set: red bad, amber warning, green good
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
 function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
@@ -14523,7 +14525,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
         </div>
       )}
       {canManage && (editMode || items.length === 0) && (adding ? (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Unit</span><select style={FS.input} value={u} onChange={(e) => setU(e.target.value)}>{[...rigs.map((r) => r.name), "All units"].map((nm) => <option key={nm}>{nm}</option>)}</select></label>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={t} placeholder="e.g. Hose pressure test" onChange={(e) => setT(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cadence</span><select style={FS.input} value={cad} onChange={(e) => setCad(e.target.value)}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
@@ -14548,7 +14550,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
               {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
             {doneFor === i.id && (
-              <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div style={{ flexBasis: "100%", fontSize: 12.5, color: FIRE.textSecondary }}>Recording <strong style={{ color: FIRE.textPrimary }}>{i.task}</strong> as done today — notes and cost are optional.</div>
                 <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Notes (optional)</span><input style={FS.input} value={doneNotes} placeholder="e.g. replaced filter, topped off fluids" onChange={(e) => setDoneNotes(e.target.value)} /></label>
                 <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cost (optional)</span><input style={FS.input} value={doneCost} placeholder="e.g. 240" inputMode="numeric" onChange={(e) => setDoneCost(e.target.value)} /></label>
@@ -14557,8 +14559,8 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
               </div>
             )}
             {histFor === i.id && (
-              <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%" }}>
-                <div style={{ ...FS.kicker, marginBottom: 6 }}>COMPLETION HISTORY</div>
+              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%" }}>
+                <CardHead icon={Wrench} title="Completion history" />
                 {histBusy === i.id && !(hist[i.id] || []).length ? (
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><Loader2 size={14} className="spin" /> Loading…</div>
                 ) : histErr ? (
@@ -14582,7 +14584,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
               </div>
             )}
             {editingMaintId === i.id && (
-              <div style={{ ...FS.card, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={maintBuf.task} onChange={(e) => setMaintBuf((b) => ({ ...b, task: e.target.value }))} /></label>
                 <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cadence</span><select style={FS.input} value={maintBuf.cadence} onChange={(e) => setMaintBuf((b) => ({ ...b, cadence: e.target.value }))}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
                 <button style={FS.btnPrimary} onClick={() => saveEditMaint(i.id)}><CheckCircle2 size={15} /> Save</button>
@@ -14593,7 +14595,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
         ))}
       </div>
       {canManage && (
-        <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}`, marginTop: 16 }}>
+        <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}`, marginTop: 16 }}>
           <div style={{ flex: 1 }}>
             <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
             <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a preventive-maintenance checklist</h3>
