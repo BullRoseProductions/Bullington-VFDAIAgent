@@ -71,8 +71,16 @@ const FIRE = {
   white: "#fff",
   // --- Industrial Noir (DA dashboard skin, v11 mock) ---
   cardNoir: "linear-gradient(180deg, #0F131A, #0B0E13)",          // card face: faint top-to-bottom falloff
-  cardShadowNoir: "0 10px 24px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.03)",
-  heroGlow: "radial-gradient(90% 140% at 100% 0%, rgba(200,50,58,.26) 0%, rgba(200,50,58,.08) 38%, rgba(200,50,58,0) 62%)",   // FIRE.red, fading out
+  card2Noir: "#10141A",                                           // inset sub-panel (mini charts) inside a Noir card
+  insetNoir: "#0A0D11",                                           // icon wells, segmented-control track
+  lineNoir: "rgba(255,255,255,.07)",                              // Noir hairline (a touch stronger than `hairline`)
+  line2Noir: "rgba(255,255,255,.13)",                             // Noir axis / control border
+  cardShadowNoir: "0 10px 30px rgba(0,0,0,.45)",
+  tileShadowNoir: "0 4px 14px rgba(0,0,0,.4)",
+  // Hero band: red glow top-right + an ember glow bottom-right over a warm-edged near-black sweep.
+  heroNoir: "radial-gradient(130% 150% at 90% 4%, rgba(200,50,58,.42), rgba(200,50,58,0) 40%), radial-gradient(80% 120% at 102% 118%, rgba(120,42,30,.3), rgba(0,0,0,0) 50%), linear-gradient(100deg, #05070A 0%, #0A0D12 55%, #130A0C 100%)",
+  heroShadeNoir: "linear-gradient(90deg, rgba(0,0,0,.35), transparent 40%)",
+  barGlowNoir: "rgba(224,58,68,.45)",                             // FIRE.redBright glow on the current bar / point
 };
 
 /* ---------------- Fire-luxury shared style recipes (reference FIRE tokens; reused across reskinned pages) ---------------- */
@@ -80,7 +88,7 @@ const FS = {
   kicker: { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 },
   card: { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
   // Industrial Noir card (DA dashboard): gradient face, 1px hairline, 12px radius, soft drop shadow.
-  cardNoir: { background: FIRE.cardNoir, border: `1px solid ${FIRE.hairline}`, borderRadius: 12, boxShadow: FIRE.cardShadowNoir },
+  cardNoir: { background: FIRE.cardNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 12, boxShadow: FIRE.cardShadowNoir },
   num: { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" },
   btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
   btnPrimary: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: FIRE.white, border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
@@ -132,21 +140,24 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
     ? { height: `calc(100dvh - ${top}px - 48px - env(safe-area-inset-bottom))`, overflowY: "auto", minHeight: 0 }
     : null;
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: band ? "14px 14px" : "22px 20px", margin: "-6px -2px 0" }}>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: band ? "10px 14px" : "22px 20px", margin: "-6px -2px 0" }}>
       {above}
       {band ? (
-        /* Industrial Noir hero band: the red glow in the top-right corner over the card gradient, a faint
-           B4C watermark and the four pillars, kicker → Oswald greeting → short red accent bar. */
-        <div style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${FIRE.hairline}`, background: `${FIRE.heroGlow}, ${FIRE.cardNoir}`, boxShadow: FIRE.cardShadowNoir, padding: "18px 20px 16px", marginBottom: 12 }}>
-          <div aria-hidden="true" style={{ position: "absolute", right: -6, bottom: -26, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 132, lineHeight: 1, letterSpacing: "-.02em", color: FIRE.textPrimary, opacity: 0.035, pointerEvents: "none", userSelect: "none" }}>B4C</div>
-          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-            {lead}
-            <div style={{ flex: "1 1 260px", minWidth: 0 }}>
-              <div style={FS.kicker}>{kicker}</div>
-              <h1 style={{ fontFamily: DISPLAY_FONT, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, margin: "5px 0 0", letterSpacing: "-0.01em", lineHeight: 1.1 }}>{title}</h1>
-              <div style={{ width: 34, height: 3, borderRadius: 2, background: FIRE.red, marginTop: 9 }} />
-              <div aria-hidden="true" style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10.5, letterSpacing: ".32em", color: FIRE.textMuted, opacity: 0.55, marginTop: 10, whiteSpace: "nowrap", overflow: "hidden" }}>PREPARE · DEVELOP · SUPPORT · SERVE</div>
-              {sub && <div style={{ fontSize: 14, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.5 }}>{sub}</div>}
+        /* Industrial Noir hero band (the mock's .hero): red glow top-right + ember bottom-right over a warm-edged
+           sweep, a left shade, the faint B4C emblem, kicker → Oswald greeting → short red bar. `actions` holds the
+           right side (pillars, quote, next event). */
+        <div className="noir-hero" style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.heroNoir, padding: "14px 22px", marginBottom: 10 }}>
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroShadeNoir, pointerEvents: "none" }} />
+          <div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 150, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 74, letterSpacing: "-.03em", color: FIRE.textPrimary, opacity: 0.035, pointerEvents: "none", userSelect: "none" }}>B4C</div>
+          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flex: "1 1 260px", minWidth: 0 }}>
+              {lead}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10, letterSpacing: ".2em", textTransform: "uppercase", color: FIRE.redText, margin: "0 0 5px" }}>{kicker}</div>
+                <h1 style={{ fontFamily: DISPLAY_FONT, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", lineHeight: 1 }}>{title}</h1>
+                {sub && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 5 }}>{sub}</div>}
+                <div style={{ width: 34, height: 2, borderRadius: 2, background: FIRE.redBright, marginTop: 8 }} />
+              </div>
             </div>
             {actions}
           </div>
@@ -179,19 +190,34 @@ function DeptCrest({ dept }) {
 const NoirCtx = React.createContext(false);
 const NoirSkin = ({ children }) => <NoirCtx.Provider value>{children}</NoirCtx.Provider>;
 const useCardFace = () => (React.useContext(NoirCtx) ? FS.cardNoir : FS.card);
-// Noir card header: small red icon, Oswald title, short red underline; `right` sits at the far end.
-function CardHead({ icon: Icon, title, right, as: Tag = "div", style, ...rest }) {
+// Noir card header (the mock's .chead): red icon, Oswald title with a short red underline tight beneath it,
+// optional red count badge, and `right` pushed to the far end.
+function CardHead({ icon: Icon, title, count, right, as: Tag = "div", style, ...rest }) {
   return (
-    <Tag style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap", width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", ...style }} {...rest}>
-      <span style={{ display: "inline-flex", alignItems: "flex-start", gap: 8 }}>
-        {Icon && <Icon size={15} color={FIRE.redBright} style={{ marginTop: 1, flexShrink: 0 }} />}
-        <span>
-          <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 14, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textPrimary, lineHeight: 1.15 }}>{title}</span>
-          <span style={{ display: "block", width: 22, height: 2, borderRadius: 2, background: FIRE.red, marginTop: 6 }} />
-        </span>
+    <Tag style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", color: "inherit", ...style }} {...rest}>
+      {Icon && <Icon size={16} color={FIRE.redBright} style={{ flexShrink: 0 }} />}
+      <span style={{ position: "relative", paddingBottom: 4, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, letterSpacing: ".02em", color: FIRE.textPrimary, lineHeight: 1.15, whiteSpace: "nowrap" }}>
+        {title}
+        <span style={{ position: "absolute", left: 0, bottom: 0, width: 20, height: 2, borderRadius: 2, background: FIRE.redBright }} />
       </span>
-      {right != null && <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: FIRE.textMuted, marginLeft: "auto" }}>{right}</span>}
+      {count > 0 && <span style={{ background: FIRE.redBright, color: FIRE.white, fontSize: 11, fontWeight: 700, borderRadius: 999, minWidth: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px", ...FS.num }}>{count}</span>}
+      {right != null && <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: FIRE.textSecondary, minWidth: 0 }}>{right}</span>}
     </Tag>
+  );
+}
+// Noir inset sub-panel (the mock's .minichart): a key swatch + Oswald title, an optional open chevron, the chart,
+// and a small caption under it.
+function MiniChart({ title, swatch, caption, onOpen, children }) {
+  return (
+    <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "10px 12px 9px", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+        {swatch}
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".02em", color: FIRE.textPrimary }}>{title}</span>
+        {onOpen && <button onClick={onOpen} aria-label={`Open ${title}`} style={{ marginLeft: "auto", background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}><ChevronRight size={15} color={FIRE.btnIcon} /></button>}
+      </div>
+      {children}
+      {caption && <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 4 }}>{caption}</div>}
+    </div>
   );
 }
 // Red uppercase tracked label. `as="button"` for a collapsible section header.
@@ -205,9 +231,20 @@ function Card({ as: Tag = "div", padding = "14px 16px", style, children, ...rest
 }
 // Big tabular number + label + optional sub-line. tone: green | amber | red | muted (default: primary text).
 // onClick makes it a button with the chevron; without it it's a plain box (read-only views).
-function StatTile({ label, value, sub, tone, onClick }) {
+function StatTile({ label, value, sub, tone, onClick, icon: Icon }) {
   const Tag = onClick ? "button" : "div";
   const face = useCardFace();
+  if (React.useContext(NoirCtx)) return (
+    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...face, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        {Icon ? <span style={{ width: 30, height: 30, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon size={15} color={FIRE.redText} /></span> : <span />}
+        {onClick && <ChevronRight size={15} color={FIRE.btnIcon} />}
+      </div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 28, lineHeight: 1, letterSpacing: "-.01em", color: TONE[tone] || FIRE.textPrimary, marginTop: 8, ...FS.num }}>{value}</div>
+      <div style={{ fontSize: 12, fontWeight: 500, color: FIRE.textSecondary, marginTop: 4 }}>{label}</div>
+      {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+    </Tag>
+  );
   return (
     <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...face, padding: "16px 18px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", position: "relative" }}>
       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, letterSpacing: "-.01em", color: TONE[tone] || FIRE.textPrimary, ...FS.num }}>{value}</div>
@@ -3533,7 +3570,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const actionCenter = (
     <Card className="dash-ov-ac" style={{ minWidth: 0 }}>
       <div className="dash-ov-ac-body">
-      <CardHead as="button" onClick={() => setAttnOpen((v) => !v)} disabled={attnN === 0} icon={AlertTriangle} title={`Action Center${attnN > 0 ? ` (${attnN})` : ""}`}
+      <CardHead as="button" onClick={() => setAttnOpen((v) => !v)} disabled={attnN === 0} icon={AlertTriangle} title="Action Center" count={attnN}
         right={attnN > 0 ? (attnOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : null}
         style={{ marginBottom: attnOpen || attnN === 0 ? 12 : 0, cursor: attnN === 0 ? "default" : "pointer" }} />
       {attnN === 0 ? (attnKnown
@@ -3583,20 +3620,23 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   );
   return (
     <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 12, marginLeft: "auto", maxWidth: 280 }}>
-          <div style={{ fontStyle: "italic", fontSize: 12.5, lineHeight: 1.45, color: FIRE.textMuted2, textAlign: "right" }}>&ldquo;{dailyQuote()}&rdquo;</div>
+        <div className="noir-hero-side" style={{ display: "flex", gap: 20, alignItems: "flex-start", flexShrink: 0, textAlign: "right" }}>
+          <div aria-hidden="true" style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10, letterSpacing: ".26em", lineHeight: 1.95, textTransform: "uppercase", color: FIRE.textPrimary, opacity: 0.42 }}>Prepare<br />Develop<br />Support<br />Serve</div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 }}>
+          <div style={{ maxWidth: 150, fontStyle: "italic", fontSize: 11.5, lineHeight: 1.5, color: FIRE.textPrimary, opacity: 0.55 }}>&ldquo;{dailyQuote()}&rdquo;</div>
           <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
             {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
             <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
           </button>
+          </div>
         </div>
       }>
       {/* DEPARTMENT HEALTH — overview layout: the two live charts, then stats 2×2 beside the Action Center,
           then the remaining panels. Same numbers and sources as the Board/Officer layouts. */}
       <NoirSkin>
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} overview actionCenter={actionCenter}
-        extraHero={<StatTile value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
+        extraHero={<StatTile icon={ClipboardList} value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
       </NoirSkin>
       <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 12, maxWidth: 360 }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
@@ -20217,6 +20257,7 @@ function HeroTile({ n, label, sub, color, onClick }) {
 // Monthly training-attendance line. series: [{ label, pct (null = no drills that month), drills, partial }].
 // A month with no drills is a GAP in the line, never a 0.
 function AttendanceTrend({ series }) {
+  const noir = React.useContext(NoirCtx);
   const [hover, setHover] = useState(null);
   const { grown, transition } = useChartGrow();
   const [wrapRef, W] = useChartWidth();
@@ -20238,7 +20279,7 @@ function AttendanceTrend({ series }) {
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={CHART_SVG(H)} onMouseLeave={() => setHover(null)}>
       {[100, 50, 0].map((p) => (
         <g key={p}>
-          <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? FIRE.btnBorder : FIRE.track} />
+          <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? (noir ? FIRE.line2Noir : FIRE.btnBorder) : FIRE.track} strokeDasharray={noir && p !== 0 ? "3 3" : undefined} />
           <text x={x0 - 6} y={yAt(p) + 3} textAnchor="end" fontSize={10} fill={FIRE.textMuted}>{p}%</text>
         </g>
       ))}
@@ -20250,7 +20291,7 @@ function AttendanceTrend({ series }) {
           </g>
         ))}
         {series.map((m, i) => m.pct != null && i !== lastIdx && <circle key={i} cx={xAt(i)} cy={yAt(m.pct)} r={hover === i ? 4 : 2.6} fill={FIRE.red} />)}
-        <circle cx={xAt(lastIdx)} cy={yAt(series[lastIdx].pct)} r={5} fill={FIRE.red} stroke={FIRE.card} strokeWidth={2} />
+        <circle cx={xAt(lastIdx)} cy={yAt(series[lastIdx].pct)} r={5} fill={noir ? FIRE.redBright : FIRE.red} stroke={noir ? FIRE.card2Noir : FIRE.card} strokeWidth={2} style={noir ? { filter: `drop-shadow(0 0 6px ${FIRE.barGlowNoir})` } : undefined} />
         <text x={xAt(lastIdx) - 8} y={yAt(series[lastIdx].pct) - 10} textAnchor="end" fontFamily={CHART_FONT} fontWeight={700} fontSize={14} fill={FIRE.textPrimary}>{series[lastIdx].pct}%</text>
       </g>
       {series.map((m, i) => (i === series.length - 1 || (series.length - 1 - i) % labelStep === 0) && <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize={10} fontWeight={i === series.length - 1 ? 700 : 400} fill={hover === i || i === series.length - 1 ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>)}
@@ -20391,6 +20432,8 @@ function useStationHoursByMonth(months, endAtNow = false) {
 // Monthly bar chart — the ONE renderer behind department station hours and a member's own hours.
 // vals[i] null = that month unknown → "—", never a zero bar. tip(i) = tooltip text for a month.
 function MonthlyBars({ months, vals, tip, aria }) {
+  const noir = React.useContext(NoirCtx);
+  const gid = React.useId().replace(/:/g, "");
   const [hover, setHover] = useState(null);
   const { grown, transition } = useChartGrow();
   const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
@@ -20408,9 +20451,17 @@ function MonthlyBars({ months, vals, tip, aria }) {
   return (
     <div ref={wrapRef}>
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={CHART_SVG(H)} onMouseLeave={() => setHover(null)}>
+      {noir && (
+        <defs>
+          <linearGradient id={`mb-${gid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={FIRE.redBright} />
+            <stop offset="100%" stopColor={FIRE.redBright} stopOpacity={0.24} />
+          </linearGradient>
+        </defs>
+      )}
       {[niceMax, niceMax / 2, 0].map((v) => (
         <g key={v}>
-          <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? FIRE.btnBorder : FIRE.track} />
+          <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? (noir ? FIRE.line2Noir : FIRE.btnBorder) : FIRE.track} strokeDasharray={noir && v !== 0 ? "3 3" : undefined} />
           <text x={x0 - 5} y={base - hAt(v) + 3} textAnchor="end" fontSize={9.5} fill={FIRE.textMuted}>{Math.round(v)}</text>
         </g>
       ))}
@@ -20419,7 +20470,10 @@ function MonthlyBars({ months, vals, tip, aria }) {
         const bh = v == null ? 0 : hAt(v);
         return (
           <g key={m.from}>
-            {v != null && v > 0 && <rect x={cx(i) - bw / 2} y={grown ? base - bh : base} width={bw} height={grown ? bh : 0} rx={3} fill={FIRE.red} fillOpacity={i === months.length - 1 || hover === i ? 1 : 0.7} style={{ transition }} />}
+            {v != null && v > 0 && (noir
+              ? <rect x={cx(i) - bw / 2} y={grown ? base - bh : base} width={bw} height={grown ? bh : 0} rx={2} fill={`url(#mb-${gid})`} fillOpacity={i === last || hover === i ? 1 : 0.82}
+                  style={{ transition, filter: i === last || hover === i ? `drop-shadow(0 0 6px ${FIRE.barGlowNoir})` : undefined }} />
+              : <rect x={cx(i) - bw / 2} y={grown ? base - bh : base} width={bw} height={grown ? bh : 0} rx={3} fill={FIRE.red} fillOpacity={i === months.length - 1 || hover === i ? 1 : 0.7} style={{ transition }} />)}
             {(roomy || i === last) && <text x={cx(i)} y={(v == null ? base : base - bh) - 5} textAnchor="middle" fontFamily={CHART_FONT} fontWeight={i === last ? 700 : 600} fontSize={10} fill={v == null ? FIRE.textMuted : i === last ? FIRE.textPrimary : FIRE.textSecondary} style={FS.num}>{v == null ? "—" : h1(v)}</text>}
             {(i === last || (last - i) % labelStep === 0) && <text x={cx(i)} y={H - 8} textAnchor="middle" fontSize={9.5} fontWeight={i === last ? 700 : 400} fill={hover === i || i === last ? FIRE.textPrimary : FIRE.textMuted}>{m.label}</text>}
             <rect x={cx(i) - slot / 2} y={0} width={slot} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
@@ -20709,39 +20763,42 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
       <StationHoursBars months={hoursMonths} />
     </ChartPanel>
   ) : null;
-  const boardTile = <StatTile key="board" value={boardRated ? `${boardPct}%` : "\u2014"} tone={boardRated ? pctToneName(boardPct) : "muted"} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
-  const membersTile = <StatTile key="members" value={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
-  const drillsTile = <StatTile key="drills" value={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
+  const boardTile = <StatTile key="board" icon={Landmark} value={boardRated ? `${boardPct}%` : "\u2014"} tone={boardRated ? pctToneName(boardPct) : "muted"} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
+  const membersTile = <StatTile key="members" icon={Users} value={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
+  const drillsTile = <StatTile key="drills" icon={Flame} value={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
   if (overview) {
     const hoursOn = moduleEnabled("stationhours", dept?.disabled_modules);
     const seg = (n) => (
       <button key={n} onClick={() => setOvSpan(n)} aria-pressed={ovSpan === n}
-        style={{ border: "none", borderRadius: 7, padding: "4px 10px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                 background: ovSpan === n ? FIRE.red : "transparent", color: ovSpan === n ? FIRE.white : FIRE.navLabel }}>{n} Mo</button>
+        style={{ border: "none", borderRadius: 5, padding: "4px 11px", fontSize: 11, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                 background: ovSpan === n ? FIRE.redBright : "transparent", color: ovSpan === n ? FIRE.white : FIRE.textSecondary }}>{n} Mo</button>
     );
     return (
       <>
-        {/* OVERVIEW — the two live charts, full width, side by side (stacked on a phone), one shared window. */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-          <SectionLabel>OVERVIEW</SectionLabel>
-          <div role="group" aria-label="Chart window" style={{ display: "inline-flex", gap: 2, padding: 2, borderRadius: 9, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>
-            {[6, 12].map(seg)}
+        {/* OVERVIEW — one card (the mock's .ovcard): the two live charts as inset sub-panels, side by side
+            (stacked on a phone), one shared 6 Mo / 12 Mo window in the header. */}
+        <Card padding="12px">
+          <CardHead icon={BarChart3} title="Overview" right={
+            <div role="group" aria-label="Chart window" style={{ display: "inline-flex", gap: 3, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}` }}>
+              {[6, 12].map(seg)}
+            </div>} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 14 }}>
+            {hoursOn && (
+              <MiniChart title="Station Hours" onOpen={to("stationhours")} caption={`credited · de-overlapped · last ${ovSpan} months`}
+                swatch={<span style={{ width: 8, height: 8, borderRadius: 2, background: FIRE.redBright, flexShrink: 0 }} />}>
+                <StationHoursBars months={ovMonths} />
+              </MiniChart>
+            )}
+            <MiniChart title="Training Attendance" onOpen={to("roster", "attendance")} caption={drillsHeld ? `last ${ovSpan} months · ${avgPart}% this year` : `last ${ovSpan} months`}
+              swatch={<span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.redBright, boxShadow: `0 0 0 2px ${FIRE.barGlowNoir}`, flexShrink: 0 }} />}>
+              <AttendanceTrend series={ovTrend} />
+            </MiniChart>
           </div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 10 }}>
-          {hoursOn && (
-            <ChartPanel icon={Clock} title="Station hours" note={`credited · de-overlapped · ${ovSpan} mo`} onOpen={to("stationhours")}>
-              <StationHoursBars months={ovMonths} />
-            </ChartPanel>
-          )}
-          <ChartPanel icon={GraduationCap} title="Training attendance" note={drillsHeld ? `${ovSpan} mo · ${avgPart}% this year` : `${ovSpan} mo`} onOpen={to("roster", "attendance")}>
-            <AttendanceTrend series={ovTrend} />
-          </ChartPanel>
-        </div>
+        </Card>
         {/* Stats as a 2×2 block beside the Action Center; on a wide screen the Action Center takes the stats'
             height and scrolls inside it (dash-ov-* in Fonts()), on a phone the two simply stack. */}
         <div className="dash-ov-row" style={{ display: "grid", gap: 10, marginTop: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, alignContent: "start" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gridAutoRows: "1fr", gap: 10 }}>
             {boardFirst ? [boardTile, membersTile, drillsTile] : [membersTile, boardTile, drillsTile]}
             {extraHero}
           </div>
@@ -20881,8 +20938,13 @@ function Fonts() {
       /* DA overview: stats 2x2 | Action Center. Wide → two columns, the Action Center matches the stats'
          height and scrolls inside; narrower → stacked, the Action Center at its natural height. */
       .dash-ov-row { grid-template-columns: 1fr; }
+      @media (max-width: 640px) {
+        .noir-hero { padding: 18px !important; }
+        .noir-emblem { display: none; }
+        .noir-hero-side { text-align: left !important; width: 100%; justify-content: space-between; }
+      }
       @media (min-width: 1100px) {
-        .dash-ov-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+        .dash-ov-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); }
         .dash-ov-ac { position: relative; min-height: 220px; }
         .dash-ov-ac > .dash-ov-ac-body { position: absolute; inset: 0; overflow-y: auto; padding: inherit; }
       }

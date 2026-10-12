@@ -40,3 +40,6 @@ _digest_preview/
 *.p8
 CREDENTIALS.txt
 .vercel
+
+# Design reference mocks — not app code
+B4C_Dashboard_IndustrialNoir_v*.html
