@@ -17081,10 +17081,10 @@ function CheckinConfirm({ S, result, members, meId, go }) {
   const pending = result?.pending;
   return (
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
-      <div style={{ ...S.opCard, textAlign: "center", padding: "34px 22px" }}>
-        {pending ? <Loader2 size={48} color="#6A7178" /> : ok ? <CheckCircle2 size={48} color="#2E7D52" /> : <AlertTriangle size={48} color="#B11E2A" />}
-        <h2 style={{ ...S.featTitle, marginTop: 14 }}>{pending ? "Checking you in…" : ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
-        <p style={{ color: "#3A4750", fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
+      <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }}>
+        {pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />}
+        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary }}>{pending ? "Checking you in…" : ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
+        <p style={{ color: FIRE.textSecondary, fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
           {pending
             ? "One moment while we confirm your sign-in."
             : ok
@@ -17097,11 +17097,11 @@ function CheckinConfirm({ S, result, members, meId, go }) {
             confirmation so the green check still reads first. */}
         {ok && result?.geoFailed && (
           <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 10, textAlign: "left", display: "flex", gap: 9, alignItems: "flex-start", background: "rgba(214,169,94,.14)", border: "1px solid rgba(214,169,94,.45)" }}>
-            <AlertTriangle size={16} color="#8A6410" style={{ flexShrink: 0, marginTop: 1 }} />
-            <span style={{ fontSize: 13, color: "#6E540F", lineHeight: 1.45 }}>Signed in ✓ — couldn't confirm your location, so this won't count toward hours.</span>
+            <AlertTriangle size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span style={{ fontSize: 13, color: FIRE.amberText, lineHeight: 1.45 }}>Signed in ✓ — couldn't confirm your location, so this won't count toward hours.</span>
           </div>
         )}
-        <button style={{ ...S.primaryBtn, marginTop: 18 }} onClick={() => go("training")}><GraduationCap size={16} /> Go to my training</button>
+        <button style={{ ...FS.btnPrimary, marginTop: 18 }} onClick={() => go("training")}><GraduationCap size={16} /> Go to my training</button>
       </div>
     </div>
   );
@@ -17113,17 +17113,17 @@ function HandoffConfirm({ S, result, go }) {
   const n = result?.items || 0;
   return (
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
-      <div style={{ ...S.opCard, textAlign: "center", padding: "34px 22px" }}>
-        {pending ? <Loader2 size={48} color="#6A7178" /> : ok ? <CheckCircle2 size={48} color="#2E7D52" /> : <AlertTriangle size={48} color="#B11E2A" />}
-        <h2 style={{ ...S.featTitle, marginTop: 14 }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
-        <p style={{ color: "#3A4750", fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
+      <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }}>
+        {pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />}
+        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
+        <p style={{ color: FIRE.textSecondary, fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
           {pending
             ? "One moment while we move custody to you."
             : ok
             ? <>{n === 1 ? "1 item is" : `${n} items are`} now in your custody. You're responsible for {n === 1 ? "it" : "them"} until {n === 1 ? "it's" : "they're"} returned or transferred.</>
             : (result?.reason || "Something went wrong.")}
         </p>
-        <button style={{ ...S.primaryBtn, marginTop: 18 }} onClick={() => go("myequipment")}><HardHat size={16} /> Go to My Equipment</button>
+        <button style={{ ...FS.btnPrimary, marginTop: 18 }} onClick={() => go("myequipment")}><HardHat size={16} /> Go to My Equipment</button>
       </div>
     </div>
   );
