@@ -9559,7 +9559,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
               <Initials S={S} dark name={m.name} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div>
-                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role || "Member"} · since {m.joined}</div>
+                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{[m.role || "Member", m.joined ? `since ${m.joined}` : null].filter(Boolean).join(" · ")}</div>
               </div>
               {m.status ? <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill> : null}
               {canAdd && canDeleteShared && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
