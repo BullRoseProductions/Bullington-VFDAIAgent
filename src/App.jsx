@@ -4860,7 +4860,7 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
     </div>
   );
   return (
-    <div style={{ ...S.fbCard, ...FS.card }}>
+    <div style={{ ...S.fbCard, ...FS.cardNoir }}>
       <div style={{ ...S.fbHead, color: FIRE.textPrimary }}><MessageSquare size={15} color={FIRE.btnIcon} /> Help it get better</div>
       <div style={S.fbRow}>
         <span style={{ ...S.fbLabel, color: FIRE.textSecondary }}>Was this useful?</span>
@@ -4980,11 +4980,11 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
     loadSessions && loadSessions();
   }
   return (
-    <div style={{ ...FS.card, padding: 16, marginBottom: 16 }}>
-      <div style={{ ...FS.kicker, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><Sparkles size={13} color={FIRE.btnIcon} /> AI DRILL PLANNER</div>
+    <div style={{ ...FS.cardNoir, padding: 14, marginBottom: 14 }}>
+      <CardHead icon={Sparkles} title="AI drill planner" style={{ marginBottom: 4 }} />
       <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>Describe your crew and constraints — you'll get a structured drill plan to adapt, then save it to a session.</div>
       <div style={S.aiGrid}>
-        <div style={{ ...S.aiForm, ...FS.card }}>
+        <div style={{ ...S.aiForm, ...FS.cardNoir }}>
           <AIField S={S} dark label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
           <AIField S={S} dark label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
           <AIField S={S} dark label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
@@ -4998,7 +4998,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
           </button>
           {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
         </div>
-        <div style={{ ...S.aiResult, ...FS.card }}>
+        <div style={{ ...S.aiResult, ...FS.cardNoir }}>
           {!plan && !loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Sparkles size={28} color={FIRE.textMuted2} /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
           {loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Loader2 size={28} className="spin" color={FIRE.textMuted2} /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
           {plan && (
@@ -5835,7 +5835,9 @@ const POST_THEMES = [
   { tag: "SAFETY", c: "#54506B", t: "Quick home-safety reminder" },
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const CATEGORY_COLORS = ["#B11E2A", "#1F4E79", "#0E6B62", "#9A6B12", "#54506B", "#2E7D52", "#C15512", "#3A4A5A"];
+// Category colour PICKER palette + the default for a new category (index 0). The Industrial Noir set; a
+// category's colour is saved on its row, so existing categories keep whatever they were given.
+const CATEGORY_COLORS = [FIRE.red, FIRE.catBlue, FIRE.catGreen, FIRE.catAmber, FIRE.catViolet, FIRE.catTeal, FIRE.catOrange, FIRE.textMuted];
 
 /* A fundraiser's colour, with a derived fallback so NULL is never a blank.
    fundraisers.color is nullable and un-backfilled on purpose (sql/fundraiser_color.sql): NULL means
@@ -17517,7 +17519,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const base = dueInfo(p), up = upcomingFor(p.id);
     if (!up) return base;
     const nd = sessDate(up), nl = nd.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + (up.startTime ? ` · ${fmtTime(up.startTime)}` : "");
-    return { ...base, label: "On track", color: "#2E7D52", rel: `next session ${nl}`, nextLabel: nl, next: nd, urgent: false };
+    return { ...base, label: "On track", color: FIRE.green, rel: `next session ${nl}`, nextLabel: nl, next: nd, urgent: false };
   };
   const planView = plan.map((p) => ({ p, info: reconcile(p) })).sort((a, b) => rank(a.info.label) - rank(b.info.label));
   const over = planView.filter((x) => x.info.urgent).length;
@@ -17792,7 +17794,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     // IDENTICAL chip logic to the leader calendar — colors/layout unchanged (do not alter).
     const renderChip = (s) => {
       const cat = plan.find((p) => String(p.id) === String(s.planId));
-      const base = s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
+      const base = s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (cat?.color || FIRE.catBlue);
       const mix = (hex, tt) => {
         const h = hex.replace("#", "");
         const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
@@ -17811,10 +17813,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     return (
       <PageShell above={mounts} kicker="MY TRAINING" title="Your training calendar"
         sub="See what's scheduled, what you've missed, and where your attendance stands.">
+      <NoirSkin>
 
         {/* 2 — attendance progress */}
         <div style={card}>
-          <div style={kick}>MY ATTENDANCE · LAST 90 DAYS</div>
+          <CardHead icon={CalendarCheck} title="My attendance · last 90 days" style={{ marginBottom: 0 }} />
           {totalRecorded === 0 ? (
             <div style={{ marginTop: 12, fontSize: 13.5, color: FIRE.textMuted }}>No sessions recorded yet.</div>
           ) : (<>
@@ -17835,7 +17838,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
               {missed.map((s) => { const cat = catOf(s); return (
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || "#1F4E79", flexShrink: 0 }} />
+                  <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || FIRE.catBlue, flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
                     <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>Missed {fmtSess(s)} · {cat?.name || "One-off"}</div>
@@ -17854,7 +17857,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               cur={cur} setCur={setCur} dark
               items={monthSessions}
               renderChip={renderChip}
-              todayColor="#C8323A"
+              todayColor={FIRE.red}
               monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
             />
           </div>
@@ -17900,7 +17903,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               const cat = catOf(s); const att = s.attendance || []; const hasRecord = att.length > 0; const present = att.includes(me?.id);
               return (
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                  <CalendarCheck size={15} color={cat?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
+                  <CalendarCheck size={15} color={cat?.color || FIRE.catBlue} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></div>
                     <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""} · {s.planId ? `part of ${cat?.name || "a category"}` : "one-off (no category)"}</div>
@@ -17921,23 +17924,24 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             })}
           </div>
         </div>
-      </PageShell>
+        </NoirSkin>
+    </PageShell>
     );
   }
 
   // ---------- leader view: FIRE-palette styles + derived reads (presentational only) ----------
-  const Lcard = { ...FS.card, padding: 16 };                                  // base + leader padding (borderRadius FIRE.cardRadius == 16)
+  const Lcard = { ...FS.cardNoir, padding: 14 };                                  // base + leader padding (borderRadius FIRE.cardRadius == 16)
   const Lkick = { ...FS.kicker, display: "flex", alignItems: "center", gap: 6 };
   const Lnum = FS.num;
   const Lbtn = FS.btn;                                                        // FIRE.btnBg/.btnBorder/.btnText == prior literals
   const LbtnIcon = FIRE.btnIcon;                                             // == "#9AA1AC"
   const Lfield = { display: "flex", flexDirection: "column", gap: 6 };       // unchanged (not in the consolidation set)
-  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: "#B6BDC8" }; // unchanged (not in the consolidation set)
+  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }; // unchanged (not in the consolidation set)
   const Linput = FS.input;                                                    // FIRE.inputBorder/.btnBg/.name == prior literals
   const LprimaryBtn = FS.btnPrimary;                                          // FIRE.white == "#fff"
   const Lrow = FS.row;                                                        // FIRE.hairline == "rgba(255,255,255,.05)"
   // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
-  const statusColor = (label) => (label === "On track" || label === "Done") ? "#76C98D" : label === "Due soon" ? "#D6A95E" : "#E58A90";
+  const statusColor = (label) => (label === "On track" || label === "Done") ? FIRE.greenText : label === "Due soon" ? FIRE.amberText : FIRE.redText;
   // Card 1 — most recent done session's attendance (empty until persistence lands)
   const lastDone = sessions.filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a))[0];   // most recent TRAINING — leadership EVENTS excluded
   const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
@@ -17953,51 +17957,52 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   return (
     <PageShell kicker="TRAINING" title="Keep training on schedule"
       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
+      <NoirSkin>
 
       {/* TOP ROW — three dark cards (replaces the 3 Stat tiles) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
         {/* Card 1 — last session attendance (ring or honest empty state) */}
         <div style={Lcard}>
-          <div style={Lkick}>LAST SESSION ATTENDANCE</div>
+          <CardHead icon={Users} title="Last session attendance" style={{ marginBottom: 0 }} />
           {hasAtt ? (
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
               <svg width="72" height="72" viewBox="0 0 72 72" style={{ flexShrink: 0 }}>
                 <circle cx="36" cy="36" r={ringR} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="6" />
-                <circle cx="36" cy="36" r={ringR} fill="none" stroke="#76C98D" strokeWidth="6" strokeLinecap="round" strokeDasharray={ringC} strokeDashoffset={ringC * (1 - ringFrac)} transform="rotate(-90 36 36)" />
-                <text x="36" y="40" textAnchor="middle" fontSize="15" fontWeight="700" fill="#F7F8FA" style={{ fontFeatureSettings: '"tnum"' }}>{lastAtt}/{totalMembers}</text>
+                <circle cx="36" cy="36" r={ringR} fill="none" stroke={FIRE.greenText} strokeWidth="6" strokeLinecap="round" strokeDasharray={ringC} strokeDashoffset={ringC * (1 - ringFrac)} transform="rotate(-90 36 36)" />
+                <text x="36" y="40" textAnchor="middle" fontSize="15" fontWeight="700" fill={FIRE.textPrimary} style={{ fontFeatureSettings: '"tnum"' }}>{lastAtt}/{totalMembers}</text>
               </svg>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F2F5" }}>{lastDone.title}</div>
-                <div style={{ fontSize: 11.5, color: "#7E8794", marginTop: 2, ...Lnum }}>{fmtSess(lastDone)}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{lastDone.title}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{fmtSess(lastDone)}</div>
               </div>
             </div>
           ) : (
-            <div style={{ marginTop: 12, fontSize: 13, color: "#7E8794", lineHeight: 1.5 }}>No attendance recorded yet.<div style={{ fontSize: 11.5, color: "#9AA1AC", marginTop: 3 }}>Activates once session sign-in is saved.</div></div>
+            <div style={{ marginTop: 12, fontSize: 13, color: FIRE.textMuted, lineHeight: 1.5 }}>No attendance recorded yet.<div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Activates once session sign-in is saved.</div></div>
           )}
         </div>
 
         {/* Card 2 — training plan (upload + AI draft; neither built → honest "Coming soon") */}
         <div style={Lcard}>
-          <div style={Lkick}>TRAINING PLAN</div>
-          <div style={{ marginTop: 12, fontSize: 12.5, color: "#B6BDC8", lineHeight: 1.5 }}>Attach a plan or syllabus to a specific session — use <b style={{ color: "#F0F2F5" }}>Attach plan</b> on any session in the calendar below.</div>
+          <CardHead icon={FileText} title="Training plan" style={{ marginBottom: 0 }} />
+          <div style={{ marginTop: 12, fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>Attach a plan or syllabus to a specific session — use <b style={{ color: FIRE.name }}>Attach plan</b> on any session in the calendar below.</div>
           {canPlanAI && <button onClick={() => setDraftOpen((v) => !v)} style={{ ...Lbtn, marginTop: 10, width: "100%", justifyContent: "center" }}><Sparkles size={14} color={LbtnIcon} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
-          <div style={{ fontSize: 11, color: "#7E8794", marginTop: 8 }}>Draft a session plan with AI, then attach it to a session.</div>
+          <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8 }}>Draft a session plan with AI, then attach it to a session.</div>
         </div>
 
         {/* Card 3 — next session (pure read of existing sessions) */}
         <div style={Lcard}>
-          <div style={Lkick}>NEXT SESSION</div>
+          <CardHead icon={Calendar} title="Next session" style={{ marginBottom: 0 }} />
           {nextSession ? (
             <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 999, background: nextCat?.color || "#1F4E79", flexShrink: 0 }} />
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F2F5" }}>{nextSession.title}</div>
+                <span style={{ width: 9, height: 9, borderRadius: 999, background: nextCat?.color || FIRE.catBlue, flexShrink: 0 }} />
+                <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.name }}>{nextSession.title}</div>
               </div>
-              <div style={{ fontSize: 12, color: "#B6BDC8", marginTop: 4, ...Lnum }}>{fmtSess(nextSession)}</div>
-              {nextCat && <div style={{ fontSize: 11.5, color: "#7E8794", marginTop: 2 }}>Last trained: {nextCat.lastISO ? new Date(nextCat.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>}</div>}
+              <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 4, ...Lnum }}>{fmtSess(nextSession)}</div>
+              {nextCat && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>Last trained: {nextCat.lastISO ? new Date(nextCat.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>}</div>}
             </div>
           ) : (
-            <div style={{ marginTop: 12, fontSize: 13, color: "#7E8794" }}>Nothing scheduled yet.</div>
+            <div style={{ marginTop: 12, fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>
           )}
         </div>
       </div>
@@ -18007,7 +18012,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
-        <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#FBE9EB", border: "1px solid #F0CDD2", color: "#8A1620", borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 9, alignItems: "center", background: FIRE.btnBg, border: `1px solid ${FIRE.redText}55`, borderLeft: `3px solid ${FIRE.redText}`, color: FIRE.redText, borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
           <AlertTriangle size={16} style={{ flexShrink: 0 }} />
           <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
         </div>
@@ -18015,7 +18020,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
       {/* TRAINING CATEGORIES */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <div style={{ ...Lkick, marginBottom: 0 }}><GraduationCap size={13} /> TRAINING CATEGORIES</div>
+        <CardHead icon={GraduationCap} title="Training categories" style={{ marginBottom: 0, width: "auto" }} />
         {canManage && planView.length > 0 && (
           <button onClick={togglePlanEdit} style={{ ...Lbtn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
             {editPlanMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit trainings</>}
@@ -18030,7 +18035,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setPcolor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? "3px solid #F7F8FA" : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? `3px solid ${FIRE.textPrimary}` : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
               ))}
             </div>
           </div>
@@ -18040,7 +18045,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={LbtnIcon} /> Add a training</button>)}
       <div>
         {planView.length === 0 ? (
-          <div style={{ ...Lcard, fontSize: 13, color: "#9AA1AC" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
+          <div style={{ ...Lcard, fontSize: 13, color: FIRE.textMuted2 }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
         ) : planView.map(({ p, info }) => (
           editingPlanId === p.id ? (
             <div key={p.id} style={{ ...Lcard, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -18050,7 +18055,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
                   {CATEGORY_COLORS.map((col) => (
                     <button key={col} title={col} onClick={() => setEd((v) => ({ ...v, color: col }))}
-                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? "3px solid #F7F8FA" : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
+                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? `3px solid ${FIRE.textPrimary}` : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
                   ))}
                 </div>
               </div>
@@ -18059,16 +18064,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             </div>
           ) : (
             <div key={p.id} style={Lrow}>
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color || "#1F4E79", flexShrink: 0, display: "inline-block" }} />
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color || FIRE.catBlue, flexShrink: 0, display: "inline-block" }} />
               <div style={FS.rowTitle}>
-                <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{p.name}</span> <span style={{ color: "#9AA1AC", fontSize: 13 }}>· {p.cadence}</span>
-                <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>} · <span style={{ color: statusColor(info.label) }}>{info.rel}</span></div>
+                <span style={{ fontWeight: 600, color: FIRE.name }}>{p.name}</span> <span style={{ color: FIRE.textMuted2, fontSize: 13 }}>· {p.cadence}</span>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1, ...Lnum }}>Last: {p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span style={{ color: "#D08A8F" }}>never logged</span>} · <span style={{ color: statusColor(info.label) }}>{info.rel}</span></div>
               </div>
               <div style={FS.rowActions}>
                 <Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill>
                 {canManage && <button style={Lbtn} onClick={() => scheduleFor(p)}><CalendarCheck size={14} color={LbtnIcon} /> Schedule</button>}
                 {canManage && editPlanMode && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={14} color={LbtnIcon} /></button>}
-                {canManage && editPlanMode && canDeleteShared && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color="#C8606A" /></button>}
+                {canManage && editPlanMode && canDeleteShared && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removePlan(p.id)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
             </div>
           )
@@ -18076,7 +18081,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       </div>
 
       {/* TRAINING CALENDAR */}
-      <div style={{ ...Lkick, marginTop: 22, marginBottom: 10 }}><Calendar size={13} /> TRAINING CALENDAR</div>
+      <CardHead icon={Calendar} title="Training calendar" style={{ marginTop: 14 }} />
       {canManage && (showSess ? (
         <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           {!repeat && <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>}
@@ -18092,13 +18097,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
               {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                 const on = sAudience === val;
-                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
               })}
             </div></label>
           <CountsAttendanceCheckbox checked={sCounts} onChange={setSCounts} fieldStyle={Lfield} labelStyle={LfieldLabel} />
           <OffsiteCheckbox checked={sOffsite} onChange={setSOffsite} label={sOffLabel} onLabelChange={setSOffLabel} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
-            <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? "#F0F2F5" : "#9AA1AC" }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
+            <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? FIRE.name : FIRE.textMuted2 }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
           {repeat && <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Pattern</span>
             <select style={Linput} value={rPattern} onChange={(e) => setRPattern(e.target.value)}><option value="weekly">Weekly</option><option value="biweekly">Every other week</option><option value="monthly">Monthly</option></select></label>}
           {repeat && rPattern === "monthly" && <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>On the</span>
@@ -18122,7 +18127,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             renderChip={(s) => {
               // base color = linked category's live color, or fallback blue for one-off / deleted category
               const cat = plan.find((p) => String(p.id) === String(s.planId));
-              const base = s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (cat?.color || "#1F4E79");
+              const base = s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (cat?.color || FIRE.catBlue);
               // dim toward dark slate for completed (keep dark enough for white text)
               const mix = (hex, t) => {
                 const h = hex.replace("#", "");
@@ -18134,7 +18139,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               const color = s.done ? mix(base, 0.45) : base;
               return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
             }}
-            todayColor="#C8323A"
+            todayColor={FIRE.red}
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
           />
         </div>
@@ -18147,7 +18152,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               </button>
             </div>
           )}
-          {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: "#7E8794", marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
+          {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
             monthSessions.map((s) => {
               const att = s.attendance || [];
               const open = openAtt === s.id;
@@ -18161,22 +18166,22 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               return (
                 <div key={s.id}>
                   <div style={Lrow}>
-                    <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || "#1F4E79"} style={{ flexShrink: 0 }} />
+                    <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || FIRE.catBlue} style={{ flexShrink: 0 }} />
                     <div style={FS.rowTitle}>
-                      <span style={{ fontWeight: 600, color: "#F0F2F5" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} /></span>
-                      <div style={{ fontSize: 12, color: "#7E8794", marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
+                      <span style={{ fontWeight: 600, color: FIRE.name }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} /></span>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
                     <div style={FS.rowActions}>
                       <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
                       {s.plans.length > 0 && <button style={Lbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
-                      {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: "#76C98D", borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? "#76C98D" : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                      {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                       {canManage && (
                         <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                       )}
                       {isRestrictedEvent(s) && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
                       {s.done
-                        ? <><Pill S={S} color="#76C98D">DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
+                        ? <><Pill S={S} color={FIRE.greenText}>DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
                         : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
                       {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
                       {/* Remove survives only while the session is UNCLOSED and EMPTY. A closed drill is an
@@ -18187,7 +18192,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           Deliberately NOT reusing `locked`, which also covers signinOpen: an open QR sign-in
                           nobody has used yet is still an empty session and still cleanup-able. Reopen renders
                           in the done branch above, so a closed session shows the right action instead. */}
-                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color="#C8606A" /></button>}
+                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                     </div>
                   </div>
                   {editingSessionId === s.id && (
@@ -18200,7 +18205,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                         <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
                           {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                             const on = sessEdit.audience === val;
-                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
                           })}
                         </div></label>
                       <CountsAttendanceCheckbox checked={sessEdit.countsAttendance} onChange={(v) => setSessEdit((b) => ({ ...b, countsAttendance: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />
@@ -18211,31 +18216,31 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                   )}
                   {s.plans.length > 0 && openPlans === s.id && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
-                      <div style={{ fontSize: 11, color: "#7E8794", marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
                       {s.plans.map((p) => (
                         <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
-                          <FileText size={14} color={p.kind === "ai" ? "#D6A95E" : LbtnIcon} style={{ flexShrink: 0 }} />
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}{p.kind === "ai" ? " · AI" : ""}</span>
+                          <FileText size={14} color={p.kind === "ai" ? FIRE.amberText : LbtnIcon} style={{ flexShrink: 0 }} />
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}{p.kind === "ai" ? " · AI" : ""}</span>
                           {p.kind === "file"
                             ? <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => openPlan(p)}><FileText size={13} color={LbtnIcon} /> Open</button>
                             : <button style={{ ...Lbtn, padding: "5px 9px" }} onClick={() => setViewPlan(p)}><FileText size={13} color={LbtnIcon} /> View</button>}
-                          {canManage && editSessionMode && canDeleteShared && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color="#C8606A" /></button>}
+                          {canManage && editSessionMode && canDeleteShared && <button title="Remove" style={{ ...Lbtn, padding: "5px 7px" }} onClick={() => detachPlan(p)}><X size={13} color={FIRE.deleteRed} /></button>}
                         </div>
                       ))}
                     </div>
                   )}
                   {open && (
                     <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
-                      <div style={{ fontSize: 12, color: "#9AA1AC", marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted2, marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
                       {roll.map((m) => {
                         const present = att.includes(m.id);
                         return (
                           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
                             {canManage && !s.done
-                              ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color="#76C98D" /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
-                              : (present ? <CheckCircle2 size={18} color="#76C98D" /> : <X size={16} color="#E58A90" />)}
-                            <span style={{ flex: 1, fontSize: 13.5, color: present ? "#F0F2F5" : "#9AA1AC" }}>{m.name}{m.id === meId ? " (you)" : ""}{restricted && !rollFor(s, m) ? <span style={{ color: "#7E8794", fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: present ? "#76C98D" : "#E58A90" }}>{present ? "PRESENT" : "ABSENT"}</span>
+                              ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color={FIRE.greenText} /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
+                              : (present ? <CheckCircle2 size={18} color={FIRE.greenText} /> : <X size={16} color={FIRE.redText} />)}
+                            <span style={{ flex: 1, fontSize: 13.5, color: present ? FIRE.name : FIRE.textMuted2 }}>{m.name}{m.id === meId ? " (you)" : ""}{restricted && !rollFor(s, m) ? <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: present ? FIRE.greenText : FIRE.redText }}>{present ? "PRESENT" : "ABSENT"}</span>
                           </div>
                         );
                       })}
@@ -18260,11 +18265,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           still signs the member in and still earns no clock. */}
                       {s.isOffsite && (
                       <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "0.5px solid rgba(255,255,255,.08)" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#9AA1AC", letterSpacing: ".08em", marginBottom: 6 }}>WHERE THIS DRILL VERIFIES</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted2, letterSpacing: ".08em", marginBottom: 6 }}>WHERE THIS DRILL VERIFIES</div>
                         {s.locLat != null && s.locLng != null ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                            <MapPin size={14} color="#D6A95E" style={{ flexShrink: 0 }} />
-                            <span style={{ fontSize: 13, color: "#F0F2F5" }}>Off-site{s.locLabel ? <> · <b>{s.locLabel}</b></> : ""}<span style={{ color: "#7E8794" }}> · within {s.locRadius || 400}m of the set point</span></span>
+                            <MapPin size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+                            <span style={{ fontSize: 13, color: FIRE.name }}>Off-site{s.locLabel ? <> · <b>{s.locLabel}</b></> : ""}<span style={{ color: FIRE.textMuted }}> · within {s.locRadius || 400}m of the set point</span></span>
                             <button disabled={locBusy === s.id} title="Capture the spot again from where you're standing now" style={{ ...Lbtn, marginLeft: "auto" }} onClick={() => setOffsiteHere(s)}>{locBusy === s.id ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} color={LbtnIcon} />} Re-set here</button>
                           </div>
                         ) : (
@@ -18272,8 +18277,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                              NO clock (C3 fails closed rather than falling back to the station), and
                              open_signin refuses outright — so say so before it becomes an error. */
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                            <AlertTriangle size={14} color="#D6A95E" style={{ flexShrink: 0 }} />
-                            <span style={{ fontSize: 13, color: "#D6A95E" }}>Location not set — do this standing at the drill site.</span>
+                            <AlertTriangle size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+                            <span style={{ fontSize: 13, color: FIRE.amberText }}>Location not set — do this standing at the drill site.</span>
                             <input value={locLabelDraft[s.id] ?? (s.locLabel || "")} placeholder="Where? (optional)"
                               onChange={(e) => setLocLabelDraft((d) => ({ ...d, [s.id]: e.target.value }))}
                               style={{ ...Linput, flex: 1, minWidth: 150, fontSize: 12.5, padding: "6px 8px" }} />
@@ -18284,14 +18289,14 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       )}
                       {!liveToken ? (
                         <div>
-                          <div style={{ fontSize: 13, color: "#B6BDC8", marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: "#F0F2F5" }}>{s.title}</b>{tokenRestoreFailed[s.id] ? <> — but this device couldn&rsquo;t load its code just now. Try again in a moment; a new code would stop the one members already have from working.</> : <>. Its code should appear here automatically.</>}</> : <>Open a QR sign-in for <b style={{ color: "#F0F2F5" }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
+                          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 10 }}>{s.signinOpen ? <>A sign-in is already live for <b style={{ color: FIRE.name }}>{s.title}</b>{tokenRestoreFailed[s.id] ? <> — but this device couldn&rsquo;t load its code just now. Try again in a moment; a new code would stop the one members already have from working.</> : <>. Its code should appear here automatically.</>}</> : <>Open a QR sign-in for <b style={{ color: FIRE.name }}>{s.title}</b>. Members scan it on their own phones to check themselves in.</>}</div>
                           {/* C3's open_signin RAISES for an off-site drill with no location. Disable
                               here so the officer sees why before it becomes a server error; the RPC
                               guard is still the real wall against a crafted call. */}
                           <button disabled={needsLoc} title={needsLoc ? "Set the drill's location first — you have to be on site" : undefined}
                             style={{ ...LprimaryBtn, opacity: needsLoc ? 0.5 : 1, cursor: needsLoc ? "not-allowed" : "pointer" }}
                             onClick={() => { if (!needsLoc) openSI(s); }}><QrCode size={15} /> {s.signinOpen ? "New code" : "Open sign-in"}</button>
-                          {s.signinOpen && <button style={{ ...Lbtn, marginLeft: 8 }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>}
+                          {s.signinOpen && <button style={{ ...Lbtn, marginLeft: 8 }} onClick={() => closeSI(s)}><X size={14} color={FIRE.deleteRed} /> Close</button>}
                         </div>
                       ) : (
                         <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
@@ -18303,27 +18308,27 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                             <div ref={dlQRRef} aria-hidden style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }}>
                               <QRCodeCanvas value={checkinURL(s, liveToken)} size={720} marginSize={2} />
                             </div>
-                            <div style={{ marginTop: 8, fontSize: 12, color: "#9AA1AC" }}>This session's code: <b style={{ letterSpacing: 2, color: "#F0F2F5" }}>{liveToken}</b></div>
+                            <div style={{ marginTop: 8, fontSize: 12, color: FIRE.textMuted2 }}>This session's code: <b style={{ letterSpacing: 2, color: FIRE.name }}>{liveToken}</b></div>
                             <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
                               <button style={Lbtn} onClick={() => setExpandQR({ s, token: liveToken })}><Maximize2 size={14} color={LbtnIcon} /> Expand</button>
                               <button style={Lbtn} onClick={() => downloadSigninPNG(s, liveToken)}><Download size={14} color={LbtnIcon} /> Download PNG</button>
                               <button style={Lbtn} onClick={() => rotateSI(s)}><RefreshCw size={14} color={LbtnIcon} /> Rotate code</button>
-                              <button style={{ ...Lbtn, padding: "7px 11px" }} onClick={() => closeSI(s)}><X size={14} color="#C8606A" /> Close</button>
+                              <button style={{ ...Lbtn, padding: "7px 11px" }} onClick={() => closeSI(s)}><X size={14} color={FIRE.deleteRed} /> Close</button>
                             </div>
                           </div>
                           <div style={{ flex: 1, minWidth: 190 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "#9AA1AC", marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
-                            {(s.attendance || []).length === 0 ? <div style={{ fontSize: 12.5, color: "#7E8794" }}>No one's scanned in yet.</div> :
+                            <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted2, marginBottom: 6 }}>SIGNED IN ({(s.attendance || []).length})</div>
+                            {(s.attendance || []).length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No one's scanned in yet.</div> :
                               (s.attendance || []).map((id) => { const mm = members.find((x) => x.id === id); const tt = (s.times || {})[id];
                                 return (
                                   <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
-                                    <CheckCircle2 size={15} color="#76C98D" style={{ flexShrink: 0 }} />
-                                    <span style={{ flex: 1, color: "#F0F2F5" }}>{mm ? mm.name : `Member #${id}`}{id === meId ? " (you)" : ""}</span>
-                                    <span style={{ fontSize: 11.5, color: "#7E8794" }}>{tt || "added"}</span>
+                                    <CheckCircle2 size={15} color={FIRE.greenText} style={{ flexShrink: 0 }} />
+                                    <span style={{ flex: 1, color: FIRE.name }}>{mm ? mm.name : `Member #${id}`}{id === meId ? " (you)" : ""}</span>
+                                    <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{tt || "added"}</span>
                                   </div>
                                 );
                               })}
-                            <div style={{ fontSize: 11, color: "#7E8794", marginTop: 12, lineHeight: 1.5 }}>Each session gets its own code; rotate it if it leaks. The code is generated server-side, and a scan records the scanning member's own attendance.</div>
+                            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.5 }}>Each session gets its own code; rotate it if it leaks. The code is generated server-side, and a scan records the scanning member's own attendance.</div>
                           </div>
                         </div>
                       )}
@@ -18345,6 +18350,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <div style={{ color: "rgba(255,255,255,.6)", fontSize: 14, marginTop: 8 }}>{fmtSess(expandQR.s)} · Code {expandQR.token} · tap anywhere to close</div>
         </div>
       )}
+      </NoirSkin>
     </PageShell>
   );
 }

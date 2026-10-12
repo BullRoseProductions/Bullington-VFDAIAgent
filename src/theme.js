@@ -47,6 +47,7 @@ export const FIRE = {
   kickerNoir: "#F2A3A8",                                          // brighter redText for the hero kicker
   // Noir categorical set (dashboard calendar): distinct, harmonized with the shell.
   catBlue: "#4F90D6", catGreen: "#2FA869", catAmber: "#CC9E52", catViolet: "#8E7CC3",
+  catTeal: "#3AA6A0", catOrange: "#D9783A",                      // extra picker hues so 8 category swatches stay distinct
   barGlowNoir: "rgba(224,58,68,.45)",                             // FIRE.redBright glow on the current bar / point
 };
 
