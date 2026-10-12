@@ -20258,6 +20258,7 @@ function HeroTile({ n, label, sub, color, onClick }) {
 // A month with no drills is a GAP in the line, never a 0.
 function AttendanceTrend({ series }) {
   const noir = React.useContext(NoirCtx);
+  const gid = React.useId().replace(/:/g, "");
   const [hover, setHover] = useState(null);
   const { grown, transition } = useChartGrow();
   const [wrapRef, W] = useChartWidth();
@@ -20277,6 +20278,14 @@ function AttendanceTrend({ series }) {
   return (
     <div ref={wrapRef}>
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria} style={CHART_SVG(H)} onMouseLeave={() => setHover(null)}>
+      {noir && (
+        <defs>
+          <linearGradient id={`at-${gid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={FIRE.redBright} stopOpacity={0.34} />
+            <stop offset="100%" stopColor={FIRE.redBright} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+      )}
       {[100, 50, 0].map((p) => (
         <g key={p}>
           <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? (noir ? FIRE.line2Noir : FIRE.btnBorder) : FIRE.track} strokeDasharray={noir && p !== 0 ? "3 3" : undefined} />
@@ -20286,8 +20295,8 @@ function AttendanceTrend({ series }) {
       <g style={{ opacity: grown ? 1 : 0, transition }}>
         {segs.map((s) => (
           <g key={s[0]}>
-            {s.length > 1 && <path d={`M${s.map((i) => `${xAt(i)},${yAt(series[i].pct)}`).join(" L")} L${xAt(s[s.length - 1])},${yBot} L${xAt(s[0])},${yBot} Z`} fill={FIRE.red} fillOpacity={0.12} />}
-            {s.length > 1 && <polyline points={s.map((i) => `${xAt(i)},${yAt(series[i].pct)}`).join(" ")} fill="none" stroke={FIRE.red} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />}
+            {s.length > 1 && <path d={`M${s.map((i) => `${xAt(i)},${yAt(series[i].pct)}`).join(" L")} L${xAt(s[s.length - 1])},${yBot} L${xAt(s[0])},${yBot} Z`} fill={noir ? `url(#at-${gid})` : FIRE.red} fillOpacity={noir ? 1 : 0.12} />}
+            {s.length > 1 && <polyline points={s.map((i) => `${xAt(i)},${yAt(series[i].pct)}`).join(" ")} fill="none" stroke={noir ? FIRE.redBright : FIRE.red} strokeWidth={noir ? 2.25 : 2} strokeLinecap="round" strokeLinejoin="round" />}
           </g>
         ))}
         {series.map((m, i) => m.pct != null && i !== lastIdx && <circle key={i} cx={xAt(i)} cy={yAt(m.pct)} r={hover === i ? 4 : 2.6} fill={FIRE.red} />)}
@@ -20442,7 +20451,7 @@ function MonthlyBars({ months, vals, tip, aria }) {
   const [wrapRef, W] = useChartWidth();
   const H = 124, x0 = 30, x1 = W - 6, base = 100, top = 18;
   if (!months.length) return <div ref={wrapRef} style={{ fontSize: 13, color: FIRE.textMuted }}>No months in this period yet.</div>;
-  const slot = (x1 - x0) / months.length, bw = Math.min(34, slot * 0.6);
+  const slot = (x1 - x0) / months.length, bw = noir ? Math.min(46, slot * 0.78) : Math.min(34, slot * 0.6);   // Noir: the mock's fuller bars
   const cx = (i) => x0 + slot * i + slot / 2;
   const hAt = (v) => (v / niceMax) * (base - top);
   // Crowded (12 months on a phone): value labels only where they fit, month labels every other month —
