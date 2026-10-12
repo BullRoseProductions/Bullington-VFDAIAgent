@@ -20807,19 +20807,23 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
           </div>
           {actionCenter}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 8, marginTop: 8 }}>
+        {/* Certifications | Station duties side by side (stacked on a phone), then Apparatus readiness on its own
+            full-width row so the readiness bar spans the dashboard; its legend stays beneath the bar. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginTop: 8 }}>
           {certsPanel}
           <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
             <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
               <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
             </div>
           </ChartPanel>
-          {moduleEnabled("apparatus", dept?.disabled_modules) && (
+        </div>
+        {moduleEnabled("apparatus", dept?.disabled_modules) && (
+          <div style={{ marginTop: 8 }}>
             <ChartPanel icon={Truck} title="Apparatus readiness" note="as of today" onOpen={to("apparatus")}>
               <ApparatusReadinessBar />
             </ChartPanel>
-          )}
-        </div>
+          </div>
+        )}
       </>
     );
   }
