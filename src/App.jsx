@@ -10,6 +10,7 @@ import {
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
 } from "lucide-react";
+import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
 import { mergeStationHours } from "../shared/station-hours.js";
 import { todayISOIn } from "../shared/zoned-time.js";
@@ -38,55 +39,7 @@ import PDF_WORKER_URL from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 /* ------------------------------------------------------------------ */
 const APP = "Before the Call";
 
-/* ---------------- FIRE-LUXURY palette (shared; rest of app adopts later) ---------------- */
-const FIRE = {
-  pageBg: "radial-gradient(130% 100% at 100% 0%, #1A1217 0%, #0E1014 42%, #0A0B0E 100%)",
-  sidebar: "#0A0C0F",
-  card: "#13161B",
-  hairline: "rgba(255,255,255,.05)",
-  cardShadow: "0 10px 30px rgba(0,0,0,.4)",
-  cardRadius: 16,
-  textPrimary: "#F7F8FA",
-  textSecondary: "#B6BDC8",
-  textMuted: "#7E8794",
-  textMuted2: "#9AA1AC",
-  red: "#C8323A",          // active-nav hairline, today marker, kicker labels
-  redBright: "#E5484D",    // tiny icon accents only
-  green: "#3FB860",
-  greenText: "#76C98D",
-  amberText: "#D6A95E",
-  blueText: "#5B9BD5",   // Board-audience events (distinct from leadership amber + fire red)
-  redText: "#E58A90",
-  track: "rgba(255,255,255,.06)",
-  // --- Phase 0 additive tokens (values previously hardcoded in the Training reskins) ---
-  name: "#F0F2F5",                       // near-white for NAMES (kept distinct from textPrimary #F7F8FA)
-  btnBg: "rgba(255,255,255,.04)",        // dark control fill
-  btnBorder: "rgba(255,255,255,.1)",     // dark control border
-  inputBorder: "rgba(255,255,255,.12)",
-  btnText: "#E7EAEF",
-  btnIcon: "#9AA1AC",                    // == textMuted2
-  navLabel: "#C7CDD6",
-  neverLogged: "#D08A8F",
-  deleteRed: "#C8606A",
-  white: "#fff",
-  // --- Industrial Noir (DA dashboard skin, v11 mock) ---
-  cardNoir: "linear-gradient(180deg, #0F131A, #0B0E13)",          // card face: faint top-to-bottom falloff
-  card2Noir: "#10141A",                                           // inset sub-panel (mini charts) inside a Noir card
-  insetNoir: "#0A0D11",                                           // icon wells, segmented-control track
-  lineNoir: "rgba(255,255,255,.07)",                              // Noir hairline (a touch stronger than `hairline`)
-  line2Noir: "rgba(255,255,255,.13)",                             // Noir axis / control border
-  cardShadowNoir: "0 10px 30px rgba(0,0,0,.45)",
-  tileShadowNoir: "0 4px 14px rgba(0,0,0,.4)",
-  // Hero band, in layers (bottom → top): the warm-edged near-black sweep, an optional photo, the glows, the left shade.
-  heroBaseNoir: "linear-gradient(100deg, #05070A 0%, #0A0D12 55%, #160A0D 100%)",
-  heroGlowNoir: "radial-gradient(140% 170% at 92% 0%, rgba(224,58,68,.58), rgba(200,50,58,.18) 30%, rgba(200,50,58,0) 50%), radial-gradient(90% 130% at 104% 122%, rgba(150,52,30,.4), rgba(0,0,0,0) 55%)",
-  heroShadeNoir: "linear-gradient(90deg, rgba(0,0,0,.6) 0%, rgba(0,0,0,.25) 32%, transparent 52%)",
-  heroPhotoOpacity: 0.2,                                          // a hero photo sits at ~15–25% under the glows
-  kickerNoir: "#F2A3A8",                                          // brighter redText for the hero kicker
-  // Noir categorical set (dashboard calendar): distinct, harmonized with the shell.
-  catBlue: "#4F90D6", catGreen: "#2FA869", catAmber: "#CC9E52", catViolet: "#8E7CC3",
-  barGlowNoir: "rgba(224,58,68,.45)",                             // FIRE.redBright glow on the current bar / point
-};
+/* ---------------- FIRE palette: src/theme.js (shared with the sign-in screens) ---------------- */
 
 /* ---------------- Fire-luxury shared style recipes (reference FIRE tokens; reused across reskinned pages) ---------------- */
 const FS = {

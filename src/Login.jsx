@@ -4,6 +4,7 @@ import { readFreshPendingScan, scanRedirectUrl } from "./pendingScan";
 // The cooldown and the sender are shared with the admin-side resend in App.jsx: all of these
 // buttons draw on ONE project-wide auth-email allowance, so the guard has to be one definition.
 import { RESEND_COOLDOWN, sendLoginLink } from "./authLinks";
+import { AUTH } from "./theme.js";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -74,20 +75,14 @@ export default function Login() {
   const busy = loading || cooldown > 0;
 
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20, paddingTop: "calc(20px + env(safe-area-inset-top))", paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
-      <style>{`
-        .b4c-input { transition: border-color .15s ease, box-shadow .15s ease; }
-        .b4c-input:focus { outline: none; border-color: #2E6FC7; box-shadow: 0 0 0 3px rgba(46,111,199,.25); }
-        .b4c-input::placeholder { color: #5D6B85; }
-      `}</style>
+    <div style={AUTH.page}>
+      <style>{AUTH.css}</style>
       <div style={{ width: "100%", maxWidth: 380 }}>
-        <img
-          src="/B4C-Main.png"
-          alt="Before the Call — Keeping Responders Prepared"
-          style={{ display: "block", width: "100%", maxWidth: 360, height: "auto", margin: "0 auto 24px" }}
-        />
-        <div style={{ background: "#0E1220", borderRadius: 16, border: "1px solid rgba(90,130,200,.14)", padding: 26, boxShadow: "0 12px 34px rgba(0,0,0,.5)" }}>
-          <div style={{ fontSize: 13, color: "#8FA3C4", textAlign: "center", margin: "0 0 18px" }}>Sign in to continue.</div>
+        <div style={AUTH.card}>
+          <img src="/b4c-logo.png" alt="B4C — Before the Call" style={AUTH.logo} />
+          <div style={AUTH.brandLine}>Before the Call</div>
+
+          <div style={AUTH.body}>Sign in to continue.</div>
 
           <input
             className="b4c-input"
@@ -95,7 +90,7 @@ export default function Login() {
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid rgba(90,130,200,.22)", background: "#10141F", color: "#EAEEF5", colorScheme: "dark", marginBottom: 10 }}
+            style={{ ...AUTH.input, marginBottom: 10 }}
           />
           <input
             className="b4c-input"
@@ -104,15 +99,15 @@ export default function Login() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && signInPassword()}
-            style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid rgba(90,130,200,.22)", background: "#10141F", color: "#EAEEF5", colorScheme: "dark", marginBottom: 12 }}
+            style={{ ...AUTH.input, marginBottom: 12 }}
           />
 
-          {err && <div style={{ fontSize: 13, color: "#E58A90", marginBottom: 12 }}>{err}</div>}
+          {err && <div style={{ fontSize: 13, color: AUTH.err, marginBottom: 12 }}>{err}</div>}
 
           <button
             onClick={signInPassword}
             disabled={loading}
-            style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2E6FC7", border: "none", borderRadius: 10, cursor: "pointer", opacity: loading ? 0.7 : 1, boxShadow: "0 4px 16px rgba(46,111,199,.35)", marginBottom: 14 }}
+            style={{ ...AUTH.primary, cursor: "pointer", opacity: loading ? 0.7 : 1, marginBottom: 14 }}
           >
             {loading ? "Working…" : "Sign in"}
           </button>
@@ -120,21 +115,21 @@ export default function Login() {
           <button
             onClick={resetPassword}
             disabled={busy}
-            style={{ display: "block", width: "100%", margin: "0 0 14px", padding: "2px 0", fontSize: 13, fontWeight: 600, color: "#8FA3C4", background: "none", border: "none", cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1, textDecoration: "underline", fontFamily: "inherit" }}
+            style={{ ...AUTH.link, display: "block", width: "100%", margin: "0 0 14px", padding: "2px 0", fontSize: 13, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
           >
             {cooldown > 0 && sent === "reset" ? `Resend in ${cooldown}s…` : "Forgot password?"}
           </button>
 
-          <div style={{ borderTop: "1px solid rgba(90,130,200,.14)", paddingTop: 14 }}>
+          <div style={{ borderTop: AUTH.divider, paddingTop: 14 }}>
             {sent && (
-              <div style={{ fontSize: 13.5, color: "#76C98D", lineHeight: 1.5, marginBottom: 12 }}>
+              <div style={{ fontSize: 13.5, color: AUTH.ok, lineHeight: 1.5, marginBottom: 12 }}>
                 Sent — check your email. We sent a {sent === "reset" ? "password-reset" : "sign-in"} link to <b>{email}</b>.{sent === "reset" ? " Tap it, then pick a new password." : ""}
               </div>
             )}
             <button
               onClick={sendLink}
               disabled={busy}
-              style={{ width: "100%", padding: "9px", fontSize: 13.5, fontWeight: 600, color: "#8FA3C4", background: "rgba(90,130,200,.06)", border: "1px solid rgba(90,130,200,.20)", borderRadius: 10, cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
+              style={{ ...AUTH.secondary, cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
             >
               {cooldown > 0 && sent === "link" ? `Resend in ${cooldown}s…` : "Or email me a login link instead"}
             </button>

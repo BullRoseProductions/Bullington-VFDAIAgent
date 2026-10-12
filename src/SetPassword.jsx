@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
+import { AUTH } from "./theme.js";
 
 /* THE SET-PASSWORD SCREEN, and the password rules it enforces.
  *
@@ -87,13 +88,15 @@ export function SetNewPassword({ hasSession, onDone, firstTime = false }) {
   }
 
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #0A0E1A 0%, #0B0D14 45%, #080A10 100%)", fontFamily: "system-ui, sans-serif", padding: 20, paddingTop: "calc(20px + env(safe-area-inset-top))", paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
-      <style>{`.b4c-input:focus{outline:none;border-color:#2E6FC7;box-shadow:0 0 0 3px rgba(46,111,199,.25)} .b4c-input::placeholder{color:#5D6B85}`}</style>
+    <div style={AUTH.page}>
+      <style>{AUTH.css}</style>
       <div style={{ width: "100%", maxWidth: 380 }}>
-        <img src="/B4C-Main.png" alt="Before the Call" style={{ display: "block", width: "100%", maxWidth: 360, height: "auto", margin: "0 auto 24px" }} />
-        <div style={{ background: "#0E1220", borderRadius: 16, border: "1px solid rgba(90,130,200,.14)", padding: 26, boxShadow: "0 12px 34px rgba(0,0,0,.5)" }}>
-          <div style={{ fontSize: 16, color: "#EAEEF5", fontWeight: 700, textAlign: "center", margin: "0 0 6px" }}>{firstTime ? "Create your password" : "Set a new password"}</div>
-          <div style={{ fontSize: 13, color: "#8FA3C4", textAlign: "center", margin: "0 0 18px", lineHeight: 1.5 }}>
+        <div style={AUTH.card}>
+          <img src="/b4c-logo.png" alt="B4C — Before the Call" style={AUTH.logo} />
+          <div style={AUTH.brandLine}>Before the Call</div>
+
+          <div style={AUTH.heading}>{firstTime ? "Create your password" : "Set a new password"}</div>
+          <div style={AUTH.body}>
             {firstTime
               ? "Before you continue, choose a password. You'll use it to sign in from now on."
               : "Type a new password and you're in."}{" "}
@@ -108,20 +111,20 @@ export function SetNewPassword({ hasSession, onDone, firstTime = false }) {
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
             autoFocus
-            style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", fontSize: 15, borderRadius: 10, border: "1px solid rgba(90,130,200,.22)", background: "#10141F", color: "#EAEEF5", colorScheme: "dark", marginBottom: 10 }}
+            style={{ ...AUTH.input, marginBottom: 10 }}
           />
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "#8FA3C4", cursor: "pointer", marginBottom: 14, userSelect: "none" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: AUTH.muted, cursor: "pointer", marginBottom: 14, userSelect: "none" }}>
             <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Show password
           </label>
 
           {/* Live requirements — every rule visible from the start (never a surprise on submit) and
               ticking green as it's satisfied. aria-live so a screen reader announces each one passing. */}
-          <div aria-live="polite" style={{ margin: "0 0 14px", padding: "11px 12px", background: "rgba(90,130,200,.06)", border: "1px solid rgba(90,130,200,.14)", borderRadius: 10 }}>
-            <div style={{ fontSize: 12, color: "#8FA3C4", fontWeight: 600, marginBottom: 7 }}>Your password needs:</div>
+          <div aria-live="polite" style={{ ...AUTH.panel, margin: "0 0 14px", padding: "11px 12px" }}>
+            <div style={{ fontSize: 12, color: AUTH.muted, fontWeight: 600, marginBottom: 7 }}>Your password needs:</div>
             {PASSWORD_RULES.map((r) => {
               const met = r.test(password);
               return (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, lineHeight: 1.7, color: met ? "#76C98D" : "#8FA3C4" }}>
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, lineHeight: 1.7, color: met ? AUTH.ok : AUTH.muted }}>
                   <span aria-hidden="true" style={{ width: 14, textAlign: "center", fontWeight: 700 }}>{met ? "✓" : "○"}</span>
                   <span>{r.label}</span>
                   <span style={{ position: "absolute", left: -9999 }}>{met ? " — met" : " — not yet met"}</span>
@@ -130,12 +133,12 @@ export function SetNewPassword({ hasSession, onDone, firstTime = false }) {
             })}
           </div>
 
-          {err && <div style={{ fontSize: 13, color: "#E58A90", marginBottom: 12 }}>{err}</div>}
+          {err && <div style={{ fontSize: 13, color: AUTH.err, marginBottom: 12 }}>{err}</div>}
 
           <button
             onClick={save}
             disabled={!ready}
-            style={{ width: "100%", padding: "11px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2E6FC7", border: "none", borderRadius: 10, cursor: ready ? "pointer" : "default", opacity: ready ? 1 : 0.7, boxShadow: "0 4px 16px rgba(46,111,199,.35)" }}
+            style={{ ...AUTH.primary, cursor: ready ? "pointer" : "default", opacity: ready ? 1 : 0.7 }}
           >
             {loading ? "Saving…" : !hasSession ? "Preparing…" : firstTime ? "Save password & continue" : "Save password & sign in"}
           </button>
@@ -150,7 +153,7 @@ export function SetNewPassword({ hasSession, onDone, firstTime = false }) {
         {firstTime && (
           <button
             onClick={() => supabase.auth.signOut()}
-            style={{ display: "block", margin: "16px auto 0", background: "none", border: "none", color: "#8FA3C4", fontSize: 13, textDecoration: "underline", cursor: "pointer" }}
+            style={{ ...AUTH.link, display: "block", margin: "16px auto 0", fontSize: 13, cursor: "pointer" }}
           >
             Sign out instead
           </button>
