@@ -14785,9 +14785,9 @@ function IssueEquipmentModal({ S, availableUnits, members, managers, meId, notif
   }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 480, padding: 20, margin: "24px 0" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 480, padding: 20, margin: "24px 0" }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <div style={FS.kicker}>ISSUE EQUIPMENT</div>
+          <CardHead icon={Briefcase} title="Issue equipment" style={{ marginBottom: 0, width: "auto" }} />
           <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
         </div>
 
@@ -14881,9 +14881,9 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
   }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <div style={FS.kicker}>CONFIRM RETURN</div>
+          <CardHead icon={ClipboardCheck} title="Confirm return" style={{ marginBottom: 0, width: "auto" }} />
           <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
         </div>
         <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{row.equipment_name}</div>
@@ -14942,9 +14942,9 @@ function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
   }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <div style={FS.kicker}>RECOVER ITEM</div>
+          <CardHead icon={RotateCcw} title="Recover item" style={{ marginBottom: 0, width: "auto" }} />
           <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
         </div>
         <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{unit.label}</div>
@@ -15803,6 +15803,7 @@ function Equipment({ S, role, members, meId, notify }) {
   };
   return (
     <PageShell above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got" sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
+      <NoirSkin>
       <div style={S.statRow}>
         <StatTile value={String(totalUnits)} label="Total units" />
         <StatTile value={String(available)} label="Available" />
@@ -15815,7 +15816,7 @@ function Equipment({ S, role, members, meId, notify }) {
       )}
       {(isDA || isManager) && (
         <Card padding="12px 16px" style={{ marginBottom: 14 }}>
-          <SectionLabel>EQUIPMENT MANAGERS</SectionLabel>
+          <CardHead icon={Users} title="Equipment managers" style={{ marginBottom: 0 }} />
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 10px", lineHeight: 1.4 }}>Up to two people control the equipment ledger.{isDA ? " You assign them." : ""}</div>
           {managers.length === 0 ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>No managers assigned yet.</div>
@@ -15847,7 +15848,7 @@ function Equipment({ S, role, members, meId, notify }) {
       )}
       {(isManager || isDA) && pending.length > 0 && (
         <Card padding="14px 16px" style={{ marginBottom: 12 }}>
-          <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ClipboardCheck size={13} color={FIRE.amberText} /> PENDING RETURNS · {pending.length}</SectionLabel>
+          <CardHead icon={ClipboardCheck} title="Pending returns" count={pending.length} />
           {pending.map((p, i) => (
             <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: i === pending.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -15924,6 +15925,7 @@ function Equipment({ S, role, members, meId, notify }) {
           onRecovered={() => { setRecovering(null); loadEquipment(); loadPending(); }}
         />
       )}
+      </NoirSkin>
     </PageShell>
   );
 }
