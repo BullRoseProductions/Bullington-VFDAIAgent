@@ -3432,16 +3432,18 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
   return (
-    <PageShell kicker={dept?.name ? `BOARD · ${dept.name}` : "BOARD"} title={dashboardGreeting(me)} sub="Department oversight at a glance.">
+    <PageShell band kicker={dept?.name ? `BOARD · ${dept.name}` : "BOARD"} title={dashboardGreeting(me)} sub="Department oversight at a glance." actions={<HeroAside />}>
+      {/* Noir skin, as on the DA dashboard: CardHead headers + the gradient card face down through the Chief's Report. */}
+      <NoirSkin>
 
       {/* MEETINGS & GOVERNANCE — governance leads for Board (read-only; ai_outputs/action_items are leader-readable) */}
-      <SectionLabel style={{ marginBottom: 8 }}>MEETINGS &amp; GOVERNANCE</SectionLabel>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
+      <CardHead icon={Landmark} title="Meetings & governance" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8, marginBottom: 14 }}>
         {/* Next leadership event — soonest future audience='leadership' session (Piece 4; repointed from the old agenda-draft NEXT MEETING) */}
         <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
         {/* Recent minutes — newest minutes draft */}
         <Card style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><FileText size={13} color={FIRE.red} /> RECENT MINUTES</SectionLabel>
+          <CardHead icon={FileText} title="Recent minutes" style={{ marginBottom: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             {minutesRow ? (<>
               <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{minutesRow.title || "Untitled minutes"}{minutesRow.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
@@ -3456,20 +3458,21 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
 
       {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
           unlike things (a 0% cert, a 42% attendance, a "no duties" n/a) into one figure nobody could act on. */}
-      <SectionLabel style={{ marginBottom: 8 }}>DEPARTMENT HEALTH · OVERSIGHT</SectionLabel>
+      <CardHead icon={HeartPulse} title="Department health · oversight" />
       {/* Read-only: no `go`, so no tile/panel links — same as the flat strip this replaced. Board attendance
           leads: it's the board's own accountability number. */}
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} boardFirst />
 
       {/* CHIEF'S REPORT — DA/PA open the Reports hub; everyone else lands on the read-only BoardStats */}
-      <Card style={{ borderLeft: `3px solid ${FIRE.red}`, marginTop: 12, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <BarChart3 size={20} color={FIRE.red} style={{ flexShrink: 0 }} />
+      <Card style={{ borderLeft: `3px solid ${FIRE.red}`, marginTop: 10, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <BarChart3 size={20} color={FIRE.redBright} style={{ flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>{isDeptAdmin(role) ? "Chief's Report" : "Department stats"}</div>
+          <div style={{ fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, letterSpacing: ".02em", color: FIRE.textPrimary }}>{isDeptAdmin(role) ? "Chief's Report" : "Department stats"}</div>
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>{isDeptAdmin(role) ? "The board-facing summary — readiness, certs, training, finances." : "The numbers behind the Chief's Report — compliance, apparatus, hours, funding, roster, training."}</div>
         </div>
         <button style={{ ...FS.btn, flexShrink: 0 }} onClick={() => go("reports")}>{isDeptAdmin(role) ? "Open report" : "View stats"} <ChevronRight size={14} color={FIRE.btnIcon} /></button>
       </Card>
+      </NoirSkin>
 
       {/* FEED + CALENDAR — read-only feed (Board not in ANNOUNCE_ROLES) beside the shared station calendar; mirrors DeptAdminDashboard */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
