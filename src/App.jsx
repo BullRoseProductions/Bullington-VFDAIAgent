@@ -9525,6 +9525,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   return (
     <PageShell kicker="ROSTER" title="Your people, all in one place"
       sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
+      <NoirSkin>
       <div style={S.segRow}>
         {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
@@ -9532,6 +9533,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
       {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -9784,6 +9786,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       // No join year → drop the "since" segment rather than print "since null" (JOINED below shows "—" the same way).
       sub={[member.role, member.joined ? `since ${member.joined}` : null, member.phone].filter(Boolean).join(" · ")}
       actions={<Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>}>
+      <NoirSkin>
       <Card padding="15px 16px" style={{ marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{part90 == null ? "—" : `${part90}%`}</span></div>
@@ -9793,7 +9796,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
         {assign && !editing && (
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <SectionLabel>PROFILE · LEADERSHIP ONLY</SectionLabel>
+              <CardHead icon={Users} title="Profile · leadership only" style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
                 {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
                 <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={startEditForm}>Edit member</button>
@@ -9871,7 +9874,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
 
       {moduleEnabled("stationhours", dept?.disabled_modules) && <MemberHoursPanel memberId={member.id} />}
 
-      <SectionLabel style={{ marginBottom: 8 }}><Award size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />CERTIFICATIONS</SectionLabel>
+      <CardHead icon={Award} title="Certifications" />
       {/* Cert rows unchanged inside the Card — including the phone-overlap fix (title flex:"1 1 160px" +
           overflowWrap:"anywhere"; controls in one wrapping group that drops below the title). */}
       <Card padding="15px 16px" style={{ marginBottom: 16 }}>
@@ -9909,7 +9912,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
         const went = expected.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
           <>
-            <SectionLabel style={{ marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />TRAINING HISTORY</SectionLabel>
+            <CardHead icon={CalendarCheck} title="Training history" />
             <Card padding="15px 16px" style={{ marginBottom: 16 }}>
               {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
                 <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{expected.length}</b> recorded sessions{expected.length < done.length ? ` since joining` : ""}.</div>
@@ -9949,7 +9952,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       })()}
 
       {assign && (<>
-      <SectionLabel style={{ marginBottom: 8 }}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MEMBER LOG — DEPT ADMINS ONLY</SectionLabel>
+      <CardHead icon={MessageSquare} title="Member log — Dept Admins only" />
       <Card padding="15px 16px">
         <div style={{ display: "flex", gap: 8, marginBottom: notes.length ? 14 : 0 }}>
           <input style={{ ...FS.input, flex: 1 }} placeholder="Add a note — training, performance, kudos, follow-ups…" value={note} onChange={(e) => setNote(e.target.value)} />
@@ -9964,6 +9967,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       </Card>
       </>)}
       {proofMount}
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -10089,7 +10093,7 @@ function RosterCerts({ S, members }) {
     <div>
       <div style={S.statRow}>
         {tileWrap(2, <StatTile value={String(n(2))} label="Certs current" onClick={() => toggleStatus(2)} />)}
-        {tileWrap(1, <StatTile value={String(n(1))} tone={n(1) > 0 ? "red" : undefined} label="Expiring within 90 days" onClick={() => toggleStatus(1)} />)}
+        {tileWrap(1, <StatTile value={String(n(1))} tone={n(1) > 0 ? "amber" : undefined} label="Expiring within 90 days" onClick={() => toggleStatus(1)} />)}
         {tileWrap(0, <StatTile value={String(n(0))} tone={n(0) > 0 ? "red" : undefined} label="Expired — action needed" onClick={() => toggleStatus(0)} />)}
         <div style={{ flex: 1, minWidth: 0, borderRadius: 12, outline: showingUncovered ? `2px solid ${FIRE.amberText}` : "none", outlineOffset: 2 }}>
           <StatTile value={String(cov.uncovered.length)} tone={cov.uncovered.length > 0 ? "red" : undefined} label="Members not covered" onClick={() => toggleStatus(UNCOVERED)} />
@@ -10121,9 +10125,9 @@ function RosterCerts({ S, members }) {
             : `Showing ${visible.length} of ${rows.length}`}
         </div>
       )}
-      <Card padding={22} style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 22 }}>
+      <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 14 }}>
         <div style={{ flex: 1 }}>
-          <SectionLabel style={{ marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />EXPIRATION ENGINE</SectionLabel>
+          <CardHead icon={CalendarCheck} title="Expiration engine" />
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Stay ahead of every renewal</h3>
           <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
@@ -10276,8 +10280,8 @@ function RosterAttendance({ S, members, sessions, plan }) {
     }));
   return (
     <div>
-      <SectionLabel style={{ marginBottom: 8 }}><CalendarCheck size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT EVENTS</SectionLabel>
-      <Card padding="4px 16px" style={{ marginBottom: 22 }}>
+      <CardHead icon={CalendarCheck} title="Recent events" />
+      <Card padding="4px 16px" style={{ marginBottom: 14 }}>
         {recentEvents.length === 0 ? <div style={{ padding: "12px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
           recentEvents.map((e) => {
           const pct = e.total ? Math.min(100, Math.round((e.present / e.total) * 100)) : 0;   // cap display + bar at 100%; raw present/total shown as-is
@@ -10296,7 +10300,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
           );
         })}
       </Card>
-      <SectionLabel style={{ marginBottom: 8 }}>MEMBER PARTICIPATION (LAST 90 DAYS)</SectionLabel>
+      <CardHead icon={Users} title="Member participation (last 90 days)" />
       <Card padding="4px 16px">
         {people.map((m) => {
           const p = pctById.get(m.id) ?? null;   // live 90-day pct (null = no eligible drills in window → "—")
@@ -20648,7 +20652,7 @@ function MemberHoursPanel({ memberId }) {
   return (
     <Card style={{ marginBottom: 16, minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-        <SectionLabel><Clock size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION HOURS</SectionLabel>
+        <CardHead icon={Clock} title="Station hours" style={{ marginBottom: 0, width: "auto" }} />
         <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>credited · last 6 months</span>
       </div>
       {err ? (
