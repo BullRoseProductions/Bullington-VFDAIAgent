@@ -3615,8 +3615,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       </div>
       <NoirSkin>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
+      <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 8 }} />
       </NoirSkin>
-      <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 12 }} />
       <CardHead icon={Wand2} title="Quick actions" style={{ marginTop: 14 }} />
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
@@ -3926,6 +3926,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
 // Read-only: completion stays leader-only (complete_action_item is is_canmanage()-gated). `go` omitted →
 // no "View items" link (Members have no Meetings screen).
 function ActionItemsCard({ meId, go, style }) {
+  const noir = React.useContext(NoirCtx);   // Noir (DA dashboard): CardHead header; Card picks up the Noir face itself
   const [items, setItems] = useState(null);   // null = not loaded
   const [loadErr, setLoadErr] = useState(false);
   const load = () => {
@@ -3952,7 +3953,9 @@ function ActionItemsCard({ meId, go, style }) {
   const fmtDue = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
   return (
     <Card style={{ display: "flex", flexDirection: "column", gap: 8, ...style }}>
-      <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> OPEN ACTION ITEMS · {items.length}</SectionLabel>
+      {noir
+        ? <CardHead icon={ClipboardCheck} title="Open action items" count={items.length} style={{ marginBottom: 0 }} />
+        : <SectionLabel style={{ display: "flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={13} color={FIRE.red} /> OPEN ACTION ITEMS · {items.length}</SectionLabel>}
       <div style={{ flex: 1, minWidth: 0 }}>
         {items.slice(0, 3).map((it) => {
           const yours = it.assigned_to === meId;
