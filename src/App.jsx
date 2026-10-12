@@ -77,9 +77,14 @@ const FIRE = {
   line2Noir: "rgba(255,255,255,.13)",                             // Noir axis / control border
   cardShadowNoir: "0 10px 30px rgba(0,0,0,.45)",
   tileShadowNoir: "0 4px 14px rgba(0,0,0,.4)",
-  // Hero band: red glow top-right + an ember glow bottom-right over a warm-edged near-black sweep.
-  heroNoir: "radial-gradient(130% 150% at 90% 4%, rgba(200,50,58,.42), rgba(200,50,58,0) 40%), radial-gradient(80% 120% at 102% 118%, rgba(120,42,30,.3), rgba(0,0,0,0) 50%), linear-gradient(100deg, #05070A 0%, #0A0D12 55%, #130A0C 100%)",
-  heroShadeNoir: "linear-gradient(90deg, rgba(0,0,0,.35), transparent 40%)",
+  // Hero band, in layers (bottom → top): the warm-edged near-black sweep, an optional photo, the glows, the left shade.
+  heroBaseNoir: "linear-gradient(100deg, #05070A 0%, #0A0D12 55%, #160A0D 100%)",
+  heroGlowNoir: "radial-gradient(140% 170% at 92% 0%, rgba(224,58,68,.58), rgba(200,50,58,.18) 30%, rgba(200,50,58,0) 50%), radial-gradient(90% 130% at 104% 122%, rgba(150,52,30,.4), rgba(0,0,0,0) 55%)",
+  heroShadeNoir: "linear-gradient(90deg, rgba(0,0,0,.6) 0%, rgba(0,0,0,.25) 32%, transparent 52%)",
+  heroPhotoOpacity: 0.2,                                          // a hero photo sits at ~15–25% under the glows
+  kickerNoir: "#F2A3A8",                                          // brighter redText for the hero kicker
+  // Noir categorical set (dashboard calendar): distinct, harmonized with the shell.
+  catBlue: "#4F90D6", catGreen: "#2FA869", catAmber: "#CC9E52", catViolet: "#8E7CC3",
   barGlowNoir: "rgba(224,58,68,.45)",                             // FIRE.redBright glow on the current bar / point
 };
 
@@ -132,7 +137,7 @@ function useFitHeight(on) {
 // The page frame: red kicker + Oswald title (+ optional lead mark, sub-line, right-aligned actions), then the
 // content. fitToScreen pins the header and scrolls the content region internally — the no-scroll guardrail.
 // `above` renders before the header (a "Back to …" link on a drill-down page).
-function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, children }) {
+function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, bandImage, children }) {
   const [bodyRef, top] = useFitHeight(!!fitToScreen);
   // Below the content region sit the shell's own bottom padding (22px) and the app frame's content padding
   // (S.content: 26px + the safe area). Subtract both, or the outer page keeps a 26px scroll of its own.
@@ -140,23 +145,26 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
     ? { height: `calc(100dvh - ${top}px - 48px - env(safe-area-inset-bottom))`, overflowY: "auto", minHeight: 0 }
     : null;
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: band ? "10px 14px" : "22px 20px", margin: "-6px -2px 0" }}>
+    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: band ? "8px 12px" : "22px 20px", margin: "-6px -2px 0" }}>
       {above}
       {band ? (
         /* Industrial Noir hero band (the mock's .hero): red glow top-right + ember bottom-right over a warm-edged
            sweep, a left shade, the faint B4C emblem, kicker → Oswald greeting → short red bar. `actions` holds the
            right side (pillars, quote, next event). */
-        <div className="noir-hero" style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.heroNoir, padding: "14px 22px", marginBottom: 10 }}>
+        <div className="noir-hero" style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.heroBaseNoir, padding: "24px 26px", minHeight: 132, display: "flex", flexDirection: "column", justifyContent: "center", marginBottom: 8, boxShadow: FIRE.cardShadowNoir }}>
+          {/* Photo slot: `bandImage` (a URL) renders behind the glows at heroPhotoOpacity; absent → nothing. */}
+          {bandImage && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${bandImage})`, backgroundSize: "cover", backgroundPosition: "center", opacity: FIRE.heroPhotoOpacity, pointerEvents: "none" }} />}
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroGlowNoir, pointerEvents: "none" }} />
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroShadeNoir, pointerEvents: "none" }} />
           <div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 150, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 74, letterSpacing: "-.03em", color: FIRE.textPrimary, opacity: 0.035, pointerEvents: "none", userSelect: "none" }}>B4C</div>
           <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, flex: "1 1 260px", minWidth: 0 }}>
               {lead}
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10, letterSpacing: ".2em", textTransform: "uppercase", color: FIRE.redText, margin: "0 0 5px" }}>{kicker}</div>
-                <h1 style={{ fontFamily: DISPLAY_FONT, fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", lineHeight: 1 }}>{title}</h1>
-                {sub && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 5 }}>{sub}</div>}
-                <div style={{ width: 34, height: 2, borderRadius: 2, background: FIRE.redBright, marginTop: 8 }} />
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".2em", textTransform: "uppercase", color: FIRE.kickerNoir, margin: "0 0 7px" }}>{kicker}</div>
+                <h1 style={{ fontFamily: DISPLAY_FONT, fontSize: 32, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", lineHeight: 1, textShadow: "0 2px 18px rgba(0,0,0,.55)" }}>{title}</h1>
+                {sub && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 6 }}>{sub}</div>}
+                <div style={{ width: 48, height: 3, borderRadius: 2, background: FIRE.redBright, marginTop: 10, boxShadow: `0 0 10px ${FIRE.barGlowNoir}` }} />
               </div>
             </div>
             {actions}
@@ -194,7 +202,7 @@ const useCardFace = () => (React.useContext(NoirCtx) ? FS.cardNoir : FS.card);
 // optional red count badge, and `right` pushed to the far end.
 function CardHead({ icon: Icon, title, count, right, as: Tag = "div", style, ...rest }) {
   return (
-    <Tag style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", color: "inherit", ...style }} {...rest}>
+    <Tag style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", color: "inherit", ...style }} {...rest}>
       {Icon && <Icon size={16} color={FIRE.redBright} style={{ flexShrink: 0 }} />}
       <span style={{ position: "relative", paddingBottom: 4, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, letterSpacing: ".02em", color: FIRE.textPrimary, lineHeight: 1.15, whiteSpace: "nowrap" }}>
         {title}
@@ -209,14 +217,14 @@ function CardHead({ icon: Icon, title, count, right, as: Tag = "div", style, ...
 // and a small caption under it.
 function MiniChart({ title, swatch, caption, onOpen, children }) {
   return (
-    <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "10px 12px 9px", minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+    <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "8px 11px 7px", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
         {swatch}
         <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".02em", color: FIRE.textPrimary }}>{title}</span>
         {onOpen && <button onClick={onOpen} aria-label={`Open ${title}`} style={{ marginLeft: "auto", background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}><ChevronRight size={15} color={FIRE.btnIcon} /></button>}
       </div>
       {children}
-      {caption && <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 4 }}>{caption}</div>}
+      {caption && <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 2 }}>{caption}</div>}
     </div>
   );
 }
@@ -235,14 +243,14 @@ function StatTile({ label, value, sub, tone, onClick, icon: Icon }) {
   const Tag = onClick ? "button" : "div";
   const face = useCardFace();
   if (React.useContext(NoirCtx)) return (
-    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...face, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+    <Tag onClick={onClick} className={onClick ? "stat-cta" : undefined} style={{ ...face, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "9px 12px", textAlign: "left", cursor: onClick ? "pointer" : "default", fontFamily: "inherit", width: "100%", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        {Icon ? <span style={{ width: 30, height: 30, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon size={15} color={FIRE.redText} /></span> : <span />}
+        {Icon ? <span style={{ width: 26, height: 26, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon size={14} color={FIRE.redText} /></span> : <span />}
         {onClick && <ChevronRight size={15} color={FIRE.btnIcon} />}
       </div>
-      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 28, lineHeight: 1, letterSpacing: "-.01em", color: TONE[tone] || FIRE.textPrimary, marginTop: 8, ...FS.num }}>{value}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: FIRE.textSecondary, marginTop: 4 }}>{label}</div>
-      {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 25, lineHeight: 1, letterSpacing: "-.01em", color: TONE[tone] || FIRE.textPrimary, marginTop: 6, ...FS.num }}>{value}</div>
+      <div style={{ fontSize: 11.5, fontWeight: 500, color: FIRE.textSecondary, marginTop: 3 }}>{label}</div>
+      {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>}
     </Tag>
   );
   return (
@@ -3601,7 +3609,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           </div>
           <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, alignSelf: "flex-start" }} onClick={() => go("roster")}>View certs</button>
         </Card>}
-        {showPendingCard && <Card padding="12px 16px" style={{ borderLeft: `3px solid #378ADD`, display: "flex", flexDirection: "column", gap: 8 }}>
+        {showPendingCard && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.catBlue}`, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
               <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 28, lineHeight: 1, color: FIRE.textPrimary }}>{pendingCerts.length}</span>
@@ -3638,7 +3646,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} overview actionCenter={actionCenter}
         extraHero={<StatTile icon={ClipboardList} value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
       </NoirSkin>
-      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 12, maxWidth: 360 }} />
+      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 8, maxWidth: 360 }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
@@ -3654,7 +3662,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           const q = QUICK[n.key] || {};
           return (
             <button key={k} style={{ ...S.quickCard, ...FS.card }} onClick={() => go(k)}>
-              <span style={{ ...S.quickIcon, background: q.accent }}><n.Icon size={18} color="#fff" /></span>
+              <span style={{ ...S.quickIcon, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}` }}><n.Icon size={18} color={FIRE.redText} /></span>
               <div style={{ flex: 1 }}>
                 <div style={{ ...S.quickTitle, color: FIRE.textPrimary }}>{n.label}</div>
                 <div style={{ ...S.quickBlurb, color: FIRE.textMuted }}>{q.blurb}</div>
@@ -5848,7 +5856,7 @@ const TIER_STYLES = {
 };
 // compact (dashboard only): shorter cells, 2 chips per day instead of 3, slightly tighter padding. Default off,
 // so the full-page Content / Recruitment / Funding calendars are unchanged.
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact }) {
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted }) {
   const chipCap = compact ? 2 : 3;
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
@@ -5894,7 +5902,10 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
                   const c = renderChip(it);
                   const isDot = c.tier === "dot";
                   return (
-                    <div key={it.id} style={{ ...st.chip, background: isDot ? "transparent" : c.color, ...(isDot ? { color: dark ? FIRE.textSecondary : "#3A4750" } : null), ...(c.tier ? TIER_STYLES[c.tier] : null), ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>
+                    <div key={it.id} style={{ ...st.chip, background: isDot ? "transparent" : c.color, ...(isDot ? { color: dark ? FIRE.textSecondary : "#3A4750" } : null), ...(c.tier ? TIER_STYLES[c.tier] : null),
+                      // tinted (Noir dashboard): a translucent wash of the hue with readable light text; `dashed` = restricted audience
+                      ...(tinted && !isDot ? { background: c.dashed ? "transparent" : `${c.color}33`, color: FIRE.textPrimary, border: `1px ${c.dashed ? "dashed" : "solid"} ${c.color}${c.dashed ? "" : "88"}` } : null),
+                      ...(c.onClick ? { cursor: "pointer" } : {}) }} title={c.title} onClick={c.onClick}>
                       {isDot && <span style={{ width: 6, height: 6, borderRadius: 999, background: c.color, flexShrink: 0, display: "inline-block" }} />}
                       {c.label}
                     </div>
@@ -6304,7 +6315,9 @@ function FundingCalendar({ S, role, notify }) {
     </div>
   );
 }
-const SOURCE_COLORS = { social: "#B11E2A", training: "#1F4E79", recruit: "#0E6B62", funding: "#9A6B12", actionitem: "#6E56CF" };
+// Noir categorical set — one hue per source, kept distinct: training blue, action items violet, recruitment green,
+// funding amber, social red.
+const SOURCE_COLORS = { social: FIRE.red, training: FIRE.catBlue, recruit: FIRE.catGreen, funding: FIRE.catAmber, actionitem: FIRE.catViolet };
 const SOURCE_RANK = { training: 0, actionitem: 1, funding: 2, recruit: 3, social: 4 };   // action items rank just below Training
 const SOURCE_TIER = { training: "bar", actionitem: "bar", funding: "pill", recruit: "pill", social: "dot" };
 function DashboardCalendar({ S, notify, withImportanceMode }) {
@@ -6359,10 +6372,10 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
     .filter((it) => it.y === cur.y && it.m === cur.m && (filter === "all" || it.source === filter))
     .sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source]);   // training→funding→recruit→social; stable within source
   const FILTERS = [
-    { label: "All", key: "all", color: "#54506B" },                       // neutral — NOT a source color
+    { label: "All", key: "all", color: FIRE.textMuted2 },                // neutral — NOT a source color
     { label: "Training", key: "training", color: SOURCE_COLORS.training }, // blue
     { label: "Action items", key: "actionitem", color: SOURCE_COLORS.actionitem }, // violet
-    { label: "Recruitment", key: "recruit", color: SOURCE_COLORS.recruit }, // teal — key is "recruit"
+    { label: "Recruitment", key: "recruit", color: SOURCE_COLORS.recruit }, // green — key is "recruit"
     { label: "Funding", key: "funding", color: SOURCE_COLORS.funding },   // amber
     { label: "Social", key: "social", color: SOURCE_COLORS.social },      // red
   ];
@@ -6386,7 +6399,8 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
           const active = filter === f.key;
           return (
             <button key={f.key} onClick={() => setFilter(f.key)}
-              style={{ border: `1.5px solid ${f.color}`, background: active ? f.color : FIRE.btnBg, color: active ? "#fff" : f.color, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              style={{ border: `1px solid ${active ? f.color : `${f.color}66`}`, background: active ? `${f.color}33` : "transparent", color: active ? FIRE.textPrimary : f.color, borderRadius: 999, padding: "4px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 7, height: 7, borderRadius: 999, background: f.color, flexShrink: 0 }} />
               {f.label}
             </button>
           );
@@ -6417,11 +6431,12 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         <MonthCalendar
           cur={cur} setCur={setCur} dark
           items={monthItems}
-          renderChip={(it) => { const restricted = it.source === "training" && isRestrictedEvent(it); const isBoardEvt = it.audience === "board"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: restricted ? (isBoardEvt ? FIRE.blueText : FIRE.amberText) : it.color, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${restricted ? (isBoardEvt ? "Board only · " : "Leadership only · ") : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
+          renderChip={(it) => { const restricted = it.source === "training" && isRestrictedEvent(it); const isBoardEvt = it.audience === "board"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: restricted ? (isBoardEvt ? FIRE.blueText : FIRE.amberText) : it.color, dashed: restricted, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${restricted ? (isBoardEvt ? "Board only · " : "Leadership only · ") : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
           todayColor={FIRE.red}
           monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
           overflowIndicator
           compact
+          tinted
         />
       )}
       {detailEvent && (() => {
@@ -20263,7 +20278,7 @@ function AttendanceTrend({ series }) {
   const { grown, transition } = useChartGrow();
   const [wrapRef, W] = useChartWidth();
   // Short on purpose: the chart supports the numbers, it shouldn't own the screen.
-  const H = 130, x0 = 32, x1 = W - 12, yTop = 14, yBot = 104;
+  const H = noir ? 104 : 130, x0 = 32, x1 = W - 12, yTop = noir ? 16 : 14, yBot = noir ? 80 : 104;
   const xAt = (i) => (series.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (series.length - 1));
   const yAt = (p) => yBot - (p / 100) * (yBot - yTop);
   const segs = []; let cur = [];
@@ -20447,9 +20462,12 @@ function MonthlyBars({ months, vals, tip, aria }) {
   const { grown, transition } = useChartGrow();
   const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
   const maxV = Math.max(0, ...vals.filter((v) => v != null));
-  const niceMax = (() => { if (maxV <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(maxV))); const f = maxV / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; })();
+  // Noir: headroom just above the tallest bar (a half-decade step) instead of the next 1/2/5 decade.
+  const niceMax = (() => { if (maxV <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(maxV)));
+    if (noir) { const step = p / 2; return Math.max(step, Math.ceil((maxV * 1.05) / step) * step); }
+    const f = maxV / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; })();
   const [wrapRef, W] = useChartWidth();
-  const H = 124, x0 = 30, x1 = W - 6, base = 100, top = 18;
+  const H = noir ? 100 : 124, x0 = 30, x1 = W - 6, base = noir ? 78 : 100, top = noir ? 14 : 18;
   if (!months.length) return <div ref={wrapRef} style={{ fontSize: 13, color: FIRE.textMuted }}>No months in this period yet.</div>;
   const slot = (x1 - x0) / months.length, bw = noir ? Math.min(46, slot * 0.78) : Math.min(34, slot * 0.6);   // Noir: the mock's fuller bars
   const cx = (i) => x0 + slot * i + slot / 2;
@@ -20786,12 +20804,12 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
       <>
         {/* OVERVIEW — one card (the mock's .ovcard): the two live charts as inset sub-panels, side by side
             (stacked on a phone), one shared 6 Mo / 12 Mo window in the header. */}
-        <Card padding="12px">
+        <Card padding="10px 12px">
           <CardHead icon={BarChart3} title="Overview" right={
             <div role="group" aria-label="Chart window" style={{ display: "inline-flex", gap: 3, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}` }}>
               {[6, 12].map(seg)}
             </div>} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 10 }}>
             {hoursOn && (
               <MiniChart title="Station Hours" onOpen={to("stationhours")} caption={`credited · de-overlapped · last ${ovSpan} months`}
                 swatch={<span style={{ width: 8, height: 8, borderRadius: 2, background: FIRE.redBright, flexShrink: 0 }} />}>
@@ -20806,14 +20824,14 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
         </Card>
         {/* Stats as a 2×2 block beside the Action Center; on a wide screen the Action Center takes the stats'
             height and scrolls inside it (dash-ov-* in Fonts()), on a phone the two simply stack. */}
-        <div className="dash-ov-row" style={{ display: "grid", gap: 10, marginTop: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gridAutoRows: "1fr", gap: 10 }}>
+        <div className="dash-ov-row" style={{ display: "grid", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gridAutoRows: "1fr", gap: 8 }}>
             {boardFirst ? [boardTile, membersTile, drillsTile] : [membersTile, boardTile, drillsTile]}
             {extraHero}
           </div>
           {actionCenter}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 10, marginTop: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 8, marginTop: 8 }}>
           {certsPanel}
           <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
             <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
@@ -20948,13 +20966,13 @@ function Fonts() {
          height and scrolls inside; narrower → stacked, the Action Center at its natural height. */
       .dash-ov-row { grid-template-columns: 1fr; }
       @media (max-width: 640px) {
-        .noir-hero { padding: 18px !important; }
+        .noir-hero { padding: 20px 18px !important; }
         .noir-emblem { display: none; }
         .noir-hero-side { text-align: left !important; width: 100%; justify-content: space-between; }
       }
       @media (min-width: 1100px) {
         .dash-ov-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); }
-        .dash-ov-ac { position: relative; min-height: 220px; }
+        .dash-ov-ac { position: relative; min-height: 150px; }
         .dash-ov-ac > .dash-ov-ac-body { position: absolute; inset: 0; overflow-y: auto; padding: inherit; }
       }
     `}</style>
