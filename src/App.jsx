@@ -154,9 +154,10 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
         <div className="noir-hero" style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.heroBaseNoir, padding: "24px 26px", minHeight: 132, display: "flex", flexDirection: "column", justifyContent: "center", marginBottom: 8, boxShadow: FIRE.cardShadowNoir }}>
           {/* Photo slot: `bandImage` (a URL) renders behind the glows at heroPhotoOpacity; absent → nothing. */}
           {bandImage && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${bandImage})`, backgroundSize: "cover", backgroundPosition: "center", opacity: FIRE.heroPhotoOpacity, pointerEvents: "none" }} />}
+          {/* Faded brand mark — the same logo file as the sidebar, behind the glows; hidden on phone (.noir-emblem). */}
+          <img src="/b4c-logo.png" alt="" aria-hidden="true" className="noir-emblem" draggable={false} style={{ position: "absolute", right: 140, top: "50%", transform: "translateY(-50%)", height: 96, width: "auto", opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroGlowNoir, pointerEvents: "none" }} />
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroShadeNoir, pointerEvents: "none" }} />
-          <div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 150, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 74, letterSpacing: "-.03em", color: FIRE.textPrimary, opacity: 0.035, pointerEvents: "none", userSelect: "none" }}>B4C</div>
           <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, flex: "1 1 260px", minWidth: 0 }}>
               {lead}
@@ -3767,6 +3768,7 @@ function useInsightDrafts() {
 // Shared 'NEEDS YOUR ATTENTION' card grid (overdue + attendance) with AI-draft actions.
 function InsightCards({ insights, go, bare, role, notify, onResolved }) {
   const { attendanceGaps, overdueItems, apparatusFailures = [] } = insights;
+  const compact = React.useContext(NoirCtx);   // Noir (DA Action Center): attendance gaps as compact rows
   const { draftFor, runDraft, draftBox } = useInsightDrafts();
   const [open, setOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible (non-bare mode); default expanded
   const canResolve = canManage(role);   // is_canmanage() = Board/DA/Officer — mirrors the RPC's leadership gate
@@ -3796,6 +3798,7 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
       {(bare || open) && (isEmpty ? (
         <Card><EmptyState text=" All caught up — no attendance gaps or overdue assignments." /></Card>
       ) : (
+        <>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
           {apparatusFailures.map((ins) => {
             const editing = resolveFor === ins.resultId;
@@ -3840,7 +3843,7 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
             </Card>
             );
           })}
-          {attendanceGaps.map((ins) => {
+          {!compact && attendanceGaps.map((ins) => {
             const key = `a-${ins.memberId}`;
             const ctx = `Member: ${ins.memberName}. Hasn't been to training in ${ins.days} days.`;
             return (
@@ -3856,6 +3859,26 @@ function InsightCards({ insights, go, bare, role, notify, onResolved }) {
             );
           })}
         </div>
+        {compact && attendanceGaps.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", columnGap: 18, marginTop: (apparatusFailures.length || overdueItems.length) ? 10 : 0 }}>
+          {attendanceGaps.map((ins) => {
+            const key = `a-${ins.memberId}`;
+            const ctx = `Member: ${ins.memberName}. Hasn't been to training in ${ins.days} days.`;
+            return (
+            <div key={key} style={{ minWidth: 0, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0 8px 10px", borderLeft: `2px solid ${FIRE.amberText}` }}>
+                <div title={`${ins.memberName} hasn't been to training in ${ins.days} days`} style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <b style={{ color: FIRE.textPrimary }}>{ins.memberName}</b> hasn't been to training in {ins.days} days
+                </div>
+                <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5, flexShrink: 0 }} onClick={() => runDraft(key, CHECKIN_SYS, ctx)}>Draft check-in</button>
+              </div>
+              {draftFor === key && <div style={{ padding: "0 0 8px 12px" }}>{draftBox(key, CHECKIN_SYS, ctx)}</div>}
+            </div>
+            );
+          })}
+        </div>
+        )}
+        </>
       ))}
     </>
   );
