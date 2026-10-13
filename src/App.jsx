@@ -6645,7 +6645,7 @@ function Visibility({ S, brand, role, notify }) {
     catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <PageShell kicker="PUBLIC RELATIONS" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week.">
+    <PageShell band watermark="PR" kicker="PUBLIC RELATIONS" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week.">
       <NoirSkin>
       <CardHead icon={Calendar} title="Monthly content calendar" />
       <ContentCalendar S={S} role={role} notify={notify} />
@@ -6663,13 +6663,13 @@ function Visibility({ S, brand, role, notify }) {
       <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI caption helper" />
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Write a post for your station</h3>
+          <h3 style={NOIR_FEAT_TITLE}>Write a post for your station</h3>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What's the post about?</span>
             <input style={FS.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {post && <RichOutput S={S} text={post} dark />}
         </div>
       </div>
