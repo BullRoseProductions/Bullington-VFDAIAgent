@@ -15831,8 +15831,30 @@ function MyEquipment({ S, meId, notify }) {
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
   const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
   return (
-    <PageShell kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it.">
+    <PageShell band kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it."
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>}>
       <NoirSkin>
+      {/* CHIPS — counted from the rows already loaded (same gearStatus rule as each row's pill) */}
+      {loaded && rows.length > 0 && (() => {
+        const pendingN = rows.filter((r) => !!r.return_requested_at).length;
+        const agingN = rows.filter((r) => gearStatus(r.equipment?.manufacture_date, r.equipment?.equipment_type?.service_life_years).rank <= 1).length;
+        const attnN = rows.filter((r) => (r.equipment?.condition || r.condition_at_open) !== "Serviceable").length;
+        const chip = (Icon, l, v, sub, tone) => (
+          <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+            {chip(HardHat, "Signed for", String(rows.length), rows.length === 1 ? "item in your custody" : "items in your custody")}
+            {chip(CheckCircle2, "Condition", attnN ? String(attnN) : "OK", attnN ? "not serviceable" : "all serviceable", attnN ? FIRE.amberText : FIRE.greenText)}
+            {chip(AlertTriangle, "Aging out", String(agingN), "past or within 3 mo of service life", agingN ? FIRE.amberText : null)}
+            {chip(ArrowLeftRight, "Return pending", String(pendingN), "awaiting manager receipt", pendingN ? FIRE.amberText : null)}
+          </div>
+        );
+      })()}
       {rows.some(transferable) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           {!selMode
@@ -15847,7 +15869,8 @@ function MyEquipment({ S, meId, notify }) {
           <div style={{ fontSize: 12, color: FIRE.textMuted }}>When an equipment manager issues you gear, it shows up here.</div>
         </Card>
       ) : (
-        <Card padding="6px 16px">
+        <Card padding="10px 16px">
+          <CardHead icon={HardHat} title="In your custody" count={rows.length} right={<span>live condition · service life</span>} />
           {rows.map((r, i) => {
             const pending = !!r.return_requested_at;
             const busy = busyId === r.equipment_id;
@@ -15865,11 +15888,12 @@ function MyEquipment({ S, meId, notify }) {
             // deriving this from `cond` would make correctness depend on that fallback staying in place.
             const signedFor = (r.equipment?.condition && r.equipment.condition !== r.condition_at_open) ? r.condition_at_open : null;
             return (
-              <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 {selMode && (
                   <input type="checkbox" disabled={!transferable(r)} checked={sel.has(r.equipment_id)} onChange={() => toggleSel(r.equipment_id)}
                     style={{ width: 16, height: 16, marginTop: 3, flexShrink: 0, accentColor: FIRE.red, opacity: transferable(r) ? 1 : 0.35 }} />
                 )}
+                <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.card2Noir, border: `1px solid ${gear.rank === 0 ? FIRE.redText + "66" : gear.rank === 1 ? FIRE.amberText + "66" : FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={18} color={gear.rank === 0 ? FIRE.redText : gear.rank === 1 ? FIRE.amberText : FIRE.textMuted} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
