@@ -10777,12 +10777,14 @@ function RosterAttendance({ S, members, sessions, plan }) {
   const top3 = ranked.slice().sort((a, b) => b.pct - a.pct || b.attended - a.attended).slice(0, 3);
   const nudge3 = ranked.filter((r) => r.pct < 75).sort((a, b) => a.pct - b.pct).slice(0, 3);
   const { draftFor, runDraft, draftBox } = useInsightDrafts();
-  const pTone = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText);
+  // COLOUR ONLY — the roster rule (>=90 green · 70–89 amber · <70 red). Who is listed under "Needs a nudge" is a
+  // separate rule (nudge3, <75) and deliberately unchanged.
+  const pTone = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.greenText : p >= 70 ? FIRE.amberText : FIRE.redText);
   const ini = (n) => (n || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const av = (n, size) => <span style={{ width: size, height: size, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: size <= 26 ? 10 : 11, color: FIRE.textPrimary, flexShrink: 0 }}>{ini(n)}</span>;
   const chip = (Icon, label, value, sub, tone) => (
     <div style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
-      <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{label}</div>
+      <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.textMuted} />{label}</div>
       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>}
     </div>
@@ -10876,8 +10878,8 @@ function RosterAttendance({ S, members, sessions, plan }) {
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", borderBottom: i === top3.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ fontSize: 13, width: 18, textAlign: "center" }}>{["🥇", "🥈", "🥉"][i]}</span>{av(r.name, 30)}
                 <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
-                <span style={{ width: 90, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><span style={{ display: "block", width: `${r.pct}%`, height: "100%", borderRadius: 999, background: FIRE.greenText }} /></span>
-                <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: FIRE.greenText, ...FS.num }}>{r.pct}%</span>
+                <span style={{ width: 90, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><span style={{ display: "block", width: `${r.pct}%`, height: "100%", borderRadius: 999, background: pTone(r.pct) }} /></span>
+                <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: pTone(r.pct), ...FS.num }}>{r.pct}%</span>
               </div>
             ))}
           </Card>
@@ -10890,6 +10892,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13, width: 18, textAlign: "center", color: FIRE.redText, fontWeight: 700 }}>!</span>{av(r.name, 30)}
                     <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
+                    <span style={{ width: 90, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", flexShrink: 0 }}><span style={{ display: "block", width: `${r.pct}%`, height: "100%", borderRadius: 999, background: pTone(r.pct) }} /></span>
                     <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: pTone(r.pct), ...FS.num }}>{r.pct}%</span>
                     <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => runDraft(key, CHECKIN_SYS, ctx)}>Draft a check-in</button>
                   </div>
@@ -10909,7 +10912,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
         {recentEvents.length === 0 ? <div style={{ padding: "6px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
           recentEvents.map((e, i) => {
           const pct = e.total ? Math.min(100, Math.round((e.present / e.total) * 100)) : 0;   // cap display + bar at 100%; raw present/total shown as-is
-          const tone = e.optional ? FIRE.textMuted : (pct >= 75 ? FIRE.green : FIRE.amberText);   // same rule as before: optional = neutral, else >=75 green / amber
+          const tone = e.optional ? FIRE.textMuted : pTone(pct);   // optional = neutral; otherwise the roster rule (90/70)
           const [mon, day] = String(e.date).split(" ");
           return (
             <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 13, padding: "11px 2px", borderBottom: i === recentEvents.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
@@ -10938,7 +10941,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
         <div style={{ marginTop: 12 }}>
         {(showAllPeople ? people : people.slice(0, PEOPLE_CAP)).map((m, i, arr) => {
           const p = pctById.get(m.id) ?? null;   // live 90-day pct (null = no eligible drills in window → "—")
-          const tone = p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;   // same 75 / 50 thresholds as before
+          const tone = pTone(p);   // the roster rule (90/70)
           return (
           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
             {av(m.name, 32)}
