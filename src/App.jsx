@@ -5991,7 +5991,7 @@ const TIER_STYLES = {
 };
 // compact (dashboard only): shorter cells, 2 chips per day instead of 3, slightly tighter padding. Default off,
 // so the full-page Content / Recruitment / Funding calendars are unchanged.
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted, tiles, belowHeader }) {
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted, tiles, belowHeader, card }) {
   const chipCap = compact ? 2 : 3;
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
@@ -6022,10 +6022,11 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
 
   if (tiles) {
     /* The training mock's calendar (.calhead + .cal): red icon, Oswald month, small ‹ › buttons, extra pushed right;
-       day tiles on card2 with a hairline border, today outlined red with a red disc. Sits inside the caller's card. */
+       day tiles on card2 with a hairline border, today outlined red with a red disc. Sits inside the caller's card,
+       or brings its own Noir card with `card` (the dashboard / Recruitment / PR / Funding calendars). */
     const navb = { width: 26, height: 26, borderRadius: 7, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 };
     return (
-      <div>
+      <div style={card ? { ...FS.cardNoir, padding: 14, marginBottom: 10 } : undefined}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
           <Calendar size={16} color={FIRE.redBright} style={{ flexShrink: 0 }} />
           <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, letterSpacing: ".02em" }}>{monthLabel}</span>
@@ -6047,9 +6048,12 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
                 <span style={now ? { background: todayColor || FIRE.redBright, color: "#fff", borderRadius: 999, width: 17, height: 17, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 } : { fontSize: 10.5, fontWeight: 600, color: FIRE.textMuted }}>{d ?? mutNum}</span>
                 {dayItems.slice(0, chipCap).map((it) => {
                   const c = renderChip(it);
+                  const isDot = c.tier === "dot";   // importance tiers (dashboard "All" filter): bar > pill > dot
                   return (
                     <div key={it.id} title={c.title} onClick={c.onClick}
-                      style={{ fontSize: 9, fontWeight: 600, borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: c.dashed ? "transparent" : `${c.color}2E`, color: FIRE.textPrimary, border: `1px ${c.dashed ? "dashed" : "solid"} ${c.color}8C`, ...(c.onClick ? { cursor: "pointer" } : {}) }}>
+                      style={{ fontSize: 9, fontWeight: 600, borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: c.dashed ? "transparent" : `${c.color}2E`, color: FIRE.textPrimary, border: `1px ${c.dashed ? "dashed" : "solid"} ${c.color}8C`,
+                        ...(c.tier ? TIER_STYLES[c.tier] : null), ...(isDot ? { background: "transparent", border: "none", color: FIRE.textSecondary } : null), ...(c.onClick ? { cursor: "pointer" } : {}) }}>
+                      {isDot && <span style={{ width: 6, height: 6, borderRadius: 999, background: c.color, flexShrink: 0, display: "inline-block" }} />}
                       {c.label}
                     </div>
                   );
@@ -6259,7 +6263,7 @@ function ContentCalendar({ S, role, notify }) {
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur} dark
+        cur={cur} setCur={setCur} dark tiles card
         items={monthPosts}
         renderChip={(p) => ({ color: p.c, label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
         todayColor={FIRE.red}
@@ -6350,7 +6354,7 @@ function RecruitmentCalendar({ S, role, notify }) {
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur} dark
+        cur={cur} setCur={setCur} dark tiles card
         items={monthItems}
         renderChip={(it) => ({ color: it.c, label: it.title, title: (canEdit && canDeleteShared) ? `${it.title} (tap to remove)` : it.title, onClick: (canEdit && canDeleteShared) ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor={FIRE.catGreen}
@@ -6471,7 +6475,7 @@ function FundingCalendar({ S, role, notify }) {
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur} dark
+        cur={cur} setCur={setCur} dark tiles card
         items={monthItems}
         /* The fundraiser goes in the TOOLTIP, never the label: a month cell is a few characters
            wide, and appending an event name would push the thing you are actually looking for out
@@ -6587,8 +6591,8 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         })}
       </div>
       {withImportanceMode && view === "importance" ? (
-        <div style={{ ...FS.card, padding: "8px 14px" }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 6 }}>{CAL_MONTHS[cur.m]} {cur.y}</div>
+        <div style={{ ...FS.cardNoir, padding: "10px 14px" }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 6 }}>{CAL_MONTHS[cur.m]} {cur.y}</div>
           {monthItems.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>No events this month.</div> :
             [["training", "Training"], ["actionitem", "Action items"], ["funding", "Funding"], ["recruit", "Recruitment"], ["social", "Social"]].map(([src, lbl]) => {   // priority order = SOURCE_RANK
               const group = monthItems.filter((it) => it.source === src).slice().sort((a, b) => a.d - b.d);   // date order within a tier
@@ -6609,7 +6613,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         </div>
       ) : (
         <MonthCalendar
-          cur={cur} setCur={setCur} dark
+          cur={cur} setCur={setCur} dark tiles card
           items={monthItems}
           renderChip={(it) => { const restricted = it.source === "training" && isRestrictedEvent(it); const isBoardEvt = it.audience === "board"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: restricted ? (isBoardEvt ? FIRE.blueText : FIRE.amberText) : it.color, dashed: restricted, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${restricted ? (isBoardEvt ? "Board only · " : "Leadership only · ") : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
           todayColor={FIRE.red}
