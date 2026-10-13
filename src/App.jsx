@@ -15442,13 +15442,13 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   }
   return (
     <div style={{ marginTop: 22 }}>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><Wrench size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAINTENANCE & REMINDERS</div>
-      <div style={{ fontSize: 13, color: due > 0 ? FIRE.red : FIRE.greenText, margin: "2px 0 12px", fontWeight: 600 }}>
+      <SectionBar icon={Wrench} label="Maintenance & reminders" count={items.length} style={{ marginTop: 0 }} />
+      <div style={{ fontSize: 13, color: due > 0 ? FIRE.redText : FIRE.greenText, margin: "-2px 0 12px", fontWeight: 600 }}>
         {due > 0 ? `${due} maintenance item${due === 1 ? "" : "s"} need attention` : "All maintenance up to date"}
       </div>
       {canManage && items.length > 0 && (
         <div style={{ display: "flex", marginBottom: 12 }}>
-          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
             {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit items</>}
           </button>
         </div>
@@ -15464,7 +15464,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add maintenance item</button>)}
       <div>
         {sorted.map((i) => (
-          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <Wrench size={15} color={MAINT_FIRE[i.status]} style={{ flexShrink: 0 }} />
             <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
               <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{i.task}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {i.unit}</span>
@@ -15479,7 +15479,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
               {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
             {doneFor === i.id && (
-              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ ...NOIR_INSET, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div style={{ flexBasis: "100%", fontSize: 12.5, color: FIRE.textSecondary }}>Recording <strong style={{ color: FIRE.textPrimary }}>{i.task}</strong> as done today — notes and cost are optional.</div>
                 <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Notes (optional)</span><input style={FS.input} value={doneNotes} placeholder="e.g. replaced filter, topped off fluids" onChange={(e) => setDoneNotes(e.target.value)} /></label>
                 <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cost (optional)</span><input style={FS.input} value={doneCost} placeholder="e.g. 240" inputMode="numeric" onChange={(e) => setDoneCost(e.target.value)} /></label>
@@ -15488,7 +15488,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
               </div>
             )}
             {histFor === i.id && (
-              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%" }}>
+              <div style={{ ...NOIR_INSET, padding: 14, marginTop: 8, width: "100%" }}>
                 <CardHead icon={Wrench} title="Completion history" />
                 {histBusy === i.id && !(hist[i.id] || []).length ? (
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><Loader2 size={14} className="spin" /> Loading…</div>
@@ -15502,7 +15502,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No completions recorded yet.</div>
                 ) : (
                   (hist[i.id] || []).map((h, hi, arr) => (
-                    <div key={h.id} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline", padding: "7px 0", borderBottom: hi === arr.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                    <div key={h.id} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline", padding: "7px 0", borderBottom: hi === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                       <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, minWidth: 96 }}>{fmtLogAt(h.done_at)}</span>
                       <span style={{ fontSize: 12.5, color: FIRE.textSecondary, minWidth: 110 }}>{h.done_by_name || "Unknown"}</span>
                       {h.notes && <span style={{ flex: 1, minWidth: 150, fontSize: 12.5, color: FIRE.textMuted }}>{h.notes}</span>}
@@ -15513,7 +15513,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
               </div>
             )}
             {editingMaintId === i.id && (
-              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ ...NOIR_INSET, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={maintBuf.task} onChange={(e) => setMaintBuf((b) => ({ ...b, task: e.target.value }))} /></label>
                 <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cadence</span><select style={FS.input} value={maintBuf.cadence} onChange={(e) => setMaintBuf((b) => ({ ...b, cadence: e.target.value }))}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
                 <button style={FS.btnPrimary} onClick={() => saveEditMaint(i.id)}><CheckCircle2 size={15} /> Save</button>
@@ -15526,13 +15526,13 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
       {canManage && (
         <div style={{ ...NOIR_AI_BANNER, marginTop: 16 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
-            <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a preventive-maintenance checklist</h3>
-            <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
+            <CardHead icon={Sparkles} title="AI maintenance checklist" />
+            <h3 style={NOIR_FEAT_TITLE}>Draft a preventive-maintenance checklist</h3>
+            <p style={NOIR_HELP}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
             <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftChecklist} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Wrench size={16} /> Draft a checklist</>}
             </button>
-            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {err && <div style={NOIR_ERR}>{err}</div>}
             {out && <RichOutput S={S} text={out} dark />}
           </div>
         </div>
