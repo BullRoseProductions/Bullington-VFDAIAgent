@@ -13265,7 +13265,7 @@ function ActionItemsReport({ S, members, back }) {
               : kind === "cancelled" ? <X size={16} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
               :                        <Clock size={16} color={overdue ? FIRE.redText : FIRE.amberText} style={{ flexShrink: 0 }} />;
     return (
-      <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+      <div key={it.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
         {icon}
         <div style={{ flex: 1, minWidth: 0 }}>
           <span style={{ fontWeight: 600, color: kind === "open" ? FIRE.textPrimary : FIRE.textMuted2, textDecoration: kind === "open" ? "none" : "line-through" }}>{it.text}</span>
@@ -13276,7 +13276,7 @@ function ActionItemsReport({ S, members, back }) {
   };
 
   const section = (title, count, note, rows, emptyText) => (
-    <div style={{ ...FS.card, padding: "14px 16px", marginBottom: 12 }}>
+    <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>{title}</span>
         <span style={{ fontSize: 12, color: FIRE.textMuted }}>({count})</span>
@@ -13309,11 +13309,10 @@ function ActionItemsReport({ S, members, back }) {
   }
 
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={FS.kicker}>REPORTS · ACTION ITEMS</div>
-      <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Action Items</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>What got done, what was dropped, and what's still open. Completed &amp; cancelled are the items resolved during {rangeText}; still-open is a live snapshot as of today.</div>
+    <PageShell band watermark="REPORTS" kicker="REPORTS · ACTION ITEMS" title="Action Items"
+      sub={`What got done, what was dropped, and what's still open. Completed & cancelled are the items resolved during ${rangeText}; still-open is a live snapshot as of today.`}
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
@@ -13321,15 +13320,16 @@ function ActionItemsReport({ S, members, back }) {
       </div>
 
       {items === null ? (
-        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading action items…</div>
+        <div style={{ ...FS.cardNoir, padding: 24, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading action items…</div>
       ) : nothing ? (
-        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>No action items resolved in this period, and none currently open.</div>
+        <div style={{ ...FS.cardNoir, padding: 24, color: FIRE.textMuted }}>No action items resolved in this period, and none currently open.</div>
       ) : (<>
         {section("✓ Completed (in range)", completed.length, null, completed.map((it) => row(it, "done")), "None completed in this period.")}
         {section("✕ Cancelled (in range)", cancelled.length, null, cancelled.map((it) => row(it, "cancelled")), "None cancelled in this period.")}
         {section("○ Still open", open.length, `current snapshot — as of ${fmtD(todayISO)}`, open.map((it) => row(it, "open")), "Nothing currently open.")}
       </>)}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
