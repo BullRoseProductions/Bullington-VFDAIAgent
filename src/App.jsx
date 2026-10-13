@@ -90,7 +90,7 @@ function useFitHeight(on) {
 // The page frame: red kicker + Oswald title (+ optional lead mark, sub-line, right-aligned actions), then the
 // content. fitToScreen pins the header and scrolls the content region internally — the no-scroll guardrail.
 // `above` renders before the header (a "Back to …" link on a drill-down page).
-function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, bandImage, children }) {
+function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, bandImage, bandMark, children }) {
   const [bodyRef, top] = useFitHeight(!!fitToScreen);
   // Below the content region sit the shell's own bottom padding (22px) and the app frame's content padding
   // (S.content: 26px + the safe area). Subtract both, or the outer page keeps a 26px scroll of its own.
@@ -108,7 +108,7 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
           {/* Photo slot: `bandImage` (a URL) renders behind the glows at heroPhotoOpacity; absent → nothing. */}
           {bandImage && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${bandImage})`, backgroundSize: "cover", backgroundPosition: "center", opacity: FIRE.heroPhotoOpacity, pointerEvents: "none" }} />}
           {/* Faded brand mark — the same logo file as the sidebar, behind the glows; hidden on phone (.noir-emblem). */}
-          <img src="/b4c-logo.png" alt="" aria-hidden="true" className="noir-emblem" draggable={false} style={{ position: "absolute", right: 140, top: "50%", transform: "translateY(-50%)", height: 96, width: "auto", opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />
+          {bandMark ?? <img src="/b4c-logo.png" alt="" aria-hidden="true" className="noir-emblem" draggable={false} style={{ position: "absolute", right: 140, top: "50%", transform: "translateY(-50%)", height: 96, width: "auto", opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />}
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroGlowNoir, pointerEvents: "none" }} />
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroShadeNoir, pointerEvents: "none" }} />
           <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
@@ -9713,6 +9713,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showMissed, setShowMissed] = useState(false);   // TRAINING HISTORY: absent sessions collapsed by default
+  const [showAllCerts, setShowAllCerts] = useState(false);   // CERTIFICATIONS: capped list, "Show all N" expands
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
   // Live 90-day participation — same deptAttendance calc as the roster + Reports; NOT the stale stored field.
   const part90 = deptAttendance(members, sessions, null, rolling90()).rows.find((r) => r.id === member.id)?.pct ?? null;
@@ -9800,24 +9801,110 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     setEditingCertId(null);
     setDraft({ name: "", exp: "" });
   }
+  // ---- facelift: derived display numbers (all from data already on this screen) ----
+  const initials = (member.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const hoursOn = moduleEnabled("stationhours", dept?.disabled_modules);
+  const hrsMonths = useMemo(() => lastMonths(6), []);
+  // Same read the Station hours panel always made — now lifted so the 6-month chip and the chart share it. With the
+  // module off the id is null, so nothing is fetched (as before, when the panel wasn't mounted).
+  const hrs = useMemberHoursByMonth(hoursOn ? member.id : null, hrsMonths);
+  const hrsTotal = Array.isArray(hrs.vals) && !hrs.err && hrs.vals.length ? hrs.vals.reduce((t, v) => t + (Number(v) || 0), 0) : null;
+  const trainDone = (sessions || []).filter((s) => s.done && !isRestrictedEvent(s));
+  const trainExpected = trainDone.filter((s) => expectedAfterJoin(member, s));
+  const trainWent = trainExpected.filter((s) => (s.attendance || []).includes(member.id)).length;
+  const trainPct = trainExpected.length ? Math.round((trainWent / trainExpected.length) * 100) : null;
+  const nCur = certs.filter((c) => c.st.rank === 2).length, nExp = certs.filter((c) => c.st.rank === 1).length;
+  const nOld = certs.filter((c) => c.st.rank === 0).length, nUndated = certs.filter((c) => c.st.rank === 3).length;
+  const CERT_CAP = 6;
+  const shownCerts = showAllCerts ? certs : certs.slice(0, CERT_CAP);   // sorted expired → expiring → current → undated
+  const statusTone = member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted;
+  const chip = (label, value, tone, sub, bar) => (
+    <div style={{ ...FS.cardNoir, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", minWidth: 0 }}>
+      <div style={{ fontSize: 11, color: FIRE.textSecondary }}>{label}</div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 23, lineHeight: 1, marginTop: 7, color: tone || FIRE.textPrimary, ...FS.num }}>{value}</div>
+      {bar}
+      {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText);   // the 75 / 50 member-file thresholds
   return (
-    <PageShell
+    <PageShell band
       above={<button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>}
-      lead={<Initials S={S} dark name={member.name} />}
-      kicker="MEMBER FILE" title={member.name}
+      // The PERSON is the backdrop: a large faded monogram of their initials (members have no photo on file).
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 34, top: "50%", transform: "translateY(-52%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 168, lineHeight: 0.8, letterSpacing: "-.03em", color: FIRE.textPrimary, opacity: 0.055, pointerEvents: "none", userSelect: "none" }}>{initials}</div>}
+      lead={<div style={{ width: 84, height: 84, borderRadius: 18, background: "linear-gradient(135deg, #2A313A, #12161C)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 32, color: FIRE.redText, flexShrink: 0, boxShadow: "0 8px 22px rgba(0,0,0,.5)" }}>{initials}</div>}
+      kicker={dept?.name ? `MEMBER FILE · ${dept.name}` : "MEMBER FILE"} title={member.name}
       // No join year → drop the "since" segment rather than print "since null" (JOINED below shows "—" the same way).
       sub={[member.role, member.joined ? `since ${member.joined}` : null, member.phone].filter(Boolean).join(" · ")}
-      actions={<Pill S={S} color={member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted}>{member.status.toUpperCase()}</Pill>}>
+      actions={<span style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, padding: "5px 11px", borderRadius: 999, color: statusTone, background: `${statusTone}1F`, border: `1px solid ${statusTone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: statusTone }} />{member.status}</span>}>
       <NoirSkin>
-      <Card padding="15px 16px" style={{ marginBottom: 16 }}>
-        <div>
-          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between" }}><span>Participation (90 days)</span><span>{part90 == null ? "—" : `${part90}%`}</span></div>
-          {/* Same thresholds as before (75 / 50), not pctTone's 75 / 30 — a reskin, not a re-grade. */}
-          {part90 != null && <ProgressBar size="lg" pct={part90} tone={part90 >= 75 ? "green" : part90 >= 50 ? "amber" : "red"} />}
-        </div>
+      {/* Quick-stat chips — participation (live 90-day), station hours (6 mo), training attendance, certs. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
+        {chip("Participation · 90d", part90 == null ? "—" : `${part90}%`, part90 == null ? null : pctColor(part90), null,
+          part90 != null && <ProgressBar pct={part90} tone={part90 >= 75 ? "green" : part90 >= 50 ? "amber" : "red"} style={{ marginTop: 8 }} />)}
+        {hoursOn && chip("Station hours · 6 mo", hrsTotal == null ? "—" : (Math.round(hrsTotal * 10) / 10).toFixed(1), null, "credited")}
+        {chip("Training attendance", trainPct == null ? "—" : `${trainPct}%`, trainPct == null ? null : pctColor(trainPct), trainExpected.length ? `${trainWent} of ${trainExpected.length} drills` : "No drills recorded yet")}
+        {chip("Certifications", certs.length ? <>{nCur}<span style={{ fontSize: 13, color: FIRE.textMuted }}>/{certs.length} current</span></> : "—", nOld ? FIRE.redText : nExp ? FIRE.amberText : certs.length ? FIRE.green : null,
+          nOld ? `${nOld} expired${nExp ? ` · ${nExp} expiring` : ""}` : nExp ? `${nExp} expiring soon` : certs.length ? "All current" : "None on file")}
+      </div>
+
+      {/* CONDENSED CERTIFICATIONS — summary counts + a capped list with a Show-all expander. Same rows, same
+          actions (View proof / Edit / Remove) and the same inline editor; only the arrangement changed. */}
+      <Card padding="14px 16px" style={{ marginBottom: 10 }}>
+        <CardHead icon={Award} title="Certifications" count={certs.length} />
+        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> : (<>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            {[[nCur, "current", FIRE.greenText], [nExp, "expiring soon", FIRE.amberText], [nOld, "expired", FIRE.redText], ...(nUndated ? [[nUndated, "no date", FIRE.textMuted2]] : [])].map(([n, l, c]) => (
+              <div key={l} style={{ display: "flex", alignItems: "center", gap: 7, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9, padding: "7px 12px" }}>
+                <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: c, ...FS.num }}>{n}</span>
+                <span style={{ fontSize: 10.5, color: FIRE.textSecondary, lineHeight: 1.2 }}>{l}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mf-certgrid">
+            {shownCerts.map((c) => (
+              <div key={c.id} style={{ ...S.certRow, flexWrap: "wrap", padding: "7px 0", gap: 10, borderBottom: `1px solid ${FIRE.lineNoir}`, minWidth: 0, ...(assign && editingCertId === c.id ? { gridColumn: "1 / -1" } : null) }}>
+              <span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} title={c.st.label} />
+              {assign && editingCertId === c.id ? (<>
+                <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
+                <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
+                <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
+                <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
+              </>) : (<>
+                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: CERT_FIRE[c.st.label], fontSize: 11 }}>· {expPhrase(c.exp)}</span></div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+                  <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                  {/* only when a proof is on file — a leader-entered cert legitimately has none */}
+                  {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
+                  {assign && (<>
+                    <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
+                    <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
+                  </>)}
+                </div>
+              </>)}
+              </div>
+            ))}
+          </div>
+          {certs.length > CERT_CAP && (
+            <button onClick={() => setShowAllCerts((v) => !v)} style={{ display: "block", width: "100%", marginTop: 10, textAlign: "center", fontSize: 11.5, fontWeight: 600, color: FIRE.redText, background: "none", border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 8, padding: 8, cursor: "pointer", fontFamily: "inherit" }}>
+              {showAllCerts ? "Show fewer" : `Show all ${certs.length} certifications`} {showAllCerts ? <ChevronUp size={13} style={{ verticalAlign: "-2px" }} /> : <ChevronDown size={13} style={{ verticalAlign: "-2px" }} />}
+            </button>
+          )}
+        </>)}
+      </Card>
+
+      <ProposeCert S={S} role={role} member={member} notify={notify} />
+
+      {/* Station hours (chart) beside the leadership-only profile — two columns on a wide screen, stacked on a
+          phone; while the profile is being edited, the form takes the full width. */}
+      {(hoursOn || assign) && (
+        <div className="mf-grid" style={{ marginBottom: 10 }}>
+          {hoursOn && <MemberHoursPanel memberId={member.id} hours={{ months: hrsMonths, ...hrs }} style={{ marginBottom: 0, ...(editing || !assign ? { gridColumn: "1 / -1" } : null) }} />}
+          {assign && (
+            <Card padding="14px 16px" style={{ minWidth: 0, ...(editing || !hoursOn ? { gridColumn: "1 / -1" } : null) }}>
         {assign && !editing && (
-          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
               <CardHead icon={Users} title="Profile · leadership only" style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
                 {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
@@ -9857,8 +9944,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
           </div>
         )}
         {assign && editing && (
-          <div style={{ marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
-            <SectionLabel style={{ marginBottom: 10 }}>EDIT MEMBER</SectionLabel>
+          <div>
+            <CardHead icon={Pencil} title="Edit member" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email <span style={{ color: FIRE.deleteRed }}>*</span></span><input type="email" style={FS.input} value={form.email || ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></label>
@@ -9892,44 +9979,14 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             </div>
           </div>
         )}
-      </Card>
-
-      {moduleEnabled("stationhours", dept?.disabled_modules) && <MemberHoursPanel memberId={member.id} />}
-
-      <CardHead icon={Award} title="Certifications" />
-      {/* Cert rows unchanged inside the Card — including the phone-overlap fix (title flex:"1 1 160px" +
-          overflowWrap:"anywhere"; controls in one wrapping group that drops below the title). */}
-      <Card padding="15px 16px" style={{ marginBottom: 16 }}>
-        {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> :
-          certs.map((c, i) => (
-            <div key={c.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: i === certs.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-              <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
-              {assign && editingCertId === c.id ? (<>
-                <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
-                <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
-                <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
-                <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
-              </>) : (<>
-                <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {expPhrase(c.exp)}</span></div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
-                  <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
-                  {/* only when a proof is on file — a leader-entered cert legitimately has none */}
-                  {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
-                  {assign && (<>
-                    <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
-                    <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
-                  </>)}
-                </div>
-              </>)}
-            </div>
-          ))}
-      </Card>
-
-      <ProposeCert S={S} role={role} member={member} notify={notify} />
+            </Card>
+          )}
+        </div>
+      )}
 
       {(() => {
         const memberLeader = isLeader(member.access);   // score + list off the VIEWED member's actual roles
-        const done = (sessions || []).filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a));   // TRAINING only — leadership EVENTS excluded (event filter; the member is still fully counted for regular training)
+        const done = [...trainDone].sort((a, b) => sessDate(b) - sessDate(a));   // trainDone (above): finalized TRAINING, leadership events excluded   // TRAINING only — leadership EVENTS excluded (event filter; the member is still fully counted for regular training)
         const expected = done.filter((s) => expectedAfterJoin(member, s));   // pre-join drills listed as "—", not counted
         const went = expected.filter((s) => (s.attendance || []).includes(member.id)).length;
         return (
@@ -20684,12 +20741,15 @@ function HoursTrend({ months, vals }) {
   );
 }
 // Member file: this member's credited station hours, last 6 months. No hours at all → the kit EmptyState.
-function MemberHoursPanel({ memberId }) {
-  const months = useMemo(() => lastMonths(6), []);
-  const { vals, err, retry } = useMemberHoursByMonth(memberId, months);
+// `hours` = an already-loaded { months, vals, err, retry } from the caller (the member file reads it once for both the
+// chart and its 6-month chip); without it the panel loads its own.
+function MemberHoursPanel({ memberId, hours, style }) {
+  const own = useMemberHoursByMonth(hours ? null : memberId, useMemo(() => lastMonths(6), []));
+  const { vals, err, retry } = hours || own;
+  const months = hours ? hours.months : lastMonths(6);
   const none = Array.isArray(vals) && vals.every((v) => !v);
   return (
-    <Card style={{ marginBottom: 16, minWidth: 0 }}>
+    <Card style={{ marginBottom: 16, minWidth: 0, ...style }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <CardHead icon={Clock} title="Station hours" style={{ marginBottom: 0, width: "auto" }} />
         <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>credited · last 6 months</span>
@@ -21023,6 +21083,11 @@ function Fonts() {
       /* DA overview: stats 2x2 | Action Center. Wide → two columns, the Action Center matches the stats'
          height and scrolls inside; narrower → stacked, the Action Center at its natural height. */
       .dash-ov-row { grid-template-columns: 1fr; }
+      /* Member file facelift: certs two-up and hours | profile side by side on a wide screen, one column on a phone. */
+      .mf-certgrid { display: grid; grid-template-columns: 1fr; column-gap: 22px; }
+      .mf-grid { display: grid; grid-template-columns: 1fr; gap: 10px; align-items: start; }
+      @media (min-width: 760px) { .mf-certgrid { grid-template-columns: 1fr 1fr; } }
+      @media (min-width: 1000px) { .mf-grid { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
       @media (max-width: 640px) {
         .noir-hero { padding: 20px 18px !important; }
         .noir-emblem { display: none; }
