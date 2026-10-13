@@ -48,10 +48,11 @@ const FS = {
   // Industrial Noir card (DA dashboard): gradient face, 1px hairline, 12px radius, soft drop shadow.
   cardNoir: { background: FIRE.cardNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 12, boxShadow: FIRE.cardShadowNoir },
   num: { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" },
-  btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
+  btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
   btnPrimary: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: FIRE.white, border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
-  input: { border: `0.5px solid ${FIRE.inputBorder}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: FIRE.card, color: FIRE.textPrimary, colorScheme: "dark", width: "100%" },
-  row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `0.5px solid ${FIRE.hairline}` },
+  // Noir form field (the mocks' .field / .sel / .ta): card2 face, 1px line2 border, 10px radius. One token, every form.
+  input: { border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: FIRE.card2Noir, color: FIRE.textPrimary, colorScheme: "dark", width: "100%" },
+  row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `1px solid ${FIRE.lineNoir}` },
   // RESPONSIVE CONVENTION (fluid, no JS breakpoint — reflows by available width):
   //  - A list row = FS.row (wraps) + FS.rowTitle on the label + FS.rowActions on the button cluster.
   //    rowTitle holds a readable min so it never squishes to a sliver; rowActions wraps the buttons
@@ -22801,7 +22802,8 @@ function baseStyles() {
     aiListHead: { display: "flex", alignItems: "center", gap: 7, fontFamily: display, fontWeight: 600, fontSize: 14.5, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 8 },
     errBox: { background: "#FCEBEC", border: "1px solid #E8A6AB", color: "#8A1620", borderRadius: 8, padding: "10px 12px", fontSize: 13 },
     field: { display: "flex", flexDirection: "column", gap: 6 },
-    fieldLabel: { fontSize: 12.5, fontWeight: 600, color: SLATE, fontFamily: body },
+    // Noir field label (the mocks' .flabel): small Oswald caps — set once here, every form picks it up.
+    fieldLabel: { fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, fontFamily: DISPLAY_FONT },
     input: { border: `1px solid ${LINE}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: body, background: "#fff", color: INK, width: "100%" },
     twoColForm: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
     /* recruitment */
