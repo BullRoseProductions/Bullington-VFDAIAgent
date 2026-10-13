@@ -19552,30 +19552,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           </div>
         )}
 
-          {(() => {
-            const noLen = (sessions || []).filter((x) => x.done && x.durationMin == null
-              && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0);
-            if (!noLen.length) return null;
-            return (
-              <div style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
-                <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
-                  <Clock size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>
-                      {noLen.length} finished drill{noLen.length === 1 ? "" : "s"} with no length recorded
-                    </div>
-                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
-                      Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Open a session below and set its length to fix that — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
-                    </div>
-                    <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
-                      {noLen.slice(0, 5).map((x) => `${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`).join("  ·  ")}
-                      {noLen.length > 5 ? `  ·  …and ${noLen.length - 5} more` : ""}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
         </NoirSkin>
     </PageShell>
     );
@@ -19614,6 +19590,32 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       watermark="TRAIN" above={sessionsErr ? <OfflineNotice onRetry={loadSessions} what="trainings" /> : null}
       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
       <NoirSkin>
+      {/* Moved from the member view (2026-10-13): it addresses officers ("open a session and set its length"),
+          but sat in the members-only branch — members saw an instruction they can't act on, officers never saw it. */}
+          {(() => {
+            const noLen = (sessions || []).filter((x) => x.done && x.durationMin == null
+              && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0);
+            if (!noLen.length) return null;
+            return (
+              <div style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
+                <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+                  <Clock size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>
+                      {noLen.length} finished drill{noLen.length === 1 ? "" : "s"} with no length recorded
+                    </div>
+                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
+                      Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Open a session below and set its length to fix that — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
+                    </div>
+                    <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
+                      {noLen.slice(0, 5).map((x) => `${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`).join("  ·  ")}
+                      {noLen.length > 5 ? `  ·  …and ${noLen.length - 5} more` : ""}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
       {/* UP NEXT — the command hero: the next session as the feature (countdown, title, when/where, attached plan,
           inline actions), the Training-Ready ring and three stats. Every value comes from sessions/plan already loaded;
