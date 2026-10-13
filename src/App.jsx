@@ -10734,6 +10734,7 @@ function RosterCerts({ S, members }) {
 function RosterPending({ S, members, notify }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);   // a failed read is not "no pending items"
   const [busyId, setBusyId] = useState(null);
   const nameFor = (id) => { const m = members.find((x) => x.id === id); return m ? m.name : "Unknown member"; };
 
@@ -10741,10 +10742,11 @@ function RosterPending({ S, members, notify }) {
     setLoading(true);
     const { data, error } = await supabase.from("cert_submissions").select("*").eq("status", "pending");
     setLoading(false);
-    if (error) { notify({ kind: "error", title: "Couldn't load pending items", text: "Something went wrong loading those. Please try again.", details: error.message }); return; }
-    setRows(data || []);
+    if (error || !data) { setLoadErr(true); notify({ kind: "error", title: "Couldn't load pending items", text: "Something went wrong loading those. Please try again.", details: error?.message }); return; }
+    setLoadErr(false); setRows(data);
   }
   useEffect(() => { loadPending(); }, []);
+  useReconnect(() => { if (loadErr) loadPending(); });   // the OfflineNotice promises a refresh on reconnect
 
   async function approve(row) {
     setBusyId(row.id);
@@ -10771,6 +10773,7 @@ function RosterPending({ S, members, notify }) {
   }
 
   if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>Loading…</div>;
+  if (rows.length === 0 && loadErr) return <OfflineNotice onRetry={loadPending} what="pending items" />;
   if (rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>No pending items.</div>;
   return (
     <div style={{ marginTop: 4 }}>
