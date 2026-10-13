@@ -10779,13 +10779,11 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
 // BoardStats building blocks. MODULE-LEVEL on purpose: defined inside BoardStats they were new component
 // types every render, so React remounted their children on each state change — harmless for flat tiles,
 // but it would re-run every chart's fetch (StationHoursBars is 24 RPCs) whenever any section loaded.
-function StatsSection({ title, note, children }) {
+function StatsSection({ title, note, icon, children }) {
+  // Department stats (BoardStats) section: CardHead title + the period note at right.
   return (
-    <div style={{ marginTop: 20 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <div style={FS.kicker}>{title}</div>
-        {note && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{note}</div>}
-      </div>
+    <div style={{ marginTop: 14 }}>
+      <CardHead icon={icon} title={title} right={note ? <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{note}</span> : null} />
       {children}
     </div>
   );
@@ -10794,7 +10792,7 @@ function StatsGrid({ children }) { return <div style={{ display: "grid", gridTem
 function StatsCharts({ children }) { return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 14, marginTop: 12 }}>{children}</div>; }
 function StatsUnavailable({ what, retry }) {
   return (
-    <div style={{ ...FS.card, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+    <div style={{ ...FS.cardNoir, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
       <AlertTriangle size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
       <span style={{ flex: 1, minWidth: 180, fontSize: 13, color: FIRE.textSecondary }}>Couldn't load {what}. These numbers are hidden rather than shown as zero.</span>
       {retry && <button style={{ ...FS.btn, padding: "6px 11px", fontSize: 12 }} onClick={retry}>Try again</button>}
@@ -10888,15 +10886,12 @@ function BoardStats({ S, role, members, sessions, dept }) {
   const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
 
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 14 }}>
-        <div style={FS.kicker}>{dept?.name ? `DEPARTMENT STATS · ${dept.name}` : "DEPARTMENT STATS"}</div>
-        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Department at a glance</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>The live numbers behind the Chief's Report — the same figures your Department Admin sees. Read-only.</div>
-      </div>
+    <PageShell kicker={dept?.name ? `DEPARTMENT STATS · ${dept.name}` : "DEPARTMENT STATS"} title="Department at a glance"
+      sub="The live numbers behind the Chief's Report — the same figures your Department Admin sees. Read-only.">
+      <NoirSkin>
       <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
 
-      <StatsSection title="COMPLIANCE" note="Certs and duties as of today · attendance for the period">
+      <StatsSection icon={ShieldAlert} title="Compliance" note="Certs and duties as of today · attendance for the period">
         <StatsGrid>
           <HeroTile n={boardRated ? `${boardPct}%` : "—"} color={boardRated ? pctTone(boardPct) : FIRE.textMuted} label="Board attendance" sub={`${doneBoard.length} meeting${doneBoard.length === 1 ? "" : "s"} in the period`} />
           <HeroTile n={attRated ? `${avgPart}%` : "—"} color={attRated ? pctTone(avgPart) : FIRE.textMuted} label="Training attendance" sub={`${drills.length} drill${drills.length === 1 ? "" : "s"} in the period`} />
@@ -10915,9 +10910,9 @@ function BoardStats({ S, role, members, sessions, dept }) {
       </StatsSection>
 
       {on("apparatus") && (
-        <StatsSection title="APPARATUS READINESS" note="As of today · out-of-service units are not counted as ready or needing attention">
+        <StatsSection icon={Truck} title="Apparatus readiness" note="As of today · out-of-service units are not counted as ready or needing attention">
           {ap.err ? <StatsUnavailable what="apparatus readiness" retry={ap.retry} /> : (
-            <div style={{ ...FS.card, padding: 18 }}>
+            <div style={{ ...FS.cardNoir, padding: 18 }}>
               <ApparatusReadinessView ap={ap} />
               {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
                 <div style={{ marginTop: 10, paddingTop: 4, borderTop: `0.5px solid ${FIRE.hairline}` }}>
@@ -10930,7 +10925,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
         </StatsSection>
       )}
 
-      <StatsSection title="STATION HOURS & ACTIVITY" note="For the period, unless marked otherwise">
+      <StatsSection icon={Clock} title="Station hours & activity" note="For the period, unless marked otherwise">
         <StatsGrid>
           {on("stationhours") && <HeroTile n={sh.loaded && !sh.err ? h1(sh.totals.credited) : "—"} label="Credited station hours" />}
           {on("stationhours") && <HeroTile n={sh.loaded && !sh.err ? String(sh.totals.shifts) : "—"} label="Station shifts" />}
@@ -10948,7 +10943,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
       </StatsSection>
 
       {canSeeMoney && (
-        <StatsSection title="FUNDING" note="Received in the period · fund progress is all-time">
+        <StatsSection icon={DollarSign} title="Funding" note="Received in the period · fund progress is all-time">
           {moneyErr ? <StatsUnavailable what="funding" retry={loadMoney} /> : (<>
             <StatsGrid>
               <HeroTile n={money(donations == null || proceeds == null ? null : donations + proceeds)} label="Total raised" sub="in the period" />
@@ -10956,7 +10951,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
               <HeroTile n={money(proceeds)} label="Fundraiser proceeds" />
             </StatsGrid>
             {funds && funds.length > 0 && (
-              <div style={{ ...FS.card, padding: "6px 16px", marginTop: 12 }}>
+              <div style={{ ...FS.cardNoir, padding: "6px 16px", marginTop: 12 }}>
                 {funds.map((c, i) => (
                   <div key={c.id} style={{ borderBottom: i < funds.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
                     <FundProgress name={c.name} raised={raised == null ? null : (raised[c.id] || 0)} goal={c.goal_amount} />
@@ -10969,24 +10964,24 @@ function BoardStats({ S, role, members, sessions, dept }) {
         </StatsSection>
       )}
 
-      <StatsSection title="ROSTER" note="As of today">
+      <StatsSection icon={Users} title="Roster" note="As of today">
         <StatsGrid>
           <HeroTile n={String(cm.length)} label="Members" sub={`${byStatus("Active")} active · ${byStatus("Probationary")} probationary · ${byStatus("Inactive")} inactive`} />
           <HeroTile n={datedJoins ? String(newThisYear) : "—"} label={`Joined in ${thisYear}`} />
         </StatsGrid>
-        <div style={{ ...FS.card, padding: 18, marginTop: 12 }}><RosterBreakdown members={members} /></div>
+        <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}><RosterBreakdown members={members} /></div>
         {cm.length > 0 && datedJoins < cm.length && (
           <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>{cm.length - datedJoins} member{cm.length - datedJoins === 1 ? " has" : "s have"} no join year on file and {cm.length - datedJoins === 1 ? "isn't" : "aren't"} counted as new.</div>
         )}
       </StatsSection>
 
-      <StatsSection title="TRAINING" note="Drills and attendance for the period">
+      <StatsSection icon={GraduationCap} title="Training" note="Drills and attendance for the period">
         <StatsGrid>
           <HeroTile n={String(drills.length)} label="Drills held" />
           <HeroTile n={attRated ? `${avgPart}%` : "—"} color={attRated ? pctTone(avgPart) : FIRE.textMuted} label="Average attendance" />
           <HeroTile n={String(upcoming.length)} label={upcoming.length === 5 ? "Next 5 upcoming" : "Upcoming events"} />
         </StatsGrid>
-        <div style={{ ...FS.card, padding: "6px 16px", marginTop: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: "6px 16px", marginTop: 12 }}>
           {upcoming.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>Nothing scheduled.</div> : upcoming.map((s, i) => (
             <div key={s.id} style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "9px 0", borderBottom: i < upcoming.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
               <span style={{ fontSize: 12.5, color: FIRE.textMuted, minWidth: 150, ...FS.num }}>{fmtSess(s)}</span>
@@ -10995,7 +10990,8 @@ function BoardStats({ S, role, members, sessions, dept }) {
           ))}
         </div>
       </StatsSection>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 // Yearly attendance — per-member aggregation from sessions + session_attendance.
