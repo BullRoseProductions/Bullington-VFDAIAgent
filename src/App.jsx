@@ -9633,7 +9633,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
     .slice().sort((x, y) => sortBy === "name" ? (x.name || "").localeCompare(y.name || "")
       : sortBy === "compliance" ? (compliance(y) ?? -1) - (compliance(x) ?? -1)
       : sortBy === "status" ? (STATUS_RANK[x.status] ?? 3) - (STATUS_RANK[y.status] ?? 3) : 0);
-  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 78 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 78–89 amber · <78 red
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 70–89 amber · <70 red
   // CREW SPOTLIGHT — three cards from data already on this screen (roster rows + the loaded sessions):
   //  · Service milestone: longest tenure by the join YEAR on file (the roster carries the year, not the month).
   //  · Top responder: most sessions attended in the last 90 days (station hours aren't loaded on the roster).
@@ -10140,7 +10140,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 9, marginBottom: 12 }}>
                 {sum(String(recentWent), "sessions · last 90 days")}
-                {sum(hrs3 == null ? "—" : <>{(Math.round(hrs3 * 10) / 10).toFixed(1)}<span style={{ fontSize: 13, color: FIRE.textMuted, fontWeight: 600 }}> hrs</span></>, "credited · last 3 months")}
+                {sum(hrs3 == null ? "—" : <>{(Math.round(hrs3 * 10) / 10).toFixed(1)}<span style={{ fontSize: 13, color: FIRE.textMuted, fontWeight: 600 }}> hrs</span></>, "station hrs · last 3 months")}
                 {sum(reqPct == null ? "—" : `${reqPct}%`, "of required attended", reqPct == null ? null : reqPct >= 75 ? FIRE.greenText : reqPct >= 50 ? FIRE.amberText : FIRE.redText)}
               </div>
               {shown.map((s, i, arr) => {
