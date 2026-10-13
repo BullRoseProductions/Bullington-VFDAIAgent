@@ -16925,6 +16925,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
   }
   return (
     <PageShell kicker="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan.">
+      <NoirSkin>
       <Card padding={16} style={{ marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Onboarding</span>
           <select style={FS.input} value={selId} onChange={(e) => setSelId(e.target.value)}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
@@ -16948,7 +16949,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
           {(items || []).length === 0 && <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>No items yet — add one above or load the defaults.</Card>}
           {grouped.map((g) => (
             <div key={g.category} style={{ marginBottom: 6 }}>
-              <SectionLabel style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{g.category.toUpperCase()}<button style={{ ...FS.btn, padding: "2px 7px", fontSize: 11 }} onClick={() => renameCategory(g.category)} disabled={busy}>Rename</button></SectionLabel>
+              <CardHead icon={ClipboardCheck} title={g.category} right={<button style={{ ...FS.btn, padding: "2px 7px", fontSize: 11 }} onClick={() => renameCategory(g.category)} disabled={busy}>Rename</button>} />
               {g.items.map((it) => {
                 const catItems = items.filter((x) => x.category === it.category);
                 const idx = catItems.findIndex((x) => x.id === it.id);
@@ -16981,7 +16982,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>No onboarding checklist yet for your department. Once items are added, they'll appear here.</Card>
       ) : grouped.map((g) => (
         <div key={g.category} style={{ marginBottom: 6 }}>
-          <SectionLabel style={{ marginBottom: 8 }}>{g.category.toUpperCase()}</SectionLabel>
+          <CardHead icon={ClipboardCheck} title={g.category} />
           {g.items.map((it) => {
             const mentor = !!it.is_mentor;
             const done = onboardingDone(it, person, checks);
@@ -17015,7 +17016,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
       ))}
       <Card padding={18} style={{ marginTop: 10 }}>
         <div style={{ flex: 1 }}>
-          <SectionLabel style={{ marginBottom: 8 }}><Sparkles size={13} color={FIRE.red} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI WELCOME & 30-DAY PLAN</SectionLabel>
+          <CardHead icon={Sparkles} title="AI welcome & 30-day plan" />
           <h3 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, margin: "0 0 4px" }}>Draft a welcome for {person?.name}</h3>
           <p style={{ fontSize: 13, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 10 }}>A friendly welcome note and a week-by-week first-month plan. You review and send.</p>
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftPlan} disabled={loading}>
@@ -17025,6 +17026,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
           {out && <RichOutput S={S} text={out} dark />}
         </div>
       </Card>
+      </NoirSkin>
     </PageShell>
   );
 }
