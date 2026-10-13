@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
 } from "lucide-react";
 import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
@@ -5968,7 +5968,7 @@ const TIER_STYLES = {
 };
 // compact (dashboard only): shorter cells, 2 chips per day instead of 3, slightly tighter padding. Default off,
 // so the full-page Content / Recruitment / Funding calendars are unchanged.
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted }) {
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted, tiles, belowHeader }) {
   const chipCap = compact ? 2 : 3;
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
@@ -5979,6 +5979,9 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
   for (let d = 1; d <= dim; d++) cells.push(d);
+  // tiles: neighbouring-month day numbers fill the blanks (the mock's .cell.mut) — display only, no items on them.
+  const prevDim = new Date(cur.y, cur.m, 0).getDate();
+  if (tiles) while (cells.length % 7) cells.push(null);
 
   const st = {
     wrap: dark ? { ...FS.card, overflow: "hidden", marginBottom: 10 } : { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
@@ -5994,6 +5997,48 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
     chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   };
 
+  if (tiles) {
+    /* The training mock's calendar (.calhead + .cal): red icon, Oswald month, small ‹ › buttons, extra pushed right;
+       day tiles on card2 with a hairline border, today outlined red with a red disc. Sits inside the caller's card. */
+    const navb = { width: 26, height: 26, borderRadius: 7, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 };
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <Calendar size={16} color={FIRE.redBright} style={{ flexShrink: 0 }} />
+          <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, letterSpacing: ".02em" }}>{monthLabel}</span>
+          <button style={navb} onClick={() => shift(-1)} title="Previous month" aria-label="Previous month"><ChevronLeft size={14} /></button>
+          <button style={navb} onClick={() => shift(1)} title="Next month" aria-label="Next month"><ChevronRight size={14} /></button>
+          {headerExtra && <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }}>{headerExtra}</span>}
+        </div>
+        {belowHeader}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4, marginBottom: 4 }}>
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={{ textAlign: "center", fontSize: 9, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted }}>{d.toUpperCase()}</div>)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4 }}>
+          {cells.map((d, i) => {
+            const mutNum = d == null ? (i < firstDow ? prevDim - firstDow + 1 + i : i - firstDow - dim + 1) : null;
+            const dayItems = d == null ? [] : items.filter((it) => it.d === d);
+            const now = d != null && isToday(d);
+            return (
+              <div key={i} style={{ minHeight: compact ? 50 : 66, minWidth: 0, borderRadius: 7, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.card2Noir, padding: "5px 6px", display: "flex", flexDirection: "column", gap: 3, opacity: d == null ? 0.3 : 1, ...(now ? { outline: "1.5px solid rgba(224,58,68,.7)", outlineOffset: -1 } : null) }}>
+                <span style={now ? { background: todayColor || FIRE.redBright, color: "#fff", borderRadius: 999, width: 17, height: 17, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 } : { fontSize: 10.5, fontWeight: 600, color: FIRE.textMuted }}>{d ?? mutNum}</span>
+                {dayItems.slice(0, chipCap).map((it) => {
+                  const c = renderChip(it);
+                  return (
+                    <div key={it.id} title={c.title} onClick={c.onClick}
+                      style={{ fontSize: 9, fontWeight: 600, borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: c.dashed ? "transparent" : `${c.color}2E`, color: FIRE.textPrimary, border: `1px ${c.dashed ? "dashed" : "solid"} ${c.color}8C`, ...(c.onClick ? { cursor: "pointer" } : {}) }}>
+                      {c.label}
+                    </div>
+                  );
+                })}
+                {overflowIndicator && dayItems.length > chipCap && <div style={{ fontSize: 9, color: FIRE.textMuted, fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - chipCap} more</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={st.wrap}>
       <div style={st.bar}>
@@ -19260,7 +19305,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }; // unchanged (not in the consolidation set)
   const Linput = FS.input;                                                    // FIRE.inputBorder/.btnBg/.name == prior literals
   const LprimaryBtn = FS.btnPrimary;                                          // FIRE.white == "#fff"
-  const Lrow = FS.row;                                                        // FIRE.hairline == "rgba(255,255,255,.05)"
+  const Lrow = FS.row;
+  // Session-row buttons (the training mock's .sbtn): 11px/600 on card2, hairline border, radius 7.
+  const Sbtn = { ...FS.btn, fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 7, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.card2Noir, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6 };                                                        // FIRE.hairline == "rgba(255,255,255,.05)"
   // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
   const statusColor = (label) => (label === "On track" || label === "Done") ? FIRE.greenText : label === "Due soon" ? FIRE.amberText : FIRE.redText;
   // Card 1 — most recent done session's attendance (empty until persistence lands)
@@ -19303,7 +19350,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         const small = (t) => <span style={{ fontSize: 13, color: FIRE.textMuted }}>{t}</span>;
         return (
           <section className="tr-hero" style={{ position: "relative", overflow: "hidden", border: `1px solid ${FIRE.lineNoir}`, borderRadius: 16, background: "radial-gradient(120% 150% at 88% 0%, rgba(200,50,58,.34), rgba(200,50,58,0) 46%), linear-gradient(105deg, #05070A, #0B0E13 55%, #140A0D)", padding: "22px 26px", marginBottom: 12, display: "flex", gap: 24, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", boxShadow: FIRE.cardShadowNoir }}>
-            <div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 20, bottom: -24, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 118, letterSpacing: "-.02em", color: FIRE.textPrimary, opacity: 0.04, pointerEvents: "none" }}>TRAIN</div>
             <div style={{ position: "relative", flex: "1 1 340px", minWidth: 0 }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 11, fontWeight: 700, letterSpacing: ".09em", color: FIRE.redText, textTransform: "uppercase" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.redBright, boxShadow: "0 0 0 4px rgba(200,50,58,.2)" }} />
@@ -19363,17 +19409,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         </div>
       )}
 
-      {/* TRAINING CATEGORIES */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <CardHead icon={GraduationCap} title="Training categories" style={{ marginBottom: 0, width: "auto" }} />
-        {canManage && planView.length > 0 && (
-          <button onClick={togglePlanEdit} style={{ ...Lbtn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
+      {/* TRAINING CATEGORIES — one card: head (Edit trainings on the right, the mock's .chead .right), then the add
+          form when open, then the category grid. */}
+      <div style={{ ...Lcard, padding: "12px 14px", marginBottom: 12 }}>
+      <CardHead icon={GraduationCap} title="Training categories"
+        right={canManage && planView.length > 0 ? (
+          <button onClick={togglePlanEdit} style={{ ...Lbtn, display: "inline-flex", alignItems: "center", gap: 5 }}>
             {editPlanMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit trainings</>}
-          </button>
-        )}
-      </div>
+          </button>) : null} />
       {canManage && (editPlanMode || planView.length === 0) && (addingPlan ? (
-        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
           <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
@@ -19388,7 +19433,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <button style={Lbtn} onClick={() => setAddingPlan(false)}>Cancel</button>
         </div>
       ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={LbtnIcon} /> Add a training</button>)}
-      <div style={{ ...Lcard, padding: "12px 14px", marginBottom: 12 }}>
         {planView.length === 0 ? (
           <div style={{ fontSize: 13, color: FIRE.textMuted2, padding: "6px 0" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
         ) : (
@@ -19422,7 +19466,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color || FIRE.catBlue, flexShrink: 0 }} />
                 <span style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                <span style={{ marginLeft: "auto", flexShrink: 0 }}><Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill></span>
+                <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 9px", borderRadius: 999, color: statusColor(info.label), background: `${statusColor(info.label)}1A`, border: `1px solid ${statusColor(info.label)}66` }}>{info.label.charAt(0).toUpperCase() + info.label.slice(1).toLowerCase()}</span>
               </div>
               <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "9px 0 10px", ...Lnum }}>
                 {p.cadence} · Last <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "never"}</b> · <span style={{ color: statusColor(info.label) }}>{info.rel}</span>
@@ -19468,11 +19512,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         );
       })()}
 
-      {/* TRAINING CALENDAR */}
+      {/* TRAINING CALENDAR — one card (the mock's .calhead + .cal tiles): month header with Schedule a session on the
+          right; the schedule form opens inside the card, under the header. Same form, same handlers. */}
       <div id="tr-schedule" />
-      <CardHead icon={Calendar} title="Training calendar" style={{ marginTop: 14 }} />
-      {canManage && (showSess ? (
-        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ ...Lcard, marginBottom: 12 }}>
+          <MonthCalendar
+            cur={cur} setCur={setCur} dark tiles
+            headerExtra={canManage && !showSess ? <button style={{ ...Lbtn, padding: "6px 11px", fontSize: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); }}><Plus size={14} color={LbtnIcon} /> Schedule a session</button> : null}
+            belowHeader={canManage && showSess ? (
+        <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           {!repeat && <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>}
           <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sTime} onChange={(e) => setSTime(e.target.value)} /></label>
                       {/* TOUCHPOINT 1 — set the length here. Optional and permanently so: a blank
@@ -19505,13 +19553,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             : <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>}
           <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
-
-      {/* calendar wrapped in dark card; dark calendar in dark card; red today marker */}
-      <div style={{ ...Lcard, marginBottom: 16 }}>
-        <div style={{ marginBottom: -10 }}>
-          <MonthCalendar
-            cur={cur} setCur={setCur} dark
+            ) : null}
             items={monthSessions}
             renderChip={(s) => {
               // base color = linked category's live color, or fallback blue for one-off / deleted category
@@ -19531,7 +19573,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             todayColor={FIRE.red}
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
           />
-        </div>
       </div>
 
       {/* SESSIONS — the month's full session list in its own card; every control below is unchanged. */}
@@ -19555,28 +19596,31 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               const locked = s.done || s.signinOpen || (s.attendance?.length > 0);   // editable only BEFORE QR sign-in starts / any check-in / done
               return (
                 <div key={s.id} id={`ts-${s.id}`}>
-                  <div style={Lrow}>
+                  <div style={{ ...Lrow, padding: "12px 2px", gap: 13, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ width: 42, textAlign: "center", flexShrink: 0 }}>
                       <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".06em", color: plan.find((p) => String(p.id) === String(s.planId))?.color || FIRE.catBlue }}>{TRAIN_MONTHS[cur.m].slice(0, 3).toUpperCase()}</div>
                       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: FIRE.textPrimary, ...Lnum }}>{s.d}</div>
                     </div>
                     <div style={FS.rowTitle}>
-                      <span style={{ fontWeight: 600, color: FIRE.name }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} /></span>
-                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: FIRE.textPrimary }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} />
+                        {/* the mock's .spill.done — the status sits with the title, not in the button cluster */}
+                        {s.done && <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", padding: "2px 8px", borderRadius: 999, color: FIRE.greenText, background: "rgba(47,168,105,.10)", border: "1px solid rgba(47,168,105,.4)", verticalAlign: "1px" }}>Done</span>}
+                      </span>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
-                    <div style={FS.rowActions}>
-                      <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
-                      {s.plans.length > 0 && <button style={Lbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
-                      {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                    <div style={{ ...FS.rowActions, gap: 6 }}>
+                      <button style={Sbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
+                      {s.plans.length > 0 && <button style={Sbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
+                      {canRunSignin && !s.done && <button style={{ ...Sbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : FIRE.redText} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                       {canManage && (
-                        <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
+                        <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Sbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} />Attach plan<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                       )}
-                      {isRestrictedEvent(s) && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
+                      {isRestrictedEvent(s) && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} />Agenda</button>}
                       {s.done
-                        ? <><Pill S={S} color={FIRE.greenText}>DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
-                        : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
-                      {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
+                        ? <>{canManage && <button style={Sbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
+                        : canManage && <button style={{ ...Sbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" }} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color="#fff" /> Complete</button>}
+                      {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
                       {/* Remove survives only while the session is UNCLOSED and EMPTY. A closed drill is an
                           attendance record; so is an open one somebody has already checked into, and deleting
                           either cascades the roster away. Mirrors the RLS policy term for term
@@ -19585,7 +19629,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           Deliberately NOT reusing `locked`, which also covers signinOpen: an open QR sign-in
                           nobody has used yet is still an empty session and still cleanup-able. Reopen renders
                           in the done branch above, so a closed session shows the right action instead. */}
-                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                     </div>
                   </div>
                   {editingSessionId === s.id && (
