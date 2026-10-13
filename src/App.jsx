@@ -16441,6 +16441,17 @@ function Equipment({ S, role, members, meId, notify }) {
     if (error || !data) { setIssuesErr(true); return; }
     setIssuesErr(false); setOpenIssues(data);
   };
+  // RESOLVE (B3) — the ONLY write is resolve_equipment_issue (is_equipment_manager() OR is_dept_admin(), own dept,
+  // open issues only). Resolving does NOT change condition: inspect and set it with Edit as usual.
+  const [resolvingId, setResolvingId] = useState(null); const [resNote, setResNote] = useState(""); const [resBusy, setResBusy] = useState(false);
+  async function resolveIssue(x) {
+    setResBusy(true);
+    const { error } = await supabase.rpc("resolve_equipment_issue", { p_issue_id: x.id, p_note: resNote.trim().slice(0, 1000) || null });
+    setResBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't resolve the issue", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Issue resolved", text: `${x.equipment_name} — set its condition with Edit if it changed.` });
+    setResolvingId(null); setResNote(""); loadIssues();
+  }
   async function assignManager(memberId) {
     if (!memberId) return;
     setMgrBusy(true);
@@ -16803,6 +16814,17 @@ function Equipment({ S, role, members, meId, notify }) {
                 <span style={{ marginLeft: "auto", fontSize: 11, color: FIRE.textMuted }}>{x.reported_by_name} · {new Date(x.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
               </div>
               <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.45 }}>{x.note}</div>
+              {resolvingId === x.id ? (
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                  <input autoFocus value={resNote} maxLength={1000} placeholder="What was done? (optional)" onChange={(e) => setResNote(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") resolveIssue(x); if (e.key === "Escape") setResolvingId(null); }}
+                    style={{ ...FS.input, flex: "1 1 200px", minWidth: 0, fontSize: 12.5, padding: "6px 8px" }} />
+                  <button disabled={resBusy} onClick={() => resolveIssue(x)} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: resBusy ? 0.5 : 1 }}>{resBusy ? <Loader2 size={13} className="spin" /> : "Mark resolved"}</button>
+                  <button disabled={resBusy} onClick={() => setResolvingId(null)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => { setResolvingId(x.id); setResNote(""); }} style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, marginTop: 8 }}><CheckCircle2 size={12} color={FIRE.btnIcon} /> Resolve</button>
+              )}
             </div>
           ))}
         </Card>
