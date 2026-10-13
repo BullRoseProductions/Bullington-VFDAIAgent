@@ -10382,43 +10382,118 @@ function RosterCerts({ S, members }) {
     try { const t = await callClaude(sys, `Draft renewal reminders for:\n${lines}`); setOut(t); }
     catch { setErr("Couldn't draft reminders just now. Try again."); } finally { setLoading(false); }
   }
+  // ---- facelift: overview rings, filter tiles, coverage by certification (all client-side, over the loaded certs) ----
+  const inScope = members.filter((m) => m.status === "Active" || m.status === "Probationary");   // same Active + Probationary scope as cov
+  const withCertsM = inScope.filter((m) => (m.certs || []).length > 0);
+  // COMPLIANT: at least one DATED cert that is current or expiring AND nothing expired. Undated-only members are
+  // not counted compliant (they surface on the data-quality line); everyone with certs on file is the denominator.
+  const compliantN = withCertsM.filter((m) => { const ranks = (m.certs || []).map((c) => certStatus(c.exp).rank); return ranks.some((r) => r === 1 || r === 2) && !ranks.includes(0); }).length;
+  const compliancePct = withCertsM.length ? Math.round((compliantN / withCertsM.length) * 100) : null;
+  const NO_DATE = 3;   // certStatus rank for an undated cert — the data-quality filter
+  const ringTone = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redText);
+  const ring = (pct, label) => { const R = 41, C = 2 * Math.PI * R; return (
+    <div style={{ position: "relative", width: 96, height: 96, flexShrink: 0 }}>
+      <svg width="96" height="96" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
+        <circle cx="48" cy="48" r={R} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="9" />
+        {pct != null && pct > 0 && <circle cx="48" cy="48" r={R} fill="none" stroke={ringTone(pct)} strokeWidth="9" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)} />}
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 27, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{pct == null ? "—" : <>{pct}<span style={{ fontSize: 13, color: FIRE.textMuted }}>%</span></>}</div>
+        <div style={{ fontSize: 8, letterSpacing: ".1em", color: FIRE.textMuted, marginTop: 2 }}>{label}</div>
+      </div>
+    </div>
+  ); };
+  const chaseBtn = (text, tone, onClick) => (
+    <button onClick={onClick} style={{ display: "inline-block", marginTop: 9, fontSize: 11, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: tone, background: `${tone}1A`, border: `1px solid ${tone}59`, borderRadius: 7, padding: "4px 10px" }}>{text}</button>
+  );
+  // COVERAGE BY CERTIFICATION — group the loaded cert rows by (trimmed, case-folded) name. Free text, no catalog:
+  // near-duplicate spellings group separately. "Hold" = members with that cert on file, of the in-scope roster.
+  const byCert = new Map();
+  members.forEach((m) => (m.certs || []).forEach((c) => {
+    const k = String(c.name || "").trim().toLowerCase(); if (!k) return;
+    if (!byCert.has(k)) byCert.set(k, { name: String(c.name).trim(), holders: new Set(), exp: 0, old: 0 });
+    const g = byCert.get(k); g.holders.add(m.id); const r = certStatus(c.exp).rank; if (r === 1) g.exp++; if (r === 0) g.old++;
+  }));
+  const certGroups = [...byCert.values()].sort((a, b) => b.holders.size - a.holders.size || a.name.localeCompare(b.name));
+  const [showAllGroups, setShowAllGroups] = useState(false);
+  const GROUP_CAP = 6;
+  const [sortBy, setSortBy] = useState("soonest");   // soonest (status, then expiry) | member | cert
+  const [showAllRows, setShowAllRows] = useState(false);
+  const ROW_CAP = 10;
+  const expKey = (r) => (/^\d{4}-\d{2}$/.test(r.exp || "") ? r.exp : "9999-99");
+  const sorted = visible.slice().sort((a, b) => sortBy === "member" ? a.member.localeCompare(b.member)
+    : sortBy === "cert" ? (a.cert || "").localeCompare(b.cert || "")
+    : (a.st.rank === 3 ? 1.5 : a.st.rank) - (b.st.rank === 3 ? 1.5 : b.st.rank) || expKey(a).localeCompare(expKey(b)));
+  const shownRows = showAllRows ? sorted : sorted.slice(0, ROW_CAP);
+  const ftile = (rank, value, label, tone) => {
+    const on = statusFilter === rank;
+    return (
+      <button key={String(rank)} onClick={() => (rank === null ? setStatusFilter(null) : toggleStatus(rank))} aria-pressed={on}
+        style={{ textAlign: "left", fontFamily: "inherit", cursor: "pointer", borderRadius: 11, padding: "12px 14px", minWidth: 0, background: on ? "linear-gradient(180deg, rgba(200,50,58,.1), transparent)" : FIRE.card2Noir, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}` }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 23, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{value}</div>
+        <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5, display: "flex", alignItems: "center", gap: 6 }}>{tone && <span style={{ width: 8, height: 8, borderRadius: 999, background: tone }} />}{label}</div>
+      </button>
+    );
+  };
+  const listTitle = statusFilter === 0 ? "Expired" : statusFilter === 1 ? "Expiring · 90 days" : statusFilter === 2 ? "Current" : statusFilter === NO_DATE ? "Missing an expiry date" : "All certifications";
   return (
     <div>
-      <div style={S.statRow}>
-        {tileWrap(2, <StatTile value={String(n(2))} label="Certs current" onClick={() => toggleStatus(2)} />)}
-        {tileWrap(1, <StatTile value={String(n(1))} tone={n(1) > 0 ? "amber" : undefined} label="Expiring within 90 days" onClick={() => toggleStatus(1)} />)}
-        {tileWrap(0, <StatTile value={String(n(0))} tone={n(0) > 0 ? "red" : undefined} label="Expired — action needed" onClick={() => toggleStatus(0)} />)}
-        <div style={{ flex: 1, minWidth: 0, borderRadius: 12, outline: showingUncovered ? `2px solid ${FIRE.amberText}` : "none", outlineOffset: 2 }}>
-          <StatTile value={String(cov.uncovered.length)} tone={cov.uncovered.length > 0 ? "red" : undefined} label="Members not covered" onClick={() => toggleStatus(UNCOVERED)} />
-        </div>
+      {/* OVERVIEW — coverage and compliance rings */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginBottom: 12 }}>
+        <Card padding="16px 20px" style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          {ring(cov.pct, "COVERAGE")}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>Roster coverage</div>
+            <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 5, lineHeight: 1.45 }}><b style={{ color: FIRE.textPrimary }}>{cov.covered} of {cov.total}</b> active &amp; probationary members have a current certification on file.</div>
+            {cov.uncovered.length > 0 && chaseBtn(`${cov.uncovered.length} member${cov.uncovered.length === 1 ? " has" : "s have"} none — chase list ›`, FIRE.redText, () => toggleStatus(UNCOVERED))}
+          </div>
+        </Card>
+        <Card padding="16px 20px" style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          {ring(compliancePct, "COMPLIANT")}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>Compliance</div>
+            <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 5, lineHeight: 1.45 }}>{withCertsM.length ? <>Of the members with certs on file, <b style={{ color: FIRE.textPrimary }}>{compliantN} of {withCertsM.length}</b> have a dated, current cert and nothing expired.</> : "No certifications on file yet."}</div>
+            {cov.undatedCerts > 0 && chaseBtn(`${cov.undatedCerts} cert${cov.undatedCerts === 1 ? "" : "s"} missing an expiry date ›`, FIRE.amberText, () => toggleStatus(NO_DATE))}
+          </div>
+        </Card>
       </div>
-      {/* Search + active-filter summary. Counts on the tiles stay ABSOLUTE (computed from every row) —
-          showing filtered counts would change the number you just tapped. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "10px 0 2px" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
-          <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: "0.625rem", top: "50%", transform: "translateY(-50%)" }} />
-          <input
-            style={{ ...FS.input, paddingLeft: "1.875rem" }}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search a member or certification…"
-            aria-label="Search certifications by member or certification name"
-          />
-        </div>
-        {filtering && (
-          <button style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5 }} onClick={clearAll}>
-            <X size={13} color={FIRE.btnIcon} /> Clear
-          </button>
-        )}
+      {/* FILTER TILES — the same certStatus buckets; counts stay absolute */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(140px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+        {ftile(null, String(rows.length), "All certifications", null)}
+        {ftile(2, String(n(2)), "Current", FIRE.greenText)}
+        {ftile(1, String(n(1)), "Expiring · 90 days", FIRE.amberText)}
+        {ftile(0, String(n(0)), "Expired · action needed", FIRE.redText)}
       </div>
-      {filtering && (
-        <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 6 }}>
-          {showingUncovered
-            ? `Showing ${visibleUncovered.length} of ${cov.uncovered.length} active/probationary members without a current certification`
-            : `Showing ${visible.length} of ${rows.length}`}
-        </div>
+      {/* COVERAGE BY CERTIFICATION */}
+      {certGroups.length > 0 && (
+        <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+          <CardHead icon={Award} title="Coverage by certification" right={<span>how much of the crew holds each one</span>} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 12 }}>
+            {(showAllGroups ? certGroups : certGroups.slice(0, GROUP_CAP)).map((g, i) => {
+              const col = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+              const pct = cov.total ? Math.min(100, Math.round((g.holders.size / cov.total) * 100)) : 0;
+              const flag = (text, tone) => <span style={{ fontSize: 10, fontWeight: 600, borderRadius: 6, padding: "3px 8px", color: tone, background: `${tone}1A`, border: `1px solid ${tone}59` }}>{text}</span>;
+              return (
+                <div key={g.name} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 3, background: col, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 12, color: FIRE.textSecondary, flexShrink: 0 }}><b style={{ fontFamily: DISPLAY_FONT, fontSize: 15, color: FIRE.textPrimary }}>{g.holders.size}</b> / {cov.total} hold</span>
+                  </div>
+                  <div style={{ height: 7, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", marginBottom: 9 }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: col }} /></div>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                    {!g.exp && !g.old ? flag("all current", FIRE.greenText) : null}
+                    {g.exp > 0 && flag(`${g.exp} expiring`, FIRE.amberText)}
+                    {g.old > 0 && flag(`${g.old} expired`, FIRE.redText)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {certGroups.length > GROUP_CAP && <button onClick={() => setShowAllGroups((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "11px 0 2px", cursor: "pointer", background: "none", border: "none", fontFamily: "inherit" }}>{showAllGroups ? "Show fewer" : `Show all ${certGroups.length} certifications`}</button>}
+        </Card>
       )}
-      <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 14 }}>
+      <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
           <CardHead icon={CalendarCheck} title="Expiration engine" />
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Stay ahead of every renewal</h3>
@@ -10430,23 +10505,43 @@ function RosterCerts({ S, members }) {
           {out && <RichOutput S={S} text={out} dark />}
         </div>
       </Card>
-      {/* The not-covered list REPLACES the cert rows when its tile is active: these are members,
-          not certifications, and interleaving the two would make the list mean two things at once. */}
+      {/* TOOLBAR — search + sort (client-side over the loaded rows) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "4px 0 10px" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
+          <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)" }} />
+          <input style={{ ...FS.input, paddingLeft: "2rem", background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by member or certification…" aria-label="Search certifications by member or certification name" />
+        </div>
+        <select aria-label="Sort certifications" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={S.select}>
+          <option value="soonest">Sort: Soonest to expire</option>
+          <option value="member">Sort: Member</option>
+          <option value="cert">Sort: Certification</option>
+        </select>
+        {filtering && <button style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5 }} onClick={clearAll}><X size={13} color={FIRE.btnIcon} /> Clear</button>}
+      </div>
+      {filtering && (
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 6 }}>
+          {showingUncovered
+            ? `Showing ${visibleUncovered.length} of ${cov.uncovered.length} active/probationary members without a current certification`
+            : `Showing ${visible.length} of ${rows.length}`}
+        </div>
+      )}
+      {/* The not-covered list REPLACES the cert rows when the chase list is open: these are members, not certifications. */}
       {showingUncovered && (
-        <Card padding="2px 14px" style={{ marginTop: 4 }}>
+        <Card padding="12px 14px" style={{ marginTop: 4 }}>
+          <CardHead icon={AlertTriangle} title="Chase list" right={<span>no current certification on file</span>} />
           {visibleUncovered.length === 0 ? (
-            <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "14px 0" }}>
+            <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 0" }}>
               {cov.uncovered.length === 0 ? "Every active and probationary member has a current certification." : "No members match that search."}
             </div>
           ) : visibleUncovered.map((m) => (
-            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <AlertTriangle size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 1 }}>
                   {(m.certs || []).length === 0
                     ? "No certifications on file"
-                    : `${(m.certs || []).length} on file \u2014 none current`}
+                    : `${(m.certs || []).length} on file — none current`}
                 </div>
               </div>
               <span style={{ fontSize: 12.5, color: FIRE.textMuted2 }}>{m.role || "Member"}</span>
@@ -10454,22 +10549,22 @@ function RosterCerts({ S, members }) {
           ))}
         </Card>
       )}
-      {/* Cert rows unchanged inside the Card — phone-overlap fix kept: title flex:"1 1 160px" +
-          overflowWrap:"anywhere"; status pill + View proof in one wrapping group. */}
-      <Card padding="2px 14px" style={{ marginTop: 4, display: showingUncovered ? "none" : undefined }}>
+      <Card padding="12px 14px" style={{ marginTop: 4, display: showingUncovered ? "none" : undefined }}>
+        <CardHead icon={ClipboardList} title={listTitle} count={visible.length} right={<span>{sortBy === "soonest" ? "expired + expiring first, soonest first" : sortBy === "member" ? "by member" : "by certification"}</span>} />
         {visible.length === 0 && (
-          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "14px 0" }}>
+          <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 0" }}>
             {rows.length === 0 ? "No certifications on file yet." : "No certifications match that filter."}
           </div>
         )}
-        {visible.map((r, i) => {
+        {shownRows.map((r, i) => {
           const cl = r.st.rank < 2 ? nextClassFor(r.cert) : null;
+          const ini = (r.member || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
           return (
-            <div key={i} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-              <Award size={15} color={CERT_FIRE[r.st.label]} style={{ flexShrink: 0 }} />
-              <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
-                <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.cert}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {r.member}</span>
-                <div style={{ fontSize: 12, color: CERT_FIRE[r.st.label], marginTop: 1 }}>{expPhrase(r.exp)}</div>
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 2px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+              <span style={{ width: 34, height: 34, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: FIRE.textPrimary, flexShrink: 0 }}>{ini}</span>
+              <div style={{ flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.member}</span> <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>· {r.cert}</span>
+                <div style={{ fontSize: 11.5, color: CERT_FIRE[r.st.label], marginTop: 1 }}>{expPhrase(r.exp)}</div>
                 {cl && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
@@ -10480,6 +10575,7 @@ function RosterCerts({ S, members }) {
             </div>
           );
         })}
+        {sorted.length > ROW_CAP && <button onClick={() => setShowAllRows((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "11px 0 2px", cursor: "pointer", background: "none", border: "none", fontFamily: "inherit" }}>{showAllRows ? "Show fewer" : `Show all ${sorted.length} certifications`}</button>}
       </Card>
       {proofMount}
     </div>
