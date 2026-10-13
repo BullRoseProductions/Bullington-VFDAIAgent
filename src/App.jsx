@@ -16215,6 +16215,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   }
   return (
     <PageShell kicker="MEETINGS" title={<>Agendas &amp; minutes</>} sub="Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.">
+      <NoirSkin>
       <div style={S.segRow}>
         {[["agenda", "Agenda"], ["minutes", "Minutes"]].map(([k, l]) => (
           <button key={k} onClick={() => setMode(k)} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
@@ -16224,9 +16225,9 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         <MeetingAgenda S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} sessions={sessions} certContext={certContext} />
       ) : (
       <>
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <SectionLabel style={{ marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MINUTES DRAFTER</SectionLabel>
+          <CardHead icon={Sparkles} title="AI minutes drafter" />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
             <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
@@ -16250,7 +16251,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       {canManage && (
         <Card padding={impOpen ? "16px 18px" : "4px 18px"} style={{ marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
           <button onClick={() => setImpOpen((v) => !v)} aria-expanded={impOpen} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: "10px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-            <span style={{ ...FS.kicker, marginBottom: 0, display: "inline-flex", alignItems: "center", gap: 6, flex: 1 }}><Upload size={13} /> IMPORT MINUTES — WRITTEN OUTSIDE B4C</span>
+            <CardHead icon={Upload} title="Import minutes — written outside B4C" style={{ marginBottom: 0, flex: 1 }} />
             {impOpen ? <ChevronUp size={16} color={FIRE.btnIcon} /> : <ChevronDown size={16} color={FIRE.btnIcon} />}
           </button>
           {impOpen && (<>
@@ -16280,8 +16281,8 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       )}
 
       {review.length > 0 && (
-        <div ref={reviewRef} style={{ ...FS.card, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
-          <SectionLabel style={{ marginBottom: 8 }}>REVIEW EXTRACTED ITEMS — confirm owner &amp; due, then create</SectionLabel>
+        <div ref={reviewRef} style={{ ...FS.cardNoir, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
+          <CardHead icon={ClipboardCheck} title="Review extracted items — confirm owner & due, then create" />
           {review.map((r, i) => (
             <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
               <input type="checkbox" checked={r.keep} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x))} title="Include this item" style={{ marginBottom: 10 }} />
@@ -16303,7 +16304,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       )}
 
       <div ref={actionItemsRef} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-        <SectionLabel style={{ marginBottom: 0 }}>ACTION ITEMS{open > 0 ? ` · ${open} OPEN` : ""}</SectionLabel>
+        <CardHead icon={ClipboardList} title="Action items" count={open} style={{ marginBottom: 0, width: "auto" }} />
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           {out && <button style={{ ...FS.btn, opacity: extracting ? 0.7 : 1 }} onClick={extractActions} disabled={extracting}>{extracting ? <><Loader2 size={16} className="spin" /> Reading minutes…</> : <><Sparkles size={16} /> Extract from minutes</>}</button>}
           {canManage && <button style={FS.btn} onClick={addReviewRow}><Plus size={14} /> Add action item</button>}
@@ -16352,7 +16353,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         </div>
       )}
 
-      <SectionLabel style={{ marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED MINUTES</SectionLabel>
+      <CardHead icon={FileText} title="Saved minutes" style={{ marginTop: 14 }} />
       <Card padding="4px 16px" style={{ marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved minutes yet.</div> : drafts.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
@@ -16372,10 +16373,10 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       </Card>
       {openDraft && (
         <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
               <div style={{ minWidth: 0 }}>
-                <SectionLabel style={{ marginBottom: openDraft.source === "imported" ? 5 : 0 }}>{openDraft.title || "Minutes"}</SectionLabel>
+                <CardHead icon={FileText} title={openDraft.title || "Minutes"} style={{ marginBottom: openDraft.source === "imported" ? 5 : 0, width: "auto" }} />
                 {openDraft.source === "imported" && <span style={IMPORTED_BADGE}>Imported — not AI-generated</span>}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -16405,6 +16406,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       )}
       </>
       )}
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -16542,7 +16544,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
   return (
     <div>
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><ClipboardList size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI AGENDA BUILDER</div>
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft an agenda from your real department data</h3>
@@ -16556,8 +16558,8 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
           <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Additional topics <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>— optional, your own items to add</span></span>
             <textarea style={{ ...FS.input, minHeight: 52, resize: "vertical" }} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="e.g. tanker purchase decision, fundraiser date vote, Johnson recognition" /></label>
 
-          <div style={{ ...FS.card, padding: "10px 14px", marginBottom: 12 }}>
-            <div style={{ ...FS.kicker, marginBottom: 2, fontSize: 10.5 }}>CONTEXT WE'LL USE</div>
+          <div style={{ ...FS.cardNoir, padding: "10px 14px", marginBottom: 12 }}>
+            <CardHead icon={Sparkles} title="Context we'll use" style={{ marginBottom: 4 }} />
 
             <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
             {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
@@ -16587,7 +16589,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       </div>
 
       <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED AGENDAS</div>
-      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
+      <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved agendas yet.</div> : drafts.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
@@ -16606,9 +16608,9 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       </div>
       {openDraft && (
         <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Agenda"}</div>
+              <CardHead icon={FileText} title={openDraft.title || "Agenda"} style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
                 {/* Print. Not gated on canManage — a member who can read the document can put it
                     on paper; nothing is written and nothing leaves the department. Uses the shared
