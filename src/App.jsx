@@ -13727,6 +13727,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null,
           currentCost: r.current_cost ?? null, inflationRate: r.inflation_rate ?? null,
           replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
+          everChecked: !!r.last_check_at,   // a rig added as "Ready" is status Pass with NO check on file — keep the two apart
           lastCheck: r.last_check_at ? new Date(r.last_check_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
           by: r.checked_by ? (nameById.get(r.checked_by) || "A member") : "—",
         })));
@@ -13941,7 +13942,13 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           const small = (t) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{t}</span>;
           return [
             chip(Truck, "In service", <>{inServiceRigs.length}{small(`/${rigs.length}`)}</>, outOfServiceCount ? `${outOfServiceCount} out of service` : "whole fleet available", outOfServiceCount ? FIRE.amberText : FIRE.greenText),
-            chip(CheckCircle2, "Ready to roll", String(ready), "passed their last check", ready ? FIRE.greenText : null),
+            // Honest count: "passed" requires a check on file. A Pass rig with no check ever logged (added as
+            // "Ready") is split out as never checked rather than reading as passed.
+            (() => {
+              const passedChecked = inServiceRigs.filter((r) => r.status === "Pass" && r.everChecked).length;
+              const neverChecked = inServiceRigs.filter((r) => r.status === "Pass" && !r.everChecked).length;
+              return chip(CheckCircle2, "Ready to roll", String(passedChecked), neverChecked ? `checked & passed · ${neverChecked} never checked` : "checked & passed", passedChecked ? FIRE.greenText : null);
+            })(),
             chip(AlertTriangle, "Needs attention", String(flagged), "in service, flagged", flagged ? FIRE.redText : null),
             chip(Wrench, "Open maintenance", String(openN), overdueN ? `${overdueN} overdue` : "nothing overdue", overdueN ? FIRE.redText : openN ? FIRE.amberText : null),
           ];
