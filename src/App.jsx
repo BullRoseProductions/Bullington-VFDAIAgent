@@ -5362,7 +5362,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
         <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent={FIRE.catGreen} />
       </div>
 
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...S.aiBanner, ...FS.cardNoir }}>
         <div style={{ flex: 1 }}>
           <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
@@ -5843,7 +5843,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
 
         <CardHead as="button" onClick={() => setDraftOpen((v) => !v)} icon={FilePlus} title="Draft a new document" right={draftOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />} style={{ marginTop: 14, marginBottom: draftOpen ? 8 : 0, cursor: "pointer" }} />
         {draftOpen && (<>
-        <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 14 }}>
+        <Card padding="16px 18px" style={{ display: "flex", marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Document type</span>
               <select style={{ ...FS.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -6660,7 +6660,7 @@ function Visibility({ S, brand, role, notify }) {
         { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
       ]} />}
 
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...S.aiBanner, ...FS.cardNoir }}>
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI caption helper" />
           <h3 style={NOIR_FEAT_TITLE}>Write a post for your station</h3>
@@ -17431,7 +17431,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         <MeetingAgenda S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} sessions={sessions} certContext={certContext} />
       ) : (
       <>
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...S.aiBanner, ...FS.cardNoir }}>
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI minutes drafter" />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
