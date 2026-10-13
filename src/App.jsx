@@ -794,8 +794,8 @@ function YourSix({ S, role, meId, members, notify }) {
           <ChevronRight size={18} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
         </button>
         {reachOpen && createPortal(
-          <div onClick={() => setReachOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 120, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 460, width: "100%", padding: "18px 18px calc(18px + env(safe-area-inset-bottom))" }}>
+          <div onClick={() => setReachOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 120, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}`, maxWidth: 460, width: "100%", padding: "18px 18px calc(18px + env(safe-area-inset-bottom))" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <HeartHandshake size={20} color={FIRE.greenText} />
                 <div style={{ flex: 1, fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 20, fontWeight: 700, color: FIRE.textPrimary }}>Reach out</div>
@@ -5496,8 +5496,8 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
         })}
       </Card>
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}`, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <CardHead icon={FileText} title={openDraft.title || "Draft"} style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
@@ -6684,7 +6684,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         const SRC_LABEL = { training: "Training", actionitem: "Action item", recruit: "Recruitment", funding: "Funding", social: "Social" };
         const dateStr = new Date(it.y, it.m, it.d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
         return (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={() => setDetailEvent(null)}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={() => setDetailEvent(null)}>
             <div style={{ ...FS.card, width: "min(460px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ width: 10, height: 10, borderRadius: 999, background: it.color, flexShrink: 0 }} />
@@ -14670,7 +14670,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
   // desktop (react-zoom-pan-pinch drives mouse pan via native document listeners, so those clicks
   // slipped past the portal-root guard). Close only via the header ✕ / footer Close buttons.
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
       {photoOpen && checkPhoto && <PhotoDotEditor S={S} url={photoUrls[checkPhoto.id]} photo={checkPhoto}
         dots={dotsFor(checkPhoto.id)} unplaced={[]} marks={marks} editable={false}
         tabs={photoTabs} checkPanel={checkPanel} onClose={() => setPhotoOpen(false)} busy={false} />}
@@ -18976,7 +18976,7 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
     onAttached(); onClose();
   }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
       <div style={{ ...FS.card, width: "min(480px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           <ClipboardList size={16} color={FIRE.btnIcon} />
@@ -19045,7 +19045,7 @@ function NotifyCrewModal({ session, onClose, notify }) {
   );
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 130, background: "rgba(0,0,0,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 460, padding: "18px 18px 16px", margin: "40px 0" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}`, width: "100%", maxWidth: 460, padding: "18px 18px 16px", margin: "40px 0" }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
           <CardHead icon={Megaphone} title="Notify crew" style={{ marginBottom: 0, width: "auto" }} />
           <button onClick={onClose} aria-label="Close" style={{ ...FS.btn, marginLeft: "auto", padding: "5px 8px" }}><X size={15} color={FIRE.btnIcon} /></button>
