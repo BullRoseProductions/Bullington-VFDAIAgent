@@ -13561,7 +13561,8 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
   }
 
   return (
-    <PageShell above={<button style={{ ...FS.btn, marginBottom: 14 }} onClick={onBack}><ArrowLeft size={15} /> Apparatus</button>} kicker="AFTER-CALL CHECKLIST" title="Back in service" sub={<>Tick off what you did after the call. What you skip is recorded too, so the next crew knows what&rsquo;s still outstanding.</>}>
+    <PageShell band watermark="FLEET" above={<button style={{ ...FS.btn, marginBottom: 14 }} onClick={onBack}><ArrowLeft size={15} /> Apparatus</button>} kicker="AFTER-CALL CHECKLIST" title="Back in service" sub={<>Tick off what you did after the call. What you skip is recorded too, so the next crew knows what&rsquo;s still outstanding.</>}>
+      <NoirSkin>
 
       {/* ---- the run form ---- */}
       <Card padding={18} style={{ marginBottom: 14 }}>
@@ -13573,7 +13574,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
           </select>
         </label>
 
-        {tasksErr && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 12, lineHeight: 1.5 }}>Couldn&rsquo;t load the tasks: {tasksErr}</div>}
+        {tasksErr && <div style={{ ...NOIR_ERR, marginTop: 12 }}>Couldn&rsquo;t load the tasks: {tasksErr}</div>}
         {tasks === null && !tasksErr && <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 12 }}>Loading tasks…</div>}
 
         {/* Nothing to run. Names where the list comes from, so a member who hits this knows who to
@@ -13585,18 +13586,18 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
         )}
 
         {tasks !== null && tasks.length > 0 && (<>
-          <SectionLabel style={{ marginTop: 16 }}>WHAT YOU DID · {doneCount} of {tasks.length}</SectionLabel>
+          <SectionBar icon={ClipboardCheck} label="What you did" count={`${doneCount} of ${tasks.length}`} style={{ margin: "16px 0 0" }} />
           <div style={{ marginTop: 6 }}>
             {tasks.map((t) => {
               const on = !!ticks[t.id];
               return (
-                <div key={t.id} style={{ padding: "10px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div key={t.id} style={{ padding: "10px 0", borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   {/* The whole row is the target. A tick box alone is a small thing to hit on a
                       phone in the dark with gloves on. */}
                   <div onClick={() => setTicks((m) => ({ ...m, [t.id]: !on }))}
                        style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                     <span style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                   border: `1.5px solid ${on ? FIRE.green : FIRE.btnBorder}`, background: on ? FIRE.green : "transparent" }}>
+                                   border: `1.5px solid ${on ? FIRE.green : FIRE.line2Noir}`, background: on ? FIRE.green : "transparent" }}>
                       {on && <CheckCircle2 size={14} color="#0E1014" />}
                     </span>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: on ? FIRE.textPrimary : FIRE.textSecondary }}>{t.label}</span>
@@ -13627,7 +13628,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
 
       {/* ---- the running log ---- */}
       <Card padding="8px 0">
-        <CardHead icon={ClipboardList} title="Checklist history" />
+        <CardHead icon={ClipboardList} title="Checklist history" style={{ padding: "8px 14px 0" }} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
           Grouped by day, newest first. Times are Central. Tap one to see what was done and what wasn&rsquo;t.
         </div>
@@ -13646,7 +13647,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
             )}
           </div>
         </div>
-        {runsErr && <div style={{ fontSize: 12.5, color: FIRE.redText, padding: "0 14px 10px", lineHeight: 1.5 }}>Couldn&rsquo;t load the log: {runsErr}</div>}
+        {runsErr && <div style={{ ...NOIR_ERR, margin: "0 14px 10px" }}>Couldn&rsquo;t load the log: {runsErr}</div>}
         {runs === null && !runsErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "0 14px 12px" }}>Loading…</div>}
         {/* RANGE-AWARE. "Nothing logged yet" would be a claim about the whole department; this is
             only ever a claim about the dates on screen. */}
@@ -13662,7 +13663,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
         )}
         {days.map((d) => (
           <div key={d.key}>
-            <div style={{ padding: "8px 14px 6px", borderTop: `0.5px solid ${FIRE.hairline}`, background: FIRE.btnBg }}>
+            <div style={{ padding: "8px 14px 6px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir }}>
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textSecondary }}>{d.label}</span>
               <span style={{ fontSize: 11.5, color: FIRE.textMuted2, marginLeft: 8 }}>{d.runs.length} checklist{d.runs.length === 1 ? "" : "s"}</span>
             </div>
@@ -13670,7 +13671,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
           const open = expanded === r.id;
           const items = itemsByRun[r.id];
           return (
-            <div key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
               <div onClick={() => toggleExpand(r.id)}
                    style={{ padding: "11px 14px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", flexWrap: "wrap" }}>
                 <Truck size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -13706,6 +13707,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
           </div>
         ))}
       </Card>
+      </NoirSkin>
     </PageShell>
   );
 }
