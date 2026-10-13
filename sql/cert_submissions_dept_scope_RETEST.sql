@@ -1,5 +1,11 @@
 -- =====================================================================
 -- RETEST for cert_submissions_dept_scope_DRAFT.sql. READ-ONLY IN EFFECT.
+-- RAN 2026-10-13 (v1): 10/10 passed — but B/C/E all SKIPPED (no pending submissions existed anywhere).
+-- RAN 2026-10-13 (v2): 23/23 passed, 0 failed — all 5 departments; only E skipped for Granbury + Lipan
+-- (no submissions of their own). Safe to re-run any time: the regression check for cert_submissions scoping.
+-- v2: makes its own fixtures — at the start it flips ONE existing submission per department to
+-- 'pending' (as the owner, inside this block), so B/C/E always run. The final RAISE rolls every one
+-- of those flips back, along with any cert the own-department approve creates.
 -- Run AFTER the fix. One DO block: for each department, sign in as one ordinary Dept Admin
 -- (not a Project Admin) exactly as the app does (JWT email claim + role authenticated), then:
 --   A. sees 0 OTHER-department submissions (and still sees its own)
@@ -16,6 +22,15 @@ DECLARE
   v_other int; v_own int; v_err text; v_target uuid; v_own_target uuid; v_tmember uuid; v_tdept uuid;
   rpt text := chr(10); n int := 0; v_pass int := 0; v_fail int := 0;
 BEGIN
+  -- Josh Merritt's 23 (reset to pending earlier today) — where are they now? (read as owner)
+  rpt := rpt || (SELECT format('   Josh Merritt: %s pending · %s approved · %s rejected (of %s)%s',
+                   count(*) FILTER (WHERE status = 'pending'), count(*) FILTER (WHERE status = 'approved'),
+                   count(*) FILTER (WHERE status = 'rejected'), count(*), chr(10))
+                   FROM public.cert_submissions WHERE member_id = '019d1fd0-e063-4d7d-adae-d770d444a1dd');
+  -- FIXTURES: one submission per department becomes 'pending' for the duration of this block (rolled back at the end)
+  UPDATE public.cert_submissions cs SET status = 'pending'
+   WHERE cs.id IN (SELECT DISTINCT ON (department_id) id FROM public.cert_submissions ORDER BY department_id, created_at DESC)
+     AND cs.status <> 'pending';
   FOR rec IN
     SELECT DISTINCT ON (m.department_id) m.department_id, d.name AS dept, m.id AS mid, lower(m.email) AS email, m.name
       FROM public.members m JOIN public.departments d ON d.id = m.department_id
