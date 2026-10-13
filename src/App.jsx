@@ -13565,10 +13565,39 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
 
 // APPROVED NEW READ (fleet facelift): one rig's maintenance log — every apparatus_maintenance_log entry for that rig,
 // newest first. Mounted only inside an EXPANDED rig on the fleet board, so it loads on expand and never for the whole
-// fleet. Select-only; dept-scoped by the existing apparatus_maintenance_log RLS. A failed read keeps what was shown.
-function RigMaintenanceLog({ rig }) {
+// fleet. Dept-scoped by the existing apparatus_maintenance_log RLS. A failed read keeps what was shown.
+// LOG MAINTENANCE (ad-hoc): one apparatus_maintenance_log INSERT with maintenance_id NULL (nullable, confirmed live
+// 2026-10-13) — work that isn't a scheduled task. Same insert Mark done makes, same gate: the button shows only for
+// the Apparatus page's DA/Officer flag (CANMANAGE_OPS_ROLES), matching aml_insert's is_canmanage_ops(). apparatus_id and task are
+// nullable in the DB, so the form always sets the rig and requires a task. Never touches apparatus_maintenance.
+function RigMaintenanceLog({ rig, canManage, meId, meName, notify }) {
   const [rows, setRows] = useState(null);   // null = loading
   const [err, setErr] = useState("");
+  const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const [logOpen, setLogOpen] = useState(false);
+  const [lb, setLb] = useState({ task: "", date: "", cost: "", notes: "" });
+  const [logBusy, setLogBusy] = useState(false);
+  const openLog = () => { setLb({ task: "", date: todayStr(), cost: "", notes: "" }); setLogOpen(true); };
+  async function submitLog() {
+    const task = lb.task.trim();
+    if (!task) { notify({ kind: "error", title: "Add what was done", text: "A short description of the work is required." }); return; }
+    const cs = String(lb.cost ?? "").replace(/[$,\s]/g, "").trim();
+    const cost = cs === "" ? null : Number(cs);
+    if (cost !== null && !(Number.isFinite(cost) && cost >= 0)) { notify({ kind: "error", title: "Check the cost", text: "Enter a number (e.g. 240), or leave it blank." }); return; }
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(lb.date || "");
+    if (!m || lb.date > todayStr()) { notify({ kind: "error", title: "Check the date", text: "Pick the day the work was done — today or earlier." }); return; }
+    const doneAt = lb.date === todayStr() ? new Date() : new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12);   // past day → local noon, never shifts a day
+    setLogBusy(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");   // same dept-id source as Mark done
+    if (deptErr || !deptId) { setLogBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { data: logged, error } = await supabase.from("apparatus_maintenance_log")
+      .insert({ department_id: deptId, maintenance_id: null, apparatus_id: rig.id, task, done_at: doneAt.toISOString(), done_by: meId, done_by_name: meName, notes: lb.notes.trim() || null, cost })
+      .select("id");
+    setLogBusy(false);
+    if (error || !logged || logged.length === 0) { notify({ kind: "error", title: "Couldn't log the maintenance", text: "Nothing was saved — please try again.", details: error?.message }); return; }   // 0 rows = RLS blocked
+    notify({ kind: "success", title: "Maintenance logged", text: `${task} · ${rig.name}` });
+    setLogOpen(false); load();
+  }
   const load = () => {
     setErr("");
     supabase.from("apparatus_maintenance_log")
@@ -13586,10 +13615,25 @@ function RigMaintenanceLog({ rig }) {
     <div style={{ minWidth: 0 }}>
       <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
         Maintenance log{rows && ytd > 0 && <span style={{ color: FIRE.textSecondary, fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>· {money(ytd)} this year</span>}
+        {canManage && !logOpen && <button onClick={openLog} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, letterSpacing: 0, textTransform: "none" }}><Plus size={13} color={FIRE.btnIcon} /> Log maintenance</button>}
       </div>
+      {canManage && logOpen && (
+        <div style={{ background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: 12, marginBottom: 12, display: "grid", gap: 9 }}>
+          <input style={FS.input} placeholder="What was done (e.g. Replaced front brake pads)" maxLength={200} value={lb.task} onChange={(e) => setLb((b) => ({ ...b, task: e.target.value }))} />
+          <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+            <label style={{ flex: "1 1 140px", fontSize: 11, color: FIRE.textMuted }}>Date<input type="date" max={todayStr()} style={{ ...FS.input, marginTop: 4 }} value={lb.date} onChange={(e) => setLb((b) => ({ ...b, date: e.target.value }))} /></label>
+            <label style={{ flex: "1 1 120px", fontSize: 11, color: FIRE.textMuted }}>Cost (optional)<input inputMode="decimal" placeholder="$" style={{ ...FS.input, marginTop: 4 }} value={lb.cost} onChange={(e) => setLb((b) => ({ ...b, cost: e.target.value }))} /></label>
+          </div>
+          <input style={FS.input} placeholder="Notes (optional) — vendor, parts, mileage" maxLength={500} value={lb.notes} onChange={(e) => setLb((b) => ({ ...b, notes: e.target.value }))} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button disabled={logBusy} onClick={submitLog} style={{ ...FS.btnPrimary, opacity: logBusy ? 0.6 : 1 }}><CheckCircle2 size={15} /> {logBusy ? "Saving…" : "Save to log"}</button>
+            <button disabled={logBusy} onClick={() => setLogOpen(false)} style={FS.btn}>Cancel</button>
+          </div>
+        </div>
+      )}
       {err ? <div style={{ fontSize: 12.5, color: FIRE.amberText }}>Couldn't load the log — not shown as empty. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={load}>Retry</button></div>
         : rows == null ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>—</div>
-        : rows.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No maintenance logged for this rig yet. Completions recorded with Mark done (below) appear here.</div>
+        : rows.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No maintenance logged for this rig yet. Mark done (below) and Log maintenance both record here.</div>
         : rows.slice(0, 6).map((r, i, arr) => (
           <div key={r.id} style={{ padding: "9px 0", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5 }}>
@@ -13896,7 +13940,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
         <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
         <div className="ap-cols" style={{ marginTop: 14 }}>
-          <RigMaintenanceLog rig={r} />
+          <RigMaintenanceLog rig={r} canManage={canManage} meId={meId} meName={(members || []).find((m) => m.id === meId)?.name || "Unknown"} notify={notify} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 }}>Capital &amp; replacement</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))", gap: 10 }}>
