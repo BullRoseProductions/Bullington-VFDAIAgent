@@ -1035,7 +1035,7 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEs
           A policy link that keyboard users can't see themselves land on is the wrong one to
           leave inaccessible. */}
       <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
-      <div style={FS.kicker}>LOCATION</div>
+      <div style={NOIR_LABEL}>LOCATION</div>
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 12px", letterSpacing: "-0.01em" }}>
         {GEOFENCE_DISCLOSURE.title}
       </h1>
@@ -3168,7 +3168,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
                 to showing them. */}
             {mineOpen.length === 0 && crewOpen.length > 0 && (
               <div style={{ marginTop: (mineOpen.length + mineDone.length) > 0 ? 10 : 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
-                <div style={{ ...FS.kicker, marginBottom: 8 }}>STATION DUTIES STILL OPEN</div>
+                <div style={{ ...NOIR_LABEL, marginBottom: 8 }}>STATION DUTIES STILL OPEN</div>
                 {crewShown.map((d) => (
                   <div key={d.id} style={{ ...FS.row, padding: "8px 0" }}>
                     <ClipboardList size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -4140,7 +4140,7 @@ function QuickAccess({ S, role, go, isEqMgr, disabledModules }) {
     .filter((n) => moduleEnabled(n.key, disabledModules));                                                                // and the same module gate — no tile for a module the department turned off
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>EXPLORE THE PLATFORM</div>
+      <CardHead icon={LayoutDashboard} title="Explore the platform" />
       <div style={S.quickGrid}>
         {items.map((n) => {
           const q = QUICK[n.key] || {};
@@ -5431,7 +5431,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
 
       <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
           <h3 style={NOIR_FEAT_TITLE}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
@@ -5459,7 +5459,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
         </div>
       </div>
 
-      <button onClick={() => setWaysOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: waysOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA<span style={{ marginLeft: "auto", display: "inline-flex" }}>{waysOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+      <button onClick={() => setWaysOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: waysOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA<span style={{ marginLeft: "auto", display: "inline-flex" }}>{waysOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
       {waysOpen && <IdeaGrid S={S} dark items={[
         { h: "Current-member referrals", p: "Your people's networks convert best. Give them a one-line script to forward." },
         { h: "Local employers", p: "Release-time or support partnerships — many owners want the community goodwill." },
@@ -6616,7 +6616,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
     <div>
       {loadErr && <OfflineNotice onRetry={loadAll} what="the calendar" />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-        <div style={{ ...FS.kicker, marginBottom: 0 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+        <CardHead icon={Calendar} title="Station calendar" style={{ marginBottom: 0, width: "auto" }} />
         {withImportanceMode && (
           <div style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${FIRE.btnBorder}`, borderRadius: 8, overflow: "hidden" }}>
             {[["grid", "Grid"], ["importance", "By importance"]].map(([k, l], i) => (
@@ -13553,7 +13553,7 @@ function CapitalFields({ S, v, set }) {
   const overridden = num(v.replaceCost) != null;
   return (
     <div style={{ flexBasis: "100%", borderTop: `1px solid ${FIRE.lineNoir}`, marginTop: 4, paddingTop: 10 }}>
-      <div style={{ ...FS.kicker, marginBottom: 2 }}>CAPITAL PLANNING (OPTIONAL)</div>
+      <div style={{ ...NOIR_LABEL, marginBottom: 2 }}>CAPITAL PLANNING (OPTIONAL)</div>
       <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 6 }}>What it cost, what it costs today, and when it's due — the app projects the replacement figure. Feeds the Capital Replacement Plan report.</div>
       {/* GRID, not a wrapping flex row. Six fields with hints of different heights left the inputs
           stepping up and down as labels wrapped; even columns keep them on one baseline at every
