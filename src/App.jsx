@@ -1449,7 +1449,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   const isDA = isDeptAdmin(role);
   const back = () => setView(null);
   const backBtn = <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Settings &amp; Support</button>;
-  const doc = (title, body) => <PageShell above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title={title}><Card padding={18} style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>{body}</Card></PageShell>;
+  const doc = (title, body) => <PageShell band above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title={title}><NoirSkin><Card padding={18} style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>{body}</Card></NoirSkin></PageShell>;
   // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
   if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><Card padding={18} style={{ marginTop: 12 }}><SectionLabel>CONTACT SUPPORT</SectionLabel><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></Card></div>;
@@ -1463,17 +1463,15 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   if (view === "aftercall" && canManage(role)) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<AfterCallSettings S={S} role={role} dept={dept} setDept={setDept} notify={notify} /></div>;
   const card = (key, Icon, title, desc) => (
     <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView(key)}>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-        <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-        <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
-      </div>
+      <CardHead icon={Icon} title={title} style={{ marginBottom: 0 }} />
       <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{desc}</div>
       <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
         <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
       </div>
     </Card>
   );
-  return (<PageShell kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Settings &amp; Support</>} sub="Your department settings, brand, and help — all in one place.">
+  return (<PageShell band kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Settings &amp; Support</>} sub="Your department settings, brand, and help — all in one place.">
+    <NoirSkin>
     <div style={S.opGrid}>
       {card("person", HeartHandshake, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
       {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
@@ -1500,7 +1498,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
     {/* Legal & Trust — external links to the public documentation center. No role gate: every member sees these. */}
     <div style={{ marginTop: 18 }}>
       <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
-      <SectionLabel>LEGAL &amp; TRUST</SectionLabel>
+      <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ marginTop: 0 }} />
       <Card padding="4px 14px" style={{ marginTop: 8 }}>
         {[
           { label: "Terms of Service", href: "https://b4thecall.com/legal/terms", Icon: FileText },
@@ -1510,7 +1508,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
         ].map(({ label, href, Icon }, i, arr) => (
           <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="b4c-legal-link"
              style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 2px", textDecoration: "none",
-                      borderBottom: i < arr.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                      borderBottom: i < arr.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
             <Icon size={16} color={FIRE.red} style={{ flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{label}</span>
             <ExternalLink size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
@@ -1523,6 +1521,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
     <div onClick={() => location.reload()} title="Tap to reload the latest version" style={{ marginTop: 18, textAlign: "center", fontSize: 11, color: FIRE.textMuted2, letterSpacing: ".03em", cursor: "pointer", ...FS.num }}>
       Build {typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev"}
     </div>
+    </NoirSkin>
   </PageShell>);
 }
 const NAV = [
