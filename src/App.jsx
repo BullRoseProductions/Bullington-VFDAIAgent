@@ -15893,6 +15893,9 @@ function HandoffModal({ items, notify, onClose }) {
     document.body
   );
 }
+// equipment_issues.kind → label (the CHECK constraint's four values).
+const ISSUE_KINDS = [["damaged", "Damaged"], ["not_working", "Not working"], ["missing_part", "Missing part"], ["other", "Other"]];
+const issueKindLabel = (k) => (ISSUE_KINDS.find(([v]) => v === k) || [null, "Issue"])[1];
 function MyEquipment({ S, meId, notify }) {
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -15916,6 +15919,18 @@ function MyEquipment({ S, meId, notify }) {
       .then(({ data, error }) => { if (!error && data) setRows(data); setLoaded(true); });
   };
   useEffect(() => { load(); }, [meId]);
+  // APPROVED NEW READ (B3): MY open issues — the "Issue reported" line on a held item. .eq(reported_by) is REQUIRED:
+  // a manager's "managers read issues" RLS would otherwise return the whole dept. Failed read keeps last-known.
+  const [myIssues, setMyIssues] = useState([]);
+  const loadMyIssues = () => {
+    if (!meId) return;
+    supabase.from("equipment_issues")
+      .select("id, equipment_id, kind, created_at")
+      .eq("reported_by", meId).is("resolved_at", null)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => { if (!error && data) setMyIssues(data); });
+  };
+  useEffect(() => { loadMyIssues(); }, [meId]);
   async function markReturned(r) {
     setBusyId(r.equipment_id);
     const { error } = await supabase.rpc("mark_equipment_returned", { p_equipment_id: r.equipment_id });
@@ -16003,6 +16018,7 @@ function MyEquipment({ S, meId, notify }) {
                   {gear.tracked && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Made {r.equipment.manufacture_date.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                   {signedFor && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Signed for as {signedFor}</div>}
                   {pending && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Return pending — a manager will confirm receipt.</div>}
+                  {(() => { const iss = myIssues.find((x) => x.equipment_id === r.equipment_id); return iss && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Issue reported · {issueKindLabel(iss.kind)} — a manager will follow up.</div>; })()}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                   {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
@@ -16385,6 +16401,17 @@ function Equipment({ S, role, members, meId, notify }) {
     if (error || !data) return;   // keep last-known on a flaky read
     setPending(data);
   };
+  // APPROVED NEW READ (B3): the dept's OPEN equipment issues. Loaded only for canManage (= is_dept_admin() OR
+  // is_equipment_manager(), the "managers read issues" RLS + resolve gate); RLS does the dept scoping. Drives the
+  // derived NEEDS ATTENTION pill — condition is never written. Failed read keeps last-known, says so.
+  const [openIssues, setOpenIssues] = useState([]); const [issuesErr, setIssuesErr] = useState(false);
+  const loadIssues = async () => {
+    const { data, error } = await supabase.from("equipment_issues")
+      .select("id, equipment_id, equipment_name, kind, note, reported_by_name, created_at")
+      .is("resolved_at", null).order("created_at", { ascending: false }).limit(200);
+    if (error || !data) { setIssuesErr(true); return; }
+    setIssuesErr(false); setOpenIssues(data);
+  };
   async function assignManager(memberId) {
     if (!memberId) return;
     setMgrBusy(true);
@@ -16420,6 +16447,8 @@ function Equipment({ S, role, members, meId, notify }) {
   // Deliberately NOT reused by MaintenancePanel — that's a separate component with its own DA/Officer
   // canManage on apparatus_maintenance, and this change must not widen it.
   const canManage = isDA || isManager;
+  useEffect(() => { if (canManage && activeStationId !== undefined) loadIssues(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [canManage, activeStationId]);
+  const issuesByEq = new Map(); openIssues.forEach((x) => issuesByEq.set(x.equipment_id, (issuesByEq.get(x.equipment_id) || 0) + 1));
   const eligibleForMgr = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !managers.some((mg) => mg.memberId === m.id));
   const availableUnits = types.flatMap((t) => t.units.filter((u) => u.status === "in_inventory")
     .map((u) => ({ id: u.id, typeName: t.name, category: t.category, serial: u.serial, asset: u.asset, condition: u.condition })));
@@ -16593,6 +16622,7 @@ function Equipment({ S, role, members, meId, notify }) {
                           {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
                           {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                         </div>
+                        {issuesByEq.get(u.id) > 0 && <Pill S={S} color={FIRE.amberText}>NEEDS ATTENTION</Pill>}
                         {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
                         {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
                         {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
@@ -16729,6 +16759,23 @@ function Equipment({ S, role, members, meId, notify }) {
             <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 10 }}>Two managers is the maximum — remove one to assign someone else.</div>
           ))}
           </div>)}
+        </Card>
+      )}
+      {/* OPEN ISSUES — reported by holders; each flags its unit NEEDS ATTENTION until resolved. */}
+      {canManage && (openIssues.length > 0 || issuesErr) && (
+        <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+          <CardHead icon={AlertTriangle} title="Open issues" count={openIssues.length} right={<span>reported by holders · condition is still yours to set</span>} />
+          {issuesErr && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 6 }}>Couldn't refresh issues — showing the last list. <button onClick={loadIssues} style={{ ...FS.btn, padding: "2px 8px" }}>Retry</button></div>}
+          {openIssues.map((x, i) => (
+            <div key={x.id} style={{ padding: "10px 0", borderBottom: i === openIssues.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{x.equipment_name}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: FIRE.amberText }}>{issueKindLabel(x.kind).toUpperCase()}</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: FIRE.textMuted }}>{x.reported_by_name} · {new Date(x.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+              </div>
+              <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.45 }}>{x.note}</div>
+            </div>
+          ))}
         </Card>
       )}
       {(isManager || isDA) && pending.length > 0 && (
