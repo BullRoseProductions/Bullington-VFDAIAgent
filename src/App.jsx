@@ -21003,7 +21003,10 @@ function Admin({ S, library, setLibrary, feedback }) {
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Estimated time</span><input style={FS.input} value={time} onChange={(e) => setTime(e.target.value)} /></label>
         </div>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Objective</span><textarea style={{ ...FS.input, minHeight: 66, resize: "vertical" }} value={objective} onChange={(e) => setObjective(e.target.value)} /></label>
-        <button style={FS.btnPrimary} onClick={publish}><Plus size={16} /> Publish to library</button>
+        {/* An empty title used to do nothing at all on tap (publish() returns early) — no message, no change.
+            The button now says why it can't run instead of looking broken. */}
+        <button style={{ ...FS.btnPrimary, opacity: title.trim() ? 1 : 0.55, cursor: title.trim() ? "pointer" : "not-allowed" }} onClick={publish} disabled={!title.trim()}><Plus size={16} /> Publish to library</button>
+        {!title.trim() && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: -4 }}>Add a packet title to publish.</div>}
         {done && <div style={{ ...S.successBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
       </div>
 
