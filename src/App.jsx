@@ -13637,6 +13637,8 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     return { purchase_year: py, purchase_cost: pc, current_cost: cc, inflation_rate: ir, replace_year: ry, replace_cost: rc };
   }
   const fmtMoney = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
+  const [openRigId, setOpenRigId] = useState(null);   // fleet board: the rig expanded in place (null = none)
+  const [maintItems, setMaintItems] = useState([]);   // reported up by MaintenancePanel (its existing read) — open-maintenance flags
   const [editMode, setEditMode] = useState(false);   // false = clean cards; true = reveal Add + per-rig Edit/Remove. Service/Start-Check stay at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingRigId(null); setAdding(false); } return !v; }); }
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
@@ -13761,20 +13763,57 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   /* One rig card. Extracted from the list so it can be rendered once per house in all-stations
      mode without duplicating 50 lines of card. The card itself is unchanged. */
   const renderRig = (r) => {
-    const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
-    const outOfService = !r.inService;   // availability dimension (separate from Pass/Needs-attention readiness)
+    // FLEET BOARD CARD — status at a glance; click to expand the full detail in place underneath.
+    const ok = r.status === "Pass";
+    const outOfService = !r.inService;
+    const openMaint = maintItems.filter((i2) => i2.rigId === r.id && i2.status !== "Current");
+    const tone = outOfService ? FIRE.redBright : ok ? FIRE.green : FIRE.amberText;
+    const statusText = outOfService ? "Out of service" : ok ? "In service" : "Needs attention";
+    const on = openRigId === r.id;
     return (
-      <div key={r.id} style={{ ...S.opCard, ...FS.cardNoir, opacity: outOfService ? 0.68 : 1 }}>
-        <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-          <Truck size={20} color={outOfService ? FIRE.textMuted2 : FIRE.btnIcon} style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, letterSpacing: ".02em", color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
-          {outOfService
-            ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
-            : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
+      <button key={r.id} type="button" aria-expanded={on} onClick={() => setOpenRigId(on ? null : r.id)}
+        style={{ position: "relative", overflow: "hidden", ...FS.cardNoir, borderRadius: 14, padding: "16px 17px 16px 21px", cursor: "pointer", minWidth: 0, textAlign: "left", fontFamily: "inherit", color: "inherit", width: "100%", border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}` }}>
+        <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: tone }} />
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 11 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, lineHeight: 1, color: FIRE.textPrimary }}>{r.name}</div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 4 }}>{[r.type, r.purchaseYear].filter(Boolean).join(" · ")}</div>
+          </div>
+          <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, letterSpacing: ".03em", color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: tone }} />{statusText}</span>
+        </div>
+        <div style={{ display: "flex", gap: 18, fontSize: 11.5, color: FIRE.textSecondary, marginBottom: 11, flexWrap: "wrap" }}>
+          <span>Last check <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{ok && r.lastCheck !== "—" ? "✓ " : ""}{r.lastCheck}</b></span>
+          {r.by !== "—" && <span>By <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{r.by}</b></span>}
+        </div>
+        {(() => {
+          const flag = (kind, Icon, text) => <div style={{ fontSize: 11.5, fontWeight: 600, borderRadius: 8, padding: "7px 11px", display: "flex", alignItems: "center", gap: 8, ...(kind === "ok" ? { background: FIRE.card2Noir, color: FIRE.textSecondary } : kind === "warn" ? { background: "rgba(204,158,82,.08)", color: FIRE.amberText, border: "1px solid rgba(204,158,82,.25)" } : { background: "rgba(200,50,58,.08)", color: FIRE.redText, border: "1px solid rgba(200,50,58,.25)" }) }}><Icon size={14} style={{ flexShrink: 0 }} />{text}</div>;
+          if (outOfService || (!ok && r.note)) return flag("bad", AlertTriangle, r.note || "Out of service");
+          if (openMaint.length) return flag("warn", Wrench, `${openMaint.length} open · ${openMaint[0].task}${openMaint[0].status === "Overdue" ? " overdue" : " due"}`);
+          return flag("ok", CheckCircle2, "No open maintenance");
+        })()}
+      </button>
+    );
+  };
+  // THE EXPANDED DETAIL — everything the old rig card held (actions, editors, checklist, photos, check history,
+  // service periods; the same components and gates), plus the rig's maintenance log and the capital line.
+  const renderRigDetail = (r) => {
+    const ok = r.status === "Pass";
+    const outOfService = !r.inService;
+    const money = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
+    return (
+      <div key={`${r.id}-detail`} style={{ gridColumn: "1 / -1", ...FS.cardNoir, padding: "16px 18px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary }}>{r.name}</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[r.type, r.purchaseYear, outOfService ? "Out of service" : ok ? "In service" : "Needs attention"].filter(Boolean).join(" · ")}</div>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
           {/* canRemove, NOT canManage — removal is Department-Admin-only. An Officer in edit
               mode sees Edit and no X, which is the whole permission change on this screen. */}
           {canRemove && editMode && <button title="Take out of the fleet" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
+            <button aria-label="Collapse" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => setOpenRigId(null)}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
+          </div>
         </div>
         {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
         {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
@@ -13815,9 +13854,29 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
         <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
         <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
+        <div className="ap-cols" style={{ marginTop: 14 }}>
+          <div style={{ minWidth: 0, fontSize: 12.5, color: FIRE.textMuted }}>Maintenance tasks and their history are in Maintenance below.</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 }}>Capital &amp; replacement</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))", gap: 10 }}>
+              {[[r.purchaseYear || "—", `PURCHASED${r.purchaseCost != null ? ` · ${money(r.purchaseCost)}` : ""}`], [r.replaceYear || "—", "REPLACE YEAR"], [money(r.replaceCost), "EST. REPLACEMENT COST"]].map(([n, l]) => (
+                <div key={l} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 13px", minWidth: 0 }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary, ...FS.num }}>{n}</div>
+                  <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 4, letterSpacing: ".02em" }}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
+  // The board grid: a card per rig; the open rig's detail spans the full row directly beneath it.
+  const fleetGrid = (rows) => (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))", gap: 13, marginBottom: 16 }}>
+      {rows.flatMap((r) => (openRigId === r.id ? [renderRig(r), renderRigDetail(r)] : [renderRig(r)]))}
+    </div>
+  );
   /* THE BRANCH. Rendered INSTEAD of the rig list, so the main page below is reached only when the
      checklist is closed and is otherwise exactly what it was. The flag is re-tested here and not
      only on the entry card: a department that switches the feature off while somebody has the
@@ -13829,10 +13888,24 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   return (
     <PageShell above={loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />} kicker={<>APPARATUS & EQUIPMENT</>} title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}>
       <NoirSkin>
-      <div style={S.statRow}>
-        <StatTile value={String(ready)} label="Ready to roll" />
-        <StatTile value={String(flagged)} tone={flagged > 0 ? "red" : undefined} label="Needs attention" />
-        <StatTile value={String(rigs.length)} label="Apparatus in station" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+        {(() => {
+          const openN = maintItems.filter((i2) => i2.status !== "Current").length, overdueN = maintItems.filter((i2) => i2.status === "Overdue").length;
+          const chip = (Icon, l, v, sub, tone) => (
+            <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
+              {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>}
+            </div>
+          );
+          const small = (t) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{t}</span>;
+          return [
+            chip(Truck, "In service", <>{inServiceRigs.length}{small(`/${rigs.length}`)}</>, outOfServiceCount ? `${outOfServiceCount} out of service` : "whole fleet available", outOfServiceCount ? FIRE.amberText : FIRE.greenText),
+            chip(CheckCircle2, "Ready to roll", String(ready), "passed their last check", ready ? FIRE.greenText : null),
+            chip(AlertTriangle, "Needs attention", String(flagged), "in service, flagged", flagged ? FIRE.redText : null),
+            chip(Wrench, "Open maintenance", String(openN), overdueN ? `${overdueN} overdue` : "nothing overdue", overdueN ? FIRE.redText : openN ? FIRE.amberText : null),
+          ];
+        })()}
       </div>
       {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
       {/* AFTER-CALL CHECKLIST — the way into the branch view.
@@ -13886,7 +13959,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
             <StationSectionHead station={sec.station} notify={notify} />
             {sec.rows.length === 0
               ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 10px" }}>Nothing here yet.</div>
-              : <div style={S.opGrid}>{sec.rows.map(renderRig)}</div>}
+              : fleetGrid(sec.rows)}
           </div>
         ))
       ) : rigs.length === 0 ? (
@@ -13895,9 +13968,9 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           <div>No apparatus in the station yet.{canManage ? " Use “Add apparatus” to build your list." : ""}</div>
         </Card>
       ) : (
-        <div style={S.opGrid}>{rigs.map(renderRig)}</div>
+        fleetGrid(rigs)
       )}
-      <MaintenancePanel S={S} role={role} rigs={rigs} meId={meId} members={members} notify={notify} />
+      <MaintenancePanel S={S} role={role} rigs={rigs} meId={meId} members={members} notify={notify} onItems={setMaintItems} />
       {/* ---- RECENTLY REMOVED (DA-only) ----
            The undo and the accountability answer in one place. This is the screen that would
            have answered "who took Brush 25 out?" — it names the person and the moment, and it
@@ -14930,7 +15003,7 @@ function maintStatus(cadence, lastDoneAt) {
 }
 const MAINT_COLOR = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.green };   // the status set: red bad, amber warning, green good
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
-function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
+function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops INSERT/DELETE RLS on apparatus_maintenance
@@ -14970,6 +15043,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
       });
   };
   useEffect(() => { loadMaint(); }, [rigs]);   // reload when rigs load/change so rig_id → unit name resolves
+  useEffect(() => { if (onItems) onItems(items); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [items]);   // fleet board's open-maintenance flags read this same list
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const order = { Overdue: 0, "Due soon": 1, Current: 2 };
   const sorted = [...items].sort((a, b) => order[a.status] - order[b.status]);
@@ -21807,6 +21881,8 @@ function Fonts() {
       /* Member file facelift: certs two-up and hours | profile side by side on a wide screen, one column on a phone. */
       .mf-certgrid { display: grid; grid-template-columns: 1fr; column-gap: 22px; }
       /* Training v2: category progress cards two-up; hero stacks its ring/stats under the feature on a phone. */
+      .ap-cols { display: grid; grid-template-columns: 1fr; gap: 20px; }
+      @media (min-width: 760px) { .ap-cols { grid-template-columns: 1fr 1fr; } }
       .tr-catgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }   /* fills the row: 3 across on a wide screen, then 2-up, then 1-up */
       @media (max-width: 640px) { .tr-hero { padding: 18px !important; } .tr-hero-r { border-left: none !important; padding-left: 0 !important; } }
       .mf-grid { display: grid; grid-template-columns: 1fr; gap: 10px; align-items: start; }
