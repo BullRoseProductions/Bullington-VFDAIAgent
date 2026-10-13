@@ -4074,6 +4074,17 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
 
 /* Shared offline/failed-load state. Replaces the silent blank: says what happened, that data is safe,
    and that it will recover on its own — plus a manual Retry for the impatient. */
+// Inline sibling of OfflineNotice for a lazily-opened section: one line + Try again, in place of a list
+// whose read failed (so a failure never renders as "none recorded").
+function ReadRetry({ what, onRetry }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textSecondary, padding: "8px 0" }}>
+      <AlertTriangle size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 150 }}>Couldn't load {what}. Nothing has been lost.</span>
+      <button onClick={onRetry} style={{ ...FS.btn, padding: "4px 10px", fontSize: 11.5 }}><RefreshCw size={12} color={FIRE.btnIcon} /> Try again</button>
+    </div>
+  );
+}
 function OfflineNotice({ onRetry, what }) {
   return (
     <div style={{ margin: "10px 0", padding: "11px 13px", background: "rgba(214,169,94,.10)", border: `1px solid ${FIRE.amberText}55`, borderRadius: 10 }}>
@@ -14802,15 +14813,19 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
     await reloadResults(checkId);   // refresh this item's trail in place
     onResolved?.();                 // reload the rig card (flag flips to READY if this was the last open failure)
   }
+  const [checksErr, setChecksErr] = useState(false);   // a failed read is not "no checks recorded"
+  async function loadChecks() {
+    setLoading(true);
+    const { data, error } = await supabase.from("apparatus_checks")
+      .select(APPARATUS_CHECK_COLS)
+      .eq("apparatus_id", rig.id).eq("state", "finalized").order("performed_at", { ascending: false });
+    setLoading(false);
+    if (error || !data) { setChecksErr(true); return; }   // checks stays null -> retried on the next open
+    setChecksErr(false); setChecks(data);
+  }
   async function toggleOpen() {
     const next = !open; setOpen(next);
-    if (next && checks === null) {
-      setLoading(true);
-      const { data } = await supabase.from("apparatus_checks")
-        .select(APPARATUS_CHECK_COLS)
-        .eq("apparatus_id", rig.id).eq("state", "finalized").order("performed_at", { ascending: false });
-      setChecks(data || []); setLoading(false);
-    }
+    if (next && checks === null) await loadChecks();
   }
   async function toggleCheck(id) {
     if (expanded === id) { setExpanded(null); return; }
@@ -14832,6 +14847,8 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
         <div style={{ ...NOIR_INSET, padding: "2px 14px" }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (checksErr && checks === null) ? (
+            <ReadRetry what="the check history" onRetry={loadChecks} />
           ) : (checks && checks.length === 0) ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>No checks recorded yet.</div>
           ) : (checks || []).map((c) => {
@@ -14921,15 +14938,19 @@ function ApparatusServiceHistory({ S, rig }) {
   const [open, setOpen] = useState(false);
   const [periods, setPeriods] = useState(null);   // null = not loaded yet
   const [loading, setLoading] = useState(false);
+  const [periodsErr, setPeriodsErr] = useState(false);   // a failed read is not "never taken out of service"
+  async function loadPeriods() {
+    setLoading(true);
+    const { data, error } = await supabase.from("apparatus_service_periods")
+      .select("id, out_at, out_by_name, out_reason, back_at, back_by_name")
+      .eq("apparatus_id", rig.id).order("out_at", { ascending: false });
+    setLoading(false);
+    if (error || !data) { setPeriodsErr(true); return; }
+    setPeriodsErr(false); setPeriods(data);
+  }
   async function toggle() {
     const next = !open; setOpen(next);
-    if (next && periods === null) {
-      setLoading(true);
-      const { data } = await supabase.from("apparatus_service_periods")
-        .select("id, out_at, out_by_name, out_reason, back_at, back_by_name")
-        .eq("apparatus_id", rig.id).order("out_at", { ascending: false });
-      setPeriods(data || []); setLoading(false);
-    }
+    if (next && periods === null) await loadPeriods();
   }
   const fmtD = (iso) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return (
@@ -14939,6 +14960,8 @@ function ApparatusServiceHistory({ S, rig }) {
         <div style={{ ...NOIR_INSET, padding: "4px 14px" }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (periodsErr && periods === null) ? (
+            <ReadRetry what="the service history" onRetry={loadPeriods} />
           ) : (periods && periods.length === 0) ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>Never taken out of service.</div>
           ) : (periods || []).map((p) => {
@@ -15121,20 +15144,24 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
   const [editDotsId, setEditDotsId] = useState(null);   // photo whose dot-placement canvas is open
   const [editMode, setEditMode] = useState(false);   // false = view (thumbnail + label + dot-count); true = reveal label-edit/dots/reorder/remove + add
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditLabelId(null); setEditDotsId(null); } return !v; }); }
+  const [photosErr, setPhotosErr] = useState(false);   // a failed read is not "no photos yet"
   async function loadItems() {
-    const { data } = await supabase.from("apparatus_check_items")
+    const { data, error } = await supabase.from("apparatus_check_items")
       .select("id, label, active, photo_id, x_pct, y_pct, sort_order")
       .eq("apparatus_id", rig.id).eq("active", true)
       .order("sort_order", { ascending: true });
-    setItems(data || []);
+    if (error || !data) return;   // keep the last-known dots rather than wiping them
+    setItems(data);
   }
   async function load() {
     setLoading(true);
-    const { data } = await supabase.from("apparatus_photos")
+    const { data, error } = await supabase.from("apparatus_photos")
       .select("id, storage_path, angle_label, sort_order")
       .eq("apparatus_id", rig.id).is("deleted_at", null)
       .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
-    const list = data || [];
+    if (error || !data) { setPhotosErr(true); setLoading(false); return; }   // photos keeps its last value (null on first load)
+    setPhotosErr(false);
+    const list = data;
     const paths = list.map((p) => p.storage_path).filter(Boolean);
     const map = {};
     if (paths.length) {
@@ -15242,6 +15269,8 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
         <div>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (photosErr && photos === null) ? (
+            <ReadRetry what="the photos" onRetry={load} />
           ) : (
             <>
               {(photos || []).length > 0 && (
