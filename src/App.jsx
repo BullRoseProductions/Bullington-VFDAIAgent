@@ -3536,7 +3536,6 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
         </div>
         <button style={{ ...FS.btn, flexShrink: 0 }} onClick={() => go("reports")}>{isDeptAdmin(role) ? "Open report" : "View stats"} <ChevronRight size={14} color={FIRE.btnIcon} /></button>
       </Card>
-      </NoirSkin>
 
       {/* FEED + CALENDAR — read-only feed (Board not in ANNOUNCE_ROLES) beside the shared station calendar; mirrors DeptAdminDashboard */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
@@ -3545,6 +3544,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -3684,7 +3684,6 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       <NoirSkin>
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} overview actionCenter={actionCenter}
         extraHero={<StatTile icon={ClipboardList} value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
-      </NoirSkin>
       <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 8, maxWidth: 360 }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
@@ -3692,10 +3691,8 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <NoirSkin>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
       <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 8 }} />
-      </NoirSkin>
       <CardHead icon={Wand2} title="Quick actions" style={{ marginTop: 14 }} />
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
@@ -3713,6 +3710,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           );
         })}
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -4001,14 +3999,12 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           </Card>
         ))}
       </div>
-      </NoirSkin>
       <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} />
         <div className="dash-cal" style={{ minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <NoirSkin>
       <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
       </NoirSkin>
     </PageShell>
@@ -4522,7 +4518,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           is now the single source of truth, rendered identically for members, Dept Admins and
           Officers. It renders its own "YOUR PERSONAL VIEW" kicker and module gate. */}
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showClockCard={false} />
-      </NoirSkin>
       {/* 5 — announcements feed + station calendar, two-column (matches DeptAdmin: feed narrower & bounded/internal-scroll, calendar wider; wraps on narrow) */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
@@ -4547,6 +4542,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           ))}
         </div>
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
