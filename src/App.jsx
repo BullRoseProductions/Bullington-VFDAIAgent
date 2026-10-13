@@ -3940,7 +3940,10 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const [raised, setRaised] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight (fed to computeInsights)
   const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
-  useEffect(() => {
+  /* A failed read is not "nothing coming up": each piece now updates only when ITS read succeeded (last-known
+     otherwise), and any failure raises snapErr -> the OfflineNotice + reconnect retry. */
+  const [snapErr, setSnapErr] = useState(false);
+  const loadSnap = () => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
     Promise.all([
       supabase.from("duties").select("id, done, done_at, recurrence"),
@@ -3950,15 +3953,19 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       supabase.from("fundraiser_log").select("amount"),
       supabase.from("action_items").select("*").eq("status", "open"),   // for the overdue-assignment insight
     ]).then(([du, rc, cc, fe, fl, ai]) => {
-      if (!du.error && du.data) { setDuties(du.data); setDutiesLoaded(true); }
-      setRecruitNext(firstUpcoming(rc.data, "date"));
-      setPrNext(firstUpcoming(cc.data, "date"));
-      setFundNext(firstUpcoming(fe.data, "date"));
-      setRaised((fl.data || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
-      setOpenItems(ai.data || []);
+      const ok = (r) => !r.error && Array.isArray(r.data);
+      if (ok(du)) { setDuties(du.data); setDutiesLoaded(true); }
+      if (ok(rc)) setRecruitNext(firstUpcoming(rc.data, "date"));
+      if (ok(cc)) setPrNext(firstUpcoming(cc.data, "date"));
+      if (ok(fe)) setFundNext(firstUpcoming(fe.data, "date"));
+      if (ok(fl)) setRaised(fl.data.reduce((s, r) => s + (Number(r.amount) || 0), 0));
+      if (ok(ai)) setOpenItems(ai.data);
+      setSnapErr(![du, rc, cc, fe, fl, ai].every(ok));
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSnap(); }, []);
+  useReconnect(() => { if (snapErr) loadSnap(); });
   const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
@@ -3969,7 +3976,8 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
     { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: FIRE.catAmber, snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
   ];
   return (
-    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"} title={dashboardGreeting(me)} actions={<HeroAside />}>
+    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"} title={dashboardGreeting(me)} actions={<HeroAside />}
+      above={snapErr ? <OfflineNotice onRetry={loadSnap} what="part of the dashboard" /> : null}>
       {/* Noir skin, as on the DA dashboard: CardHead headers + the gradient card face on everything inside. */}
       <NoirSkin>
       <CardHead icon={HeartPulse} title="Department health" />
@@ -4388,7 +4396,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
   const [upcomingAll, setUpcomingAll] = useState([]);   // all sorted upcoming across the 4 calendar sources; nextEvent derived at render (audience-aware)
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
   const { openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);   // openSessionPlans left to PersonalView, which owns UPCOMING TRAINING
-  useEffect(() => {
+  const [snapErr, setSnapErr] = useState(false);   // a failed read is not "no upcoming events"
+  const loadUpcoming = () => {
     const todayIso = toISO(today);
     Promise.all([
       supabase.from("training_sessions").select("id, title, date, start_time, audience"),
@@ -4396,6 +4405,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       supabase.from("recruitment_events").select("title, date"),
       supabase.from("content_calendar").select("caption, date"),
     ]).then(([tr, fu, rc, so]) => {
+      if (![tr, fu, rc, so].every((r) => !r.error && Array.isArray(r.data))) { setSnapErr(true); return; }   // keep last-known
+      setSnapErr(false);
       const rows = [
         ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, startTime: r.start_time || null, type: "Training", audience: r.audience || "everyone" })),
         ...(fu.data || []).map((r) => ({ title: r.title, date: r.date, type: "Fundraiser" })),
@@ -4405,8 +4416,10 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || String(a.startTime || "").localeCompare(String(b.startTime || "")));   // date, then start time (unset first)
       setUpcomingAll(rows);                                             // store all upcoming; select at render (leadership-aware)
     });
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, []);
+  };
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  useEffect(() => { loadUpcoming(); }, []);
+  useReconnect(() => { if (snapErr) loadUpcoming(); });
   // Get prepared: a Training next-event's attachments come from the already-loaded sessions prop (s.plans[] from slice 1) — no extra query.
   // NEXT EVENT: a non-leader's next event skips leadership training (still shown on the calendar). Leader sees it. Scored off actual roles (me.access), not "View as".
   const nextEvent = upcomingAll.find((e) => isLeader(me?.access) || !(e.type === "Training" && isRestrictedEvent(e))) || null;
@@ -4416,7 +4429,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
     /* 1 — the standard page frame with the Noir hero band: dept crest (logo_url when set, monogram otherwise),
        greeting and sub-line, pillars + daily quote on the right — same as the other dashboards. */
     <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `MY STATION · ${dept.name}` : "MY STATION"} title={dashboardGreeting(me)}
-      sub="Here's exactly where you stand — and what's coming up for you." actions={<HeroAside />}>
+      sub="Here's exactly where you stand — and what's coming up for you." actions={<HeroAside />}
+      above={snapErr ? <OfflineNotice onRetry={loadUpcoming} what="what's coming up" /> : null}>
       <NoirSkin>
       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
           (it renders nothing once complete); only its place in the order changed. */}
