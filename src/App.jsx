@@ -3331,8 +3331,8 @@ function Announcements({ role, members, meId, notify, style }) {
   const birthdays = celebs.map((c) => ({ id: c.member_id, name: c.member.name, md: parseMD(c.birthday) })).filter((x) => x.md && x.md.m === curMonth).sort((a, b) => a.md.d - b.md.d);   // this month, by day
   const anniversaries = celebs.map((c) => { const md = parseMD(c.joined_date); return md ? { id: c.member_id, name: c.member.name, md, years: curYear - md.y } : null; }).filter((x) => x && x.md.m === curMonth && x.years >= 1).sort((a, b) => a.md.d - b.md.d);   // this month, real anniversaries (>=1 yr)
   return (
-    <div style={{ ...FS.card, padding: 18, ...style }}>
-      <div style={FS.kicker}>FEED</div>
+    <div style={{ ...FS.cardNoir, padding: 18, ...style }}>
+      <CardHead icon={Megaphone} title="Feed" style={{ marginBottom: 0 }} />
 
       {/* Announcements — featured at the top of the feed; bounded so a long feed scrolls internally (~6 rows) instead of growing the page */}
       <div style={{ marginTop: 10, maxHeight: 372, overflowY: "auto" }}>
@@ -3341,7 +3341,7 @@ function Announcements({ role, members, meId, notify, style }) {
         ) : items.length === 0 ? (
           <div style={{ fontSize: 13, color: FIRE.textMuted }}>No announcements yet.</div>
         ) : items.map((it) => (
-          <div key={it.id} style={{ padding: "10px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={it.id} style={{ padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
               {it.title && <span style={{ fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{it.title}</span>}
               {it.audience === "leadership" && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}55`, borderRadius: 5, padding: "1px 5px" }}>Leadership</span>}
@@ -3392,12 +3392,12 @@ function Announcements({ role, members, meId, notify, style }) {
 
       {/* Compose — posters only (ANNOUNCE_ROLES = DA/PA/TO); the DB enforces the real gate */}
       {canPost && (composing ? (
-        <div style={{ marginTop: 12, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 12 }}>
+        <div style={{ marginTop: 12, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 12 }}>
           <input style={{ ...FS.input, marginBottom: 8 }} placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
           <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical", marginBottom: 8 }} placeholder="Write an announcement…" value={body} onChange={(e) => setBody(e.target.value)} />
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
             {[["everyone", "Everyone"], ["leadership", "Leadership"]].map(([v, l]) => (
-              <button key={v} onClick={() => setAudience(v)} style={{ ...FS.btn, flex: 1, justifyContent: "center", ...(audience === v ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{l}</button>
+              <button key={v} onClick={() => setAudience(v)} style={{ ...FS.btn, flex: 1, justifyContent: "center", ...(audience === v ? { borderColor: FIRE.redBright, color: FIRE.textPrimary, background: "rgba(200,50,58,.12)" } : {}) }}>{l}</button>
             ))}
           </div>
           {/* min=today so a past date cannot be picked by accident. TODAY IS VALID — the policy
@@ -3405,7 +3405,7 @@ function Announcements({ role, members, meId, notify, style }) {
               guard: the browser lets a typed date through, and the only thing that matters is
               that a past date simply means "already expired", which is a recoverable state an
               admin can see and clear, not a corruption. */}
-          <label style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted2, marginBottom: 4 }}>Show until (optional)</label>
+          <label style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, marginBottom: 6 }}>Show until (optional)</label>
           <input type="date" min={todayLocal} value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)}
                  style={{ ...FS.input, marginBottom: 4, colorScheme: "dark" }} />
           <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 10 }}>Leave blank to run until you remove it.</div>
@@ -3420,8 +3420,8 @@ function Announcements({ role, members, meId, notify, style }) {
       ))}
 
       {/* Birthdays & anniversaries THIS MONTH — from the dept-scoped celebrations view (all members can see) */}
-      <div style={{ marginTop: 14, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>🎂 Birthdays &amp; anniversaries</div>
+      <div style={{ marginTop: 14, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 10 }}>
+        <SectionBar label="🎂 Birthdays & anniversaries" style={{ margin: "0 0 8px" }} />
         {birthdays.length === 0 && anniversaries.length === 0 ? (
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, fontStyle: "italic" }}>No birthdays or anniversaries this month.</div>
         ) : (
