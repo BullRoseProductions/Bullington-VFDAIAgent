@@ -190,6 +190,10 @@ function SectionBar({ icon: Icon, label, count, right, open, onToggle, style }) 
     </div>
   );
 }
+// Noir replacements for the pre-Noir text styles (S.featTitle / S.helpP / S.errBox) on the remaining pages.
+const NOIR_FEAT_TITLE = { fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, margin: "0 0 4px", lineHeight: 1.3 };
+const NOIR_HELP = { fontSize: 12.5, lineHeight: 1.55, color: FIRE.textMuted, margin: "0 0 10px" };
+const NOIR_ERR = { marginTop: 10, fontSize: 12.5, lineHeight: 1.45, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText };
 // The mocks' inset panel (.card2 surface) — sections inside an expanded card sit on this.
 const NOIR_INSET = { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10 };
 // The mocks' .ck ring: "pass" = green ring + check, "fail" = red ring + X, "todo" = neutral ring (an item to check,
@@ -20677,7 +20681,7 @@ function StationDuties({ S, role, members, meId, notify }) {
     });
   };
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />} kicker="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own.">
+    <PageShell band watermark="DUTIES" above={loadErr && <OfflineNotice onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />} kicker="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own.">
       <NoirSkin>
 
       {canManage && (
@@ -20726,7 +20730,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           <button style={FS.btn} onClick={() => setAddingA(false)}>Cancel</button>
         </Card>
       )}
-      {canCreate && <p style={{ ...S.helpP, marginTop: -2, color: FIRE.textMuted }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
+      {canCreate && <p style={NOIR_HELP}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
       {dutiesGrouped ? (
         /* One section per house. A house with no duties still gets its heading — the point of the
@@ -20742,7 +20746,7 @@ function StationDuties({ S, role, members, meId, notify }) {
       ) : renderDutyCategories(periodDuties)}
 
       <CardHead icon={CheckCircle2} title="Other work logged" style={{ marginTop: 14 }} />
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>{allMode ? "Work logged across every house. Go to a station to add an entry." : "Did something that isn't on the checklist? Log it here so it's on the record — anyone can add."}</p>
+      <p style={NOIR_HELP}>{allMode ? "Work logged across every house. Go to a station to add an entry." : "Did something that isn't on the checklist? Log it here so it's on the record — anyone can add."}</p>
       {/* The log form stamps the STORED station, so in all-houses mode it would file the entry
           under whichever house happened to be active — hide it and label the rows instead. */}
       <Card padding={16} style={{ marginBottom: 12, display: allMode ? "none" : "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
