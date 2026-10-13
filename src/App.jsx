@@ -9677,7 +9677,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} dept={dept} />;
   return (
     <PageShell band kicker={(() => { const k = tab === "certs" ? "CERTIFICATIONS" : tab === "attendance" ? "ATTENDANCE" : "ROSTER"; return dept?.name ? `${k} · ${dept.name}` : k; })()} title="Your people, all in one place"
-      watermark={tab === "certs" ? "CERTS" : tab === "attendance" ? "DRILLS" : "ROSTER"}
+      watermark={tab === "certs" ? "CERTS" : tab === "attendance" ? "PRESENT" : "CREW"}
       sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
       <NoirSkin>
       <div style={S.segRow}>
@@ -16083,7 +16083,7 @@ function MyEquipment({ S, meId, notify }) {
   const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
   return (
     <PageShell band kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it."
-      watermark="GEAR">
+      watermark="MY GEAR">
       <NoirSkin>
       {/* CHIPS — counted from the rows already loaded (same gearStatus rule as each row's pill) */}
       {loaded && rows.length > 0 && (() => {
