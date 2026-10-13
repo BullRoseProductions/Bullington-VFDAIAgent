@@ -19376,13 +19376,9 @@ function Admin({ S, library, setLibrary, feedback }) {
     setLibrary([np, ...library]); setTitle(""); setObjective(""); setDone(true); setTimeout(() => setDone(false), 2500);
   }
   return (
-    <div>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>CONTENT ADMIN</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Publish a packet</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Platform admins add monthly materials. New packets appear in the library immediately.</div>
-      </div>
-      <div style={{ ...S.formCard, ...FS.card }}>
+    <PageShell kicker="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately.">
+      <NoirSkin>
+      <div style={{ ...S.formCard, ...FS.cardNoir, padding: "16px 18px", gap: 12 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Packet title</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Tanker Shuttle Operations" /></label>
         <div style={S.twoColForm}>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Track</span><select style={FS.input} value={track} onChange={(e) => setTrack(e.target.value)}>{Object.keys(TRACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
@@ -19393,17 +19389,17 @@ function Admin({ S, library, setLibrary, feedback }) {
         {done && <div style={{ ...S.successBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
       </div>
 
-      <div style={{ marginTop: 26 }}>
-        <div style={S.cardEyebrow}><MessageSquare size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FIELD SIGNAL · WHAT WE'RE LEARNING</div>
+      <div style={{ marginTop: 16 }}>
+        <CardHead icon={MessageSquare} title="Field signal · what we're learning" />
         <p style={{ ...S.pageSub, marginTop: 0, marginBottom: 14, color: FIRE.textMuted }}>Ratings and critiques from departments on AI-generated plans. Review monthly, spot the patterns, and turn them into sharper prompt rules and better packets — that's how the system improves.</p>
         {(!feedback || feedback.length === 0) ? (
-          <div style={{ ...S.empty, ...FS.card, color: FIRE.textMuted }}>No feedback yet. Generate a plan in the AI Training Assistant, rate it, and it'll show up here.</div>
+          <div style={{ ...S.empty, ...FS.cardNoir, color: FIRE.textMuted }}>No feedback yet. Generate a plan in the AI Training Assistant, rate it, and it'll show up here.</div>
         ) : (
           feedback.map((f, i) => (
-            <div key={i} style={{ ...S.fbItem, ...FS.card }}>
-              <span style={{ ...S.fbDot, background: f.rating === "up" ? "#2E7D52" : (f.rating === "down" ? "#B11E2A" : "#9AA1A9") }} />
+            <div key={i} style={{ ...S.fbItem, ...FS.cardNoir }}>
+              <span style={{ ...S.fbDot, background: f.rating === "up" ? FIRE.green : (f.rating === "down" ? FIRE.redText : FIRE.textMuted2) }} />
               <div style={{ flex: 1 }}>
-                <div style={{ ...S.fbItemTop, color: FIRE.textPrimary }}><strong>{f.topic}</strong>{f.edited && <span style={S.fbEdited}>EDITED</span>}</div>
+                <div style={{ ...S.fbItemTop, color: FIRE.textPrimary }}><strong>{f.topic}</strong>{f.edited && <span style={{ ...S.fbEdited, background: "rgba(224,58,68,.14)", border: "1px solid rgba(224,58,68,.35)", color: FIRE.kickerNoir }}>EDITED</span>}</div>
                 {f.tags && f.tags.length > 0 && <div style={{ ...S.fbItemTags, color: FIRE.textMuted }}>{f.tags.join(" · ")}</div>}
                 {f.notes && <div style={{ ...S.fbItemNotes, color: FIRE.textSecondary }}>"{f.notes}"</div>}
               </div>
@@ -19412,7 +19408,8 @@ function Admin({ S, library, setLibrary, feedback }) {
           ))
         )}
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
