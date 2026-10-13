@@ -13823,7 +13823,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, letterSpacing: ".03em", color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: tone }} />{statusText}</span>
         </div>
         <div style={{ display: "flex", gap: 18, fontSize: 11.5, color: FIRE.textSecondary, marginBottom: 11, flexWrap: "wrap" }}>
-          <span>Last check <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{ok && r.lastCheck !== "—" ? "✓ " : ""}{r.lastCheck}</b></span>
+          {r.everChecked ? <span>Last check <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{ok ? "✓ " : ""}{r.lastCheck}</b></span> : <b style={{ color: FIRE.amberText, fontWeight: 600 }}>Never checked</b>}
           {r.by !== "—" && <span>By <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{r.by}</b></span>}
         </div>
         {(() => {
