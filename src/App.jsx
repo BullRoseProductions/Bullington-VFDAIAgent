@@ -214,6 +214,8 @@ const NOIR_HELP = { fontSize: 12.5, lineHeight: 1.55, color: FIRE.textMuted, mar
 // The AI call-to-action banner on Noir. Replaces { ...S.aiBanner, ...FS.cardNoir }: S.aiBanner's 4px purple-grey
 // left edge survived that spread (React keeps the borderLeft longhand after the border shorthand).
 const NOIR_AI_BANNER = { ...FS.cardNoir, padding: 22, marginBottom: 22, display: "flex" };
+// SectionBar's label face, for hand-rolled toggles/labels that can't be a SectionBar.
+const NOIR_LABEL = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, margin: 0 };
 const NOIR_ERR = { marginTop: 10, fontSize: 12.5, lineHeight: 1.45, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText };
 // The mocks' inset panel (.card2 surface) — sections inside an expanded card sit on this.
 const NOIR_INSET = { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10 };
@@ -7909,7 +7911,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
   }
 
   const form = (
-    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 190 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
         <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="Pancake Breakfast 2026" /></label>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Target date</span>
@@ -7954,8 +7956,8 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
   return (
     <div style={{ marginBottom: 22 }}>
       {loadErr && <OfflineNotice onRetry={load} what="fundraisers" />}
-      <div style={{ ...FS.kicker, marginBottom: 4 }}>FUNDRAISERS</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The events you're running. Each one becomes the home for its plan, dates, sponsors and jobs.</p>
+      <div style={{ ...NOIR_LABEL, marginBottom: 4 }}>FUNDRAISERS</div>
+      <p style={{ ...NOIR_HELP, marginBottom: 10 }}>The events you're running. Each one becomes the home for its plan, dates, sponsors and jobs.</p>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fundraiser</button>}
@@ -7975,7 +7977,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
       {rows === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
       ) : shown.length === 0 ? (
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           {view === "done" ? "Nothing finished yet. Fundraisers you mark Done will collect here."
            : view === "archived" ? "Nothing archived. Events you put away wait here, with what they raised."
            : "No fundraisers yet. Add one — a pancake breakfast, a boot drive — and you'll be able to hang its plan, dates, sponsors, and tasks off it."}
@@ -7988,7 +7990,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
             const soon = r.target_date && r.target_date >= todayISO && r.status !== "done";
             return (
               <div key={r.id} onClick={() => setSelectedId(r.id)}
-                   style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: r.status === "archived" ? 0.72 : 1, cursor: "pointer" }}>
+                   style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 10, opacity: r.status === "archived" ? 0.72 : 1, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <PartyPopper size={17} color={st.color()} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -8212,14 +8214,10 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
     setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}
-      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>FUNDRAISERS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident.</div>
-      </div>
+    <PageShell band watermark="FUNDS" kicker="FUNDRAISERS" title="Plan fundraisers, write the appeals, line up sponsors"
+      sub="Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident."
+      above={<>{loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}{back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding</button>}</>}>
+      <NoirSkin>
 
       {/* THE EVENTS THEMSELVES, above the planner. The planner is a tool you reach for once; the
           list of what the department is actually running is what you come back to, so it opens the
@@ -8229,13 +8227,13 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
                                      focusId={focusFr} reloadKey={frReload} onFocusHandled={() => setFocusFr(null)}
                                      onOpenDoc={reopen} onWorkAdded={() => setFundingReloadKey((k) => k + 1)} />}
 
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><PartyPopper size={13} style={{ verticalAlign: "-2px" }} />FUNDRAISER PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><PartyPopper size={13} style={{ verticalAlign: "-2px" }} />FUNDRAISER PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
-          <div style={S.segRow}>
+          <div style={{ display: "inline-flex", flexWrap: "wrap", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 12 }}>
             {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
-              <button key={m} onClick={() => { setMode(m); setOut(""); setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setErr(""); }} style={{ ...S.segBtn, background: mode === m ? FIRE.btnBg : "transparent", borderColor: mode === m ? FIRE.red : FIRE.btnBorder, color: mode === m ? FIRE.textPrimary : FIRE.navLabel }}>{m}</button>
+              <button key={m} onClick={() => { setMode(m); setOut(""); setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setErr(""); }} aria-pressed={mode === m} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: mode === m ? FIRE.redBright : "transparent", color: mode === m ? "#fff" : FIRE.textSecondary }}>{m}</button>
             ))}
           </div>
           {phase === "input" && (<>
@@ -8252,13 +8250,13 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
             <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={mode === "Plan a fundraiser" ? brainstorm : generate} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> {loadingLabel}</> : <><Sparkles size={16} /> {mode === "Plan a fundraiser" ? "Get ideas" : "Generate"}</>}
             </button>
-            {rawIdeas && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.textSecondary, whiteSpace: "pre-wrap", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, maxHeight: 180, overflowY: "auto" }}>{rawIdeas}</div>}
+            {rawIdeas && <div style={{ ...S.errBox, ...NOIR_INSET, color: FIRE.textSecondary, whiteSpace: "pre-wrap", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, maxHeight: 180, overflowY: "auto" }}>{rawIdeas}</div>}
           </>)}
           {mode === "Plan a fundraiser" && phase === "ideas" && (<>
-            <p style={{ ...S.helpP, color: FIRE.textMuted }}>Six ideas across proven, fresh, and bold. Pick one to build a full plan — or start over to change your inputs.</p>
+            <p style={NOIR_HELP}>Six ideas across proven, fresh, and bold. Pick one to build a full plan — or start over to change your inputs.</p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
               {ideas.map((idea, i) => (
-                <div key={i} style={{ ...FS.card, padding: "10px 12px", display: "flex", flexDirection: "column" }}>
+                <div key={i} style={{ ...FS.cardNoir, padding: "10px 12px", display: "flex", flexDirection: "column" }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{idea.name}</div>
                   <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 4, flex: 1, lineHeight: 1.35 }}>{idea.pitch}</div>
                   <button style={{ ...FS.btn, marginTop: 8, padding: "5px 9px", fontSize: 11.5, width: "100%", justifyContent: "center" }} onClick={() => chooseIdea(idea)}><Sparkles size={13} /> Build the plan</button>
@@ -8273,7 +8271,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
               {loading && <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 10, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> {loadingLabel}</span>}
             </div>
           )}
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
@@ -8301,17 +8299,17 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         </div>
       </div>
 
-      <button onClick={() => setIdeasOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: ideasOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+      <button onClick={() => setIdeasOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: ideasOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <PartyPopper size={13} style={{ verticalAlign: "-2px" }} />EVENT IDEAS ({FUNDRAISER_IDEAS.length})
         <span style={{ marginLeft: "auto", display: "inline-flex" }}>{ideasOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
       </button>
       {ideasOpen && (<>
-        <p style={{ ...S.helpP, color: FIRE.textMuted }}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
+        <p style={NOIR_HELP}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8, marginBottom: 22 }}>
           {FUNDRAISER_IDEAS.map((idea) => {
             const recent = recentFor(idea);
             return (
-              <div key={idea.title} style={{ ...FS.card, padding: "10px 12px" }}>
+              <div key={idea.title} style={{ ...FS.cardNoir, padding: "10px 12px" }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{idea.title}</div>
                   {recent && <Pill S={S} color={FIRE.amberText}>DONE {recent.date}</Pill>}
@@ -8324,16 +8322,16 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         </div>
       </>)}
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
       <FundingCalendar key={fundingReloadKey} S={S} role={role} notify={notify} />
 
-      <div style={{ ...FS.kicker, marginBottom: 8, display: "flex", alignItems: "center" }}>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8, display: "flex", alignItems: "center" }}>
         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
         {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: FIRE.greenText, fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
       </div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
+      <p style={NOIR_HELP}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
       {addingLog ? (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Event</span><input style={FS.input} value={ln} placeholder="e.g. Chili Cook-Off" onChange={(e) => setLn(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>When</span><input style={FS.input} value={ld} placeholder="e.g. Jun 2026" onChange={(e) => setLd(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Raised ($)</span><input style={FS.input} value={la} placeholder="e.g. 1500" onChange={(e) => setLa(e.target.value)} /></label>
@@ -8342,9 +8340,9 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAddingLog(true)}><Plus size={15} /> Log a fundraiser</button>}
       <div style={{ marginBottom: 6 }}>
-        {log.length === 0 ? <div style={{ ...S.opCard, ...FS.card, fontSize: 13, color: FIRE.textMuted }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
+        {log.length === 0 ? <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13, color: FIRE.textMuted }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
           log.map((e) => (
-            <div key={e.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={e.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <PartyPopper size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.name}</span>
@@ -8356,14 +8354,14 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
           ))}
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</div>
-      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</div>
+      <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved drafts yet.</div> : drafts.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled draft"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -8374,10 +8372,10 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         })}
       </div>
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Draft"}</div>
+              <div style={{ ...NOIR_LABEL, marginBottom: 0 }}>{openDraft.title || "Draft"}</div>
               <div style={{ display: "flex", gap: 8 }}>
                 {/* Print. Not gated on canManage — a member who can read the document can put it
                     on paper; nothing is written and nothing leaves the department. Uses the shared
@@ -8401,7 +8399,8 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
           </div>
         </div>
       )}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
