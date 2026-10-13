@@ -18089,12 +18089,37 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
 
   return (
-    <PageShell kicker="TRAINING" title="Keep training on schedule"
+    <PageShell band kicker={dept?.name ? `TRAINING · ${dept.name}` : "TRAINING"} title="Keep training on schedule"
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>TRAIN</div>}
       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
       <NoirSkin>
 
+      {/* STAT CHIPS — last attendance, next session, categories on track, sessions this year (all from data on hand) */}
+      {(() => {
+        const daysToNext = nextSession ? Math.round((sessDate(nextSession) - t0n) / 86400000) : null;
+        const onTrack = planView.filter((x) => x.info.label === "On track" || x.info.label === "Done").length;
+        const yr = new Date().getFullYear();
+        const doneYTD = sessions.filter((x) => x.done && sessDate(x).getFullYear() === yr).length;
+        const chip = (Icon, label, value, sub, tone) => (
+          <div style={{ ...FS.cardNoir, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: FIRE.textSecondary, display: "flex", alignItems: "center", gap: 6 }}><Icon size={13} color={FIRE.redText} />{label}</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1, marginTop: 8, color: tone || FIRE.textPrimary, ...Lnum }}>{value}</div>
+            {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>}
+          </div>
+        );
+        const small = (t) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{t}</span>;
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
+            {chip(Users, "Last attendance", hasAtt ? <>{lastAtt}{small(`/${totalMembers}`)}</> : "—", hasAtt ? lastDone.title : "No attendance recorded yet", hasAtt ? FIRE.greenText : null)}
+            {chip(Calendar, "Next session", daysToNext == null ? "—" : daysToNext <= 0 ? "Today" : <>{daysToNext}{small("d")}</>, nextSession ? `${nextSession.title} · ${fmtSess(nextSession)}` : "Nothing scheduled yet")}
+            {chip(CheckCircle2, "On track", planView.length ? <>{onTrack}{small(`/${planView.length}`)}</> : "—", planView.length ? "categories current" : "No training categories yet", planView.length && onTrack === planView.length ? FIRE.greenText : null)}
+            {chip(GraduationCap, "Sessions this year", String(doneYTD), "completed")}
+          </div>
+        );
+      })()}
+
       {/* TOP ROW — three dark cards (replaces the 3 Stat tiles) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
         {/* Card 1 — last session attendance (ring or honest empty state) */}
         <div style={Lcard}>
           <CardHead icon={Users} title="Last session attendance" style={{ marginBottom: 0 }} />
@@ -18177,9 +18202,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <button style={Lbtn} onClick={() => setAddingPlan(false)}>Cancel</button>
         </div>
       ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={LbtnIcon} /> Add a training</button>)}
-      <div>
+      <div style={{ ...Lcard, padding: "4px 14px", marginBottom: 12 }}>
         {planView.length === 0 ? (
-          <div style={{ ...Lcard, fontSize: 13, color: FIRE.textMuted2 }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
+          <div style={{ fontSize: 13, color: FIRE.textMuted2, padding: "10px 0" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
         ) : planView.map(({ p, info }) => (
           editingPlanId === p.id ? (
             <div key={p.id} style={{ ...Lcard, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -18277,15 +18302,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
           />
         </div>
+      </div>
 
+      {/* SESSIONS — the month's full session list in its own card; every control below is unchanged. */}
+      <div style={{ ...Lcard, marginBottom: 16 }}>
+        <CardHead icon={ClipboardList} title={`Sessions · ${TRAIN_MONTHS[cur.m]} ${cur.y}`} count={monthSessions.length}
+          right={canManage && monthSessions.length > 0 ? (
+            <button onClick={toggleSessionEdit} style={{ ...Lbtn, display: "inline-flex", alignItems: "center", gap: 5 }}>
+              {editSessionMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit sessions</>}
+            </button>) : null} />
         <div>
-          {canManage && monthSessions.length > 0 && (
-            <div style={{ display: "flex", marginBottom: 8 }}>
-              <button onClick={toggleSessionEdit} style={{ ...Lbtn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
-                {editSessionMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit sessions</>}
-              </button>
-            </div>
-          )}
           {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
             monthSessions.map((s) => {
               const att = s.attendance || [];
@@ -18300,7 +18326,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               return (
                 <div key={s.id}>
                   <div style={Lrow}>
-                    <CalendarCheck size={15} color={plan.find((p) => String(p.id) === String(s.planId))?.color || FIRE.catBlue} style={{ flexShrink: 0 }} />
+                    <div style={{ width: 42, textAlign: "center", flexShrink: 0 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".06em", color: plan.find((p) => String(p.id) === String(s.planId))?.color || FIRE.catBlue }}>{TRAIN_MONTHS[cur.m].slice(0, 3).toUpperCase()}</div>
+                      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: FIRE.textPrimary, ...Lnum }}>{s.d}</div>
+                    </div>
                     <div style={FS.rowTitle}>
                       <span style={{ fontWeight: 600, color: FIRE.name }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} /></span>
                       <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
