@@ -96,6 +96,9 @@ export function NotificationBell({ meId, onOpen }) {
    Turning a family back on writes enabled = true rather than deleting the row — deliberately,
    matching the table, which has no DELETE policy. A deletion and an enabled=true say the same
    thing about intent but different things about history, and updated_at is worth keeping. */
+// The Back buttons used S.btn, which the app's style object does not define — they rendered as bare
+// native buttons. This is the app's FS.btn (not exported from App.jsx), built from the same FIRE tokens.
+const BACK_BTN = { display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" };
 const MUTABLE_FAMILIES = [
   { key: "events", label: "Event & training reminders",
     desc: "A day before and an hour before each drill, meeting or training session you're expected at." },
@@ -182,7 +185,7 @@ export function NotificationSettings({ S, meId, back }) {
 
   return (
     <div>
-      {back && <button style={{ ...S.btn, marginBottom: 14 }} onClick={back}>← Back</button>}
+      {back && <button style={{ ...BACK_BTN, marginBottom: 14 }} onClick={back}>← Back</button>}
       <h1 style={{ fontSize: 20, fontWeight: 800, color: "#F7F8FA", margin: "0 0 4px" }}>Notification settings</h1>
       <div style={{ fontSize: 13, color: "#7E8794", lineHeight: 1.5, marginBottom: 6 }}>
         Choose what B4C sends to your phone. Everything stays in your notifications list either way —
@@ -291,7 +294,7 @@ export default function NotificationCenter({ S, meId, back }) {
 
   return (
     <div>
-      {back && <button style={{ ...S.btn, marginBottom: 14 }} onClick={back}>← Back</button>}
+      {back && <button style={{ ...BACK_BTN, marginBottom: 14 }} onClick={back}>← Back</button>}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: "#F7F8FA", margin: 0 }}>Notifications</h1>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
