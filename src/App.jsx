@@ -20035,21 +20035,18 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
   const swatch = (k, label) => (
     <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 8, background: FIRE.btnBg, padding: 2, cursor: canManage ? "pointer" : "default" }} />
+        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 8, background: FIRE.card2Noir, padding: 2, cursor: canManage ? "pointer" : "default" }} />
         <input style={{ ...FS.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
       </div>
     </label>
   );
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>MEDIA BUILDER</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Build on-brand media</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too.</div>
-      </div>
-      {!canManage && <div style={{ ...FS.card, padding: 14, marginBottom: 14, fontSize: 13, color: FIRE.textMuted }}>You can view the brand kit. Editing is limited to department admins.</div>}
-      <div style={{ ...FS.card, padding: 18 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
+    <PageShell band kicker="MEDIA BUILDER" title="Build on-brand media"
+      sub="Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too.">
+      <NoirSkin>
+      {!canManage && <div style={{ ...FS.cardNoir, padding: 14, marginBottom: 14, fontSize: 13, color: FIRE.textMuted }}>You can view the brand kit. Editing is limited to department admins.</div>}
+      <div style={{ ...FS.cardNoir, padding: 18 }}>
+        <CardHead icon={Palette} title="Identity" />
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
@@ -20060,10 +20057,10 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
           <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Headline font</span><select style={FS.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
         </div>
       </div>
-      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />LOGO</div>
+      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}>
+        <CardHead icon={ImageIcon} title="Logo" />
         <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ width: 84, height: 84, borderRadius: 12, border: `0.5px solid ${FIRE.hairline}`, background: FIRE.btnBg, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+          <div style={{ width: 84, height: 84, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
             {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color={FIRE.textMuted2} />}
           </div>
           {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -20071,13 +20068,13 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
             {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
           </div>}
         </div>
-        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0, color: FIRE.textMuted }}>PNG with a transparent background works best. Saved to your department when you tap Save — it appears on your header, sidebar, dashboard, and printed roster.</p>
+        <p style={{ ...NOIR_HELP, marginTop: 8, marginBottom: 0 }}>PNG with a transparent background works best. Saved to your department when you tap Save — it appears on your header, sidebar, dashboard, and printed roster.</p>
       </div>
-      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>VOICE & TAGLINE</div>
+      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}>
+        <CardHead icon={MessageSquare} title="Voice & tagline" />
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tagline</span><input style={FS.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
         <label style={{ ...S.field, marginTop: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How the department sounds</span><textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
-        <p style={{ ...S.helpP, marginBottom: 0, color: FIRE.textMuted }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
+        <p style={{ ...NOIR_HELP, marginBottom: 0 }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
       </div>
       {canManage && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
@@ -20087,15 +20084,15 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
           <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Saves name, station, colors, font, tagline &amp; voice. (Logo &amp; guidelines coming soon.)</span>
         </div>
       )}
-      <div style={{ ...FS.card, padding: 18, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.primary }} /><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.accent }} /></div>
         <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: FIRE.textPrimary }}>{brand.name}</div>
         <div style={{ fontSize: 13, color: FIRE.textMuted, flex: 1, minWidth: 140 }}>{brand.tagline}</div>
       </div>
 
-      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DEPARTMENT GUIDELINES</div>
-        <p style={{ ...S.helpP, marginTop: 0, color: FIRE.textMuted }}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
+      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}>
+        <CardHead icon={FileText} title="Department guidelines" />
+        <p style={NOIR_HELP}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
         {canManage && (
           <label style={{ ...FS.btn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} color={FIRE.btnIcon} /> Upload guideline
             <input type="file" accept=".pdf,.doc,.docx,image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; set("guidelines", [...(brand.guidelines || []), { id: Date.now(), name: f.name }]); e.target.value = ""; }} /></label>
@@ -20103,7 +20100,7 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
         <div style={{ marginTop: 10 }}>
           {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No guidelines uploaded yet.</div> :
             (brand.guidelines || []).map((g) => (
-              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
                 <span style={{ flex: 1, fontSize: 13.5, color: FIRE.textPrimary }}>{g.name}</span>
                 {canManage && <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => set("guidelines", (brand.guidelines || []).filter((x) => x.id !== g.id))}><X size={13} color={FIRE.deleteRed} /></button>}
@@ -20113,7 +20110,8 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
       </div>
 
       <div style={{ marginTop: 18 }}><GraphicStudio S={S} brand={brand} /></div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
