@@ -192,6 +192,22 @@ function SectionBar({ icon: Icon, label, count, right, open, onToggle, style }) 
     </div>
   );
 }
+// Noir modal shell (the Issue / Add-units modals' look): gradient panel + a header with the red glow, icon tile,
+// Oswald title, optional sub-line, right-hand actions and a close button. Reused by the viewers and other modals.
+const NOIR_MODAL_PANEL = { background: "linear-gradient(180deg, #0E1218, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,.6)" };
+function NoirModalHead({ icon: Icon, title, sub, right, onClose }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "14px 18px", borderBottom: `1px solid ${FIRE.lineNoir}`, background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)", flexWrap: "wrap" }}>
+      {Icon && <span style={{ width: 36, height: 36, borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon size={18} color={FIRE.redText} /></span>}
+      <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, lineHeight: 1.15, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+        {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+      </div>
+      {right && <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>{right}</div>}
+      {onClose && <button onClick={onClose} aria-label="Close" title="Close (Esc)" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0, flexShrink: 0 }}><X size={14} color={FIRE.textSecondary} /></button>}
+    </div>
+  );
+}
 // Noir replacements for the pre-Noir text styles (S.featTitle / S.helpP / S.errBox) on the remaining pages.
 const NOIR_FEAT_TITLE = { fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, margin: "0 0 4px", lineHeight: 1.3 };
 const NOIR_HELP = { fontSize: 12.5, lineHeight: 1.55, color: FIRE.textMuted, margin: "0 0 10px" };
@@ -5573,9 +5589,9 @@ function DocViewer({ url, name, onClose }) {
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 130, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxWidth: 820, width: "100%", margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: FIRE.card, borderBottom: `0.5px solid ${FIRE.hairline}`, flexShrink: 0 }}>
-          <FileText size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: `radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.14), transparent 46%), ${FIRE.card2Noir}`, borderBottom: `1px solid ${FIRE.lineNoir}`, flexShrink: 0 }}>
+          <span style={{ width: 30, height: 30, borderRadius: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><FileText size={15} color={FIRE.redText} /></span>
+          <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY_FONT, fontSize: 15, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
           <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...FS.btn, padding: "6px 10px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0 }}><Download size={14} color={FIRE.btnIcon} /> Download</a>
           <button onClick={onClose} title="Close (Esc)" style={{ ...FS.btn, padding: "6px 8px", flexShrink: 0 }}><X size={16} color={FIRE.btnIcon} /></button>
         </div>
@@ -5590,7 +5606,7 @@ function DocViewer({ url, name, onClose }) {
           {status === "ready" && kind === "pdf" && pdf && w > 0 && Array.from({ length: numPages }).map((_, i) => <PdfPage key={i} pdf={pdf} pageNum={i + 1} width={w} />)}
           {status === "ready" && kind === "docx" && (<>
             <style>{`.docx-view img{max-width:100%;height:auto} .docx-view table{border-collapse:collapse;width:100%;margin:8px 0} .docx-view td,.docx-view th{border:1px solid rgba(255,255,255,.16);padding:6px 8px;text-align:left} .docx-view a{color:${FIRE.blueText}} .docx-view h1,.docx-view h2,.docx-view h3{color:#fff;margin:12px 0 6px} .docx-view p{margin:0 0 8px} .docx-view ul,.docx-view ol{margin:0 0 8px;padding-left:22px}`}</style>
-            <div className="docx-view" style={{ ...FS.card, padding: "16px 18px", fontSize: 14, lineHeight: 1.6, color: FIRE.textPrimary, wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: html }} />
+            <div className="docx-view" style={{ ...NOIR_INSET, padding: "16px 18px", fontSize: 14, lineHeight: 1.6, color: FIRE.textPrimary, wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: html }} />
           </>)}
           {status === "ready" && kind === "image" && <img src={url} alt={name} style={{ display: "block", maxWidth: "100%", margin: "0 auto", borderRadius: 8 }} />}
         </div>
@@ -18596,22 +18612,20 @@ function AiPlanViewer({ S, plan, onClose, dept, notify }) {
   const rest = blocks.filter((b) => !isRun(b)).join("\n").trim();
   const hasRun = runSheet.split("\n").slice(1).join("\n").trim().length > 0;   // heading alone doesn't count — never offer an empty Quick tab
   const shown = !hasRun ? rest : (view === "quick" ? runSheet : rest);
-  const tab = (key, label) => (
-    <button onClick={() => setView(key)} style={{ ...FS.btn, ...(view === key ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>
-  );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "20px 22px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
-          <div style={{ ...FS.kicker, marginBottom: 0 }}>{plan.title || "AI-drafted plan"}</div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printPlan}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
-            <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /> Close</button>
-          </div>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%" }}>
+        <NoirModalHead icon={FileText} title={plan.title || "AI-drafted plan"} sub="Training plan"
+          right={<button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printPlan}><Printer size={14} color={FIRE.btnIcon} /> Print</button>} onClose={onClose} />
+        <div style={{ padding: "14px 18px 18px" }}>
+          {hasRun && (
+            <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 12 }}>
+              {[["quick", "Quick run sheet"], ["full", "Full plan"]].map(([k, l]) => <button key={k} onClick={() => setView(k)} aria-pressed={view === k} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: view === k ? FIRE.redBright : "transparent", color: view === k ? "#fff" : FIRE.textSecondary }}>{l}</button>)}
+            </div>
+          )}
+          <Disclaimer S={S} compact dark />
+          <RichOutput S={S} text={shown} dark />
         </div>
-        {hasRun && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{tab("quick", "Quick run sheet")}{tab("full", "Full plan")}</div>}
-        <Disclaimer S={S} compact dark />
-        <RichOutput S={S} text={shown} dark />
       </div>
     </div>
   );
@@ -18621,14 +18635,12 @@ function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
   if (!session) return null;
   const plans = session.plans || [];
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 520, width: "100%", padding: "18px 20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
-          <div style={{ ...FS.kicker, marginBottom: 0 }}>{session.title} — PLANS ({plans.length})</div>
-          <button style={{ ...FS.btn, padding: "6px 10px", flexShrink: 0 }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /></button>
-        </div>
-        {plans.map((p) => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 520, width: "100%" }}>
+        <NoirModalHead icon={FileText} title={session.title} sub={`${plans.length} plan${plans.length === 1 ? "" : "s"} attached`} onClose={onClose} />
+        <div style={{ padding: "6px 18px 14px" }}>
+        {plans.map((p, i) => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: i === plans.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
             <FileText size={14} color={p.kind === "ai" ? FIRE.amberText : FIRE.btnIcon} style={{ flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}{p.kind === "ai" ? " · AI" : ""}</span>
             {p.kind === "ai"
@@ -18636,6 +18648,7 @@ function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
               : <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => onOpen(p)}>Open</button>}
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
