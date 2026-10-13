@@ -17852,9 +17852,9 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
     <div>
       <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}><ClipboardList size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI AGENDA BUILDER</div>
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft an agenda from your real department data</h3>
-          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Pulled live from your station — the draft references only what's real below, nothing invented.</p>
+          <CardHead icon={ClipboardList} title="AI agenda builder" />
+          <h3 style={NOIR_FEAT_TITLE}>Draft an agenda from your real department data</h3>
+          <p style={NOIR_HELP}>Pulled live from your station — the draft references only what's real below, nothing invented.</p>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
             <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
@@ -17864,7 +17864,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
           <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Additional topics <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>— optional, your own items to add</span></span>
             <textarea style={{ ...FS.input, minHeight: 52, resize: "vertical" }} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="e.g. tanker purchase decision, fundraiser date vote, Johnson recognition" /></label>
 
-          <div style={{ ...FS.cardNoir, padding: "10px 14px", marginBottom: 12 }}>
+          <div style={{ ...NOIR_INSET, padding: "10px 14px", marginBottom: 12 }}>
             <CardHead icon={Sparkles} title="Context we'll use" style={{ marginBottom: 4 }} />
 
             <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
@@ -17883,7 +17883,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate agenda</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
@@ -17894,14 +17894,14 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
         </div>
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED AGENDAS</div>
+      <CardHead icon={FileText} title="Saved agendas" style={{ marginTop: 22 }} />
       <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved agendas yet.</div> : drafts.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled agenda"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -17913,8 +17913,8 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
         })}
       </div>
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px", background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <CardHead icon={FileText} title={openDraft.title || "Agenda"} style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
