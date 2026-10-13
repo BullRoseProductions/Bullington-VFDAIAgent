@@ -3066,6 +3066,8 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
       {noir
         ? <CardHead icon={LayoutDashboard} title="Your personal view" style={{ marginTop: 14 }} />
         : <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>}
+      {/* A failed duties read kept [] and looked like "nothing assigned" — say so instead. */}
+      {(loadErr || crewErr) && <OfflineNotice onRetry={() => { if (loadErr) loadMine(); if (crewErr) loadCrew(); }} what="your duties" />}
       {/* Open loops first — it self-hides when there are none, so it costs nothing on a clean record. */}
       <NeedsAttention S={S} me={me} meId={meId} sessions={sessions} go={go} />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: noir ? 8 : 12, marginBottom: noir ? 8 : 14 }}>
@@ -3493,7 +3495,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
   return (
-    <PageShell band kicker={dept?.name ? `BOARD · ${dept.name}` : "BOARD"} title={dashboardGreeting(me)} sub="Department oversight at a glance." actions={<HeroAside />}>
+    <PageShell band kicker={dept?.name ? `BOARD · ${dept.name}` : "BOARD"} title={dashboardGreeting(me)} sub="Department oversight at a glance." actions={<HeroAside />}
+      above={loadErr ? <OfflineNotice onRetry={loadBoard} what="the board view" /> : null}>
       {/* Noir skin, as on the DA dashboard: CardHead headers + the gradient card face down through the Chief's Report. */}
       <NoirSkin>
 
@@ -3667,7 +3670,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     </Card>
   );
   return (
-    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
+    <PageShell band above={loadErr ? <OfflineNotice onRetry={() => { setLoadErr(false); loadPanels(); }} what="the command view" /> : null} lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
         <HeroAside>
           <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
