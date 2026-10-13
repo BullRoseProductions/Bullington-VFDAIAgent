@@ -197,7 +197,7 @@ function SectionBar({ icon: Icon, label, count, right, open, onToggle, style }) 
 const NOIR_MODAL_PANEL = { background: "linear-gradient(180deg, #0E1218, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,.6)" };
 function NoirModalHead({ icon: Icon, title, sub, right, onClose }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "14px 18px", borderBottom: `1px solid ${FIRE.lineNoir}`, background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "14px 18px", borderBottom: `1px solid ${FIRE.lineNoir}`, background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)", flexWrap: "wrap", textAlign: "left" }}>
       {Icon && <span style={{ width: 36, height: 36, borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon size={18} color={FIRE.redText} /></span>}
       <div style={{ flex: "1 1 180px", minWidth: 0 }}>
         <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, lineHeight: 1.15, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
@@ -16155,11 +16155,9 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
   }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={ClipboardCheck} title="Confirm return" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
-        </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "100%", maxWidth: 420, margin: "24px 0" }}>
+        <NoirModalHead icon={ClipboardCheck} title="Confirm return" onClose={onClose} />
+        <div style={{ padding: "16px 18px 18px" }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{row.equipment_name}</div>
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 14 }}>Returned by {row.holder_name}</div>
         <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition on return</span>
@@ -16176,6 +16174,7 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
           <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Confirming…" : "Confirm return"}</button>
           <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
         </div>
+      </div>
       </div>
     </div>,
     document.body
@@ -16216,11 +16215,9 @@ function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
   }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={RotateCcw} title="Recover item" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
-        </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "100%", maxWidth: 420, margin: "24px 0" }}>
+        <NoirModalHead icon={RotateCcw} title="Recover item" onClose={onClose} />
+        <div style={{ padding: "16px 18px 18px" }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{unit.label}</div>
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 8 }}>{unit.holder_name ? `Currently signed to ${unit.holder_name}` : "Currently checked out"}</div>
         <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 14, lineHeight: 1.45 }}>Reclaiming without a member return — this closes their custody as a manager recovery and puts the item back in inventory.</div>
@@ -16238,6 +16235,7 @@ function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
           <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Recovering…" : "Recover to inventory"}</button>
           <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
         </div>
+      </div>
       </div>
     </div>,
     document.body
@@ -16303,11 +16301,9 @@ function HandoffModal({ items, notify, onClose }) {
 
   return createPortal(
     <div onClick={cancelAndClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0", textAlign: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={ArrowLeftRight} title="Start transfer" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={cancelAndClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
-        </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "100%", maxWidth: 420, margin: "24px 0", textAlign: "center" }}>
+        <NoirModalHead icon={ArrowLeftRight} title="Start transfer" onClose={cancelAndClose} />
+        <div style={{ padding: "16px 18px 18px" }}>
 
         <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 12 }}>
           Have the receiver scan this with their phone camera. Custody moves to them when they confirm — it can’t happen without the scan.
@@ -16336,6 +16332,7 @@ function HandoffModal({ items, notify, onClose }) {
         )}
 
         <button onClick={cancelAndClose} style={{ ...FS.btn, marginTop: 16 }}>{st.phase === "live" ? "Cancel transfer" : "Close"}</button>
+      </div>
       </div>
     </div>,
     document.body
