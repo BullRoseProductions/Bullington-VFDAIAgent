@@ -19001,6 +19001,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState(""); const [sTime, setSTime] = useState("");
+  // The schedule form's own length. It used to be bound to sessEdit (the EDIT form's state), so a length
+  // typed while scheduling was never sent and leaked into the next edit. Blank = no length, as before.
+  const [sDur, setSDur] = useState("");
+  const sDurMin = () => { const n = Number(sDur); return sDur === "" || !Number.isFinite(n) || n <= 0 ? null : Math.round(n); };
   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
   const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true });
@@ -19087,6 +19091,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       title,
       date: toISO(new Date(cur.y, cur.m, Number(sd))),
       start_time: sTime || null,
+      duration_min: sDurMin(),
       done: false,
       audience: sAudience,
       counts_toward_attendance: sCounts,
@@ -19094,7 +19099,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       location_label: sOffsite ? (sOffLabel.trim() || null) : null,   // coordinates come later, at open-sign-in
     });
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setShowSess(false); setStitle(""); setSTime(""); loadSessions();
+    setShowSess(false); setStitle(""); setSTime(""); setSDur(""); loadSessions();
   }
   function toggleRepeat() {
     if (!repeat) {   // opening: seed pattern from the selected category's cadence, day from today
@@ -19134,7 +19139,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
-    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, duration_min: sDurMin(), done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem && dates.length) await supabase.from("training_plans").update({ starts_on: dates[0] }).eq("id", pItem.id);
@@ -19143,7 +19148,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const desc = rPattern === "weekly" ? `weekly on ${dow}` : rPattern === "biweekly" ? `every other week on ${dow}` : `the ${ordName} ${dow} each month`;
     const skipped = dates.length - fresh.length;
     notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} session${fresh.length === 1 ? "" : "s"} — ${desc}${skipped ? ` (${skipped} already existed)` : ""}.` });
-    setShowSess(false); setRepeat(false); setStitle(""); setSTime(""); loadSessions();
+    setShowSess(false); setRepeat(false); setStitle(""); setSTime(""); setSDur(""); loadSessions();
   }
   // "Done for the night" — does NOT lock. Opens the roll writable so the officer can
   // confirm/complete attendance BEFORE finalizing. The lock/clock-reset moves to finalizeSession.
@@ -19712,7 +19717,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           length is valid and simply produces no attendance hours. It is NOT a
                           required field, because forcing a number would get a guess typed in, and a
                           guessed length becomes hours on an ISO/LOSAP-adjacent report. */}
-                      <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sessEdit.durationMin} onChange={(e) => setSessEdit((b) => ({ ...b, durationMin: e.target.value }))} /></label>
+                      <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sDur} onChange={(e) => setSDur(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
