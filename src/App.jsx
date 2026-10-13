@@ -9545,11 +9545,12 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   const rosterList = members.filter(countsInStats);
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} dept={dept} />;
   return (
-    <PageShell kicker="ROSTER" title="Your people, all in one place"
+    <PageShell band kicker={dept?.name ? `ROSTER · ${dept.name}` : "ROSTER"} title="Your people, all in one place"
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>CREW</div>}
       sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
       <NoirSkin>
       <div style={S.segRow}>
-        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? FIRE.btnBg : "transparent", borderColor: tab === k ? FIRE.red : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
+        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: tab === k ? FIRE.redBright : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
       {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
@@ -9574,8 +9575,30 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
   // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
   const q = query.trim().toLowerCase();
   const matches = (m) => !q || [m.name, m.email, m.role, (Array.isArray(m.access) ? m.access.join(" ") : "")].some((f) => (f || "").toLowerCase().includes(q));
-  const rosterTotal = members.filter(countsInStats).length;   // full roster (owner/test/PA excluded) — the "of Y"
-  const filtered = members.filter((m) => countsInStats(m) && (showInactive || !q || m.status !== "Inactive") && matches(m));
+  const rosterAll = members.filter(countsInStats);   // full roster (owner/test/PA excluded) — the "of Y" and the stat chips
+  const rosterTotal = rosterAll.length;
+  const [statusTab, setStatusTab] = useState("all");   // facelift tabs: all | Active | Probationary (composes with search + the inactive toggle)
+  const [sortBy, setSortBy] = useState("roster");      // roster (today's order) | name | compliance | status
+  // CERT COMPLIANCE — the share of a member's certs on file that are current (certStatus rank 2; undated never counts
+  // current). No certs on file → null ("—"), never 0%. Display only, from the certs already on each roster row.
+  const compliance = (m) => { const cs = m.certs || []; return cs.length ? Math.round((cs.filter((c) => certStatus(c.exp).rank === 2).length / cs.length) * 100) : null; };
+  const rated = rosterAll.map(compliance).filter((v) => v != null);
+  const avgCompliance = rated.length ? Math.round(rated.reduce((t, v) => t + v, 0) / rated.length) : null;
+  const nActive = rosterAll.filter((m) => m.status === "Active").length, nProb = rosterAll.filter((m) => m.status === "Probationary").length;
+  const STATUS_RANK = { Active: 0, Probationary: 1, Inactive: 2 };
+  const filtered = members.filter((m) => countsInStats(m) && (showInactive || !q || m.status !== "Inactive") && matches(m))
+    .filter((m) => statusTab === "all" || m.status === statusTab)
+    .slice().sort((x, y) => sortBy === "name" ? (x.name || "").localeCompare(y.name || "")
+      : sortBy === "compliance" ? (compliance(y) ?? -1) - (compliance(x) ?? -1)
+      : sortBy === "status" ? (STATUS_RANK[x.status] ?? 3) - (STATUS_RANK[y.status] ?? 3) : 0);
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redText);
+  const chip = (Icon, label, value, sub, tone) => (
+    <div style={{ ...FS.cardNoir, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", minWidth: 0 }}>
+      <div style={{ fontSize: 11, color: FIRE.textSecondary, display: "flex", alignItems: "center", gap: 6 }}><Icon size={13} color={FIRE.redText} />{label}</div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1, marginTop: 8, color: tone || FIRE.textPrimary, ...FS.num }}>{value}</div>
+      {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
   async function add() {
     const email = em.trim().toLowerCase();
     if (!nm.trim() || !email || !/^\S+@\S+\.\S+$/.test(email)) { notify({ kind: "error", title: "Email required", text: "A valid email is needed so this member can sign in." }); return; }
@@ -9616,6 +9639,13 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
   }
   return (
     <div>
+      {/* Stat chips — members / active / probationary / average cert compliance, from the roster rows on hand. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
+        {chip(Users, "Members", String(rosterTotal), `${nActive} active · ${nProb} probationary`)}
+        {chip(CheckCircle2, "Active", String(nActive), rosterTotal ? `${Math.round((nActive / rosterTotal) * 100)}% of roster` : null, nActive ? FIRE.greenText : null)}
+        {chip(UserPlus, "Probationary", String(nProb), "in onboarding")}
+        {chip(Award, "Avg cert compliance", avgCompliance == null ? "—" : `${avgCompliance}%`, rated.length ? `across ${rated.length} with certs on file` : "No certs on file yet", avgCompliance == null ? null : pctColor(avgCompliance))}
+      </div>
       {canAdd && (adding ? (
         <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={nm} onChange={(e) => setNm(e.target.value)} /></label>
@@ -9648,11 +9678,25 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </Card>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
-      <Card padding="11px 14px" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <Search size={16} color={FIRE.textMuted} />
-        <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search members by name, email, or role…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        {query && <button style={S.clearBtn} onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
-      </Card>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", maxWidth: 360, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 8, padding: "7px 11px" }}>
+          <Search size={15} color={FIRE.textMuted} />
+          <input style={{ ...S.searchInput, color: FIRE.textPrimary, fontSize: 13 }} placeholder="Search members by name, email, or role…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          {query && <button style={S.clearBtn} onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[["all", "All", rosterTotal], ["Active", "Active", nActive], ["Probationary", "Probationary", nProb]].map(([k, l, n]) => {
+            const on = statusTab === k;
+            return <button key={k} onClick={() => setStatusTab(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: on ? 700 : 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, padding: "5px 11px", background: on ? FIRE.redBright : FIRE.btnBg, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, color: on ? FIRE.white : FIRE.textSecondary }}>{l} <b style={FS.num}>{n}</b></button>;
+          })}
+        </div>
+        <select aria-label="Sort members" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...S.select, marginLeft: "auto" }}>
+          <option value="roster">Sort: Roster order</option>
+          <option value="name">Sort: Name</option>
+          <option value="compliance">Sort: Compliance</option>
+          <option value="status">Sort: Status</option>
+        </select>
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
         {canPrint && <button onClick={handlePrint} title="Print or save the roster as a PDF" style={{ ...FS.btn, marginLeft: "auto", padding: "6px 11px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }}><Printer size={14} color={FIRE.btnIcon} /> Print roster</button>}
@@ -9663,31 +9707,36 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
         </div>
       )}
       {filtered.length === 0 && <Card padding="15px 16px" style={{ textAlign: "center", color: FIRE.textMuted }}>{query ? `No members match "${query}".` : "No members to show."}</Card>}
-      <div style={S.opGrid}>
-        {/* Owner + test + Project Admin hidden via countsInStats; search + inactive toggle compose (AND) */}
-        {filtered.map((m) => (
-          <Card key={m.id} padding="15px 16px" style={onOpen ? { cursor: "pointer" } : undefined} onClick={onOpen ? () => onOpen(m.id) : undefined}>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <Initials S={S} dark name={m.name} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(260px, 100%), 1fr))", gap: 10 }}>
+        {/* Owner + test + Project Admin hidden via countsInStats; search + status tab + inactive toggle compose (AND) */}
+        {filtered.map((m) => { const cp = compliance(m); const ini = (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase(); return (
+          <Card key={m.id} padding="13px 14px" style={{ display: "flex", flexDirection: "column", gap: 10, ...(onOpen ? { cursor: "pointer" } : null) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+            <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
+              <div style={{ width: 42, height: 42, borderRadius: 11, background: "linear-gradient(135deg, #242A32, #12161C)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.redText, flexShrink: 0 }}>{ini}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div>
-                <div style={{ ...S.personMeta, color: FIRE.textMuted }}>{[m.role || "Member", m.joined ? `since ${m.joined}` : null].filter(Boolean).join(" · ")}</div>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14.5, lineHeight: 1.15, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 2 }}>{m.role || "Member"}</div>
               </div>
-              {m.status ? <Pill S={S} color={sColor(m.status)}>{m.status.toUpperCase()}</Pill> : null}
+              {m.status ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 999, color: sColor(m.status), background: `${sColor(m.status)}1F`, border: `1px solid ${sColor(m.status)}66`, flexShrink: 0 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: sColor(m.status) }} />{m.status}</span> : null}
               {canAdd && canDeleteShared && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11, fontSize: 13, color: FIRE.textMuted }}>
-              <Phone size={13} /> {m.phone}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: FIRE.textSecondary }}><span>Cert compliance</span><span style={{ fontWeight: 700, color: pctColor(cp), ...FS.num }}>{cp == null ? "—" : `${cp}%`}</span></div>
+              {cp == null ? <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4 }}>No certs on file</div>
+                : <div style={{ height: 6, borderRadius: 4, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, overflow: "hidden", marginTop: 6 }}><div style={{ width: `${cp}%`, height: "100%", borderRadius: 4, background: pctColor(cp) }} /></div>}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: FIRE.textMuted, flexWrap: "wrap" }}>
+              {m.joined && <span>since <b style={{ color: FIRE.textSecondary }}>{m.joined}</b> ·</span>}<Phone size={13} /> {m.phone}
               {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
                 : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
             </div>
             {m.email && (
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, fontSize: 13, color: FIRE.textMuted }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: FIRE.textMuted, minWidth: 0 }}>
                 <Mail size={13} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</span>
               </div>
             )}
           </Card>
-        ))}
+        ); })}
       </div>
     </div>
   );
