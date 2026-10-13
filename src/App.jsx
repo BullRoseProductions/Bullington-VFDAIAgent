@@ -5259,15 +5259,16 @@ function RichOutput({ S, text, dark }) {
   const sections = parseSections(text);
   // additive: default (dark falsy) uses the exact same S.rich* objects → byte-identical light path. Parse/RichText untouched.
   const wrap  = S.richWrap;   // layout-only (flex/gap/marginTop) — same for both themes
-  const card  = dark ? { ...FS.card, padding: "15px 17px" } : S.richCard;
-  const title = dark ? { ...S.richTitle, color: FIRE.textPrimary, borderBottom: `1px solid ${FIRE.hairline}` } : S.richTitle;
+  // dark = the Noir AI answer: each section on the inset surface, its title an Oswald head with the short red rule.
+  const card  = dark ? { ...NOIR_INSET, padding: "14px 16px" } : S.richCard;
+  const title = dark ? { ...S.richTitle, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14.5, letterSpacing: ".02em", color: FIRE.textPrimary, borderBottom: "none", paddingBottom: 5, marginBottom: 10, position: "relative", display: "inline-block" } : S.richTitle;
   const para  = dark ? { ...S.richP, color: FIRE.textSecondary } : S.richP;
   const list  = dark ? { ...S.richList, color: FIRE.textSecondary } : S.richList;
   return (
     <div style={wrap}>
       {sections.map((sec, i) => (
         <div key={i} style={card}>
-          {sec.title && <div style={title}>{sec.title}</div>}
+          {sec.title && <div style={title}>{sec.title}{dark && <span aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: 20, height: 2, borderRadius: 2, background: FIRE.redBright }} />}</div>}
           {sec.blocks.map((b, j) => {
             if (b.para != null) return <p key={j} style={para}><RichText text={b.para} /></p>;
             const Tag = b.ordered ? "ol" : "ul";
