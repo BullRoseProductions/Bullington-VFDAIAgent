@@ -15578,24 +15578,26 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
     } finally { setBusy(false); }
   }
   return (
-    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "4px 0 10px" }}>
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "4px 0 10px" }}>
+      {/* The mocks' photo strip: 122×84 tiles, label as a caption over the photo, dashed tile when empty. */}
       {SLOTS.map(([kind, label]) => {
         const row = byKind?.[kind] || null; const url = urls[kind];
+        const cap = <span style={{ position: "absolute", left: 0, right: 0, bottom: 0, fontSize: 9.5, fontWeight: 600, color: "#eaf0f6", padding: "14px 8px 6px", background: "linear-gradient(0deg, rgba(0,0,0,.72), transparent)", borderRadius: "0 0 10px 10px", pointerEvents: "none" }}>{label}</span>;
         return (
           <div key={kind}>
-            <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 4 }}>{label}</div>
             {url ? (
-              <div style={{ position: "relative", width: 96, height: 96 }}>
-                <img src={url} alt={label} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: `1px solid ${FIRE.hairline}`, display: "block" }} />
+              <div style={{ position: "relative", width: 122, height: 84 }}>
+                <img src={url} alt={label} style={{ width: 122, height: 84, objectFit: "cover", borderRadius: 10, border: `1px solid ${FIRE.line2Noir}`, display: "block" }} />
+                {cap}
                 {canManage && <button title="Remove photo" onClick={() => remove(row)} disabled={busy} style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 999, background: FIRE.pageBg, border: `1px solid ${FIRE.btnBorder}`, cursor: busy ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={12} color={FIRE.deleteRed} /></button>}
               </div>
             ) : canManage ? (
-              <label style={{ ...FS.btn, width: 96, height: 96, minHeight: 44, display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1, fontSize: 11, textAlign: "center" }}>
-                <Camera size={16} color={FIRE.btnIcon} /> {busy ? "Working…" : "Add photo"}
+              <label style={{ width: 122, height: 84, borderRadius: 10, border: `1.5px dashed ${FIRE.line2Noir}`, background: FIRE.card2Noir, color: FIRE.textMuted, display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1, fontSize: 10.5, textAlign: "center" }}>
+                <Camera size={16} color={FIRE.textMuted} /> {busy ? "Working…" : `Add ${label.toLowerCase()}`}
                 <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) addPhoto(f, kind); }} />
               </label>
             ) : (
-              <div style={{ width: 96, height: 96, borderRadius: 8, border: `1px dashed ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", color: FIRE.textMuted2, fontSize: 11 }}>No photo</div>
+              <div style={{ width: 122, height: 84, borderRadius: 10, border: `1.5px dashed ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", color: FIRE.textMuted2, fontSize: 10.5, textAlign: "center", padding: 6 }}>No {label.toLowerCase()}</div>
             )}
           </div>
         );
@@ -15653,9 +15655,13 @@ function EquipmentCustodyLedger({ unit }) {
             const lost = r.close_action === "marked_lost";
             const tone = !r.closed_at ? FIRE.blueText : lost ? FIRE.redText : FIRE.textMuted;
             return (
-              <div key={r.id} style={{ padding: "9px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+              <div key={r.id} style={{ display: "flex", gap: 11, padding: "9px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: !r.closed_at ? "rgba(79,144,214,.14)" : lost ? "rgba(200,50,58,.14)" : "rgba(47,168,105,.14)", border: `1px solid ${!r.closed_at ? "rgba(79,144,214,.4)" : lost ? "rgba(200,50,58,.4)" : "rgba(47,168,105,.4)"}` }}>
+                  {!r.closed_at ? <ArrowLeftRight size={13} color={FIRE.blueText} /> : lost ? <X size={13} color={FIRE.redText} /> : <Check size={13} color={FIRE.greenText} />}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.holder_name || "—"}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.holder_name || "—"}</span>
                   <span style={{ fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{fmt(r.opened_at)} → {r.closed_at ? fmt(r.closed_at) : "now"}</span>
                   <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: tone }}>{r.closed_at ? (CLOSE[r.close_action] || "Closed").toUpperCase() : "HOLDING"}</span>
                 </div>
@@ -15673,6 +15679,7 @@ function EquipmentCustodyLedger({ unit }) {
                       : <button key={path} onClick={() => view(path)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11 }}><Camera size={12} color={FIRE.btnIcon} /> Condition photo {photos[r.id].length > 1 ? k + 1 : ""}</button>)}
                   </div>
                 )}
+                </div>
               </div>
             );
           })}
@@ -16719,24 +16726,27 @@ function Equipment({ S, role, members, meId, notify }) {
   /* The type-grouped equipment list for ONE scope. Extracted so all-houses mode can render it
      once per house; the markup inside is unchanged. Groups are computed from the list passed in
      rather than the component-wide `types`, which is what makes a per-house call correct. */
-  const renderTypes = (typeList) => {
+  // The mocks' inventory card: Inventory head INSIDE the card (withHead), muted category bars, .irow unit rows.
+  const npill = (color, text, w) => <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 10px", borderRadius: 999, minWidth: w || 0, textAlign: "center", flexShrink: 0, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{text}</span>;
+  const renderTypes = (typeList, withHead) => {
     const groups = {};
     typeList.forEach((t) => { (groups[t.category || "Uncategorized"] = groups[t.category || "Uncategorized"] || []).push(t); });
     const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));   // types already ordered sort_order,name → preserved within each group
     return (
-      <Card padding="2px 16px">
+      <Card padding="12px 16px">
+      {withHead && <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} />}
       {groupNames.map((cat, gi) => (
         <div key={cat}>
-          <SectionLabel style={{ padding: gi === 0 ? "12px 0 6px" : "18px 0 6px" }}>{cat}</SectionLabel>
+          <SectionBar label={cat} style={{ margin: gi === 0 ? "4px 0 4px" : "16px 0 4px" }} />
           {groups[cat].map((t, ti) => {
             const open = expanded === t.id;
             const lastRow = gi === groupNames.length - 1 && ti === groups[cat].length - 1;
             return (
-              <div key={t.id} style={{ borderBottom: lastRow ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div key={t.id} style={{ borderBottom: lastRow ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 44 }}>
                   <button onClick={() => toggleExpand(t.id)} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, minHeight: 44, background: "none", border: "none", padding: "6px 0", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}{!t.returnable && <span style={{ fontWeight: 400, fontSize: 11.5, color: FIRE.textMuted }}> · consumable</span>}</div>
-                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.green : FIRE.textMuted }}>{t.available} available</span></div>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}{!t.returnable && <span style={{ fontWeight: 400, fontSize: 11.5, color: FIRE.textMuted }}> · consumable</span>}</div>
+                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.greenText : FIRE.textMuted }}>{t.available} available</span></div>
                     <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronDown size={16} color={FIRE.textMuted} /> : <ChevronRight size={16} color={FIRE.textMuted} />}</span>
                   </button>
                   {canManage && editMode && <button title="Edit type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEditType(t)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
@@ -16762,7 +16772,7 @@ function Equipment({ S, role, members, meId, notify }) {
                               : u.status === "maintenance" ? { label: "In maintenance", color: FIRE.amberText }
                               : u.status === "retired"     ? { label: "Retired",        color: FIRE.textMuted2 }
                               : u.status === "lost"        ? { label: "Lost",           color: FIRE.redBright }
-                              : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright };
+                              : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.greenText : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.amberText };
                   const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
                   const gear = gearStatus(u.manufactureDate, t.serviceLifeYears);   // this unit's date + its TYPE's service life
                   // NFPA retirement is mandatory by AGE regardless of condition, so a past-life unit is not
@@ -16775,15 +16785,18 @@ function Equipment({ S, role, members, meId, notify }) {
                   const hideServiceable = gear.rank === 0 && isConditionBadge && u.condition === "Serviceable";
                   return (
                     <div key={u.id}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
-                          {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
+                      <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "10px 2px", flexWrap: "wrap", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                        <div style={{ width: 110, flexShrink: 0, fontFamily: DISPLAY_FONT, fontSize: 12, color: FIRE.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...FS.num }}>{idLabel}</div>
+                        <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+                          <div style={{ fontSize: 12, color: FIRE.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {u.status === "held" ? <>held by <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{u.holderName || "—"}</b></> : u.status === "in_inventory" ? <span style={{ color: FIRE.textMuted }}>Unassigned</span> : badge.label}
+                            {u.status !== "in_inventory" && <span style={{ color: FIRE.textMuted }}> · condition {u.condition}</span>}
+                          </div>
                           {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                         </div>
-                        {issuesByEq.get(u.id) > 0 && <Pill S={S} color={FIRE.amberText}>NEEDS ATTENTION</Pill>}
-                        {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
-                        {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
+                        {issuesByEq.get(u.id) > 0 && npill(FIRE.amberText, "Needs attention")}
+                        {gear.tracked && npill(gear.fire, gear.label.charAt(0) + gear.label.slice(1).toLowerCase())}
+                        {!hideServiceable && npill(badge.color, badge.label, 92)}
                         {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
                         {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
                         {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
@@ -16846,7 +16859,18 @@ function Equipment({ S, role, members, meId, notify }) {
   };
   return (
     <PageShell band above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got"
-      watermark="GEAR" sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
+      watermark="GEAR" sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}
+      actions={(canManage || isManager || isDA) ? (
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
+          {types.length > 0 && (
+            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+              {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
+            </button>
+          )}
+          {canManage && <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>}
+          {(isManager || isDA) && <button onClick={() => setIssuing(true)} style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={15} /> Issue equipment</button>}
+        </div>
+      ) : null}>
       <NoirSkin>
       {/* GEAR CHIPS — from the units already loaded (gearStatus unchanged: past life = retire, regardless of condition) */}
       {(() => {
@@ -16871,11 +16895,7 @@ function Equipment({ S, role, members, meId, notify }) {
           </div>
         );
       })()}
-      {(isManager || isDA) && (
-        <div style={{ marginBottom: 12 }}>
-          <button onClick={() => setIssuing(true)} style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={15} /> Issue equipment</button>
-        </div>
-      )}
+      {/* Issue equipment / Add type / Edit now live in the hero band (actions) — same gates, same handlers. */}
       {(isDA || isManager) && (
         <Card padding="12px 16px" style={{ marginBottom: 14, background: FIRE.card2Noir }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -16962,18 +16982,6 @@ function Equipment({ S, role, members, meId, notify }) {
           ))}
         </Card>
       )}
-      {(canManage || isManager || isDA) && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-          {canManage && (
-            <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
-          )}
-          {types.length > 0 && (
-            <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
-              {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
-            </button>
-          )}
-        </div>
-      )}
       {/* AGING OUT + BY CATEGORY — over the loaded units and their type's NFPA service life */}
       {(() => {
         const rows = types.flatMap((t) => t.units.map((u) => ({ u, t, g: gearStatus(u.manufactureDate, t.serviceLifeYears) })));
@@ -17026,7 +17034,7 @@ function Equipment({ S, role, members, meId, notify }) {
               </div>
             </Card>
           )}
-          <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} style={{ marginTop: 4 }} />
+          {grouped && <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} style={{ marginTop: 4 }} />}
         </>);
       })()}
       {canManage && addingType && (
@@ -17060,7 +17068,7 @@ function Equipment({ S, role, members, meId, notify }) {
           <Briefcase size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No equipment types yet.{canManage ? " Use “Add type” to create one." : ""}</div>
         </Card>
-      ) : renderTypes(types)}
+      ) : renderTypes(types, true)}
       {issuing && (
         <IssueEquipmentModal
           S={S} availableUnits={availableUnits} members={members} managers={managers} meId={meId}
