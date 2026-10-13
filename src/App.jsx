@@ -2807,7 +2807,7 @@ export default function App() {
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
@@ -18866,7 +18866,7 @@ function NotifyCrewModal({ session, onClose, notify }) {
     document.body
   );
 }
-function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, notify, dept, addFeedback }) {
+function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
@@ -19377,7 +19377,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const R = 58, C = 2 * Math.PI * R;
 
     return (
-      <PageShell band watermark="TRAIN" above={mounts} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
+      <PageShell band watermark="TRAIN" above={<>{sessionsErr && <OfflineNotice onRetry={loadSessions} what="trainings" />}{mounts}</>} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
         sub="What's coming up, where you stand, and what to catch up on."
         actions={totalRecorded > 0 ? (
           <div style={{ textAlign: "right", flexShrink: 0, position: "relative" }}>
@@ -19539,7 +19539,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
   return (
     <PageShell band kicker={dept?.name ? `TRAINING · ${dept.name}` : "TRAINING"} title="Keep training on schedule"
-      watermark="TRAIN"
+      watermark="TRAIN" above={sessionsErr ? <OfflineNotice onRetry={loadSessions} what="trainings" /> : null}
       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
       <NoirSkin>
 
