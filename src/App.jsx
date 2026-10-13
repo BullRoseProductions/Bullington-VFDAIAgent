@@ -15931,6 +15931,20 @@ function MyEquipment({ S, meId, notify }) {
       .then(({ data, error }) => { if (!error && data) setMyIssues(data); });
   };
   useEffect(() => { loadMyIssues(); }, [meId]);
+  // REPORT ISSUE (B3) — the ONLY write is report_equipment_issue; the RPC itself requires that the caller holds
+  // the item (open custody period) and snapshots who/what. Condition is not touched — a manager inspects.
+  const [reportFor, setReportFor] = useState(null);   // equipment_id whose report form is open
+  const [rKind, setRKind] = useState("damaged"); const [rNote, setRNote] = useState(""); const [rBusy, setRBusy] = useState(false);
+  async function submitReport(r) {
+    const note = rNote.trim();
+    if (!note) { notify({ kind: "error", title: "Describe the issue", text: "A short note helps the manager know what to look at." }); return; }
+    setRBusy(true);
+    const { error } = await supabase.rpc("report_equipment_issue", { p_equipment_id: r.equipment_id, p_kind: rKind, p_note: note.slice(0, 1000) });
+    setRBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't report the issue", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Issue reported", text: `${r.equipment_name} — an equipment manager will follow up.` });
+    setReportFor(null); setRNote(""); loadMyIssues();
+  }
   async function markReturned(r) {
     setBusyId(r.equipment_id);
     const { error } = await supabase.rpc("mark_equipment_returned", { p_equipment_id: r.equipment_id });
@@ -16019,10 +16033,25 @@ function MyEquipment({ S, meId, notify }) {
                   {signedFor && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Signed for as {signedFor}</div>}
                   {pending && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Return pending — a manager will confirm receipt.</div>}
                   {(() => { const iss = myIssues.find((x) => x.equipment_id === r.equipment_id); return iss && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Issue reported · {issueKindLabel(iss.kind)} — a manager will follow up.</div>; })()}
+                  {reportFor === r.equipment_id && (
+                    <div style={{ marginTop: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: 10, display: "grid", gap: 8 }}>
+                      <select value={rKind} onChange={(e) => setRKind(e.target.value)} style={{ ...FS.input, fontSize: 12.5 }}>
+                        {ISSUE_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <textarea value={rNote} maxLength={1000} rows={3} placeholder="What's wrong? (required)" onChange={(e) => setRNote(e.target.value)} style={{ ...FS.input, fontSize: 12.5, resize: "vertical", fontFamily: "inherit" }} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button disabled={rBusy || !rNote.trim()} onClick={() => submitReport(r)} style={{ ...FS.btnPrimary, padding: "6px 12px", fontSize: 12, opacity: (rBusy || !rNote.trim()) ? 0.5 : 1 }}>{rBusy ? <Loader2 size={13} className="spin" /> : "Send report"}</button>
+                        <button disabled={rBusy} onClick={() => setReportFor(null)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+                        <span style={{ marginLeft: "auto", fontSize: 10.5, color: FIRE.textMuted }}>{rNote.length}/1000</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                   {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
                   {!hideServiceable && <Pill S={S} color={condColor(cond)}>{(cond || "—").toUpperCase()}</Pill>}
+                  {r.equipment_id && reportFor !== r.equipment_id && !myIssues.some((x) => x.equipment_id === r.equipment_id) &&
+                    <button onClick={() => { setReportFor(r.equipment_id); setRKind("damaged"); setRNote(""); }} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><AlertTriangle size={12} color={FIRE.amberText} /> Report issue</button>}
                   {pending
                     ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
                     : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
