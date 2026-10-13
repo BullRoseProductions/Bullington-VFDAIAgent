@@ -17415,10 +17415,11 @@ function Onboarding({ S, members, setMembers, notify, role }) {
     catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <PageShell kicker="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan.">
+    <PageShell band kicker="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 92, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>INTAKE</div>}>
       <NoirSkin>
-      <Card padding={16} style={{ marginBottom: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Onboarding</span>
+      <Card padding="12px 16px" style={{ marginBottom: 12, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Viewing</span>
           <select style={FS.input} value={selId} onChange={(e) => setSelId(e.target.value)}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
         <div style={{ flex: 1, minWidth: 180 }}>
           <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>Onboarding progress</span><span>{pct}%</span></div>
@@ -17471,40 +17472,66 @@ function Onboarding({ S, members, setMembers, notify, role }) {
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading checklist…</Card>
       ) : items.length === 0 ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>No onboarding checklist yet for your department. Once items are added, they'll appear here.</Card>
-      ) : grouped.map((g) => (
-        <div key={g.category} style={{ marginBottom: 6 }}>
-          <CardHead icon={ClipboardCheck} title={g.category} />
-          {g.items.map((it) => {
-            const mentor = !!it.is_mentor;
-            const done = onboardingDone(it, person, checks);
-            const signable = !mentor && canSign && !progErr;
-            const signed = mentor ? null : onboardingSignedLine(checks[it.id], members);
+      ) : (
+        /* FEATURED MEMBER — the checklist grouped by category. Done items show the real "Signed by <checked_by> ·
+           <checked_at>"; open items show Sign off (officers/DA/Board, via the existing set_onboarding_item RPC — the
+           same toggle() as before, so the write path and the self-sign block are unchanged). */
+        <Card padding="16px 18px">
+          {(() => {
+            const mentorName = person?.mentorId ? (members || []).find((m) => m.id === person.mentorId)?.name || "Assigned" : null;
+            const ini = (person?.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+            return (<>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 4 }}>
+                <span style={{ width: 50, height: 50, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary, flexShrink: 0 }}>{ini}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary }}>{person?.name}</div>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[person?.status, person?.role].filter(Boolean).join(" · ")}{mentorName ? <> · mentor <b style={{ color: FIRE.textSecondary }}>{mentorName}</b></> : ""}</div>
+                </div>
+                <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : pct >= 50 ? FIRE.amberText : FIRE.textPrimary, ...FS.num }}>{doneCount}<span style={{ fontSize: 15, color: FIRE.textMuted }}>/{items.length}</span></div>
+                  <div style={{ fontSize: 11, color: FIRE.textMuted }}>steps complete</div>
+                </div>
+              </div>
+              <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", margin: "14px 0 18px" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${FIRE.greenText}, #55BE87)` }} /></div>
+            </>);
+          })()}
+          {grouped.map((g) => {
+            const gDone = g.items.filter((it) => onboardingDone(it, person, checks)).length;
             return (
-              <div key={it.id} style={FS.row}>
-                <button onClick={signable ? () => toggle(it.id) : undefined} disabled={!signable} title={mentor ? "Assign a mentor →" : !canSign ? "Signed off by Board, DA, or an Officer" : (done ? "Undo sign-off" : "Sign off")} style={{ background: "none", border: "none", cursor: signable ? "pointer" : "default", padding: 0, display: "inline-flex", flexShrink: 0 }}>
-                  {done ? <CheckCircle2 size={18} color={FIRE.green} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block" }} />}
-                </button>
-                {mentor ? (
-                  <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <span style={{ color: done ? FIRE.textMuted2 : FIRE.textPrimary, fontSize: 14 }}>{it.label}</span>
-                    {canEditItems ? (
-                      <select style={{ ...FS.input, maxWidth: 240, padding: "5px 9px", flex: "0 1 auto" }} value={person?.mentorId || ""} onChange={(e) => assignMentor(e.target.value)}>
-                        <option value="">— None —</option>
-                        {(members || []).filter((m) => m.id !== person?.id && m.status === "Active" && isAssignable(m)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                      </select>
-                    ) : <span style={{ fontSize: 13, color: FIRE.textMuted }}>{person?.mentorId ? (members || []).find((m) => m.id === person.mentorId)?.name || "Assigned" : "No mentor yet"}</span>}
-                  </div>
-                ) : (
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: done ? "line-through" : "none", fontSize: 14 }}>{it.label}</div>
-                    {signed && <div style={{ fontSize: 12, color: FIRE.textMuted }}>{signed}</div>}
-                  </div>
-                )}
+              <div key={g.category} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".09em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{g.category}<span style={{ fontSize: 10, color: FIRE.textSecondary, fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>{gDone} of {g.items.length}</span></div>
+                {g.items.map((it, i) => {
+                  const mentor = !!it.is_mentor;
+                  const done = onboardingDone(it, person, checks);
+                  const signable = !mentor && canSign && !progErr;
+                  const signed = mentor ? null : onboardingSignedLine(checks[it.id], members);
+                  return (
+                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+                      <button onClick={signable && done ? () => toggle(it.id) : undefined} disabled={!(signable && done)} title={mentor ? "Reflects the assigned mentor" : done ? (signable ? "Undo sign-off" : "Signed off") : "Not yet signed off"}
+                        style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, cursor: signable && done ? "pointer" : "default", background: done ? "rgba(47,168,105,.16)" : "transparent", border: done ? "1px solid rgba(47,168,105,.5)" : `1.5px dashed ${FIRE.line2Noir}` }}>
+                        {done && <CheckCircle2 size={12} color={FIRE.greenText} />}
+                      </button>
+                      <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: done ? FIRE.textPrimary : FIRE.textSecondary }}>{it.label}{mentor && <span style={{ fontSize: 10, fontWeight: 700, color: FIRE.amberText, background: "rgba(204,158,82,.12)", border: "1px solid rgba(204,158,82,.3)", borderRadius: 5, padding: "2px 7px", marginLeft: 8, letterSpacing: ".03em" }}>MENTOR</span>}</div>
+                        {mentor ? (
+                          canEditItems ? (
+                            <select style={{ ...FS.input, maxWidth: 240, padding: "5px 9px", marginTop: 4 }} value={person?.mentorId || ""} onChange={(e) => assignMentor(e.target.value)}>
+                              <option value="">— None —</option>
+                              {(members || []).filter((m) => m.id !== person?.id && m.status === "Active" && isAssignable(m)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                            </select>
+                          ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{person?.mentorId ? <>Mentor <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{(members || []).find((m) => m.id === person.mentorId)?.name || "Assigned"}</b></> : "No mentor yet"}</div>
+                        ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{signed || "Not yet signed off"}</div>}
+                      </div>
+                      {!done && signable && <button onClick={() => toggle(it.id)} style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: FIRE.redText, background: "rgba(200,50,58,.12)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 7, padding: "6px 12px" }}>Sign off</button>}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
-        </div>
-      ))}
+          <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6, paddingTop: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>Members see this as a read-only checklist on their own dashboard — officers and admins sign each step.</div>
+        </Card>
+      )}
       <Card padding={18} style={{ marginTop: 10 }}>
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI welcome & 30-day plan" />
