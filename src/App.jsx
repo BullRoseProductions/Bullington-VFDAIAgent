@@ -18698,6 +18698,8 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const today = new Date();
   const me = members.find((m) => m.id === meId);
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [showAllMissed, setShowAllMissed] = useState(false);   // member view: catch-up list condensed to 3 until expanded
+  const [upOpen, setUpOpen] = useState(null);                  // member view: "Up next" row whose Details are open
   const [addingPlan, setAddingPlan] = useState(false);
   const [editPlanMode, setEditPlanMode] = useState(false);   // false = clean text; true = reveal Add + per-plan Edit/Remove. Schedule stays at rest (ops).
   function togglePlanEdit() { setEditPlanMode((v) => { if (v) { setEditingPlanId(null); setAddingPlan(false); } return !v; }); }
@@ -19171,78 +19173,137 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
     };
 
-    const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
-    const kick = FS.kicker;
     const num = FS.num;
+    // Roster rule for attendance: ≥90 green · 70–89 amber · <70 red. A low number never wears green.
+    const tone = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.greenText : p >= 70 ? FIRE.amberText : FIRE.redText);
+    const toneFill = (p) => (p == null ? FIRE.textMuted2 : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redBright);
+    const sessColor = (s) => s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (catOf(s)?.color || FIRE.catBlue);   // saved category colour
+    const dowTime = (s) => [sessDate(s).toLocaleDateString("en-US", { weekday: "short" }), s.startTime ? fmtTime(s.startTime) : null, s.isOffsite && s.locLabel ? s.locLabel : null].filter(Boolean).join(" · ");
+    // UP NEXT — the member's own upcoming sessions (restricted events only if they're on that roll), soonest first.
+    const upcoming = sessions.filter((s) => !s.done && sessDate(s) >= t0 && (!isRestrictedEvent(s) || rollFor(s, me))).sort((x, y) => sessDate(x) - sessDate(y)).slice(0, 3);
+    // Month trend — the same "recorded" rule as the 90-day figure, bucketed by month (last 8 months, from loaded sessions).
+    const trend = Array.from({ length: 8 }, (_, i) => {
+      const d = new Date(t0.getFullYear(), t0.getMonth() - 7 + i, 1);
+      const rec = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === d.getFullYear() && s.m === d.getMonth() && countsTowardRate(s) && expectedAfterJoin(me, s));
+      const hit = rec.filter((s) => (s.attendance || []).includes(me?.id)).length;
+      return { label: d.toLocaleDateString("en-US", { month: "short" }), pct: rec.length ? Math.round((hit / rec.length) * 100) : null };
+    });
+    const card = { ...FS.cardNoir, padding: "15px 16px", marginBottom: 14 };
+    const cubtn = { fontSize: 11, fontWeight: 700, color: FIRE.redText, border: "1px solid rgba(224,58,68,.35)", background: "rgba(224,58,68,.06)", borderRadius: 7, padding: "6px 12px", flexShrink: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" };
+    const shownMissed = showAllMissed ? missed : missed.slice(0, 3);
+    const viewSession = (s) => { setCur({ y: s.y, m: s.m }); setTimeout(() => document.getElementById("mt-upcoming")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+    const R = 58, C = 2 * Math.PI * R;
 
     return (
-      <PageShell band watermark="TRAIN" above={mounts} kicker="MY TRAINING" title="Your training calendar"
-        sub="See what's scheduled, what you've missed, and where your attendance stands.">
+      <PageShell band watermark="TRAIN" above={mounts} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
+        sub="What's coming up, where you stand, and what to catch up on."
+        actions={totalRecorded > 0 ? (
+          <div style={{ textAlign: "right", flexShrink: 0, position: "relative" }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: tone(pct), ...num }}>{pct}%</div>
+            <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 4, letterSpacing: ".02em" }}>attended · last 90 days</div>
+          </div>) : null}>
       <NoirSkin>
 
-        {/* 2 — attendance progress */}
-        <div style={card}>
-          <CardHead icon={CalendarCheck} title="My attendance · last 90 days" style={{ marginBottom: 0 }} />
-          {totalRecorded === 0 ? (
-            <div style={{ marginTop: 12, fontSize: 13.5, color: FIRE.textMuted }}>No sessions recorded yet.</div>
-          ) : (<>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "12px 0 8px" }}>
-              <span style={{ fontSize: 13.5, color: FIRE.textSecondary, ...num }}>{attendedCount} of {totalRecorded} sessions attended</span>
-              {/* Same thresholds as the roster attendance rings: ≥90 green · 70–89 amber · <70 red (low attendance is bad). */}
-              <span style={{ fontSize: 15, fontWeight: 700, color: pct >= 90 ? FIRE.greenText : pct >= 70 ? FIRE.amberText : FIRE.redText, ...num }}>{pct}%</span>
+        {/* 1 — WHAT'S COMING UP: the month calendar (saved category colours) + the member's next three sessions. */}
+        <div id="mt-upcoming" style={card}>
+          <CardHead icon={CalendarCheck} title="What's coming up" />
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div style={{ flex: "1 1 420px", minWidth: 0 }}>
+              <MonthCalendar cur={cur} setCur={setCur} dark tiles compact items={monthSessions} renderChip={renderChip} todayColor={FIRE.red} monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`} />
             </div>
-            <div style={{ height: 8, borderRadius: 999, background: FIRE.track, overflow: "hidden" }}>
-              <div style={{ width: `${pct}%`, height: "100%", background: pct >= 90 ? FIRE.green : pct >= 70 ? FIRE.amberText : FIRE.redBright, borderRadius: 999 }} />
+            <div style={{ flex: "1 1 260px", maxWidth: 360, minWidth: 0, display: "flex", flexDirection: "column", gap: 9 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.textMuted }}>Up next for you</div>
+              {upcoming.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Nothing scheduled for you yet.</div> : upcoming.map((s, i) => {
+                const col = sessColor(s); const open = upOpen === s.id; const cat = catOf(s);
+                return (
+                  <div key={s.id} style={{ background: i === 0 ? "linear-gradient(180deg, rgba(224,58,68,.07), transparent)" : FIRE.card2Noir, border: `1px solid ${i === 0 ? "rgba(224,58,68,.4)" : FIRE.lineNoir}`, borderRadius: 10, padding: "10px 11px" }}>
+                    <div style={{ display: "flex", gap: 11, alignItems: "flex-start" }}>
+                      <div style={{ textAlign: "center", width: 38, flexShrink: 0 }}>
+                        <div style={{ fontSize: 9, color: FIRE.redText, fontWeight: 700, letterSpacing: ".08em" }}>{TRAIN_MONTHS[s.m].slice(0, 3).toUpperCase()}</div>
+                        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1, color: FIRE.textPrimary, ...num }}>{s.d}</div>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{s.title}</div>
+                        <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...num }}>{dowTime(s)}</div>
+                        <span style={{ display: "inline-block", marginTop: 5, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", borderRadius: 4, padding: "2px 7px", background: `${col}29`, color: col }}>{s.audience === "board" ? "Board only" : s.audience === "leadership" ? "Leadership only" : (cat?.name || "One-off")}</span>
+                      </div>
+                      {/* No RSVP feature exists — Details expands what we know about the session. */}
+                      <button onClick={() => setUpOpen(open ? null : s.id)} aria-expanded={open} style={{ ...cubtn, padding: "5px 10px", alignSelf: "center" }}>{open ? "Close" : "Details"}</button>
+                    </div>
+                    {open && (
+                      <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}`, fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.55 }}>
+                        <div>{sessDate(s).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}</div>
+                        <div>{s.planId ? `Part of ${cat?.name || "a category"}` : "One-off session"}{s.isOffsite ? ` · off-site${s.locLabel ? ` (${s.locLabel})` : ""}` : ""}{s.countsAttendance === false ? " · optional" : ""}</div>
+                        {(s.plans || []).length > 0 && <button onClick={() => openSessionPlans(s)} style={{ ...cubtn, marginTop: 7, padding: "5px 10px" }}><FileText size={13} /> View plan</button>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </>)}
+          </div>
         </div>
 
-        {/* 3 — missed / catch up (hidden entirely when no real missed records) */}
+        {/* 2 — WHERE YOU STAND: ring + line + month trend, every number coloured by the roster rule. */}
+        <div style={card}>
+          <CardHead icon={BarChart3} title="Where you stand" />
+          {totalRecorded === 0 ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted }}>No sessions recorded yet.</div>
+          ) : (
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ position: "relative", width: 132, height: 132, margin: "4px auto", flexShrink: 0 }}>
+                <svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
+                  <circle cx="66" cy="66" r={R} fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="10" />
+                  <circle cx="66" cy="66" r={R} fill="none" stroke={toneFill(pct)} strokeWidth="10" strokeLinecap="round" strokeDasharray={`${(pct / 100) * C} ${C}`} transform="rotate(-90 66 66)" />
+                </svg>
+                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: tone(pct), ...num }}>{pct}%</div>
+                  <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 3, letterSpacing: ".04em" }}>last 90 days</div>
+                </div>
+              </div>
+              <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 12, ...num }}><b style={{ color: FIRE.textPrimary }}>{attendedCount} of {totalRecorded}</b> sessions attended in the last 90 days{missed.length ? <> · <b style={{ color: FIRE.textPrimary }}>{missed.length} missed</b></> : null}</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 66 }}>
+                  {trend.map((t) => <div key={t.label} title={t.pct == null ? `${t.label}: no recorded sessions` : `${t.label}: ${t.pct}%`} style={{ flex: 1, height: t.pct == null ? 3 : `${Math.max(t.pct, 4)}%`, borderRadius: "3px 3px 0 0", background: t.pct == null ? "rgba(255,255,255,.07)" : `linear-gradient(180deg, ${toneFill(t.pct)}, ${toneFill(t.pct)}33)` }} />)}
+                </div>
+                <div style={{ display: "flex", gap: 5, marginTop: 6 }}>{trend.map((t) => <span key={t.label} style={{ flex: 1, textAlign: "center", fontSize: 9, color: FIRE.textMuted, fontWeight: 600 }}>{t.label}</span>)}</div>
+                {pct < 70 && <div style={{ fontSize: 11, color: FIRE.amberText, marginTop: 12, display: "flex", alignItems: "center", gap: 7 }}><AlertTriangle size={14} style={{ flexShrink: 0 }} />You're under 70% — catch up below to bring it back up.</div>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 3 — CATCH UP: latest three, then Show all. Review notes only where a real plan exists; otherwise the
+            session itself (its day on the calendar). No fake catch-up content. */}
         {missed.length > 0 && (
           <div style={card}>
-            <div style={kick}>TRAINING YOU MISSED · CATCH UP</div>
-            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
-              {missed.map((s) => { const cat = catOf(s); return (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || FIRE.catBlue, flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
-                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>Missed {fmtSess(s)} · {cat?.name || "One-off"}</div>
-                  </div>
+            <CardHead icon={RotateCcw} title="Catch up on what you missed" right={<span style={{ ...num }}>{missed.length} missed</span>} />
+            {shownMissed.map((s, i) => { const has = (s.plans || []).length > 0; return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 2px", borderBottom: i === shownMissed.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: sessColor(s), flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                  <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...num }}>{fmtSess(s)} · {catOf(s)?.name || "One-off"}</div>
                 </div>
-              ); })}
-            </div>
+                {has
+                  ? <button onClick={() => openSessionPlans(s)} style={cubtn}><FileText size={13} /> Review notes</button>
+                  : <button onClick={() => viewSession(s)} style={cubtn}><Calendar size={13} /> View session</button>}
+              </div>
+            ); })}
+            {missed.length > 3 && (
+              <div style={{ marginTop: 11, textAlign: "center" }}>
+                <button onClick={() => setShowAllMissed((v) => !v)} style={{ fontSize: 11.5, fontWeight: 600, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontFamily: "inherit" }}>{showAllMissed ? "Show fewer" : `Show all ${missed.length} missed`}</button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* 4 — training calendar (MonthCalendar + chip logic unchanged; dark calendar in dark card) */}
-        <div style={card}>
-          <div style={{ ...kick, marginBottom: 12 }}>TRAINING CALENDAR</div>
-          <div style={{ marginBottom: -10 }}>{/* cancels MonthCalendar's built-in 10px bottom margin → even inset framing */}
-            <MonthCalendar
-              cur={cur} setCur={setCur} dark
-              items={monthSessions}
-              renderChip={renderChip}
-              todayColor={FIRE.red}
-              monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
-            />
-          </div>
-        </div>
-
-        {/* 5 — this month's sessions */}
-        <div style={card}>
-          {/* TOUCHPOINT 3 — BACKFILL. Finished drills with no recorded length produce no attendance
-              hours at all, and that absence is invisible unless something names it: the hours simply
-              never appear and nobody knows to look. Listed here, in Training, because this is where
-              drills are owned; Station Hours shows the same count so the gap is noticed where the
-              missing hours would have shown up. Set the length from the session's own Edit — one
-              place to change it, not two. */}
           {(() => {
             const noLen = (sessions || []).filter((x) => x.done && x.durationMin == null
               && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0);
             if (!noLen.length) return null;
             return (
-              <div style={{ ...FS.card, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
+              <div style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
                 <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
                   <Clock size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -19261,35 +19322,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               </div>
             );
           })()}
-          <div style={kick}>THIS MONTH'S SESSIONS</div>
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
-            {monthSessions.length === 0 ? (
-              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div>
-            ) : monthSessions.map((s) => {
-              const cat = catOf(s); const att = s.attendance || []; const hasRecord = att.length > 0; const present = att.includes(me?.id);
-              return (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                  <CalendarCheck size={15} color={cat?.color || FIRE.catBlue} style={{ flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></div>
-                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""} · {s.planId ? `part of ${cat?.name || "a category"}` : "one-off (no category)"}</div>
-                  </div>
-                  {!s.done ? (
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em" }}>Scheduled</span>
-                  ) : hasRecord ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                      <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: present ? FIRE.greenText : FIRE.redText }}>{present ? "You came" : "You missed"}</span>
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
-                  )}
-                  {s.plan && <button onClick={() => openSessionPlans(s)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
         </NoirSkin>
     </PageShell>
     );
