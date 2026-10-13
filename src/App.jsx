@@ -10688,6 +10688,8 @@ function RosterAttendance({ S, members, sessions, plan }) {
   );
   const small = (x) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{x}</span>;
   const fmtShort = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const [showAllPeople, setShowAllPeople] = useState(false);   // Member participation: first 12, "Show all N"
+  const PEOPLE_CAP = 12;
   const pctById = new Map(att90.rows.map((r) => [r.id, r.pct]));   // same 90-day call as the tiles (att90)
   const people = [...members].sort((a, b) => (pctById.get(b.id) ?? -1) - (pctById.get(a.id) ?? -1));
   const activeMembers = (members || []).filter((m) => countsInStats(m) && m.status === "Active");
@@ -10797,38 +10799,56 @@ function RosterAttendance({ S, members, sessions, plan }) {
           </Card>
         </div>
       )}
-      <CardHead icon={CalendarCheck} title="Recent events" />
-      <Card padding="4px 16px" style={{ marginBottom: 14 }}>
-        {recentEvents.length === 0 ? <div style={{ padding: "12px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
-          recentEvents.map((e) => {
+      {/* RECENT SESSIONS + MEMBER PARTICIPATION — collapsible, collapsed by default (native <details>); same rows/data. */}
+      <Card as="details" padding="12px 16px" className="ra-det" style={{ marginBottom: 12 }}>
+        <summary style={{ listStyle: "none", cursor: "pointer" }}>
+          <CardHead icon={CalendarCheck} title="Recent sessions" style={{ marginBottom: 0 }} right={<span style={{ display: "inline-flex", alignItems: "center" }}>{recentEvents.length} session{recentEvents.length === 1 ? "" : "s"} · turnout per session<ChevronRight size={14} className="ra-chev" style={{ marginLeft: 5 }} /></span>} />
+        </summary>
+        <div style={{ marginTop: 12 }}>
+        {recentEvents.length === 0 ? <div style={{ padding: "6px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
+          recentEvents.map((e, i) => {
           const pct = e.total ? Math.min(100, Math.round((e.present / e.total) * 100)) : 0;   // cap display + bar at 100%; raw present/total shown as-is
+          const tone = e.optional ? FIRE.textMuted : (pct >= 75 ? FIRE.green : FIRE.amberText);   // same rule as before: optional = neutral, else >=75 green / amber
+          const [mon, day] = String(e.date).split(" ");
           return (
-            <div key={e.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ ...S.personName, color: FIRE.textPrimary }}>{e.name}</div>
-                <div style={{ ...S.personMeta, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span>{e.date}</span>
-                  {e.category && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px" }}>{e.category}</span>}
-                  <EventOptionalTag optional={e.optional} />
-                </div>
+            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 13, padding: "11px 2px", borderBottom: i === recentEvents.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+              <div style={{ width: 44, textAlign: "center", flexShrink: 0 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: FIRE.textMuted, letterSpacing: ".05em" }}>{(mon || "").toUpperCase()}</div>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{day}</div>
               </div>
-              <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{e.present}/{e.total}{e.optional ? "" : ` (${pct}%)`}</div><ProgressBar pct={pct} tone={e.optional ? "muted" : (pct >= 75 ? "green" : "amber")} /></div>
+              <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{e.name}</span>
+                {e.category && <span style={{ fontSize: 9.5, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 5, padding: "2px 7px", marginLeft: 8, verticalAlign: 1 }}>{e.category}</span>}
+                <EventOptionalTag optional={e.optional} />
+              </div>
+              <div style={{ width: 210, maxWidth: "100%", display: "flex", alignItems: "center", gap: 11, flexShrink: 0 }}>
+                <div style={{ flex: 1, height: 7, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: tone }} /></div>
+                <span style={{ width: 92, textAlign: "right", fontSize: 12, fontWeight: 700, color: tone, ...FS.num }}>{e.present}/{e.total}{e.optional ? "" : ` · ${pct}%`}</span>
+              </div>
             </div>
           );
         })}
+        </div>
       </Card>
-      <CardHead icon={Users} title="Member participation (last 90 days)" />
-      <Card padding="4px 16px">
-        {people.map((m) => {
+      <Card as="details" padding="12px 16px" className="ra-det">
+        <summary style={{ listStyle: "none", cursor: "pointer" }}>
+          <CardHead icon={Users} title="Member participation" style={{ marginBottom: 0 }} right={<span style={{ display: "inline-flex", alignItems: "center" }}>{people.length} member{people.length === 1 ? "" : "s"} · last 90 days<ChevronRight size={14} className="ra-chev" style={{ marginLeft: 5 }} /></span>} />
+        </summary>
+        <div style={{ marginTop: 12 }}>
+        {(showAllPeople ? people : people.slice(0, PEOPLE_CAP)).map((m, i, arr) => {
           const p = pctById.get(m.id) ?? null;   // live 90-day pct (null = no eligible drills in window → "—")
+          const tone = p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;   // same 75 / 50 thresholds as before
           return (
-          <div key={m.id} style={{ ...S.eventRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-            <Initials S={S} dark name={m.name} />
-            <div style={{ flex: 1, minWidth: 0, marginLeft: 11 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{m.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{m.role}</div></div>
-            <div style={{ width: 130 }}><div style={{ fontSize: 12.5, color: FIRE.textSecondary, textAlign: "right" }}>{p == null ? "—" : `${p}%`}</div>{p != null && <ProgressBar pct={p} tone={p >= 75 ? "green" : (p >= 50 ? "amber" : "red")} />}</div>
+          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+            {av(m.name, 32)}
+            <div style={{ flex: "1 1 140px", minWidth: 0 }}><div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</div><div style={{ fontSize: 10.5, color: FIRE.textMuted }}>{m.role}</div></div>
+            <div style={{ width: 210, maxWidth: "60%", height: 7, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", flexShrink: 0 }}>{p != null && <div style={{ width: `${p}%`, height: "100%", borderRadius: 999, background: tone }} />}</div>
+            <span style={{ width: 40, textAlign: "right", fontSize: 12.5, fontWeight: 700, color: tone, ...FS.num }}>{p == null ? "—" : `${p}%`}</span>
           </div>
           );
         })}
+        {people.length > PEOPLE_CAP && <button onClick={() => setShowAllPeople((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "11px 0 2px", cursor: "pointer", background: "none", border: "none", borderTop: `1px solid ${FIRE.lineNoir}`, marginTop: 4, fontFamily: "inherit" }}>{showAllPeople ? "Show fewer" : `Show all ${people.length}`}</button>}
+        </div>
       </Card>
     </div>
   );
@@ -21780,6 +21800,10 @@ function Fonts() {
       /* DA overview: stats 2x2 | Action Center. Wide → two columns, the Action Center matches the stats'
          height and scrolls inside; narrower → stacked, the Action Center at its natural height. */
       .dash-ov-row { grid-template-columns: 1fr; }
+      /* Attendance tab collapsibles (<details>): no native marker; the chevron turns when open. */
+      .ra-det > summary::-webkit-details-marker { display: none; }
+      .ra-det .ra-chev { transition: transform .15s; }
+      .ra-det[open] .ra-chev { transform: rotate(90deg); }
       /* Member file facelift: certs two-up and hours | profile side by side on a wide screen, one column on a phone. */
       .mf-certgrid { display: grid; grid-template-columns: 1fr; column-gap: 22px; }
       /* Training v2: category progress cards two-up; hero stacks its ring/stats under the feature on a phone. */
