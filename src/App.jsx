@@ -2803,7 +2803,7 @@ export default function App() {
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
           {/* Signers (Board/DA/Officer) and list editors (DA/PA) get the officer screen; everyone else sees their own checklist, read-only. */}
           {screen === "onboarding" && ((canManage(role) || isDeptAdmin(role))
-            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />
+            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} />
             : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} />)}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
           {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
@@ -17968,7 +17968,10 @@ function MyOnboarding({ S, me, members }) {
     </PageShell>
   );
 }
-function Onboarding({ S, members, setMembers, notify, role }) {
+function Onboarding({ S, members, setMembers, notify, role, dept }) {
+  // PROGRESS, NOT PASS/FAIL (Ashlea's call): in-progress onboarding fills in a neutral tone — never red for a
+  // new member, never green before it's earned. Green only at 100%. The 90/70 attendance rule does NOT apply here.
+  const progTone = (p) => (p != null && p >= 100 ? FIRE.greenText : FIRE.textSecondary);
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canEditItems = hasAny(role, DEPT_ADMIN_ROLES);   // add/rename/reorder/delete items + assign mentor: PA/DA — same set as is_dept_admin() (RLS enforces server-side)
@@ -18157,27 +18160,26 @@ function Onboarding({ S, members, setMembers, notify, role }) {
     catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <PageShell band kicker="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
-      watermark="INTAKE">
+    <PageShell band kicker={dept?.name ? `NEW-MEMBER ONBOARDING · ${dept.name}` : "NEW-MEMBER ONBOARDING"} title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
+      watermark="INTAKE"
+      actions={
+        /* The old Viewing/progress toolbar card, folded into the band: the member picker (still needed — candidates
+           include non-probationary members with no ring card) + Edit checklist. The duplicate progress bar is gone;
+           the featured card below shows it. */
+        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", position: "relative" }}>
+          <select aria-label="Viewing" style={{ ...S.select, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 9, padding: "8px 30px 8px 12px", fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, maxWidth: 220 }} value={selId} onChange={(e) => setSelId(e.target.value)}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+          {canEditItems && <button style={FS.btn} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
+        </div>}>
       <NoirSkin>
-      <Card padding="12px 16px" style={{ marginBottom: 12, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Viewing</span>
-          <select style={FS.input} value={selId} onChange={(e) => setSelId(e.target.value)}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>Onboarding progress</span><span>{pct}%</span></div>
-          <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
-        </div>
-        {canEditItems && <button style={{ ...FS.btn, alignSelf: "flex-end" }} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
-      </Card>
       {/* OVERVIEW is rendered here, above the featured member */}
       {/* OVERVIEW — tiles + a progress ring per probationary member (click to feature them) */}
       {!editMode && probMembers.length > 0 && items && items.length > 0 && (<>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
           {[[UserPlus, "In onboarding", String(probMembers.length), "probationary members", null],
-            [BarChart3, "Avg completion", avgDone == null ? "—" : `${avgDone}%`, probMembers.length === 1 ? "for the one member" : `across the ${probMembers.length}`, avgDone == null ? null : avgDone >= 75 ? FIRE.greenText : avgDone >= 40 ? FIRE.amberText : FIRE.redText],
+            [BarChart3, "Avg completion", avgDone == null ? "—" : `${avgDone}%`, probMembers.length === 1 ? "for the one member" : `across the ${probMembers.length}`, avgDone == null ? null : avgDone >= 100 ? FIRE.greenText : null],
             [ClipboardCheck, "Awaiting sign-off", awaiting == null ? "—" : String(awaiting), "open items", awaiting ? FIRE.amberText : null]].map(([Icon, l, v, sub, tone]) => (
             <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.textMuted} />{l}</div>
               <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
               <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>
             </div>
@@ -18188,7 +18190,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
           {overview.map(({ m, p }) => {
             const on = String(m.id) === String(selId);
             const R = 31, C = 2 * Math.PI * R;
-            const tone = p == null ? FIRE.textMuted : p.pct >= 75 ? FIRE.greenText : p.pct >= 40 ? FIRE.amberText : FIRE.redText;
+            const tone = p == null ? FIRE.textMuted : progTone(p.pct);
             const started = m.joinedOn ? new Date(m.joinedOn + "T00:00:00") : null;
             const dayN = started ? Math.max(1, Math.floor((Date.now() - started.getTime()) / 86400000) + 1) : null;
             const next = p && p.open.find((it) => !it.is_mentor) || (p && p.open[0]);
@@ -18229,7 +18231,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
           </Card>
           {(items || []).length === 0 && <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>No items yet — add one above or load the defaults.</Card>}
           {grouped.map((g) => (
-            <div key={g.category} style={{ marginBottom: 6 }}>
+            <Card key={g.category} padding="12px 16px" style={{ marginBottom: 12 }}>
               <CardHead icon={ClipboardCheck} title={g.category} right={<button style={{ ...FS.btn, padding: "2px 7px", fontSize: 11 }} onClick={() => renameCategory(g.category)} disabled={busy}>Rename</button>} />
               {g.items.map((it) => {
                 const catItems = items.filter((x) => x.category === it.category);
@@ -18254,7 +18256,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                   </div>
                 );
               })}
-            </div>
+            </Card>
           ))}
         </>
       ) : items === null ? (
@@ -18277,11 +18279,11 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[person?.status, person?.role].filter(Boolean).join(" · ")}{mentorName ? <> · mentor <b style={{ color: FIRE.textSecondary }}>{mentorName}</b></> : ""}</div>
                 </div>
                 <div style={{ marginLeft: "auto", textAlign: "right" }}>
-                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : pct >= 50 ? FIRE.amberText : FIRE.textPrimary, ...FS.num }}>{doneCount}<span style={{ fontSize: 15, color: FIRE.textMuted }}>/{items.length}</span></div>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{doneCount}<span style={{ fontSize: 15, color: FIRE.textMuted }}>/{items.length}</span></div>
                   <div style={{ fontSize: 11, color: FIRE.textMuted }}>steps complete</div>
                 </div>
               </div>
-              <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", margin: "14px 0 18px" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${FIRE.greenText}, #55BE87)` }} /></div>
+              <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", margin: "14px 0 18px" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: pct >= 100 ? `linear-gradient(90deg, ${FIRE.greenText}, #55BE87)` : progTone(pct) }} /></div>
             </>);
           })()}
           {grouped.map((g) => {
@@ -18298,7 +18300,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
                       <button onClick={signable && done ? () => toggle(it.id) : undefined} disabled={!(signable && done)} title={mentor ? "Reflects the assigned mentor" : done ? (signable ? "Undo sign-off" : "Signed off") : "Not yet signed off"}
                         style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, cursor: signable && done ? "pointer" : "default", background: done ? "rgba(47,168,105,.16)" : "transparent", border: done ? "1px solid rgba(47,168,105,.5)" : `1.5px dashed ${FIRE.line2Noir}` }}>
-                        {done && <CheckCircle2 size={12} color={FIRE.greenText} />}
+                        {done && <Check size={12} strokeWidth={3} color={FIRE.greenText} />}
                       </button>
                       <div style={{ flex: "1 1 200px", minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: done ? FIRE.textPrimary : FIRE.textSecondary }}>{it.label}{mentor && <span style={{ fontSize: 10, fontWeight: 700, color: FIRE.amberText, background: "rgba(204,158,82,.12)", border: "1px solid rgba(204,158,82,.3)", borderRadius: 5, padding: "2px 7px", marginLeft: 8, letterSpacing: ".03em" }}>MENTOR</span>}</div>
