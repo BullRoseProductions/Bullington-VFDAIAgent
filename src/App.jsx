@@ -4686,6 +4686,7 @@ function StudySession({ S }) {
   const visible = turns.filter((t) => !t.hidden);
   return (
     <PageShell kicker="STUDY SESSION" title="Study for your certification" sub="Pick a track, then quiz yourself or ask a question. An AI study partner — always verify against official standards.">
+      <NoirSkin>
       <Card padding={16} style={{ marginBottom: 12, display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
           <select style={{ ...FS.input, maxWidth: 320 }} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
@@ -4697,7 +4698,7 @@ function StudySession({ S }) {
           </select></label>
         <div style={S.segRow}>
           {[["quiz", isDeptQual(cert) ? "Skill check" : "Quiz me"], ["explain", "Explain"]].map(([k, l]) => (
-            <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
+            <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: mode === k ? FIRE.redBright : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
           ))}
         </div>
       </Card>
@@ -4725,7 +4726,7 @@ function StudySession({ S }) {
               <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length:</span>
               <div style={S.segRow}>
                 {[5, 10, 20].map((n) => (
-                  <button key={n} onClick={() => setQuizLen(n)} style={{ ...S.segBtn, background: quizLen === n ? FIRE.btnBg : "transparent", borderColor: quizLen === n ? FIRE.red : FIRE.btnBorder, color: quizLen === n ? FIRE.textPrimary : FIRE.navLabel }}>{n}</button>
+                  <button key={n} onClick={() => setQuizLen(n)} style={{ ...S.segBtn, background: quizLen === n ? "rgba(224,58,68,.16)" : "transparent", borderColor: quizLen === n ? FIRE.redBright : FIRE.btnBorder, color: quizLen === n ? FIRE.textPrimary : FIRE.navLabel }}>{n}</button>
                 ))}
               </div>
               <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={() => startStructuredQuiz(quizLen)} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
@@ -4764,6 +4765,7 @@ function StudySession({ S }) {
           </>
         )}
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -4822,6 +4824,7 @@ function StationQA({ S }) {
   const submit = () => { const t = input.trim(); if (!t || loading) return; send(t); };
   return (
     <PageShell kicker={<>STATION Q&amp;A</>} title="Ask the station assistant" sub={<>{ground.has ? "Grounded in your uploaded SOPs — always verify locally." : "General fire & EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally."}{ground.has && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>This assistant reads your department's uploaded SOP text to answer.{ground.note ? ` (${ground.note})` : ""}</div>}</>}>
+      <NoirSkin>
       <Disclaimer S={S} compact dark />
       <div style={{ marginTop: 12 }}>
         {turns.map((t, i) => (
@@ -4842,6 +4845,7 @@ function StationQA({ S }) {
         <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>Ask</button>
       </div>
       {turns.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Clear</button>}
+      </NoirSkin>
     </PageShell>
   );
 }
