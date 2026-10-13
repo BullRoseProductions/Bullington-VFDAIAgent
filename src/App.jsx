@@ -10046,7 +10046,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   const nOld = certs.filter((c) => c.st.rank === 0).length, nUndated = certs.filter((c) => c.st.rank === 3).length;
   const CERT_CAP = 6;
   const shownCerts = showAllCerts ? certs : certs.slice(0, CERT_CAP);   // sorted expired → expiring → current → undated
-  const statusTone = member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted;
+  const statusTone = member.status === "Active" ? FIRE.greenText : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted;
   const chip = (label, value, tone, sub, bar) => (
     <div style={{ ...FS.cardNoir, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", minWidth: 0 }}>
       <div style={{ fontSize: 11, color: FIRE.textSecondary }}>{label}</div>
@@ -10055,7 +10055,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4 }}>{sub}</div>}
     </div>
   );
-  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText);   // the 75 / 50 member-file thresholds
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText);   // the 75 / 50 member-file thresholds
   return (
     <PageShell band
       above={<button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>}
@@ -10064,11 +10064,11 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       lead={<div style={{ width: 84, height: 84, borderRadius: 18, background: "linear-gradient(135deg, #2A313A, #12161C)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 32, color: FIRE.redText, flexShrink: 0, boxShadow: "0 8px 22px rgba(0,0,0,.5)" }}>{initials}</div>}
       kicker={dept?.name ? `MEMBER FILE · ${dept.name}` : "MEMBER FILE"} title={member.name}
       // No join year → drop the "since" segment rather than print "since null" (JOINED below shows "—" the same way).
-      sub={[member.role, member.joined ? `since ${member.joined}` : null, member.phone].filter(Boolean).join(" · ")}
+      sub={[member.role, member.joined ? `Member since ${member.joined}` : null, assign ? null : member.phone].filter(Boolean).join(" · ")}   /* leaders with the Profile card see the phone there */
       actions={<span style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, padding: "5px 11px", borderRadius: 999, color: statusTone, background: `${statusTone}1F`, border: `1px solid ${statusTone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: statusTone }} />{member.status}</span>}>
       <NoirSkin>
       {/* Quick-stat chips — participation (live 90-day), station hours (6 mo), training attendance, certs. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
         {chip("Participation · 90d", part90 == null ? "—" : `${part90}%`, part90 == null ? null : pctColor(part90), null,
           part90 != null && <ProgressBar pct={part90} tone={part90 >= 75 ? "green" : part90 >= 50 ? "amber" : "red"} style={{ marginTop: 8 }} />)}
         {hoursOn && chip("Station hours · 6 mo", hrsTotal == null ? "—" : (Math.round(hrsTotal * 10) / 10).toFixed(1), null, "credited")}
@@ -10080,7 +10080,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       {/* CONDENSED CERTIFICATIONS — summary counts + a capped list with a Show-all expander. Same rows, same
           actions (View proof / Edit / Remove) and the same inline editor; only the arrangement changed. */}
       <Card padding="14px 16px" style={{ marginBottom: 10 }}>
-        <CardHead icon={Award} title="Certifications" count={certs.length} />
+        <CardHead icon={Award} title="Certifications" />
         {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> : (<>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             {[[nCur, "current", FIRE.greenText], [nExp, "expiring soon", FIRE.amberText], [nOld, "expired", FIRE.redText], ...(nUndated ? [[nUndated, "no date", FIRE.textMuted2]] : [])].map(([n, l, c]) => (
@@ -10100,9 +10100,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
               </>) : (<>
-                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: CERT_FIRE[c.st.label], fontSize: 11 }}>· {expPhrase(c.exp)}</span></div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
-                  <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5, display: "flex", alignItems: "center", gap: 9 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} /><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span></div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", flexShrink: 0, maxWidth: "100%" }}>
+                  <span style={{ fontSize: 10.5, color: c.st.rank === 2 ? FIRE.textMuted : CERT_FIRE[c.st.label], fontWeight: c.st.rank === 2 ? 400 : 600, marginRight: 4 }}>{expPhrase(c.exp)}</span>
                   {/* only when a proof is on file — a leader-entered cert legitimately has none */}
                   {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
                   {assign && (<>
@@ -10133,14 +10133,13 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             <Card padding="14px 16px" style={{ minWidth: 0, ...(editing || !hoursOn ? { gridColumn: "1 / -1" } : null) }}>
         {assign && !editing && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-              <CardHead icon={Users} title="Profile · leadership only" style={{ marginBottom: 0, width: "auto" }} />
-              <div style={{ display: "flex", gap: 8 }}>
-                {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
-                <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={startEditForm}>Edit member</button>
-              </div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px 18px" }}>
+            <CardHead icon={Users} title="Profile" right={<>
+              <span style={{ fontSize: 10.5, color: FIRE.textMuted }}>leadership only</span>
+              {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
+              <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5 }} onClick={startEditForm}>Edit ›</button>
+            </>} />
+            {/* the mock's .detl: two columns, email full width, small muted keys over 12.5px values */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: "12px 16px" }}>
               {[
                 ["Access", member.access?.length ? member.access.join(", ") : "—"],
                 ["Mentor", (members || []).find((m) => m.id === member.mentorId)?.name || "—"],
@@ -10160,13 +10159,14 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                      only fail is worse than none. Say what to do instead: the Edit member form
                      immediately above is where an address gets added. */
                   : (<span style={{ color: FIRE.amberText, fontStyle: "italic" }}>No email — can&rsquo;t sign in. Add one with <b style={{ fontStyle: "normal" }}>Edit member</b>.</span>)],
+                ["Phone", member.phone || "—"],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
                 ["Address", priv?.address || "—"],
               ].map(([l, v]) => (
-                <div key={l}>
-                  <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted2, fontWeight: 700 }}>{l}</div>
-                  <div style={{ fontSize: 13, color: FIRE.textSecondary, wordBreak: "break-word" }}>{v}</div>
+                <div key={l} style={l === "Email" || l === "Address" ? { gridColumn: "1 / -1" } : undefined}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted }}>{l}</div>
+                  <div style={{ fontSize: 12.5, color: FIRE.textPrimary, marginTop: 3, wordBreak: "break-word" }}>{v}</div>
                 </div>
               ))}
             </div>
@@ -10245,18 +10245,18 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               {shown.map((s, i, arr) => {
                 const present = (s.attendance || []).includes(member.id);
                 const preJoin = !present && !expectedAfterJoin(member, s);
-                const tone = present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redText;
+                const tone = present ? FIRE.greenText : preJoin ? FIRE.textSecondary : FIRE.redText;
                 return (
                   <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ width: 40, textAlign: "center", flexShrink: 0 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: FIRE.textMuted }}>{sessDate(s).toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</div>
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: FIRE.redText }}>{sessDate(s).toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</div>
                       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{sessDate(s).getDate()}</div>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></div>
-                      <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 1 }}>{fmtSess(s)}</div>
+                      <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 1, ...FS.num }}>{[s.startTime ? fmtTime(s.startTime) : null, s.durationMin != null ? `${(Math.round((s.durationMin / 60) * 10) / 10).toFixed(1)} hrs` : null].filter(Boolean).join(" · ") || fmtSess(s)}</div>
                     </div>
-                    <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", flexShrink: 0, color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}>{present ? "Attended" : preJoin ? "Before joining" : "Missed"}</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", flexShrink: 0, color: tone, background: preJoin ? "#141922" : `${tone}1A`, border: `1px solid ${preJoin ? FIRE.line2Noir : tone + "66"}` }}>{present ? "Attended" : preJoin ? "Before joining" : "Missed"}</span>
                   </div>
                 );
               })}
@@ -10311,7 +10311,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 <div style={{ position: "relative", width: 96, height: 96, flexShrink: 0 }} title="Mean of cert compliance and 90-day participation">
                   <svg width="96" height="96" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
                     <circle cx="48" cy="48" r={R} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="9" />
-                    {ready != null && ready > 0 && <circle cx="48" cy="48" r={R} fill="none" stroke={ready >= 75 ? FIRE.green : ready >= 50 ? FIRE.amberText : FIRE.redText} strokeWidth="9" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - ready / 100)} />}
+                    {ready != null && ready > 0 && <circle cx="48" cy="48" r={R} fill="none" stroke={ready >= 75 ? FIRE.greenText : ready >= 50 ? FIRE.amberText : FIRE.redText} strokeWidth="9" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - ready / 100)} />}
                   </svg>
                   <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                     <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{ready == null ? "—" : <>{ready}<span style={{ fontSize: 14, color: FIRE.textMuted }}>%</span></>}</div>
