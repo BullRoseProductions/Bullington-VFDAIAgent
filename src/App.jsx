@@ -14038,7 +14038,14 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
               const neverChecked = inServiceRigs.filter((r) => r.status === "Pass" && !r.everChecked).length;
               return chip(CheckCircle2, "Ready to roll", String(passedChecked), neverChecked ? `checked & passed · ${neverChecked} never checked` : "checked & passed", passedChecked ? FIRE.greenText : null);
             })(),
-            chip(AlertTriangle, "Needs attention", String(flagged), "in service, flagged", flagged ? FIRE.redText : null),
+            // Overdue checks (derived by checkDue — in-service, scheduled, past due or never checked) ride under
+            // the flagged count as their own line; they are NOT added to it — a missed check isn't a failed one.
+            (() => {
+              const odN = inServiceRigs.filter((r) => checkDue(r)?.state === "overdue").length;
+              return chip(AlertTriangle, "Needs attention", String(flagged),
+                odN ? <>in service, flagged<br /><span style={{ color: FIRE.amberText, fontWeight: 600 }}>{odN} check{odN === 1 ? "" : "s"} overdue</span></> : "in service, flagged",
+                flagged ? FIRE.redText : null);
+            })(),
             chip(Wrench, "Open maintenance", String(openN), overdueN ? `${overdueN} overdue` : "nothing overdue", overdueN ? FIRE.redText : openN ? FIRE.amberText : null),
           ];
         })()}
