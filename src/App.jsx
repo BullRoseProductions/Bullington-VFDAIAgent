@@ -9668,6 +9668,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
     : [["members", "Members"]];
   const [tab, setTab] = useState(() => tabs.some(([k]) => k === initialTab) ? initialTab : "members");   // role-guarded deep-link seed
   const [sel, setSel] = useState(null);
+  const [bandEl, setBandEl] = useState(null);   // the band's action slot — RosterMembers portals its Print / Add member into it
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
   // Roster DISPLAY excludes PA/owner (countsInStats: not a Project Admin, not an excluded id)
@@ -9678,12 +9679,16 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   return (
     <PageShell band kicker={(() => { const k = tab === "certs" ? "CERTIFICATIONS" : tab === "attendance" ? "ATTENDANCE" : "ROSTER"; return dept?.name ? `${k} · ${dept.name}` : k; })()} title="Your people, all in one place"
       watermark={tab === "certs" ? "CERTS" : tab === "attendance" ? "PRESENT" : "CREW"}
-      sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
+      sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}
+      actions={tab === "members" ? <div ref={setBandEl} style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }} /> : null}>
       <NoirSkin>
-      <div style={S.segRow}>
-        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: tab === k ? FIRE.redBright : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
-      </div>
-      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} sessions={sessions} />}
+      {/* the mock's .segctl: a dark track with compact segments, the active one solid red */}
+      {tabs.length > 1 && (
+        <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 14, flexWrap: "wrap" }}>
+          {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} aria-pressed={tab === k} style={{ fontSize: 11, fontWeight: 600, padding: "4px 11px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: tab === k ? FIRE.redBright : "transparent", color: tab === k ? "#fff" : FIRE.textSecondary }}>{l}</button>)}
+        </div>
+      )}
+      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} sessions={sessions} bandEl={bandEl} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
@@ -9691,7 +9696,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
     </PageShell>
   );
 }
-function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, sessions }) {
+function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, sessions, bandEl }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
@@ -9702,7 +9707,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
   }
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
   useEditorOpen(adding);   // add-member form open — hold the roster refresh
-  const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
+  const sColor = (s) => s === "Active" ? FIRE.greenText : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
   const q = query.trim().toLowerCase();
   const matches = (m) => !q || [m.name, m.email, m.role, (Array.isArray(m.access) ? m.access.join(" ") : "")].some((f) => (f || "").toLowerCase().includes(q));
@@ -9722,7 +9727,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
     .slice().sort((x, y) => sortBy === "name" ? (x.name || "").localeCompare(y.name || "")
       : sortBy === "compliance" ? (compliance(y) ?? -1) - (compliance(x) ?? -1)
       : sortBy === "status" ? (STATUS_RANK[x.status] ?? 3) - (STATUS_RANK[y.status] ?? 3) : 0);
-  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 70–89 amber · <70 red
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.greenText : p >= 70 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 70–89 amber · <70 red
   // CREW SPOTLIGHT — three cards from data already on this screen (roster rows + the loaded sessions):
   //  · Service milestone: longest tenure by the join YEAR on file (the roster carries the year, not the month).
   //  · Top responder: most sessions attended in the last 90 days (station hours aren't loaded on the roster).
@@ -9845,7 +9850,12 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
           </label>
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </Card>
-      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      ) : null)}
+      {/* Print roster + Add member live in the hero band (the mock's .ph-actions) — same gates, same handlers. */}
+      {bandEl && createPortal(<>
+        {canPrint && <button onClick={handlePrint} title="Print or save the roster as a PDF" style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }}><Printer size={14} color={FIRE.btnIcon} /> Print roster</button>}
+        {canAdd && !adding && <button style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>}
+      </>, bandEl)}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", maxWidth: 360, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 8, padding: "7px 11px" }}>
           <Search size={15} color={FIRE.textMuted} />
@@ -9865,20 +9875,20 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
           <option value="status">Sort: Status</option>
         </select>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
-        {canPrint && <button onClick={handlePrint} title="Print or save the roster as a PDF" style={{ ...FS.btn, marginLeft: "auto", padding: "6px 11px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }}><Printer size={14} color={FIRE.btnIcon} /> Print roster</button>}
-      </div>
+      {/* count + inactive toggle on ONE line (were two rows) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
       {members.some((m) => m.status === "Inactive") && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+        <div style={{ marginLeft: "auto" }}>
           <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
         </div>
       )}
+      </div>
       {filtered.length === 0 && <Card padding="15px 16px" style={{ textAlign: "center", color: FIRE.textMuted }}>{query ? `No members match "${query}".` : "No members to show."}</Card>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(260px, 100%), 1fr))", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))", gap: 12 }}>
         {/* Owner + test + Project Admin hidden via countsInStats; search + status tab + inactive toggle compose (AND) */}
         {filtered.map((m) => { const cp = compliance(m); const ini = (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase(); return (
-          <Card key={m.id} padding="13px 14px" style={{ display: "flex", flexDirection: "column", gap: 10, ...(onOpen ? { cursor: "pointer" } : null) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+          <Card key={m.id} className={onOpen ? "rl-card" : undefined} padding="13px" style={{ display: "flex", flexDirection: "column", gap: 9, ...(onOpen ? { cursor: "pointer" } : null) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
               <div title={cp == null ? "No certs on file" : `Cert compliance ${cp}%`} style={{ position: "relative", width: 46, height: 46, flexShrink: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: `conic-gradient(${cp == null ? "rgba(255,255,255,.09)" : pctColor(cp)} ${cp == null ? 0 : (cp * 3.6).toFixed(1)}deg, rgba(255,255,255,.09) 0)` }}>
                 <div style={{ width: 36, height: 36, borderRadius: "50%", background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{ini}</div>
@@ -9890,19 +9900,19 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
               {m.status ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 999, color: sColor(m.status), background: `${sColor(m.status)}1F`, border: `1px solid ${sColor(m.status)}66`, flexShrink: 0 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: sColor(m.status) }} />{m.status}</span> : null}
               {canAdd && canDeleteShared && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: FIRE.textMuted, flexWrap: "wrap" }}>
+              {m.joined && <span>since <b style={{ color: FIRE.textSecondary }}>{m.joined}</b> ·</span>}<Phone size={12} /> {m.phone}
+              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 11 }}>View file <ChevronRight size={13} /></span>
+                : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
+            </div>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: FIRE.textSecondary }}><span>Cert compliance</span><span style={{ fontWeight: 700, color: pctColor(cp), ...FS.num }}>{cp == null ? "—" : `${cp}%`}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: FIRE.textSecondary, marginBottom: 5 }}><span>Cert compliance</span><span style={{ fontWeight: 700, color: pctColor(cp), ...FS.num }}>{cp == null ? "—" : `${cp}%`}</span></div>
               {cp == null ? <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4 }}>No certs on file</div>
                 : <div style={{ height: 6, borderRadius: 4, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, overflow: "hidden", marginTop: 6 }}><div style={{ width: `${cp}%`, height: "100%", borderRadius: 4, background: pctColor(cp) }} /></div>}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: FIRE.textMuted, flexWrap: "wrap" }}>
-              {m.joined && <span>since <b style={{ color: FIRE.textSecondary }}>{m.joined}</b> ·</span>}<Phone size={13} /> {m.phone}
-              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
-                : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
-            </div>
             {m.email && (
-              <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: FIRE.textMuted, minWidth: 0 }}>
-                <Mail size={13} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: FIRE.textMuted, minWidth: 0 }}>
+                <Mail size={12} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</span>
               </div>
             )}
           </Card>
@@ -22487,6 +22497,8 @@ function Fonts() {
       .dr-nav-on::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2.5px; border-radius: 0 2px 2px 0; background: ${FIRE.redBright}; }
       .dr-nav-on svg { color: ${FIRE.redBright}; }
       .stat-cta { transition: filter .15s ease, transform .08s ease; }
+      .rl-card { transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+      .rl-card:hover { transform: translateY(-3px); border-color: rgba(255,255,255,.13) !important; box-shadow: 0 10px 26px rgba(0,0,0,.45) !important; }
       .stat-cta:hover { filter: brightness(1.08); }
       .stat-cta:active { transform: translateY(1px); }
       @media (max-width: 900px) {
