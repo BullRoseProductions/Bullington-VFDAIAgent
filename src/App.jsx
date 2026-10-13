@@ -17494,7 +17494,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     const actor = done ? it.completed_by : it.cancelled_by;
     const who = (actor && nameById.get(actor)) || it.assignee_name || (it.assigned_to ? "Unknown" : "Unassigned");   // live actor → snapshot name → fallback
     return (
-      <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+      <div key={it.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
         {done
           ? <CheckCircle2 size={16} color={reopenable ? FIRE.green : FIRE.textMuted} style={{ flexShrink: 0 }} />
           : <X size={16} color={reopenable ? FIRE.redText : FIRE.textMuted} style={{ flexShrink: 0 }} />}
@@ -17522,9 +17522,9 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   return (
     <PageShell band watermark="MEETINGS" kicker="MEETINGS" title={<>Agendas &amp; minutes</>} sub="Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.">
       <NoirSkin>
-      <div style={S.segRow}>
+      <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 14 }}>
         {[["agenda", "Agenda"], ["minutes", "Minutes"]].map(([k, l]) => (
-          <button key={k} onClick={() => setMode(k)} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
+          <button key={k} onClick={() => setMode(k)} aria-pressed={mode === k} style={{ fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: mode === k ? FIRE.redBright : "transparent", color: mode === k ? "#fff" : FIRE.textSecondary }}>{l}</button>
         ))}
       </div>
       {mode === "agenda" ? (
@@ -17590,7 +17590,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         <div ref={reviewRef} style={{ ...FS.cardNoir, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
           <CardHead icon={ClipboardCheck} title="Review extracted items — confirm owner & due, then create" />
           {review.map((r, i) => (
-            <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <input type="checkbox" checked={r.keep} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x))} title="Include this item" style={{ marginBottom: 10 }} />
               <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={r.task} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, task: e.target.value } : x))} /></label>
               <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
@@ -17622,7 +17622,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
             const who = it.assigned_to ? (nameById.get(it.assigned_to) || "Unknown") : "Unassigned";
             const due = it.due_date ? new Date(it.due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "no due date";
             return (
-              <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={it.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <button onClick={() => completeItem(it)} disabled={!canManage} title={canManage ? "Mark done" : "Leaders only"} style={{ background: "none", border: "none", cursor: canManage ? "pointer" : "default", padding: 0, display: "inline-flex", flexShrink: 0 }}>
                   <span style={{ width: 16, height: 16, borderRadius: 999, border: `2px solid ${FIRE.textMuted}`, display: "inline-block" }} />
                 </button>
@@ -17647,11 +17647,11 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCompletedCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>
               </div>
               {recentResolved.length > 0 && (<>
-                <SectionLabel style={{ fontSize: 10.5, marginTop: 2, marginBottom: 4 }}>RECENTLY RESOLVED · REOPENABLE FOR 14 DAYS</SectionLabel>
+                <SectionBar label="Recently resolved · reopenable for 14 days" count={recentResolved.length} style={{ margin: "2px 0 4px" }} />
                 {[...recentResolved].sort((a, b) => (resolvedAt(b) || "").localeCompare(resolvedAt(a) || "")).map((it) => resolvedRow(it, true))}
               </>)}
               {archivedResolved.length > 0 && (<>
-                <SectionLabel style={{ fontSize: 10.5, marginTop: recentResolved.length ? 12 : 2, marginBottom: 4 }}>ARCHIVE · READ-ONLY</SectionLabel>
+                <SectionBar label="Archive · read-only" count={archivedResolved.length} style={{ margin: `${recentResolved.length ? 12 : 2}px 0 4px` }} />
                 {[...archivedResolved].sort((a, b) => (resolvedAt(b) || "").localeCompare(resolvedAt(a) || "")).map((it) => resolvedRow(it, false))}
               </>)}
             </div>
@@ -17666,7 +17666,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{d.title || "Untitled minutes"}{d.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -17678,8 +17678,8 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         })}
       </Card>
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px", background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
               <div style={{ minWidth: 0 }}>
                 <CardHead icon={FileText} title={openDraft.title || "Minutes"} style={{ marginBottom: openDraft.source === "imported" ? 5 : 0, width: "auto" }} />
