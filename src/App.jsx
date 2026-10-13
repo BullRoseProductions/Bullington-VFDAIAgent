@@ -16888,37 +16888,71 @@ function Equipment({ S, role, members, meId, notify }) {
                     </div>
                   );
                 })}
-                {canManage && (addingFor === t.id ? (
-                  <Card padding={12} style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, minHeight: 44 }}>
-                      {[["ids", "Enter IDs"], ["qty", "Just a quantity"]].map(([val, lbl], i) => { const on = bulkMode === val; return <button key={val} type="button" onClick={() => setBulkMode(val)} style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
-                    </div>
-                    {bulkMode === "ids" ? (
-                      <div style={{ ...S.field, flex: 1, minWidth: 240 }}>
-                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, marginBottom: 6, alignSelf: "flex-start" }}>
-                          {[["serial", "These are serial numbers"], ["asset", "These are asset numbers"]].map(([val, lbl], i) => { const on = bulkIdKind === val; return <button key={val} type="button" onClick={() => setBulkIdKind(val)} style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
+                {canManage && <button style={{ ...FS.btn, marginTop: 8, minHeight: 44 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add units</button>}
+                {/* ADD UNITS — the modals revamp (b4c_equipment_modals_revamp.html). Layout only: the same state
+                    (bulkMode / bulkIdKind / bulkText / bulkQty / uCond / more fields) and the same addUnit(). */}
+                {canManage && addingFor === t.id && createPortal((() => {
+                  const flabel = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, margin: "0 0 8px", display: "flex", alignItems: "center", gap: 8 };
+                  const fieldS = { width: "100%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: "11px 13px", color: FIRE.textPrimary, fontSize: 13, fontFamily: "inherit" };
+                  const seg = (opts, val, set) => (
+                    <div style={{ display: "inline-flex", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 9, padding: 3, gap: 3, flexWrap: "wrap" }}>
+                      {opts.map(([v, l]) => <button key={v} type="button" onClick={() => set(v)} style={{ fontFamily: "inherit", fontSize: 12, fontWeight: 700, border: "none", borderRadius: 6, padding: "8px 15px", cursor: "pointer", background: val === v ? FIRE.redBright : "transparent", color: val === v ? "#fff" : FIRE.textMuted }}>{l}</button>)}
+                    </div>);
+                  const n = bulkMode === "ids" ? bulkText.split("\n").map((x) => x.trim()).filter(Boolean).length : Math.max(0, Math.min(50, parseInt(bulkQty, 10) || 0));
+                  return (
+                    <div onClick={resetAddUnit} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+                      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 660, margin: "24px 0", background: "linear-gradient(180deg, #0E1218, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,.6)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "16px 20px", borderBottom: `1px solid ${FIRE.lineNoir}`, position: "relative", background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)" }}>
+                          <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Plus size={20} color={FIRE.redText} /></span>
+                          <div style={{ minWidth: 0, paddingRight: 40 }}>
+                            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, lineHeight: 1, color: FIRE.textPrimary }}>Add units</div>
+                            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4 }}>Add one or more of this item to your inventory.</div>
+                          </div>
+                          <button onClick={resetAddUnit} aria-label="Close" style={{ position: "absolute", top: 15, right: 16, width: 30, height: 30, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}><X size={14} color={FIRE.textSecondary} /></button>
                         </div>
-                        <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={4} placeholder={`One ${bulkIdKind} number per line`} style={{ ...FS.input, minHeight: 88, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+                        <div style={{ padding: "16px 20px" }}>
+                          {/* item context */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 15, marginBottom: 15, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                            <span style={{ width: 40, height: 40, borderRadius: 10, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Briefcase size={18} color={FIRE.textMuted} /></span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{t.name}</div>
+                              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{t.category || "Uncategorized"} · {t.total} in inventory</div>
+                            </div>
+                          </div>
+                          <div style={flabel}>How do you want to add them?</div>
+                          <div style={{ marginBottom: 16 }}>{seg([["ids", "Enter ID numbers"], ["qty", "Just a quantity"]], bulkMode, setBulkMode)}</div>
+                          {bulkMode === "ids" ? (<>
+                            <div style={flabel}>{bulkIdKind === "asset" ? "Asset numbers" : "Serial numbers"} <span style={{ marginLeft: "auto", fontFamily: "inherit", fontSize: 11, fontWeight: 600, letterSpacing: 0, textTransform: "none", color: FIRE.textSecondary }}>one per line</span></div>
+                            <div style={{ marginBottom: 10 }}>{seg([["serial", "Serial numbers"], ["asset", "Asset numbers"]], bulkIdKind, setBulkIdKind)}</div>
+                            <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={4} placeholder={`One ${bulkIdKind} number per line`} style={{ ...fieldS, minHeight: 88, resize: "vertical", lineHeight: 1.5 }} />
+                          </>) : (<>
+                            <div style={flabel}>How many (1–50)</div>
+                            <input type="number" min="1" max="50" value={bulkQty} onChange={(e) => setBulkQty(e.target.value)} style={{ ...fieldS, maxWidth: 160 }} />
+                            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6, lineHeight: 1.4 }}>Units without an ID can't be told apart. You can add serials later.</div>
+                          </>)}
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 11, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 7 }}>Condition</div>
+                            <select style={{ ...fieldS, maxWidth: 280 }} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select>
+                          </div>
+                          <button type="button" onClick={() => setMore((v) => !v)} style={{ marginTop: 14, fontSize: 12, fontWeight: 600, color: FIRE.redText, background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "inherit" }}>
+                            {more ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {more ? "Less detail" : "More detail — manufacturer, model, size, made date"}
+                          </button>
+                          {more && (
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginTop: 10 }}>
+                              {[["Manufacturer", uMfr, setUMfr, "text"], ["Model", uModel, setUModel, "text"], ["Size", uSize, setUSize, "text"], ["Manufacture date", uMfg, setUMfg, "date"]].map(([l, v, set, ty]) => (
+                                <label key={l} style={{ display: "block" }}><div style={{ fontSize: 11, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 6 }}>{l}</div><input type={ty} value={v} onChange={(e) => set(e.target.value)} style={fieldS} /></label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: 11, padding: "15px 20px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, flexWrap: "wrap" }}>
+                          <button onClick={() => addUnit(t.id, t.name)} style={{ ...FS.btnPrimary, flex: "2 1 220px", justifyContent: "center", padding: "13px 18px", fontSize: 13.5, borderRadius: 10 }}><Plus size={15} /> {n > 0 ? `Add ${n} unit${n === 1 ? "" : "s"}` : "Add units"}</button>
+                          <button onClick={resetAddUnit} style={{ ...FS.btn, flex: "0 0 auto", padding: "13px 18px", borderRadius: 10 }}>Cancel</button>
+                        </div>
                       </div>
-                    ) : (
-                      <div style={{ ...S.field, minWidth: 170 }}>
-                        <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How many (1–50)</span>
-                        <input type="number" min="1" max="50" value={bulkQty} onChange={(e) => setBulkQty(e.target.value)} style={{ ...FS.input, minHeight: 44 }} />
-                        <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.4 }}>Units without an ID can't be told apart. You can add serials later.</span>
-                      </div>
-                    )}
-                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
-                    {more && (<>
-                      <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacturer</span><input style={FS.input} value={uMfr} onChange={(e) => setUMfr(e.target.value)} /></label>
-                      <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Model</span><input style={FS.input} value={uModel} onChange={(e) => setUModel(e.target.value)} /></label>
-                      <label style={{ ...S.field, minWidth: 100 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Size</span><input style={FS.input} value={uSize} onChange={(e) => setUSize(e.target.value)} /></label>
-                      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacture date</span><input type="date" style={FS.input} value={uMfg} onChange={(e) => setUMfg(e.target.value)} /></label>
-                    </>)}
-                    <button style={FS.btn} onClick={() => setMore((v) => !v)}>{more ? "Less detail" : "More detail"}</button>
-                    <button style={{ ...FS.btnPrimary, minHeight: 44 }} onClick={() => addUnit(t.id, t.name)}><Plus size={15} /> Add units</button>
-                    <button style={FS.btn} onClick={resetAddUnit}>Cancel</button>
-                  </Card>
-                ) : <button style={{ ...FS.btn, marginTop: 8, minHeight: 44 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add units</button>)}
+                    </div>
+                  );
+                })(), document.body)}
                   </div>
                 )}
               </div>
