@@ -10009,12 +10009,25 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   useEffect(() => {                              // load DA/PA-only data; Board/TO skip (RLS would return nothing anyway)
     if (!assign) return;
     let alive = true;
-    supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
-      .then(({ data }) => { if (alive) setPriv(data || {}); });
-    supabase.from("member_notes").select("text, by, created_at").eq("member_id", member.id).order("created_at", { ascending: false })
-      .then(({ data }) => { if (alive) setNotes(data || []); });
+    loadPrivate(() => alive);
+    loadNotes(() => alive);
     return () => { alive = false; };
   }, [member.id, assign]);
+  /* A FAILED READ IS NOT "NOTHING ON FILE". member_private used to fall back to {} on error, which the Edit form
+     then seeded as blanks — and Save upserts those blanks, i.e. a hiccup could null a member's birthday,
+     address and joined date. privErr now blocks Edit until the details have actually loaded. (maybeSingle
+     returns data null with NO error for a member with no row — that is genuinely empty and stays {}.)
+     member_notes likewise kept [] and said "No notes yet". */
+  const [privErr, setPrivErr] = useState(false);
+  const [notesErr, setNotesErr] = useState(false);
+  function loadPrivate(isAlive = () => true) {
+    supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
+      .then(({ data, error }) => { if (!isAlive()) return; if (error) { setPrivErr(true); return; } setPrivErr(false); setPriv(data || {}); });
+  }
+  function loadNotes(isAlive = () => true) {
+    supabase.from("member_notes").select("text, by, created_at").eq("member_id", member.id).order("created_at", { ascending: false })
+      .then(({ data, error }) => { if (!isAlive()) return; if (error || !data) { setNotesErr(true); return; } setNotesErr(false); setNotes(data); });
+  }
   function startEditForm() {
     setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
     setEditing(true);
@@ -10196,8 +10209,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             <CardHead icon={Users} title="Profile" right={<>
               <span style={{ fontSize: 10.5, color: FIRE.textMuted }}>leadership only</span>
               {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
-              <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5 }} onClick={startEditForm}>Edit ›</button>
+              <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, opacity: priv === null ? 0.5 : 1 }} onClick={startEditForm} disabled={priv === null} title={priv === null ? "Loading this member's details…" : undefined}>Edit ›</button>
             </>} />
+            {privErr && <ReadRetry what="this member's joined date, birthday and address (Edit waits for them)" onRetry={() => loadPrivate()} />}
             {/* the mock's .detl: two columns, email full width, small muted keys over 12.5px values */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: "12px 16px" }}>
               {[
@@ -10415,7 +10429,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{n.by} · {fmtLongDate((n.created_at || "").slice(0, 10)) || "recent"}</div></div>
           </div>
         ))}
-        {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to department admins only — never to the member.</div>}
+        {notes.length === 0 && notesErr && <ReadRetry what="the member log" onRetry={() => loadNotes()} />}
+        {notes.length === 0 && !notesErr && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to department admins only — never to the member.</div>}
       </Card>
       </>)}
       {proofMount}
