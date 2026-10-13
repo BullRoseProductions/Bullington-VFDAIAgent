@@ -211,6 +211,9 @@ function NoirModalHead({ icon: Icon, title, sub, right, onClose }) {
 // Noir replacements for the pre-Noir text styles (S.featTitle / S.helpP / S.errBox) on the remaining pages.
 const NOIR_FEAT_TITLE = { fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, margin: "0 0 4px", lineHeight: 1.3 };
 const NOIR_HELP = { fontSize: 12.5, lineHeight: 1.55, color: FIRE.textMuted, margin: "0 0 10px" };
+// The AI call-to-action banner on Noir. Replaces { ...S.aiBanner, ...FS.cardNoir }: S.aiBanner's 4px purple-grey
+// left edge survived that spread (React keeps the borderLeft longhand after the border shorthand).
+const NOIR_AI_BANNER = { ...FS.cardNoir, padding: 22, marginBottom: 22, display: "flex" };
 const NOIR_ERR = { marginTop: 10, fontSize: 12.5, lineHeight: 1.45, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText };
 // The mocks' inset panel (.card2 surface) — sections inside an expanded card sit on this.
 const NOIR_INSET = { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10 };
@@ -5381,7 +5384,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
         <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent={FIRE.catGreen} />
       </div>
 
-      <div style={{ ...S.aiBanner, ...FS.cardNoir }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
           <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
@@ -6683,7 +6686,7 @@ function Visibility({ S, brand, role, notify }) {
         { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
       ]} />}
 
-      <div style={{ ...S.aiBanner, ...FS.cardNoir }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI caption helper" />
           <h3 style={NOIR_FEAT_TITLE}>Write a post for your station</h3>
@@ -11256,7 +11259,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
         {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
       </div>
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Turn your numbers into a report — in one tap</h3>
@@ -15555,7 +15558,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
         ))}
       </div>
       {canManage && (
-        <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}`, marginTop: 16 }}>
+        <div style={{ ...NOIR_AI_BANNER, marginTop: 16 }}>
           <div style={{ flex: 1 }}>
             <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
             <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a preventive-maintenance checklist</h3>
@@ -17562,7 +17565,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         <MeetingAgenda S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} sessions={sessions} certContext={certContext} />
       ) : (
       <>
-      <div style={{ ...S.aiBanner, ...FS.cardNoir }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI minutes drafter" />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -17881,7 +17884,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
   return (
     <div>
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
           <div style={{ ...FS.kicker, marginBottom: 8 }}><ClipboardList size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI AGENDA BUILDER</div>
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft an agenda from your real department data</h3>
