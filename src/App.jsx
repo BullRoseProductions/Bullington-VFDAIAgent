@@ -5728,9 +5728,10 @@ function Documents({ S, role, notify, uploaderName, members }) {
     <PageShell above={loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
       kicker="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place"
       sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."}>
+      <NoirSkin>
 
       {canManageDocs && (<>
-        <SectionLabel style={{ marginBottom: 8 }}><Upload size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />UPLOAD YOUR DOCUMENTS</SectionLabel>
+        <CardHead icon={Upload} title="Upload your documents" />
         <label style={{ ...S.field, maxWidth: 240, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Type for these uploads</span>
           <select style={{ ...FS.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
             {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -5744,9 +5745,9 @@ function Documents({ S, role, notify, uploaderName, members }) {
           <input type="file" multiple style={{ display: "none" }} onChange={onFiles} />
         </label>
 
-        <SectionLabel as="button" onClick={() => setDraftOpen((v) => !v)} style={{ marginTop: 24, marginBottom: draftOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><FilePlus size={13} style={{ verticalAlign: "-2px" }} />DRAFT A NEW DOCUMENT<span style={{ marginLeft: "auto", display: "inline-flex" }}>{draftOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></SectionLabel>
+        <CardHead as="button" onClick={() => setDraftOpen((v) => !v)} icon={FilePlus} title="Draft a new document" right={draftOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />} style={{ marginTop: 14, marginBottom: draftOpen ? 8 : 0, cursor: "pointer" }} />
         {draftOpen && (<>
-        <Card padding={22} style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 22 }}>
+        <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Document type</span>
               <select style={{ ...FS.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -5764,7 +5765,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
         </>)}
       </>)}
 
-      <SectionLabel style={{ marginTop: 24, marginBottom: 8 }}><FolderOpen size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR DOCUMENT LIBRARY</SectionLabel>
+      <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
       {!docsLoading && docs.length === 0 ? (
         <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
           {canManageDocs
@@ -5809,7 +5810,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
 
       {isDA && (
         <div style={{ marginTop: 24 }}>
-          <SectionLabel as="button" onClick={() => { const n = !showTrash; setShowTrash(n); if (n) loadTrashed(); }} style={{ marginBottom: showTrash ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Trash2 size={13} style={{ verticalAlign: "-2px" }} />TRASH<span style={{ marginLeft: "auto", display: "inline-flex" }}>{showTrash ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></SectionLabel>
+          <CardHead as="button" onClick={() => { const n = !showTrash; setShowTrash(n); if (n) loadTrashed(); }} icon={Trash2} title="Trash" right={showTrash ? <ChevronUp size={14} /> : <ChevronDown size={14} />} style={{ marginBottom: showTrash ? 8 : 0, cursor: "pointer" }} />
           {showTrash && (
             trashLoading ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Loading…</Card>
             : trashed.length === 0 ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Trash is empty.</Card>
@@ -5830,6 +5831,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
         </div>
       )}
       {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} onClose={() => setViewerDoc(null)} />}
+      </NoirSkin>
     </PageShell>
   );
 }
