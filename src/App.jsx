@@ -5354,7 +5354,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
     setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
   }
   return (
-    <PageShell kicker="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.">
+    <PageShell band watermark="RECRUIT" kicker="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.">
       <NoirSkin>
       <div style={S.phaseRow}>
         <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent={FIRE.red} />
@@ -5366,7 +5366,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
         <div style={{ flex: 1 }}>
           <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a recruitment plan for your department</h3>
+          <h3 style={NOIR_FEAT_TITLE}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
             <AIField S={S} dark label="Your town" value={town} onChange={setTown} />
             <AIField S={S} dark label="Department size" value={size} onChange={setSize} />
@@ -5380,7 +5380,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {plan && <RichOutput S={S} text={plan} dark />}
           {plan && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
