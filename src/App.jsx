@@ -10566,7 +10566,7 @@ function RosterCerts({ S, members }) {
       {/* COVERAGE BY CERTIFICATION */}
       {certGroups.length > 0 && (
         <Card padding="14px 16px" style={{ marginBottom: 12 }}>
-          <CardHead icon={Award} title="Coverage by certification" right={<span>how much of the crew holds each one</span>} />
+          <CardHead icon={Award} title="Coverage by certification" right={<span>How much of the crew holds each one</span>} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 12 }}>
             {(showAllGroups ? certGroups : certGroups.slice(0, GROUP_CAP)).map((g, i) => {
               const col = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
@@ -10592,25 +10592,13 @@ function RosterCerts({ S, members }) {
           {certGroups.length > GROUP_CAP && <button onClick={() => setShowAllGroups((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "11px 0 2px", cursor: "pointer", background: "none", border: "none", fontFamily: "inherit" }}>{showAllGroups ? "Show fewer" : `Show all ${certGroups.length} certifications`}</button>}
         </Card>
       )}
-      <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
-          <CardHead icon={CalendarCheck} title="Expiration engine" />
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Stay ahead of every renewal</h3>
-          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
-          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
-            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
-          </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
-        </div>
-      </Card>
       {/* TOOLBAR — search + sort (client-side over the loaded rows) */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "4px 0 10px" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
           <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)" }} />
           <input style={{ ...FS.input, paddingLeft: "2rem", background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by member or certification…" aria-label="Search certifications by member or certification name" />
         </div>
-        <select aria-label="Sort certifications" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={S.select}>
+        <select aria-label="Sort certifications" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...S.select, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9, padding: "9px 30px 9px 13px", fontSize: 12, fontWeight: 600, color: FIRE.textSecondary }}>
           <option value="soonest">Sort: Soonest to expire</option>
           <option value="member">Sort: Member</option>
           <option value="cert">Sort: Certification</option>
@@ -10661,13 +10649,14 @@ function RosterCerts({ S, members }) {
           return (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 2px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <span style={{ width: 34, height: 34, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: FIRE.textPrimary, flexShrink: 0 }}>{ini}</span>
-              <div style={{ flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.member}</span> <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>· {r.cert}</span>
-                <div style={{ fontSize: 11.5, color: CERT_FIRE[r.st.label], marginTop: 1 }}>{expPhrase(r.exp)}</div>
-                {cl && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
+              <div style={{ width: 150, flexShrink: 0, minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{r.member}</div>
+              <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
+                <div style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{r.cert}</div>
+                {cl && <div style={{ fontSize: 11.5, color: FIRE.greenText, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
-                <Pill S={S} color={CERT_FIRE[r.st.label]}>{r.st.label}</Pill>
+              <div style={{ width: 90, flexShrink: 0, fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(r.exp)}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", flexShrink: 0, maxWidth: "100%" }}>
+                {(() => { const col = r.st.label === "CURRENT" ? FIRE.greenText : CERT_FIRE[r.st.label]; return <span style={{ width: 78, textAlign: "center", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "3px 9px", color: col, background: `${col}1A`, border: `1px solid ${col}66` }}>{r.st.label.toLowerCase()}</span>; })()}
                 {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
                 {r.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(r.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
               </div>
@@ -10675,6 +10664,19 @@ function RosterCerts({ S, members }) {
           );
         })}
         {sorted.length > ROW_CAP && <button onClick={() => setShowAllRows((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "11px 0 2px", cursor: "pointer", background: "none", border: "none", fontFamily: "inherit" }}>{showAllRows ? "Show fewer" : `Show all ${sorted.length} certifications`}</button>}
+      </Card>
+      {/* Expiration engine — kept (not in the mock), moved below the list, plain Noir styling (no accent bar). */}
+      <Card padding="14px 16px" style={{ display: "flex", marginTop: 12 }}>
+        <div style={{ flex: 1 }}>
+          <CardHead icon={CalendarCheck} title="Expiration engine" />
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, marginBottom: 4 }}>Stay ahead of every renewal</div>
+          <p style={{ fontSize: 12, lineHeight: 1.5, color: FIRE.textMuted, margin: "0 0 10px" }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
+          </button>
+          {err && <div style={{ marginTop: 10, fontSize: 12, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
+        </div>
       </Card>
       {proofMount}
     </div>
