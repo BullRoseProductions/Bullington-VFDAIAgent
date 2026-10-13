@@ -20046,7 +20046,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     </div>
                   </div>
                   {editingSessionId === s.id && (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                       <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title</span><input style={Linput} value={sessEdit.title} onChange={(e) => setSessEdit((b) => ({ ...b, title: e.target.value }))} /></label>
                       <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Date</span><input type="date" style={Linput} value={sessEdit.date} onChange={(e) => setSessEdit((b) => ({ ...b, date: e.target.value }))} /></label>
                       <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sessEdit.startTime} onChange={(e) => setSessEdit((b) => ({ ...b, startTime: e.target.value }))} /></label>
@@ -20068,7 +20068,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     </div>
                   )}
                   {s.plans.length > 0 && openPlans === s.id && (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12 }}>
                       <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
                       {s.plans.map((p) => (
                         <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
@@ -20083,17 +20083,17 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     </div>
                   )}
                   {open && (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12 }}>
                       <div style={{ fontSize: 12, color: FIRE.textMuted2, marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
                       {roll.map((m) => {
                         const present = att.includes(m.id);
                         return (
-                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
+                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                             {canManage && !s.done
                               ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color={FIRE.greenText} /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
-                              : (present ? <CheckCircle2 size={18} color={FIRE.greenText} /> : <X size={16} color={FIRE.redText} />)}
+                              : <CheckMark state={present ? "pass" : "fail"} size={18} />}
                             <span style={{ flex: 1, fontSize: 13.5, color: present ? FIRE.name : FIRE.textMuted2 }}>{m.name}{m.id === meId ? " (you)" : ""}{restricted && !rollFor(s, m) ? <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: present ? FIRE.greenText : FIRE.redText }}>{present ? "PRESENT" : "ABSENT"}</span>
+                            <ResultBadge pass={present}>{present ? "PRESENT" : "ABSENT"}</ResultBadge>
                           </div>
                         );
                       })}
@@ -20108,7 +20108,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     const liveToken = signinTokens[s.id];
                     const needsLoc = s.isOffsite && (s.locLat == null || s.locLng == null);   // off-site with nowhere to verify against
                     return (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 14 }}>
                       {/* WHERE THIS DRILL VERIFIES — shown ONLY for a drill flagged off-site at
                           planning. A station drill needs no strip: "At the station" on every card was
                           noise on the 100% case. Rendered in both branches (before opening AND while
