@@ -1,5 +1,8 @@
 -- =====================================================================
--- B3. Report issue — equipment_issues + RLS + two RPCs. DRAFT. NOT APPLIED.
+-- B3. Report issue — equipment_issues + RLS + two RPCs.
+-- APPLIED 2026-10-13 by hand (state check: table, RLS on, 2 policies, both RPCs; anon can't
+-- EXECUTE; no direct INSERT). RETEST sql/equipment_issues_RETEST.sql: 15/15 passed.
+-- (Filename keeps _DRAFT for history; the DB is the source of truth.)
 -- (Brief B4C_Equipment_ReportIssue_Brief not found in the repo — built from the spec text.)
 --
 -- Who: a member reports on gear they HOLD (open custody period, closed_at null).
