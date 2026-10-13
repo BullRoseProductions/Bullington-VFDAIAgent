@@ -1338,19 +1338,12 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
   }
 
   return (
-    <div style={{ padding: "4px 2px 0" }}>
-      <div style={{ marginBottom: 14 }}>
-        <div style={FS.kicker}>AFTER-CALL CHECKLIST</div>
-        {/* The literal, not the DISPLAY const — that one is scoped inside another component far
-            below and is not in scope here. Same face every other settings screen sets. */}
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>After-Call Checklist</h1>
-        <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
-          A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.
-        </div>
-      </div>
+    <PageShell band kicker="AFTER-CALL CHECKLIST" title="After-Call Checklist"
+      sub="A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.">
+      <NoirSkin>
 
       {/* the toggle */}
-      <div style={{ ...FS.card, padding: 18, marginBottom: 12 }}>
+      <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>
@@ -1386,13 +1379,13 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
 
       {/* the shared list — only once the feature is on */}
       {enabled && (
-        <div style={{ ...FS.card, padding: "8px 0" }}>
-          <div style={{ ...FS.kicker, padding: "10px 14px 4px" }}>THE TASK LIST</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0" }}>
+          <CardHead icon={ClipboardCheck} title="The task list" style={{ padding: "10px 14px 2px", marginBottom: 4 }} />
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
             One list for the whole department — every rig uses it. Crews tick these off after a call.
           </div>
           {loadErr && (
-            <div style={{ fontSize: 12.5, color: FIRE.redText, padding: "0 14px 10px", lineHeight: 1.5 }}>
+            <div style={{ ...NOIR_ERR, margin: "0 14px 10px" }}>
               Couldn&rsquo;t load the list: {loadErr}
             </div>
           )}
@@ -1403,7 +1396,7 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
             </div>
           )}
           {(items || []).map((it) => (
-            <div key={it.id} style={{ padding: "10px 14px", borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div key={it.id} style={{ padding: "10px 14px", borderTop: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               {editingId === it.id ? (<>
                 <input style={{ ...FS.input, flex: 1, minWidth: 180 }} value={editBuf} autoFocus
                        onChange={(e) => setEditBuf(e.target.value)}
@@ -1419,7 +1412,7 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
               </>)}
             </div>
           ))}
-          <div style={{ padding: "10px 14px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+          <div style={{ padding: "10px 14px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
             {adding ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <input style={{ ...FS.input, flex: 1, minWidth: 180 }} value={label} autoFocus
@@ -1437,7 +1430,8 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
           </div>
         </div>
       )}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
