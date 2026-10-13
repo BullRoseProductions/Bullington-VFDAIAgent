@@ -90,7 +90,9 @@ function useFitHeight(on) {
 // The page frame: red kicker + Oswald title (+ optional lead mark, sub-line, right-aligned actions), then the
 // content. fitToScreen pins the header and scrolls the content region internally — the no-scroll guardrail.
 // `above` renders before the header (a "Back to …" link on a drill-down page).
-function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, bandImage, bandMark, children }) {
+// `watermark`: the page's large ghosted word in the band (FLEET, GEAR, TRAIN…) — one standard size/placement, from
+// the mocks' .pagehdr .emb. `bandMark` still overrides it for a custom mark (the member file's initials).
+function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, bandImage, bandMark, watermark, children }) {
   const [bodyRef, top] = useFitHeight(!!fitToScreen);
   // Below the content region sit the shell's own bottom padding (22px) and the app frame's content padding
   // (S.content: 26px + the safe area). Subtract both, or the outer page keeps a 26px scroll of its own.
@@ -108,7 +110,7 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
           {/* Photo slot: `bandImage` (a URL) renders behind the glows at heroPhotoOpacity; absent → nothing. */}
           {bandImage && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${bandImage})`, backgroundSize: "cover", backgroundPosition: "center", opacity: FIRE.heroPhotoOpacity, pointerEvents: "none" }} />}
           {/* Faded brand mark — the same logo file as the sidebar, behind the glows; hidden on phone (.noir-emblem). */}
-          {bandMark ?? <img src="/b4c-logo.png" alt="" aria-hidden="true" className="noir-emblem" draggable={false} style={{ position: "absolute", right: 140, top: "50%", transform: "translateY(-50%)", height: 96, width: "auto", opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />}
+          {bandMark ?? (watermark ? <div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 96, lineHeight: 1, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none", whiteSpace: "nowrap" }}>{watermark}</div> : null) ?? <img src="/b4c-logo.png" alt="" aria-hidden="true" className="noir-emblem" draggable={false} style={{ position: "absolute", right: 140, top: "50%", transform: "translateY(-50%)", height: 96, width: "auto", opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />}
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroGlowNoir, pointerEvents: "none" }} />
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroShadeNoir, pointerEvents: "none" }} />
           <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
@@ -4480,7 +4482,7 @@ function Library({ S, library, openPacket }) {
   const tint = (hex, a) => `${hex}${a}`;
   return (
     <PageShell band kicker="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight."
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>LIB</div>}>
+      watermark="LIB">
       <NoirSkin>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 14px" }}>
         <Search size={18} color={FIRE.btnIcon} />
@@ -9588,7 +9590,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} dept={dept} />;
   return (
     <PageShell band kicker={dept?.name ? `ROSTER · ${dept.name}` : "ROSTER"} title="Your people, all in one place"
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>CREW</div>}
+      watermark="CREW"
       sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
       <NoirSkin>
       <div style={S.segRow}>
@@ -15964,7 +15966,7 @@ function MyEquipment({ S, meId, notify }) {
   const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
   return (
     <PageShell band kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it."
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>}>
+      watermark="GEAR">
       <NoirSkin>
       {/* CHIPS — counted from the rows already loaded (same gearStatus rule as each row's pill) */}
       {loaded && rows.length > 0 && (() => {
@@ -16727,7 +16729,7 @@ function Equipment({ S, role, members, meId, notify }) {
   };
   return (
     <PageShell band above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got"
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>} sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
+      watermark="GEAR" sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
       <NoirSkin>
       {/* GEAR CHIPS — from the units already loaded (gearStatus unchanged: past life = retire, regardless of condition) */}
       {(() => {
@@ -17979,7 +17981,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
   }
   return (
     <PageShell band kicker="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 92, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>INTAKE</div>}>
+      watermark="INTAKE">
       <NoirSkin>
       <Card padding="12px 16px" style={{ marginBottom: 12, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Viewing</span>
@@ -19192,7 +19194,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
 
   return (
     <PageShell band kicker={dept?.name ? `TRAINING · ${dept.name}` : "TRAINING"} title="Keep training on schedule"
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>TRAIN</div>}
+      watermark="TRAIN"
       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
       <NoirSkin>
 
