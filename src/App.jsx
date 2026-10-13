@@ -13722,6 +13722,32 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   }
   const fmtMoney = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
   const [openRigId, setOpenRigId] = useState(null);   // fleet board: the rig expanded in place (null = none)
+  // CHECK SCHEDULING (B2). The interval is written ONLY through set_apparatus_check_interval (is_canmanage_ops;
+  // a guard trigger refuses direct writes to the column). Next due / overdue are derived here, never stored.
+  const [schedFor, setSchedFor] = useState(null); const [schedBuf, setSchedBuf] = useState(""); const [schedBusy, setSchedBusy] = useState(false);
+  const DAY_MS = 86400000;
+  const fmtDue = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // null = no schedule. Out of service pauses the schedule (no check can be run). Never checked = due now.
+  const checkDue = (r) => {
+    if (!r.checkIntervalDays) return null;
+    if (!r.inService) return { state: "paused", text: "Schedule paused — out of service" };
+    if (!r.lastCheckAt) return { state: "overdue", text: "Check due now — never checked" };
+    const due = new Date(new Date(r.lastCheckAt).getTime() + r.checkIntervalDays * DAY_MS);
+    const late = Math.floor((Date.now() - due.getTime()) / DAY_MS);
+    if (Date.now() > due.getTime()) return { state: "overdue", text: late >= 1 ? `Check overdue · ${late}d late` : "Check due today" };
+    return { state: "ok", text: `Next check ${fmtDue(due)}` };
+  };
+  async function saveSchedule(r, clear) {
+    const t = String(schedBuf).trim();
+    const days = clear || t === "" ? null : Number(t);
+    if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= 365)) { notify({ kind: "error", title: "Check the interval", text: "Whole days, 1–365 — or clear it for no schedule." }); return; }
+    setSchedBusy(true);
+    const { error } = await supabase.rpc("set_apparatus_check_interval", { p_apparatus_id: r.id, p_days: days });
+    setSchedBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the schedule", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: days ? `${r.name}: check every ${days} day${days === 1 ? "" : "s"}.` : `${r.name}: check schedule cleared.` });
+    setSchedFor(null); loadRigs();
+  }
   const [maintItems, setMaintItems] = useState([]);   // reported up by MaintenancePanel (its existing read) — open-maintenance flags
   const [editMode, setEditMode] = useState(false);   // false = clean cards; true = reveal Add + per-rig Edit/Remove. Service/Start-Check stay at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingRigId(null); setAdding(false); } return !v; }); }
@@ -13757,7 +13783,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const loadRigs = () => {
     // Scoped to the active station. NOT filtered when the id is unknown — see useActiveStation.
     let q = supabase.from("apparatus")
-      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost, station_id")
+      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost, station_id, check_interval_days")
       .is("deleted_at", null)          // removed rigs are hidden, not gone — see removeRig
       .order("created_at", { ascending: true });
     // ALL_STATIONS drops the filter: RLS still scopes to the department, so this returns every
@@ -13772,6 +13798,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           currentCost: r.current_cost ?? null, inflationRate: r.inflation_rate ?? null,
           replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
           everChecked: !!r.last_check_at,   // a rig added as "Ready" is status Pass with NO check on file — keep the two apart
+          lastCheckAt: r.last_check_at || null, checkIntervalDays: r.check_interval_days ?? null,   // check scheduling (B2)
           lastCheck: r.last_check_at ? new Date(r.last_check_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
           by: r.checked_by ? (nameById.get(r.checked_by) || "A member") : "—",
         })));
@@ -13869,6 +13896,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         <div style={{ display: "flex", gap: 18, fontSize: 11.5, color: FIRE.textSecondary, marginBottom: 11, flexWrap: "wrap" }}>
           {r.everChecked ? <span>Last check <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{ok ? "✓ " : ""}{r.lastCheck}</b></span> : <b style={{ color: FIRE.amberText, fontWeight: 600 }}>Never checked</b>}
           {r.by !== "—" && <span>By <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{r.by}</b></span>}
+          {(() => { const cd = checkDue(r); return cd && <span style={{ color: cd.state === "overdue" ? FIRE.amberText : FIRE.textMuted, fontWeight: cd.state === "overdue" ? 600 : 400 }}>{cd.text}</span>; })()}
         </div>
         {(() => {
           const flag = (kind, Icon, text) => <div style={{ fontSize: 11.5, fontWeight: 600, borderRadius: 8, padding: "7px 11px", display: "flex", alignItems: "center", gap: 8, ...(kind === "ok" ? { background: FIRE.card2Noir, color: FIRE.textSecondary } : kind === "warn" ? { background: "rgba(204,158,82,.08)", color: FIRE.amberText, border: "1px solid rgba(204,158,82,.25)" } : { background: "rgba(200,50,58,.08)", color: FIRE.redText, border: "1px solid rgba(200,50,58,.25)" }) }}><Icon size={14} style={{ flexShrink: 0 }} />{text}</div>;
@@ -13903,6 +13931,23 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
         {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 11 }}>Last check: {r.lastCheck} · {r.by}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
+          <span>Check schedule: <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{r.checkIntervalDays ? `every ${r.checkIntervalDays} day${r.checkIntervalDays === 1 ? "" : "s"}` : "none"}</b></span>
+          {(() => { const cd = checkDue(r); return cd && <span style={{ color: cd.state === "overdue" ? FIRE.amberText : FIRE.textMuted, fontWeight: cd.state === "overdue" ? 600 : 400 }}>· {cd.text}</span>; })()}
+          {canManage && schedFor !== r.id && <button onClick={() => { setSchedFor(r.id); setSchedBuf(r.checkIntervalDays ? String(r.checkIntervalDays) : ""); }} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}><Clock size={12} color={FIRE.btnIcon} /> {r.checkIntervalDays ? "Change" : "Set schedule"}</button>}
+        </div>
+        {canManage && schedFor === r.id && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+            <span style={{ fontSize: 12, color: FIRE.textSecondary }}>Check every</span>
+            <input autoFocus type="number" min={1} max={365} step={1} inputMode="numeric" value={schedBuf} placeholder="7" onChange={(e) => setSchedBuf(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveSchedule(r, false); if (e.key === "Escape") setSchedFor(null); }}
+              style={{ ...FS.input, width: 76, fontSize: 12.5, padding: "6px 8px" }} />
+            <span style={{ fontSize: 12, color: FIRE.textSecondary }}>days</span>
+            <button disabled={schedBusy} onClick={() => saveSchedule(r, false)} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: schedBusy ? 0.5 : 1 }}>{schedBusy ? <Loader2 size={13} className="spin" /> : "Save"}</button>
+            {r.checkIntervalDays && <button disabled={schedBusy} onClick={() => saveSchedule(r, true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Clear schedule</button>}
+            <button disabled={schedBusy} onClick={() => setSchedFor(null)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+          </div>
+        )}
         {/* ACTION ROW. Start Check leads and is allowed to take the full width on a narrow card.
             It previously sat LAST inside a nested flex row that had no flexWrap, pinned right with
             marginLeft:auto — so on a phone-width apparatus card "Take out of service" consumed the
