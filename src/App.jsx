@@ -356,8 +356,8 @@ class ErrorBoundary extends React.Component {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div style={{ ...FS.card, padding: "22px 24px", borderLeft: `3px solid ${FIRE.red}`, maxWidth: 620 }}>
-        <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary, marginBottom: 8 }}>Something went wrong on this page.</div>
+      <div style={{ ...FS.cardNoir, padding: "22px 24px", maxWidth: 620 }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontSize: 20, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 8 }}>Something went wrong on this page.</div>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.55, marginBottom: 16 }}>
           This section hit an unexpected error. Your data is safe. Try reloading, or pick another section from the menu.
         </div>
