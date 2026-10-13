@@ -4472,35 +4472,77 @@ function Library({ S, library, openPacket }) {
     const okQ = !q || (p.title + p.code + p.objective).toLowerCase().includes(q.toLowerCase());
     return okT && okQ;
   }), [library, q, track]);
+  // Facelift: a spotlight packet, then the results grouped into track SHELVES. Same packets, same search + track
+  // filter (results is unchanged); the library is kept newest-first (Content Admin prepends), so the spotlight is the
+  // newest packet that matches the current search/filter.
+  const spot = results[0] || null;
+  const shelves = Object.keys(TRACKS).map((k) => ({ k, T: TRACKS[k], items: results.filter((p) => p.track === k) })).filter((sh) => sh.items.length > 0);
+  const tint = (hex, a) => `${hex}${a}`;
   return (
-    <PageShell kicker="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight.">
-      <Card padding="11px 14px" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+    <PageShell band kicker="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight."
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>LIB</div>}>
+      <NoirSkin>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 14px" }}>
         <Search size={18} color={FIRE.btnIcon} />
         <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
         {q && <button style={{ ...S.clearBtn, color: FIRE.textMuted }} onClick={() => setQ("")}><X size={15} /></button>}
-      </Card>
-      <div style={S.chipRow}>
+      </div>
+      <div style={{ ...S.chipRow, marginBottom: 12 }}>
         {[["All", "All", null], ...Object.keys(TRACKS).map((k) => [k, TRACKS[k].label, TRACKS[k].accent])].map(([k, label, accent]) => {
           const on = track === k;
-          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.btnBg : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? (accent || FIRE.red) : FIRE.btnBorder}` }}>{label}</button>;
+          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? tint(accent || FIRE.redBright, "26") : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `1px solid ${on ? (accent || FIRE.redBright) : FIRE.btnBorder}` }}>{label}</button>;
         })}
       </div>
       {results.length === 0 ? (
         <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</Card>
-      ) : (
-        <div style={S.cardGrid}>{results.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} />)}</div>
-      )}
+      ) : (<>
+        {/* SPOTLIGHT — the newest matching packet, track-coloured */}
+        {spot && (() => { const T = TRACKS[spot.track]; return (
+          <button onClick={() => openPacket(spot.id)} style={{ ...FS.cardNoir, position: "relative", overflow: "hidden", width: "100%", textAlign: "left", cursor: "pointer", fontFamily: "inherit", padding: "18px 20px", marginBottom: 14, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", border: `1px solid ${tint(T.accent, "66")}`, background: `radial-gradient(90% 140% at 100% 0%, ${tint(T.accent, "33")}, transparent 55%), ${FIRE.cardNoir}` }}>
+            <T.Icon aria-hidden="true" size={120} color={T.accent} style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", opacity: 0.08, pointerEvents: "none" }} />
+            <div style={{ flex: "1 1 280px", minWidth: 0, position: "relative" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", color: T.accent, background: tint(T.accent, "21"), border: `1px solid ${tint(T.accent, "66")}`, borderRadius: 999, padding: "3px 10px" }}><Sparkles size={12} /> NEWEST IN THE LIBRARY</span>
+              <div style={{ ...S.runCode, color: T.accent, marginTop: 10 }}>{spot.code}</div>
+              <h2 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1.1, margin: "4px 0 6px", color: FIRE.textPrimary }}>{spot.title}</h2>
+              <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, maxWidth: 620 }}>{spot.objective}</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 12, color: FIRE.textMuted, marginTop: 8 }}>
+                <span><Clock size={12} style={{ verticalAlign: "-2px" }} /> <b style={{ color: FIRE.textSecondary }}>{spot.time}</b></span><span>·</span><span>Updated {spot.updated}</span>
+              </div>
+            </div>
+            <span style={{ ...FS.btnPrimary, position: "relative", background: T.accent, flexShrink: 0 }}>View packet <ChevronRight size={15} /></span>
+          </button>
+        ); })()}
+        {/* SHELVES — one labelled row per track */}
+        {shelves.map(({ k, T, items }) => (
+          <section key={k} style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+              <span style={{ width: 26, height: 26, borderRadius: 7, display: "inline-flex", alignItems: "center", justifyContent: "center", background: tint(T.accent, "21"), border: `1px solid ${tint(T.accent, "55")}` }}><T.Icon size={14} color={T.accent} /></span>
+              <h3 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, letterSpacing: ".02em", margin: 0, color: FIRE.textPrimary }}>{T.label}</h3>
+              <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{items.length} packet{items.length === 1 ? "" : "s"}</span>
+              {track === "All" && <button onClick={() => setTrack(k)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 11.5, color: FIRE.textSecondary, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 2 }}>See all <ChevronRight size={13} /></button>}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))", gap: 10 }}>
+              {items.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} />)}
+            </div>
+          </section>
+        ))}
+      </>)}
+      </NoirSkin>
     </PageShell>
   );
 }
+// A packet card on its track shelf: bolder track colour (top edge, tinted icon well, code), Oswald title.
 function RunCard({ S, p, onClick }) {
   const T = TRACKS[p.track];
   return (
-    <button style={{ ...S.runCard, ...FS.card, cursor: "pointer", textAlign: "left", borderLeft: `4px solid ${T.accent}` }} onClick={onClick}>
-      <div style={S.runTop}><span style={{ ...S.runCode, color: T.accent }}>{p.code}</span><T.Icon size={16} color={T.accent} /></div>
-      <h3 style={{ ...S.runTitle, color: FIRE.textPrimary }}>{p.title}</h3>
-      <p style={{ ...S.runObj, color: FIRE.textMuted }}>{p.objective}</p>
-      <div style={{ ...S.runFoot, color: FIRE.textMuted }}><span><Clock size={13} /> {p.time}</span><span style={S.runUpdated}>Updated {p.updated}</span></div>
+    <button style={{ ...FS.cardNoir, cursor: "pointer", textAlign: "left", fontFamily: "inherit", padding: "13px 14px", display: "flex", flexDirection: "column", gap: 6, borderTop: `3px solid ${T.accent}`, minWidth: 0 }} onClick={onClick}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ width: 30, height: 30, borderRadius: 8, display: "inline-flex", alignItems: "center", justifyContent: "center", background: `${T.accent}21`, border: `1px solid ${T.accent}55` }}><T.Icon size={15} color={T.accent} /></span>
+        <span style={{ ...S.runCode, color: T.accent, fontSize: 11.5 }}>{p.code}</span>
+      </div>
+      <h4 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, lineHeight: 1.15, margin: "2px 0 0", color: FIRE.textPrimary }}>{p.title}</h4>
+      <p style={{ margin: 0, fontSize: 12, lineHeight: 1.45, color: FIRE.textMuted, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{p.objective}</p>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: FIRE.textMuted, marginTop: "auto", paddingTop: 4 }}><span><Clock size={12} style={{ verticalAlign: "-2px" }} /> {p.time}</span><span>Updated {p.updated}</span></div>
     </button>
   );
 }
