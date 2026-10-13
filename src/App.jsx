@@ -14674,15 +14674,8 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
       {photoOpen && checkPhoto && <PhotoDotEditor S={S} url={photoUrls[checkPhoto.id]} photo={checkPhoto}
         dots={dotsFor(checkPhoto.id)} unplaced={[]} marks={marks} editable={false}
         tabs={photoTabs} checkPanel={checkPanel} onClose={() => setPhotoOpen(false)} busy={false} />}
-      <div style={{ ...FS.cardNoir, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
-          <Truck size={18} color={FIRE.btnIcon} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Truck check</div>
-            <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontWeight: 700, fontSize: 18, color: FIRE.textPrimary }}>{rig.name}</div>
-          </div>
-          <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={onClose}><X size={16} color={FIRE.textSecondary} /></button>
-        </div>
+      <div style={{ ...NOIR_MODAL_PANEL, width: "min(560px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+        <NoirModalHead icon={Truck} title={rig.name} sub="Truck check" onClose={onClose} />
         <div style={{ padding: 16 }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: FIRE.textMuted }}><Loader2 size={15} className="spin" /> Loading…</div>
@@ -18977,15 +18970,8 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
   }
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
-      <div style={{ ...FS.card, width: "min(480px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
-          <ClipboardList size={16} color={FIRE.btnIcon} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Attach agenda</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.title}</div>
-          </div>
-          <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={onClose}><X size={16} color={FIRE.textSecondary} /></button>
-        </div>
+      <div style={{ ...NOIR_MODAL_PANEL, width: "min(480px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+        <NoirModalHead icon={ClipboardList} title={session.title} sub="Attach agenda" onClose={onClose} />
         <div style={{ padding: 12 }}>
           {agendas === null ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted, padding: 8 }}><Loader2 size={14} className="spin" /> Loading agendas…</div>
