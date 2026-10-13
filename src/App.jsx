@@ -13145,11 +13145,10 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     saveOrShareText(csv, `attendance-${range.from}_to_${range.to}.csv`);
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={FS.kicker}>REPORTS · ATTENDANCE</div>
-      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Attendance Report</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>Training attendance per member for {rangeText}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.</div>
+    <PageShell band watermark="REPORTS" kicker="REPORTS · ATTENDANCE" title="Attendance Report"
+      sub={`Training attendance per member for ${rangeText}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.`}
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
@@ -13157,10 +13156,10 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={S.segRow}>
+        <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}` }}>
           {[["summary", "Summary"], ["detail", "By session"]].map(([k, l]) => {
             const on = detail === (k === "detail");
-            return <button key={k} onClick={() => setDetail(k === "detail")} style={{ ...S.segBtn, background: on ? FIRE.btnBg : "transparent", borderColor: on ? FIRE.red : FIRE.btnBorder, color: on ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>;
+            return <button key={k} onClick={() => setDetail(k === "detail")} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: on ? FIRE.redBright : "transparent", color: on ? "#fff" : FIRE.textSecondary }}>{l}</button>;
           })}
         </div>
         {detail && chron.length > 10 && (
@@ -13177,11 +13176,11 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
 
       {detail ? (
-        <div style={{ ...FS.card, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             <thead>
               <tr>
-                <th style={{ position: "sticky", left: 0, background: FIRE.card, textAlign: "left", padding: "6px 14px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", zIndex: 1 }}>Member</th>
+                <th style={{ position: "sticky", left: 0, background: FIRE.cardNoir, textAlign: "left", padding: "6px 14px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", zIndex: 1 }}>Member</th>
                 {gridCols.map((s) => (
                   <th key={s.id} title={s.title} style={{ padding: "6px 9px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>
                     {colLabel(s)}{s.audience === "board" ? <span style={{ color: FIRE.blueText }}> ·B</span> : s.audience === "leadership" ? <span style={{ color: FIRE.amberText }}> ·L</span> : null}
@@ -13192,8 +13191,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                  <td style={{ position: "sticky", left: 0, background: FIRE.card, padding: "7px 14px", fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", zIndex: 1 }}>{r.name}</td>
+                <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                  <td style={{ position: "sticky", left: 0, background: FIRE.cardNoir, padding: "7px 14px", fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", zIndex: 1 }}>{r.name}</td>
                   {gridCols.map((s) => { const c = CELL[cellState(r, s)]; return <td key={s.id} style={{ textAlign: "center", padding: "7px 9px", color: c.c, fontWeight: 700 }}>{c.ch}</td>; })}
                   <td style={{ textAlign: "center", padding: "7px 12px", ...FS.num, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{r.attended}/{r.eligible}</td>
                 </tr>
@@ -13203,14 +13202,14 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
           <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "8px 14px 2px" }}><span style={{ color: FIRE.green, fontWeight: 700 }}>✓</span> attended · <span style={{ color: FIRE.redText, fontWeight: 700 }}>✗</span> absent · <span style={{ fontWeight: 700 }}>—</span> not expected · <span style={{ color: FIRE.amberText }}>·L</span> leadership · <span style={{ color: FIRE.blueText }}>·B</span> board</div>
         </div>
       ) : (
-      <div style={{ ...FS.card, padding: "4px 16px", marginTop: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
+      <div style={{ ...FS.cardNoir, padding: "4px 16px", marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
           <div style={{ flex: 1, minWidth: 0 }}>Member</div>
           <div style={{ width: 90, textAlign: "right" }}>Attended</div>
           <div style={{ width: 60, textAlign: "right" }}>Rate</div>
         </div>
         {rows.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "12px 0" }}>No members to report.</div> : rows.map((r) => (
-          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
               <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.role}</div>
@@ -13222,7 +13221,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
       )}
       {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {rangeText} yet.</div>}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
