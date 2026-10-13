@@ -19143,10 +19143,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           ) : (<>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "12px 0 8px" }}>
               <span style={{ fontSize: 13.5, color: FIRE.textSecondary, ...num }}>{attendedCount} of {totalRecorded} sessions attended</span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.greenText, ...num }}>{pct}%</span>
+              {/* Same thresholds as the roster attendance rings: ≥90 green · 70–89 amber · <70 red (low attendance is bad). */}
+              <span style={{ fontSize: 15, fontWeight: 700, color: pct >= 90 ? FIRE.greenText : pct >= 70 ? FIRE.amberText : FIRE.redText, ...num }}>{pct}%</span>
             </div>
             <div style={{ height: 8, borderRadius: 999, background: FIRE.track, overflow: "hidden" }}>
-              <div style={{ width: `${pct}%`, height: "100%", background: FIRE.green, borderRadius: 999 }} />
+              <div style={{ width: `${pct}%`, height: "100%", background: pct >= 90 ? FIRE.green : pct >= 70 ? FIRE.amberText : FIRE.redBright, borderRadius: 999 }} />
             </div>
           </>)}
         </div>
