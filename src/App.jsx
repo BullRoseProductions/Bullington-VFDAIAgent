@@ -8722,13 +8722,10 @@ function Funding({ S, role, notify, dept, meId, members }) {
    RLS change on donation_campaigns and a split of this page — not a client-side condition. */
 function Donations({ S, role, notify, dept, meId, members, back }) {
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
-      <div style={{ marginBottom: 14 }}>
-        <div style={FS.kicker}>DONATIONS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>What you're raising for, and who gives</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Keep track of the businesses and people who support the department, and the funds you're asking them to help with.</div>
-      </div>
+    <PageShell band watermark="FUNDS" kicker="DONATIONS" title="What you're raising for, and who gives"
+      sub="Keep track of the businesses and people who support the department, and the funds you're asking them to help with."
+      above={back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding</button>}>
+      <NoirSkin>
 
       {/* STACKED, not tabbed. The two answer different questions — "what are we raising for" and
           "who gives" — and a leader working a drive needs both in view: the funds give the asks
@@ -8736,10 +8733,11 @@ function Donations({ S, role, notify, dept, meId, members, back }) {
           made the page feel like two features sharing a tile. */}
       <DonationFunds S={S} notify={notify} meId={meId} members={members} />
 
-      <div style={{ marginTop: 28, paddingTop: 20, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+      <div style={{ marginTop: 28, paddingTop: 20, borderTop: `1px solid ${FIRE.lineNoir}` }}>
         <DonationBusinesses S={S} notify={notify} meId={meId} members={members} />
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -8879,7 +8877,7 @@ function DonationFunds({ S, notify, meId, members }) {
   }
 
   const form = (
-    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Fund name *</span>
         <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="New Engine Fund" /></label>
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Short line</span>
@@ -8909,8 +8907,8 @@ function DonationFunds({ S, notify, meId, members }) {
   return (
     <>
       {loadErr && <OfflineNotice onRetry={load} what="donations" />}
-      <div style={{ ...FS.kicker, marginBottom: 4 }}>FUNDS</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>What you're raising for. Each one can carry a donate link and a target, and fills up as gifts are logged against it.</p>
+      <div style={{ ...NOIR_LABEL, marginBottom: 4 }}>FUNDS</div>
+      <p style={{ ...NOIR_HELP, marginBottom: 10 }}>What you're raising for. Each one can carry a donate link and a target, and fills up as gifts are logged against it.</p>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fund</button>}
         {/* Archived stays one click away, and says how many — so archiving reads as "put away"
@@ -8928,7 +8926,7 @@ function DonationFunds({ S, notify, meId, members }) {
         /* UNFORCED. A department that never runs a donation drive is not behind on anything, so the
            empty state invites rather than nags — and the archived view gets its own wording so it
            does not read as "you have no funds" when active ones exist. */
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           {showArchived
             ? "Nothing archived. Funds you put away will wait here, with their giving history intact."
             : "No funds yet — add one whenever you're ready. Plenty of departments run for years without one; it's here for when you're raising for something specific and want to keep track of who helped."}
@@ -8936,7 +8934,7 @@ function DonationFunds({ S, notify, meId, members }) {
       ) : (
         <div>
           {shown.map((c) => (
-            <div key={c.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: c.status === "archived" ? 0.75 : 1 }}>
+            <div key={c.id} style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 10, opacity: c.status === "archived" ? 0.75 : 1 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                 <HeartHandshake size={17} color={FIRE.greenText} style={{ flexShrink: 0, marginTop: 2 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -9021,7 +9019,7 @@ function DonationFunds({ S, notify, meId, members }) {
                   </div>
 
                   {giftFor === c.id && (
-                    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "rgba(255,255,255,.03)", border: `0.5px solid ${FIRE.hairline}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "rgba(255,255,255,.03)", border: `1px solid ${FIRE.lineNoir}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                       <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Amount ($) *</span>
                         <input style={FS.input} value={gf.amount} onChange={(e) => setGf((x) => ({ ...x, amount: e.target.value }))} placeholder="250" inputMode="numeric" autoFocus /></label>
                       <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date received *</span>
@@ -9216,8 +9214,8 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
   }
 
   const stat = (label, value, sub, color) => (
-    <div style={{ ...FS.card, padding: 14, flex: "1 1 180px", minWidth: 150 }}>
-      <div style={{ ...FS.kicker, marginBottom: 6 }}>{label}</div>
+    <div style={{ ...FS.cardNoir, padding: 14, flex: "1 1 180px", minWidth: 150 }}>
+      <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 21, fontWeight: 800, color: color || FIRE.textPrimary, ...FS.num, lineHeight: 1.1 }}>{value}</div>
       {sub && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
     </div>
@@ -9228,7 +9226,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
       {loadErr && <OfflineNotice onRetry={load} what="this history" />}
       <button style={{ ...FS.btn, marginBottom: 12 }} onClick={onBack}><ArrowLeft size={15} /> All supporters</button>
 
-      <div style={{ ...S.opCard, ...FS.card, marginBottom: 14 }}>
+      <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
           <HeartHandshake size={20} color={stageColor(donor.stage)} style={{ flexShrink: 0, marginTop: 3 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -9250,7 +9248,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
           </div>
           <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => onEdit(donor)}><Pencil size={13} /> Edit</button>
         </div>
-        {donor.relationship_notes && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 10, lineHeight: 1.55, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}` }}>{donor.relationship_notes}</div>}
+        {donor.relationship_notes && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 10, lineHeight: 1.55, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>{donor.relationship_notes}</div>}
       </div>
 
       {/* Pledged and Received side by side, never reconciled — see the note above the component. */}
@@ -9266,7 +9264,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
       </div>
 
       {openForm === "touch" && (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>When *</span>
             <input style={FS.input} type="date" value={tf.occurred_on} onChange={(e) => setTf((x) => ({ ...x, occurred_on: e.target.value }))} /></label>
           <label style={{ ...S.field, flex: 1, minWidth: 220 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What came of it *</span>
@@ -9277,7 +9275,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
       )}
 
       {openForm === "gift" && (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Amount ($) *</span>
             <input style={FS.input} value={gf.amount} onChange={(e) => setGf((x) => ({ ...x, amount: e.target.value }))} placeholder="250" inputMode="numeric" autoFocus /></label>
           <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date received *</span>
@@ -9296,11 +9294,11 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
         </div>
       )}
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>HISTORY</div>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}>HISTORY</div>
       {rows === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
       ) : list.length === 0 ? (
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           No history yet — log a call, a visit, or a gift.
         </div>
       ) : (
@@ -9310,13 +9308,13 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
             const Icon = meta.Icon;
             const isGift = r.kind === "contribution";
             return (
-              <div key={r.id} style={{ display: "flex", gap: 11, padding: "11px 2px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                <div style={{ paddingTop: 2, color: isGift ? FIRE.red : FIRE.textMuted }}><Icon size={15} /></div>
+              <div key={r.id} style={{ display: "flex", gap: 11, padding: "11px 2px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                <div style={{ paddingTop: 2, color: isGift ? FIRE.greenText : FIRE.textMuted }}><Icon size={15} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.label || meta.label}</span>
                     {isGift && r.amount != null && <span style={{ fontSize: 14, fontWeight: 800, color: FIRE.red, ...FS.num }}>${Number(r.amount).toLocaleString()}</span>}
-                    {isGift && r.campaign_id && <span style={{ fontSize: 11.5, color: FIRE.textMuted, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "1px 8px" }}>{fundName.get(r.campaign_id) || "a fund"}</span>}
+                    {isGift && r.campaign_id && <span style={{ fontSize: 11.5, color: FIRE.textMuted, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "1px 8px" }}>{fundName.get(r.campaign_id) || "a fund"}</span>}
                   </div>
                   {r.note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>{r.note}</div>}
                 </div>
@@ -9425,7 +9423,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
   }
 
   const form = (
-    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
         <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="Dale Harris" /></label>
       <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Business</span>
@@ -9456,8 +9454,8 @@ function DonationBusinesses({ S, notify, meId, members }) {
   return (
     <>
       {loadErr && <OfflineNotice onRetry={load} what="supporters" />}
-      <div style={{ ...FS.kicker, marginBottom: 4 }}>DONATION TRACKER</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Everyone who gives or might — businesses and individuals alike. Note where each conversation stands and when to check back.</p>
+      <div style={{ ...NOIR_LABEL, marginBottom: 4 }}>DONATION TRACKER</div>
+      <p style={{ ...NOIR_HELP, marginBottom: 10 }}>Everyone who gives or might — businesses and individuals alike. Note where each conversation stands and when to check back.</p>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a supporter</button>}
         <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={() => setShowRetired((v) => !v)}>
@@ -9470,7 +9468,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
       {rows === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
       ) : shown.length === 0 ? (
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           {showRetired
             ? "Nobody retired. Supporters you stop working with wait here, with their giving history intact."
             : "No supporters yet. Add the businesses and people you'd ask — the hardware store, the feed store, the family that always turns up. You can note where each conversation stands and when to check back."}
@@ -9484,7 +9482,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
             const due = d.active && d.next_follow_up && d.next_follow_up <= todayISO;
             return (
               <div key={d.id} onClick={() => setSelectedId(d.id)}
-                   style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: d.active ? 1 : 0.72, cursor: "pointer" }}>
+                   style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 10, opacity: d.active ? 1 : 0.72, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <HeartHandshake size={17} color={stageColor(d.stage)} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
