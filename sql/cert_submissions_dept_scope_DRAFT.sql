@@ -1,5 +1,7 @@
 -- =====================================================================
--- cert_submissions — DEPARTMENT SCOPING FIX. DRAFT. NOT APPLIED.
+-- cert_submissions — DEPARTMENT SCOPING FIX. APPLIED 2026-10-13 by hand (post-conditions passed;
+-- state check: 4 policies — admin read = is_dept_admin() AND department_id = my_department_id(),
+-- leader insert scoped to own dept + own members). RETEST: sql/cert_submissions_dept_scope_RETEST.sql.
 --
 -- LEAK (confirmed 2026-10-13 by an impersonation test, all 5 departments): every ordinary
 -- Dept Admin could READ every department's cert submissions (151–193 rows from other depts),
