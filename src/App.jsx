@@ -15381,6 +15381,84 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
     </div>
   );
 }
+// Per-item custody ledger — APPROVED NEW READ (own commit). Loads only when opened: every
+// equipment_custody period for this unit (open + closed), plus the condition photos attached
+// to those periods (equipment_photos kind='condition'). Dept scoping is the tables' existing
+// RLS. Read-only — issue / transfer / return / recover keep their own flows. Photos are signed
+// one at a time, on click.
+function EquipmentCustodyLedger({ unit }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(null);       // null = not loaded yet
+  const [photos, setPhotos] = useState({});     // custody_id → [storage_path]
+  const [err, setErr] = useState(false);
+  const [shown, setShown] = useState({});       // storage_path → signed url
+  async function load() {
+    setErr(false);
+    const { data, error } = await supabase.from("equipment_custody")
+      .select("id, holder_name, opened_at, opened_by_name, open_action, closed_at, closed_by_name, close_action, condition_at_open, condition_at_close, note")
+      .eq("equipment_id", unit.id).order("opened_at", { ascending: false }).limit(100);
+    if (error) { setErr(true); return; }        // keep whatever was shown; never blank on a failed read
+    const list = data || [];
+    const ids = list.map((r) => r.id);
+    const byC = {};
+    if (ids.length) {
+      const { data: ph } = await supabase.from("equipment_photos")
+        .select("custody_id, storage_path").in("custody_id", ids).eq("kind", "condition").is("deleted_at", null);
+      (ph || []).forEach((p) => { if (p.storage_path) (byC[p.custody_id] = byC[p.custody_id] || []).push(p.storage_path); });
+    }
+    setRows(list); setPhotos(byC);
+  }
+  useEffect(() => { if (open && rows === null) load(); }, [open]);
+  async function view(path) {
+    if (shown[path]) { setShown((m) => { const n = { ...m }; delete n[path]; return n; }); return; }
+    const { data } = await supabase.storage.from("station-documents").createSignedUrl(path, 3600);
+    if (data?.signedUrl) setShown((m) => ({ ...m, [path]: data.signedUrl }));
+  }
+  const fmt = (t) => t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "";
+  const OPEN = { issue: "Issued", transfer_accepted: "Transferred in" };
+  const CLOSE = { returned: "Returned", transferred_out: "Transferred out", manager_recovery: "Recovered by manager", marked_lost: "Marked lost" };
+  return (
+    <div style={{ margin: "0 0 10px" }}>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} style={{ ...FS.btn, padding: "6px 11px", fontSize: 11.5 }}>
+        <Clock size={13} color={FIRE.btnIcon} /> {open ? "Hide custody history" : "Custody history"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "8px 12px" }}>
+          {err && <div style={{ fontSize: 12, color: FIRE.amberText, padding: "6px 0" }}>Couldn't load the custody history. <button onClick={load} style={{ background: "none", border: "none", color: FIRE.redText, cursor: "pointer", padding: 0, fontSize: 12 }}>Retry</button></div>}
+          {rows === null && !err && <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>}
+          {rows && rows.length === 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "6px 0" }}>Never issued — no custody records yet.</div>}
+          {rows && rows.map((r, i) => {
+            const lost = r.close_action === "marked_lost";
+            const tone = !r.closed_at ? FIRE.blueText : lost ? FIRE.redText : FIRE.textMuted;
+            return (
+              <div key={r.id} style={{ padding: "9px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.holder_name || "—"}</span>
+                  <span style={{ fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{fmt(r.opened_at)} → {r.closed_at ? fmt(r.closed_at) : "now"}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: tone }}>{r.closed_at ? (CLOSE[r.close_action] || "Closed").toUpperCase() : "HOLDING"}</span>
+                </div>
+                <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.45 }}>
+                  {[`${OPEN[r.open_action] || "Opened"}${r.opened_by_name ? ` by ${r.opened_by_name}` : ""}`,
+                    r.condition_at_open ? `out: ${r.condition_at_open}` : null,
+                    r.closed_at && r.closed_by_name ? `closed by ${r.closed_by_name}` : null,
+                    r.condition_at_close ? `back: ${r.condition_at_close}` : null].filter(Boolean).join(" · ")}
+                </div>
+                {r.note && <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 3 }}>“{r.note}”</div>}
+                {(photos[r.id] || []).length > 0 && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {photos[r.id].map((path, k) => shown[path]
+                      ? <img key={path} src={shown[path]} alt="Condition photo" onClick={() => view(path)} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, cursor: "pointer" }} />
+                      : <button key={path} onClick={() => view(path)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11 }}><Camera size={12} color={FIRE.btnIcon} /> Condition photo {photos[r.id].length > 1 ? k + 1 : ""}</button>)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 // Equipment registry — TYPE-FIRST. equipment_type is the seeded catalog; equipment holds the units.
 // One row per type ("Structure Jacket — 12 total · 4 available"); tap to expand its units and add more.
 // available = units with status='in_inventory'. status is owned by the custody ledger (later slice) —
@@ -16405,6 +16483,7 @@ function Equipment({ S, role, members, meId, notify }) {
                         </Card>
                       )}
                       <EquipmentUnitPhotos unit={u} canManage={canManage} meId={meId} notify={notify} />
+                      <EquipmentCustodyLedger unit={u} />
                     </div>
                   );
                 })}
