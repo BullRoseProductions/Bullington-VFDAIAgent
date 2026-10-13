@@ -13563,6 +13563,46 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
   );
 }
 
+// APPROVED NEW READ (fleet facelift): one rig's maintenance log — every apparatus_maintenance_log entry for that rig,
+// newest first. Mounted only inside an EXPANDED rig on the fleet board, so it loads on expand and never for the whole
+// fleet. Select-only; dept-scoped by the existing apparatus_maintenance_log RLS. A failed read keeps what was shown.
+function RigMaintenanceLog({ rig }) {
+  const [rows, setRows] = useState(null);   // null = loading
+  const [err, setErr] = useState("");
+  const load = () => {
+    setErr("");
+    supabase.from("apparatus_maintenance_log")
+      .select("id, task, done_at, done_by_name, notes, cost")
+      .eq("apparatus_id", rig.id)
+      .order("done_at", { ascending: false })
+      .limit(50)
+      .then(({ data, error }) => { if (error || !data) { setErr(error?.message || "Please try again."); return; } setRows(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rig.id]);
+  const yr = new Date().getFullYear();
+  const ytd = (rows || []).filter((r) => r.done_at && new Date(r.done_at).getFullYear() === yr).reduce((t, r) => t + (Number(r.cost) || 0), 0);
+  const money = (n) => `$${Math.round(n).toLocaleString()}`;
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+        Maintenance log{rows && ytd > 0 && <span style={{ color: FIRE.textSecondary, fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>· {money(ytd)} this year</span>}
+      </div>
+      {err ? <div style={{ fontSize: 12.5, color: FIRE.amberText }}>Couldn't load the log — not shown as empty. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={load}>Retry</button></div>
+        : rows == null ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>—</div>
+        : rows.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No maintenance logged for this rig yet. Completions recorded with Mark done (below) appear here.</div>
+        : rows.slice(0, 6).map((r, i, arr) => (
+          <div key={r.id} style={{ padding: "9px 0", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5 }}>
+              <span style={{ fontWeight: 600, color: FIRE.textPrimary, minWidth: 0 }}>{r.task}</span>
+              {r.cost != null && <span style={{ color: FIRE.amberText, fontWeight: 700, fontFamily: DISPLAY_FONT, flexShrink: 0 }}>{money(Number(r.cost))}</span>}
+            </div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{r.done_at ? new Date(r.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}{r.done_by_name ? ` · by ${r.done_by_name}` : ""}{r.notes ? ` · ${r.notes}` : ""}</div>
+          </div>
+        ))}
+      {rows && rows.length > 6 && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6 }}>+{rows.length - 6} earlier entries</div>}
+    </div>
+  );
+}
 function Apparatus({ S, role, members, meId, notify, dept }) {
   const activeStationId = useActiveStation();   // undefined = still loading
   const [rigs, setRigs] = useState([]);
@@ -13855,7 +13895,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
         <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
         <div className="ap-cols" style={{ marginTop: 14 }}>
-          <div style={{ minWidth: 0, fontSize: 12.5, color: FIRE.textMuted }}>Maintenance tasks and their history are in Maintenance below.</div>
+          <RigMaintenanceLog rig={r} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 }}>Capital &amp; replacement</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))", gap: 10 }}>
