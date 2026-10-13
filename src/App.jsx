@@ -17313,6 +17313,44 @@ function Onboarding({ S, members, setMembers, notify, role }) {
     return () => { alive = false; };
   }, [selId, progTick]);
   useReconnect(() => { if (progErr) setProgTick((t) => t + 1); });
+  /* ALL-MEMBERS OVERVIEW — the ONE added read: done flags for every PROBATIONARY member in onboarding, so each gets a
+     ring and the tiles can total across them. Dept-scoped by the existing onboarding_progress RLS (the same policy the
+     per-member read above already relies on); select-only, no write. The featured member keeps its live `checks`. */
+  const probMembers = candidates.filter((m) => m.status === "Probationary");
+  const probKey = probMembers.map((m) => m.id).join(",");
+  const [allProg, setAllProg] = useState(null);   // member_id → Set(item_id done) · null = loading
+  const [allProgErr, setAllProgErr] = useState(false);
+  const [allTick, setAllTick] = useState(0);
+  useEffect(() => {
+    if (!probMembers.length) { setAllProg(new Map()); return; }
+    let alive = true;
+    supabase.from("onboarding_progress").select("member_id, item_id, done").in("member_id", probMembers.map((m) => m.id))
+      .then(({ data, error }) => {
+        if (!alive) return;
+        if (error || !data) { setAllProgErr(true); return; }   // a failed read keeps the last-known overview
+        const mp = new Map();
+        data.forEach((r) => { if (!r.done) return; if (!mp.has(r.member_id)) mp.set(r.member_id, new Set()); mp.get(r.member_id).add(r.item_id); });
+        setAllProgErr(false); setAllProg(mp);
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probKey, allTick, selId]);   // re-read on switching members, so a ring left behind after a sign-off is current
+  useReconnect(() => { if (allProgErr) setAllTick((t) => t + 1); });
+  // one member's completion: the featured member from live `checks`, everyone else from the overview read
+  const progressOf = (m) => {
+    if (!items || !items.length) return null;
+    const doneIds = String(m.id) === String(selId) ? null : (allProg ? (allProg.get(m.id) || new Set()) : undefined);
+    if (doneIds === undefined) return null;
+    const isDone = (it) => (it.is_mentor ? !!m.mentorId : doneIds ? doneIds.has(it.id) : !!checks[it.id]?.done);
+    const doneN = items.filter(isDone).length;
+    const open = items.filter((it) => !isDone(it));
+    return { pct: Math.round((doneN / items.length) * 100), doneN, open, openSignable: open.filter((it) => !it.is_mentor).length };
+  };
+  const overview = probMembers.map((m) => ({ m, p: progressOf(m) }));
+  const known = overview.filter((o) => o.p);
+  const avgDone = known.length ? Math.round(known.reduce((t, o) => t + o.p.pct, 0) / known.length) : null;
+  const awaiting = known.length === overview.length ? known.reduce((t, o) => t + o.p.openSignable, 0) : null;
+
   async function toggle(itemId) {   // sign / un-sign through the RPC — it stamps checked_by + checked_at server-side
     if (!canSign || !selId) return;
     const prev = checks[itemId];
@@ -17427,6 +17465,53 @@ function Onboarding({ S, members, setMembers, notify, role }) {
         </div>
         {canEditItems && <button style={{ ...FS.btn, alignSelf: "flex-end" }} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
       </Card>
+      {/* OVERVIEW is rendered here, above the featured member */}
+      {/* OVERVIEW — tiles + a progress ring per probationary member (click to feature them) */}
+      {!editMode && probMembers.length > 0 && items && items.length > 0 && (<>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
+          {[[UserPlus, "In onboarding", String(probMembers.length), "probationary members", null],
+            [BarChart3, "Avg completion", avgDone == null ? "—" : `${avgDone}%`, probMembers.length === 1 ? "for the one member" : `across the ${probMembers.length}`, avgDone == null ? null : avgDone >= 75 ? FIRE.greenText : avgDone >= 40 ? FIRE.amberText : FIRE.redText],
+            [ClipboardCheck, "Awaiting sign-off", awaiting == null ? "—" : String(awaiting), "open items", awaiting ? FIRE.amberText : null]].map(([Icon, l, v, sub, tone]) => (
+            <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>
+            </div>
+          ))}
+        </div>
+        {allProgErr && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginBottom: 10 }}>Couldn't load everyone's progress — showing what's known. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setAllTick((t) => t + 1)}>Retry</button></div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(280px, 100%), 1fr))", gap: 12, marginBottom: 12 }}>
+          {overview.map(({ m, p }) => {
+            const on = String(m.id) === String(selId);
+            const R = 31, C = 2 * Math.PI * R;
+            const tone = p == null ? FIRE.textMuted : p.pct >= 75 ? FIRE.greenText : p.pct >= 40 ? FIRE.amberText : FIRE.redText;
+            const started = m.joinedOn ? new Date(m.joinedOn + "T00:00:00") : null;
+            const dayN = started ? Math.max(1, Math.floor((Date.now() - started.getTime()) / 86400000) + 1) : null;
+            const next = p && p.open.find((it) => !it.is_mentor) || (p && p.open[0]);
+            return (
+              <button key={m.id} onClick={() => setSelId(m.id)} aria-pressed={on} style={{ ...FS.cardNoir, borderRadius: 14, padding: 16, display: "flex", gap: 15, alignItems: "center", textAlign: "left", fontFamily: "inherit", cursor: "pointer", minWidth: 0, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}` }}>
+                <div style={{ position: "relative", width: 76, height: 76, flexShrink: 0 }}>
+                  <svg width="76" height="76" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
+                    <circle cx="38" cy="38" r={R} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="8" />
+                    {p && p.pct > 0 && <circle cx="38" cy="38" r={R} fill="none" stroke={tone} strokeWidth="8" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - p.pct / 100)} />}
+                  </svg>
+                  <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{p ? `${p.pct}%` : "—"}</div>
+                    <div style={{ fontSize: 7.5, letterSpacing: ".08em", color: FIRE.textMuted, marginTop: 1 }}>DONE</div>
+                  </div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>{m.name}</div>
+                  <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{[m.role, started ? `started ${started.toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : null, dayN ? `day ${dayN}` : null].filter(Boolean).join(" · ")}</div>
+                  {p && (p.open.length === 0
+                    ? <div style={{ fontSize: 11.5, color: FIRE.greenText, marginTop: 8 }}>Every step signed off</div>
+                    : next && <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 8 }}>Next: <b style={{ color: FIRE.redText, fontWeight: 600 }}>{next.label}</b>{p.open.length > 1 ? ` + ${p.open.length - 1} more` : ""}</div>)}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </>)}
       {progErr && <Card padding={12} style={{ marginBottom: 12, fontSize: 13, color: FIRE.amberText }}>Couldn't load {person?.name || "this member"}'s progress. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setProgTick((t) => t + 1)}>Retry</button></Card>}
       {!canSign && !editMode && <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 12px" }}>Items are signed off by Board, Department Admin, or Officers.</div>}
       {editMode && canEditItems ? (
