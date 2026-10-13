@@ -5836,11 +5836,13 @@ function Documents({ S, role, notify, uploaderName, members }) {
 
 /* ---------------- Visibility ---------------- */
 const POST_THEMES = [
-  { tag: "PEOPLE", c: "#B11E2A", t: "Member spotlight — why they serve" },
-  { tag: "COMMUNITY", c: "#0E6B62", t: "Seasonal safety tip" },
-  { tag: "BEHIND SCENES", c: "#1F4E79", t: "Training night photo or clip" },
-  { tag: "THE ASK", c: "#9A6B12", t: "Thank a supporter / recap the month" },
-  { tag: "SAFETY", c: "#54506B", t: "Quick home-safety reminder" },
+  // Default (seed) post themes for a department that hasn't saved its own — the noir categorical set. Saved
+  // themes keep the colours they were given.
+  { tag: "PEOPLE", c: FIRE.red, t: "Member spotlight — why they serve" },
+  { tag: "COMMUNITY", c: FIRE.catGreen, t: "Seasonal safety tip" },
+  { tag: "BEHIND SCENES", c: FIRE.catBlue, t: "Training night photo or clip" },
+  { tag: "THE ASK", c: FIRE.catAmber, t: "Thank a supporter / recap the month" },
+  { tag: "SAFETY", c: FIRE.catViolet, t: "Quick home-safety reminder" },
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // Category colour PICKER palette + the default for a new category (index 0). The Industrial Noir set; a
@@ -6063,7 +6065,7 @@ function ContentCalendar({ S, role, notify }) {
       </div>
 
       {showCat && (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Label</span>
             <input style={FS.input} value={catLabel} onChange={(e) => setCatLabel(e.target.value)} placeholder="e.g. EVENTS" /></label>
           <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
@@ -6082,7 +6084,7 @@ function ContentCalendar({ S, role, notify }) {
       )}
 
       {show && (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
             <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span>
@@ -6098,7 +6100,7 @@ function ContentCalendar({ S, role, notify }) {
         cur={cur} setCur={setCur} dark
         items={monthPosts}
         renderChip={(p) => ({ color: p.c, label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
-        todayColor="#B11E2A"
+        todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={
           <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
@@ -6501,10 +6503,11 @@ function Visibility({ S, brand, role, notify }) {
   }
   return (
     <PageShell kicker="PUBLIC RELATIONS" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week.">
-      <SectionLabel style={{ marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MONTHLY CONTENT CALENDAR</SectionLabel>
+      <NoirSkin>
+      <CardHead icon={Calendar} title="Monthly content calendar" />
       <ContentCalendar S={S} role={role} notify={notify} />
 
-      <button onClick={() => setIdeasOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: ideasOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>IDEAS FOR THINGS TO MAKE<span style={{ marginLeft: "auto", display: "inline-flex" }}>{ideasOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+      <CardHead as="button" onClick={() => setIdeasOpen((v) => !v)} icon={Wand2} title="Ideas for things to make" right={ideasOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />} style={{ marginBottom: ideasOpen ? 8 : 14, cursor: "pointer" }} />
       {ideasOpen && <IdeaGrid S={S} dark items={[
         { h: "60-second station tour", p: "Walk the bay on a phone camera. People love seeing inside." },
         { h: "Member spotlight", p: "One photo + why they serve. Faces build trust the fastest." },
@@ -6514,9 +6517,9 @@ function Visibility({ S, brand, role, notify }) {
         { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
       ]} />}
 
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
-          <SectionLabel style={{ marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI CAPTION HELPER</SectionLabel>
+          <CardHead icon={Sparkles} title="AI caption helper" />
           <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Write a post for your station</h3>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What's the post about?</span>
             <input style={FS.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
@@ -6530,6 +6533,7 @@ function Visibility({ S, brand, role, notify }) {
 
       <GraphicStudio S={S} brand={brand} />
 
+      </NoirSkin>
     </PageShell>
   );
 }
