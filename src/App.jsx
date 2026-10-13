@@ -20493,6 +20493,7 @@ const GFX_TEMPLATES = [
   { key: "stat", name: "Stat card", labels: ["Eyebrow", "Big number", "What it measures", "Call to action"], def: { l1: "Last month", l2: "41", l3: "calls answered by your volunteers", l4: "Your neighbors need you. Join the crew." } },
 ];
 function GraphicStudio({ S, brand }) {
+  const GS_ON = { background: "rgba(200,50,58,.14)", borderColor: FIRE.redBright, color: FIRE.textPrimary };   // was S.segBtnOn (purple-grey, off-palette)
   const [tk, setTk] = useState("flyer");
   const tmpl = GFX_TEMPLATES.find((t) => t.key === tk);
   const [f, setF] = useState(tmpl.def);
@@ -20524,26 +20525,26 @@ function GraphicStudio({ S, brand }) {
   }
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAKE A GRAPHIC</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
+      <CardHead icon={ImageIcon} title="Make a graphic" />
+      <p style={NOIR_HELP}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {GFX_TEMPLATES.map((t) => (
-          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
+          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(tk === t.key ? GS_ON : {}) }}>{t.name}</button>
         ))}
       </div>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
+        <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {GFX_SIZES.map((sz) => (
-            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(sizeKey === sz.key ? S.segBtnOn : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
+            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(sizeKey === sz.key ? GS_ON : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
           ))}
         </div>
       </div>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>STYLE</div>
+        <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>STYLE</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {STYLES.map((sy) => (
-            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(styleKey === sy.key ? S.segBtnOn : {}) }}>{sy.name}</button>
+            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(styleKey === sy.key ? GS_ON : {}) }}>{sy.name}</button>
           ))}
         </div>
       </div>
@@ -20578,7 +20579,7 @@ function GraphicStudio({ S, brand }) {
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
                   <button style={{ ...FS.btnPrimary, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
                 </div>
-                {aiErr && <div style={{ ...S.errBox, marginTop: 8, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.redText }}>{aiErr}</div>}
+                {aiErr && <div style={{ ...NOIR_ERR, marginTop: 8 }}>{aiErr}</div>}
               </div>}
             </div>
           </div>
