@@ -4775,7 +4775,7 @@ function StudySession({ S }) {
   }
   const visible = turns.filter((t) => !t.hidden);
   return (
-    <PageShell kicker="STUDY SESSION" title="Study for your certification" sub="Pick a track, then quiz yourself or ask a question. An AI study partner — always verify against official standards.">
+    <PageShell band watermark="STUDY" kicker="STUDY SESSION" title="Study for your certification" sub="Pick a track, then quiz yourself or ask a question. An AI study partner — always verify against official standards.">
       <NoirSkin>
       <Card padding={16} style={{ marginBottom: 12, display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
@@ -4807,7 +4807,7 @@ function StudySession({ S }) {
           </div>
         ))}
         {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Tutor is thinking…</div>}
-        {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+        {err && <div style={NOIR_ERR}>{err}</div>}
       </div>
       <div style={{ marginTop: 12 }}>
         {structuredQuiz ? (
