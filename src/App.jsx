@@ -16087,10 +16087,20 @@ function MyEquipment({ S, meId, notify }) {
     load();
   }
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
-  const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
+  // green = serviceable · amber = needs attention (a warning) · muted = out of service
+  const condColor = (c) => c === "Serviceable" ? FIRE.greenText : c === "Out of service" ? FIRE.textMuted2 : FIRE.amberText;
+  const npill = (color, text) => <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 10px", borderRadius: 999, flexShrink: 0, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{text}</span>;
+  const gbtn = { fontSize: 11, fontWeight: 600, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 7, padding: "6px 11px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" };
   return (
     <PageShell band kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it."
-      watermark="MY GEAR">
+      watermark="MY GEAR"
+      actions={rows.some(transferable) ? (
+        /* Transfer moved into the band (the mock's .ph-actions) — same select-mode handlers. */
+        <div style={{ display: "flex", gap: 9, position: "relative" }}>
+          {!selMode
+            ? <button onClick={() => setSelMode(true)} style={FS.btn}><ArrowLeftRight size={14} color={FIRE.btnIcon} /> Transfer to someone</button>
+            : <button onClick={exitSelMode} style={FS.btn}>Cancel transfer</button>}
+        </div>) : null}>
       <NoirSkin>
       {/* CHIPS — counted from the rows already loaded (same gearStatus rule as each row's pill) */}
       {loaded && rows.length > 0 && (() => {
@@ -16113,13 +16123,7 @@ function MyEquipment({ S, meId, notify }) {
           </div>
         );
       })()}
-      {rows.some(transferable) && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          {!selMode
-            ? <button onClick={() => setSelMode(true)} style={FS.btn}><ArrowLeftRight size={14} color={FIRE.btnIcon} /> Transfer to someone</button>
-            : <button onClick={exitSelMode} style={FS.btn}>Cancel</button>}
-        </div>
-      )}
+      {selMode && <div style={{ fontSize: 12, color: FIRE.textSecondary, margin: "-4px 0 10px" }}>Pick the items to hand off, then Start transfer.</div>}
       {!loaded ? null : rows.length === 0 ? (
         <Card padding="26px 18px" style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6 }}>
           <HardHat size={26} color={FIRE.textMuted2} />
@@ -16127,8 +16131,10 @@ function MyEquipment({ S, meId, notify }) {
           <div style={{ fontSize: 12, color: FIRE.textMuted }}>When an equipment manager issues you gear, it shows up here.</div>
         </Card>
       ) : (
-        <Card padding="10px 16px">
-          <CardHead icon={HardHat} title="In your custody" count={rows.length} right={<span>live condition · service life</span>} />
+        <>
+        <CardHead icon={HardHat} title="In your custody" count={rows.length} right={<span>live condition · service life</span>} />
+        {/* The mock's .ggrid of .gcard item cards — border tinted by state (amber attention / red retire). */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 14 }}>
           {rows.map((r, i) => {
             const pending = !!r.return_requested_at;
             const busy = busyId === r.equipment_id;
@@ -16145,18 +16151,33 @@ function MyEquipment({ S, meId, notify }) {
             // against `cond` — with no live condition the pill is already showing the snapshot, and
             // deriving this from `cond` would make correctness depend on that fallback staying in place.
             const signedFor = (r.equipment?.condition && r.equipment.condition !== r.condition_at_open) ? r.condition_at_open : null;
+            const openIssue = myIssues.find((x) => x.equipment_id === r.equipment_id);
+            // Service-life bar (the mock's .glifewrap): elapsed share of life from the loaded dates; coloured by
+            // gearStatus (in life / aging / retire), not by percentage.
+            const yrs = Number(r.equipment?.equipment_type?.service_life_years) || 0;
+            const madeM = /^(\d{4})-(\d{2})-(\d{2})/.exec(r.equipment?.manufacture_date || "");
+            const usedPct = gear.tracked && madeM ? Math.min(100, Math.max(0, Math.round(((Date.now() - new Date(+madeM[1], +madeM[2] - 1, +madeM[3])) / (gear.retire - new Date(+madeM[1], +madeM[2] - 1, +madeM[3]))) * 100))) : null;
             return (
-              <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+              <div key={r.id} style={{ ...FS.cardNoir, borderRadius: 14, padding: 0, minWidth: 0, display: "flex", flexDirection: "column", border: `1px solid ${gear.rank === 0 ? "rgba(200,50,58,.45)" : (gear.rank === 1 || openIssue || cond !== "Serviceable") ? "rgba(204,158,82,.45)" : FIRE.lineNoir}` }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "15px 16px", flex: 1 }}>
                 {selMode && (
                   <input type="checkbox" disabled={!transferable(r)} checked={sel.has(r.equipment_id)} onChange={() => toggleSel(r.equipment_id)}
                     style={{ width: 16, height: 16, marginTop: 3, flexShrink: 0, accentColor: FIRE.red, opacity: transferable(r) ? 1 : 0.35 }} />
                 )}
-                <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.card2Noir, border: `1px solid ${gear.rank === 0 ? FIRE.redText + "66" : gear.rank === 1 ? FIRE.amberText + "66" : FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={18} color={gear.rank === 0 ? FIRE.redText : gear.rank === 1 ? FIRE.amberText : FIRE.textMuted} /></span>
+                <span style={{ width: 72, height: 72, borderRadius: 11, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={30} color={gear.rank === 0 ? FIRE.redText : gear.rank === 1 ? FIRE.amberText : FIRE.textMuted} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.2 }}>{r.equipment_name}</div>
+                    {!hideServiceable && npill(condColor(cond), cond || "—")}
+                  </div>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
-                  {gear.tracked && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Made {r.equipment.manufacture_date.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
-                  {signedFor && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Signed for as {signedFor}</div>}
+                  {usedPct != null && (
+                    <div style={{ marginTop: 9 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: FIRE.textMuted, marginBottom: 4, ...FS.num }}><span>service life{yrs ? ` · ${yrs} yr` : ""}</span><span>made {r.equipment.manufacture_date.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span></div>
+                      <div style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${usedPct}%`, height: "100%", borderRadius: 999, background: gear.fire }} /></div>
+                    </div>
+                  )}
+                  {signedFor && <div style={{ fontSize: 11, color: FIRE.amberText, marginTop: 5 }}>Signed for as {signedFor}</div>}
                   {pending && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Return pending — a manager will confirm receipt.</div>}
                   {(() => { const iss = myIssues.find((x) => x.equipment_id === r.equipment_id); return iss && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Issue reported · {issueKindLabel(iss.kind)} — a manager will follow up.</div>; })()}
                   {reportFor === r.equipment_id && (
@@ -16173,19 +16194,24 @@ function MyEquipment({ S, meId, notify }) {
                     </div>
                   )}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                  {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
-                  {!hideServiceable && <Pill S={S} color={condColor(cond)}>{(cond || "—").toUpperCase()}</Pill>}
-                  {r.equipment_id && reportFor !== r.equipment_id && !myIssues.some((x) => x.equipment_id === r.equipment_id) &&
-                    <button onClick={() => { setReportFor(r.equipment_id); setRKind("damaged"); setRNote(""); }} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><AlertTriangle size={12} color={FIRE.amberText} /> Report issue</button>}
-                  {pending
-                    ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
-                    : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
+                </div>
+                {/* .gfoot: the life-status flag on the left, the item's actions on the right */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 16px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                  {gear.tracked ? <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", borderRadius: 6, padding: "3px 8px", color: gear.fire, background: `${gear.fire}1A`, border: `1px solid ${gear.fire}55` }}>{gear.label}</span>
+                    : <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: FIRE.textMuted }}>NOT TRACKED</span>}
+                  <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                    {r.equipment_id && reportFor !== r.equipment_id && !openIssue &&
+                      <button onClick={() => { setReportFor(r.equipment_id); setRKind("damaged"); setRNote(""); }} style={{ ...gbtn, color: FIRE.redText, borderColor: "rgba(200,50,58,.35)" }}><AlertTriangle size={12} color={FIRE.redText} /> Report issue</button>}
+                    {pending
+                      ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...gbtn, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
+                      : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...gbtn, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
+                  </span>
                 </div>
               </div>
             );
           })}
-        </Card>
+        </div>
+        </>
       )}
       {selMode && sel.size > 0 && (
         <div style={{ position: "sticky", bottom: 0, marginTop: 12, display: "flex", justifyContent: "center" }}>
