@@ -15425,12 +15425,15 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   const [editMode, setEditMode] = useState(false);   // false = clean text; true = reveal Add + per-item Edit/Remove. Mark done stays at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingMaintId(null); setAdding(false); } return !v; }); }
   const rigNameById = new Map((rigs || []).map((r) => [r.id, r.name]));
+  const [maintErr, setMaintErr] = useState(false);       // a failed read is not "all maintenance up to date"
+  const [maintLoaded, setMaintLoaded] = useState(false);
   const loadMaint = () => {
     supabase.from("apparatus_maintenance")
       .select("id, rig_id, task, cadence, last_done_at")
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
-        if (error || !data) return;
+        if (error || !data) { setMaintErr(true); return; }   // keep last-known items
+        setMaintErr(false); setMaintLoaded(true);
         setItems(data.map((r) => ({
           id: r.id, rigId: r.rig_id,
           unit: r.rig_id ? (rigNameById.get(r.rig_id) || "Unknown unit") : "All units",
@@ -15440,7 +15443,8 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
         })));
       });
   };
-  useEffect(() => { loadMaint(); }, [rigs]);   // reload when rigs load/change so rig_id → unit name resolves
+  useEffect(() => { loadMaint(); }, [rigs]);
+  useReconnect(() => { if (maintErr) loadMaint(); });   // reload when rigs load/change so rig_id → unit name resolves
   useEffect(() => { if (onItems) onItems(items); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [items]);   // fleet board's open-maintenance flags read this same list
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const order = { Overdue: 0, "Due soon": 1, Current: 2 };
@@ -15517,9 +15521,10 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   return (
     <div style={{ marginTop: 22 }}>
       <SectionBar icon={Wrench} label="Maintenance & reminders" count={items.length} style={{ marginTop: 0 }} />
+      {maintErr && !maintLoaded ? <ReadRetry what="maintenance" onRetry={loadMaint} /> : (
       <div style={{ fontSize: 13, color: due > 0 ? FIRE.redText : FIRE.greenText, margin: "-2px 0 12px", fontWeight: 600 }}>
         {due > 0 ? `${due} maintenance item${due === 1 ? "" : "s"} need attention` : "All maintenance up to date"}
-      </div>
+      </div>)}
       {canManage && items.length > 0 && (
         <div style={{ display: "flex", marginBottom: 12 }}>
           <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
