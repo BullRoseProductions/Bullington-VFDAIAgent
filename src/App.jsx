@@ -1034,9 +1034,9 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEs
       </h1>
 
       {GEOFENCE_COPY_IS_DRAFT && (
-        <div style={{ ...FS.card, padding: 14, marginBottom: 14, borderLeft: `4px solid ${FIRE.red}` }}>
+        <div style={{ ...FS.cardNoir, padding: 14, marginBottom: 14, background: "rgba(214,169,94,.08)", border: "1px solid rgba(214,169,94,.32)" }}>
           <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
-            <AlertTriangle size={16} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+            <AlertTriangle size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
             <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
               <strong style={{ color: FIRE.textPrimary }}>Awaiting legal sign-off on this screen.</strong> The wording matches
               APP-002, but the assembled screen hasn't been cleared yet — it must not go in front of members or the app stores
@@ -1046,11 +1046,11 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEs
         </div>
       )}
 
-      <div style={{ ...FS.card, padding: 18 }}>
+      <div style={{ ...FS.cardNoir, padding: 18 }}>
         {/* Paragraph 1 carries "even when the app is closed or not in use" — the statement the
             store looks for and the one a member most needs to actually read. Set apart so it
             cannot be skimmed past in a wall of text. The words are untouched. */}
-        <div style={{ background: FIRE.track, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 10, padding: "13px 14px", margin: "0 0 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ ...NOIR_INSET, padding: "13px 14px", margin: "0 0 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
           <MapPin size={17} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.55 }}>
             {GEOFENCE_DISCLOSURE.lead}
@@ -1076,10 +1076,10 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEs
       {/* Answered already → show what they chose and let them change it. An agreement you
           cannot walk back is not consent, so "turn it off" is always on screen. */}
       {consent ? (
-        <div style={{ ...FS.card, padding: 16, marginTop: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: 16, marginTop: 12 }}>
           <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
             {consent === "granted"
-              ? <CheckCircle2 size={17} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              ? <CheckCircle2 size={17} color={FIRE.greenText} style={{ flexShrink: 0, marginTop: 1 }} />
               : <Clock size={17} color={FIRE.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>
