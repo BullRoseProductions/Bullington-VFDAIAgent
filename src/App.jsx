@@ -15756,61 +15756,86 @@ function IssueEquipmentModal({ S, availableUnits, members, managers, meId, notif
     notify({ kind: "success", title: "Equipment issued", text: `Issued ${selected.size} item${selected.size === 1 ? "" : "s"} to ${recipient?.name || "the member"}.` });
     onIssued();
   }
+  // The modals revamp mock (b4c_equipment_modals_revamp.html). Layout only — recipient / selection / signature /
+  // witness state and submit() (issue_equipment_batch) are exactly as before. Issue stays disabled until a member,
+  // at least one item and the recipient's signature are present; submit() still re-checks every rule.
+  const flabel = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, margin: "0 0 8px", display: "flex", alignItems: "center", gap: 8 };
+  const field = { width: "100%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: "12px 14px", color: FIRE.textPrimary, fontSize: 13.5, fontFamily: "inherit" };
+  const ready = !!recipientId && selected.size > 0 && !!sig && (!selfIssue || (!!witnessId && !!witnessSig));
+  const firstName = (recipient?.name || "").split(" ")[0];
+  const ini = (n) => (n || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   return createPortal(
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 480, padding: 20, margin: "24px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={Briefcase} title="Issue equipment" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 660, margin: "24px 0", background: "linear-gradient(180deg, #0E1218, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "16px 20px", borderBottom: `1px solid ${FIRE.lineNoir}`, position: "relative", background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)" }}>
+          <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Briefcase size={20} color={FIRE.redText} /></span>
+          <div style={{ minWidth: 0, paddingRight: 40 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, lineHeight: 1, color: FIRE.textPrimary }}>Issue equipment</div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4 }}>Sign gear out to a member — they confirm custody on the spot.</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ position: "absolute", top: 15, right: 16, width: 30, height: 30, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}><X size={14} color={FIRE.textSecondary} /></button>
         </div>
 
-        <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Issue to</span>
-          <select style={FS.input} value={recipientId} onChange={(e) => { setRecipientId(e.target.value); setSig(""); }}>
-            <option value="">Choose a member…</option>
-            {recipients.map((m) => <option key={m.id} value={m.id}>{m.name}{m.id === meId ? " (you)" : ""}</option>)}
-          </select>
-        </label>
+        <div style={{ padding: "16px 20px" }}>
+          <div style={flabel}>Issue to</div>
+          <div style={{ position: "relative", marginBottom: 16 }}>
+            {recipient && <span aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg, #242a32, #12161c)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10, color: FIRE.redText, pointerEvents: "none" }}>{ini(recipient.name)}</span>}
+            <select aria-label="Issue to" style={{ ...field, appearance: "none", WebkitAppearance: "none", paddingLeft: recipient ? 48 : 14, paddingRight: 34, color: recipient ? FIRE.textPrimary : FIRE.textMuted, cursor: "pointer" }} value={recipientId} onChange={(e) => { setRecipientId(e.target.value); setSig(""); }}>
+              <option value="">Choose a member…</option>
+              {recipients.map((m) => <option key={m.id} value={m.id}>{m.name}{m.role ? ` · ${m.role}` : ""}{m.id === meId ? " (you)" : ""}</option>)}
+            </select>
+            <ChevronDown size={16} color={FIRE.textMuted} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+          </div>
 
-        <div style={{ ...FS.kicker, marginBottom: 6 }}>ITEMS · {selected.size} selected</div>
-        <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${FIRE.hairline}`, borderRadius: 10, padding: "2px 10px", marginBottom: 14 }}>
-          {availableUnits.length === 0 ? (
-            <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No available items — everything is issued or out of inventory.</div>
-          ) : groupNames.map((cat) => (
-            <div key={cat}>
-              <div style={{ ...FS.kicker, padding: "8px 0 4px" }}>{cat}</div>
-              {grouped[cat].map((u) => {
-                const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
-                return (
-                  <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 40, padding: "4px 0", cursor: "pointer", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-                    <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggle(u.id)} style={{ width: 16, height: 16, flexShrink: 0, accentColor: FIRE.red }} />
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary }}>{u.typeName} · {idLabel}</span>
-                    <span style={{ fontSize: 11, color: u.condition === "Serviceable" ? FIRE.greenText : FIRE.textMuted2 }}>{u.condition}</span>
-                  </label>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+          <div style={flabel}>Items to issue <span style={{ marginLeft: "auto", fontFamily: "inherit", fontWeight: 700, fontSize: 11, letterSpacing: 0, textTransform: "none", color: selected.size ? FIRE.redText : FIRE.textMuted }}>{selected.size} selected</span></div>
+          <div style={{ border: `1px solid ${FIRE.lineNoir}`, borderRadius: 11, overflow: "hidden", marginBottom: 16, maxHeight: 280, overflowY: "auto" }}>
+            {availableUnits.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "12px 14px" }}>No available items — everything is issued or out of inventory.</div>
+            ) : groupNames.flatMap((cat) => grouped[cat].map((u) => {
+              const on = selected.has(u.id);
+              const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
+              return (
+                <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderBottom: `1px solid ${FIRE.lineNoir}`, cursor: "pointer", background: on ? "rgba(224,58,68,.07)" : "transparent" }}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(u.id)} style={{ position: "absolute", opacity: 0, width: 1, height: 1, pointerEvents: "none" }} />
+                  <span aria-hidden="true" style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${on ? FIRE.redBright : FIRE.line2Noir}`, background: on ? FIRE.redBright : "transparent" }}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{u.typeName}</span>
+                    <span style={{ display: "block", fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{idLabel} · <span style={{ color: u.condition === "Serviceable" ? FIRE.greenText : FIRE.amberText }}>{u.condition}</span></span>
+                  </span>
+                  <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", borderRadius: 5, padding: "3px 8px", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.textSecondary, flexShrink: 0, textTransform: "uppercase" }}>{cat}</span>
+                </label>
+              );
+            }))}
+          </div>
 
-        <div style={{ ...FS.kicker, marginBottom: 6 }}>SIGNATURE</div>
-        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 6 }}>{recipient ? <><b style={{ color: FIRE.textPrimary }}>{recipient.name}</b> signs to accept custody:</> : "Choose a recipient first."}</div>
-        {recipient && <div style={{ marginBottom: 14 }}><SignaturePad key={recipientId} onChange={setSig} /></div>}
+          <div style={flabel}>Sign-out — recipient confirms custody</div>
+          <div style={{ border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 11, padding: 14, background: FIRE.card2Noir }}>
+            {recipient ? (<>
+              <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 8 }}><b style={{ color: FIRE.textPrimary }}>{recipient.name}</b> signs to accept custody:</div>
+              <SignaturePad key={recipientId} onChange={setSig} />
+            </>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, textAlign: "center", padding: "8px 0" }}>Choose who's receiving the gear first.</div>}
+          </div>
+          <div style={{ fontSize: 11, color: sig ? FIRE.greenText : FIRE.amberText, display: "flex", alignItems: "center", gap: 7, marginTop: 10 }}>
+            {sig ? <CheckCircle2 size={14} style={{ flexShrink: 0 }} /> : <AlertTriangle size={14} style={{ flexShrink: 0 }} />}
+            {sig ? "Signed — ready to issue." : "Signature is required — it records who's responsible for this gear."}
+          </div>
 
-        {selfIssue && (<>
-          <div style={{ ...FS.kicker, marginBottom: 6 }}>WITNESS · REQUIRED FOR SELF-ISSUE</div>
-          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 6 }}>You can't be the only signature on your own custody — another manager or a DA witnesses.</div>
-          <label style={{ ...S.field, marginBottom: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Witness</span>
-            <select style={FS.input} value={witnessId} onChange={(e) => { setWitnessId(e.target.value); setWitnessSig(""); }}>
+          {selfIssue && (<div style={{ marginTop: 16 }}>
+            <div style={flabel}>Witness · required for self-issue</div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 8 }}>You can't be the only signature on your own custody — another manager or a DA witnesses.</div>
+            <select aria-label="Witness" style={{ ...field, marginBottom: 10 }} value={witnessId} onChange={(e) => { setWitnessId(e.target.value); setWitnessSig(""); }}>
               <option value="">Choose a witness…</option>
               {witnessOptions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
-          </label>
-          {witnessId && <div style={{ marginBottom: 14 }}><SignaturePad key={witnessId} onChange={setWitnessSig} /></div>}
-        </>)}
+            {witnessId && <div style={{ border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 11, padding: 14, background: FIRE.card2Noir }}><SignaturePad key={witnessId} onChange={setWitnessSig} /></div>}
+          </div>)}
+        </div>
 
-        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Issuing…" : selected.size ? `Issue ${selected.size} item${selected.size === 1 ? "" : "s"}` : "Issue"}</button>
-          <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
+        <div style={{ display: "flex", gap: 11, padding: "15px 20px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, flexWrap: "wrap" }}>
+          <button disabled={busy || !ready} onClick={submit} style={{ ...FS.btnPrimary, flex: "2 1 220px", justifyContent: "center", padding: "13px 18px", fontSize: 13.5, borderRadius: 10, opacity: (busy || !ready) ? 0.5 : 1, cursor: (busy || !ready) ? "default" : "pointer" }}>
+            {busy ? "Issuing…" : selected.size && recipient ? `Issue ${selected.size} item${selected.size === 1 ? "" : "s"} to ${firstName}` : "Issue"}
+          </button>
+          <button disabled={busy} onClick={onClose} style={{ ...FS.btn, flex: "0 0 auto", padding: "13px 18px", borderRadius: 10 }}>Cancel</button>
         </div>
       </div>
     </div>,
