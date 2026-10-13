@@ -10096,7 +10096,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
         <div style={{ fontSize: 12, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
       {members.some((m) => m.status === "Inactive") && (
         <div style={{ marginLeft: "auto" }}>
-          <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.card2Noir : "transparent", borderColor: showInactive ? FIRE.red : FIRE.line2Noir, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
+          <button onClick={() => setShowInactive((v) => !v)} aria-pressed={showInactive} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(showInactive ? { borderColor: FIRE.redBright, background: "rgba(200,50,58,.12)", color: FIRE.textPrimary } : null) }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
         </div>
       )}
       </div>
