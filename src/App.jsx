@@ -884,13 +884,10 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
     notify({ kind: "success", text: target ? "Your person is set." : "Cleared your person." });
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>YOUR PERSON</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Who's your person?</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Optional. Pick someone on your crew you'd want to hear from in a hard moment — they'll be the first tap in “Reach out” on Your Six. This is private to you; only you can see or change it.</div>
-      </div>
-      <div style={{ ...FS.card, ...YS_CARD }}>
+    <PageShell band kicker="YOUR PERSON" title="Who's your person?"
+      sub="Optional. Pick someone on your crew you'd want to hear from in a hard moment — they'll be the first tap in “Reach out” on Your Six. This is private to you; only you can see or change it.">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, ...YS_CARD }}>
         {current === undefined ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
         ) : (<>
@@ -904,7 +901,8 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
           {person && !person.phone && <div style={{ marginTop: 6, fontSize: 12.5, color: FIRE.amberText }}>This person has no number on file, so “Reach out” can't call them yet — pick someone with a number, or ask an officer to add theirs.</div>}
         </>)}
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 /* ── Automatic station presence: the prominent disclosure ────────────────────────────────
