@@ -2812,7 +2812,7 @@ export default function App() {
           {screen === "qanda" && <StationQA S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
-          {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
+          {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
@@ -4607,8 +4607,32 @@ function RunCard({ S, p, onClick }) {
 }
 
 /* ---------------- Packet ---------------- */
-function Packet({ S, packet, back }) {
+function Packet({ S, packet, dept, notify, back }) {
   const T = TRACKS[packet.track];
+  /* "Download packet (PDF)" had no handler — a dead button. It now goes through printDocument, the one
+     print/share path (web: print view → Save as PDF; iOS app: a real PDF to the share sheet), built from the
+     same packet fields the screen renders, in the same order. Nothing is fetched or written. */
+  const [printing, setPrinting] = useState(false);
+  async function downloadPacket() {
+    const list = (items) => ({ type: "list", ordered: false, items: (items || []).map(String) });
+    const blocks = [
+      { type: "p", text: [packet.code, packet.time, packet.level].filter(Boolean).join(" · ") },
+      { type: "h2", text: "Objective" }, { type: "p", text: packet.objective || "" },
+      { type: "h2", text: "Required equipment" }, list(packet.equipment),
+      { type: "h2", text: "Instructor guide" }, { type: "p", text: packet.instructorGuide || "" },
+      { type: "h2", text: "Step-by-step lesson plan" }, { type: "list", ordered: true, items: (packet.steps || []).map((st) => `${st.t} (${st.m} min) — ${st.d}`) },
+      { type: "h2", text: "Scenario / drill setup" }, { type: "p", text: packet.scenario || "" },
+      { type: "h2", text: "Safety considerations" }, list(packet.safety),
+      { type: "h2", text: "Discussion questions" }, list(packet.discussion),
+      { type: "h2", text: "Evaluation checklist" }, list(packet.evaluation),
+      { type: "h2", text: "Debrief questions" }, list(packet.debrief),
+    ];
+    setPrinting(true);
+    try {
+      const n = printFailureNotice(await printDocument(packet.title || "Training packet", blocks, dept));
+      if (n) notify?.(n);
+    } finally { setPrinting(false); }
+  }
   // Industrial Noir: the light baseStyles text colours are overridden onto the FIRE palette here, and every block
   // is a Noir card. Content, order and controls are exactly as before.
   const body = { ...S.body, color: FIRE.textSecondary }, list = { ...S.list, color: FIRE.textSecondary };
@@ -4621,7 +4645,7 @@ function Packet({ S, packet, back }) {
           <div style={S.metaRow}><span style={{ ...S.runCode, color: T.accent }}>{packet.code}</span><TrackPill S={S} track={packet.track} /></div>
           <h1 style={{ ...S.packetTitle, color: FIRE.textPrimary }}>{packet.title}</h1>
           <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} dark /><Meta Icon={Users} text={packet.level} dark /></div>
-          <button style={FS.btnPrimary}><Download size={16} /> Download packet (PDF)</button>
+          <button style={{ ...FS.btnPrimary, opacity: printing ? 0.7 : 1 }} onClick={downloadPacket} disabled={printing}>{printing ? <><Loader2 size={16} className="spin" /> Preparing…</> : <><Download size={16} /> Download packet (PDF)</>}</button>
         </div>
       </div>
       <Disclaimer S={S} dark />
