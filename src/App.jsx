@@ -27,6 +27,7 @@ import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseCl
 import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
+import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -1312,7 +1313,7 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
      department can still see the task existed; deleting it would remove the only evidence outside
      those snapshots. The confirm says what actually happens, because "remove" reads like erasure. */
   async function retire(it) {
-    if (!window.confirm(`Remove “${it.label}” from the list?\n\nCrews will stop seeing it. Checklists already logged keep it exactly as it was.`)) return;
+    if (!(await noirConfirm({ title: `Remove “${it.label}”?`, body: "Crews will stop seeing it. Checklists already logged keep it exactly as it was.", confirmLabel: "Remove", danger: true }))) return;
     setBusy(true);
     const { data, error } = await supabase.from("aftercall_items").update({ active: false }).eq("id", it.id).select();
     setBusy(false);
@@ -5724,7 +5725,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
   // Soft-delete: move to trash (DA/PA, server-stamped). File STAYS in Storage so it can be restored.
   async function deleteDoc(item) {
     if (!item?.id) return;
-    if (!window.confirm(`Move "${item.name}" to the trash? An admin can restore it.`)) return;
+    if (!(await noirConfirm({ title: "Move to the trash?", body: `“${item.name}” moves to the trash. An admin can restore it.`, confirmLabel: "Move to trash", danger: true }))) return;
     const { error } = await supabase.rpc("soft_delete_document", { p_id: item.id });
     if (error) { notify({ kind: "error", title: "Couldn't move to trash", text: "Please try again.", details: error.message }); return; }
     notify({ kind: "success", title: "Moved to trash", text: `"${item.name}" was moved to the trash.` });
@@ -6985,7 +6986,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
     load();
   }
   async function cancelItem(it) {
-    const reason = window.prompt(`Why is "${it.text}" no longer needed? (a reason is required)`);
+    const reason = await noirPrompt({ title: "No longer needed?", body: `Why is “${it.text}” no longer needed?`, label: "Reason", placeholder: "e.g. Handled at the last meeting", required: true, confirmLabel: "Mark not needed" });
     if (reason === null) return;
     if (!reason.trim()) { notify({ kind: "error", title: "Reason required", text: "Please give a reason for cancelling this item." }); return; }
     const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });
@@ -9969,8 +9970,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     const goInactive = member.status !== "Inactive";
     if (goInactive && member.id === meId) { notify({ kind: "error", title: "Can't deactivate yourself", text: "Have another leader deactivate your account." }); return; }   // self-lockout, matches saveMember's intent
     const next = goInactive ? "Inactive" : "Active";
-    if (goInactive && !window.confirm(`Deactivate ${member.name}? They'll drop off the active roster; you can reactivate anytime.`)) return;
-    if (!goInactive && !window.confirm(`Reactivate ${member.name}? They'll return to the active roster.`)) return;
+    if (goInactive && !(await noirConfirm({ title: `Deactivate ${member.name}?`, body: "They'll drop off the active roster. You can reactivate them anytime.", confirmLabel: "Deactivate", danger: true }))) return;
+    if (!goInactive && !(await noirConfirm({ title: `Reactivate ${member.name}?`, body: "They'll return to the active roster.", confirmLabel: "Reactivate" }))) return;
     const { error } = await supabase.from("members").update({ status: next }).eq("id", member.id);
     if (error) { notify({ kind: "error", title: goInactive ? "Couldn't deactivate the member" : "Couldn't reactivate the member", text: "Something went wrong. Please try again.", details: error.message }); return; }
     onUpdate({ ...member, status: next });
@@ -10008,7 +10009,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     setNotes((ns) => [data, ...ns]); setNote("");
   }
   async function removeCert(c) {
-    if (!window.confirm("Remove this certification? This cannot be undone.")) return;
+    if (!(await noirConfirm({ title: "Remove this certification?", body: "This cannot be undone.", confirmLabel: "Remove", danger: true }))) return;
     setBusyId(c.id);
     const { error } = await supabase.rpc("delete_cert", { cert_id: c.id });
     setBusyId(null);
@@ -10711,7 +10712,7 @@ function RosterPending({ S, members, notify }) {
     loadPending();
   }
   async function reject(row) {
-    const reason = window.prompt("Reason for rejecting (optional):", "");
+    const reason = await noirPrompt({ title: "Reject this certification?", body: "Tell the member why — they'll see the reason on their cert, so they know what to fix.", label: "Reason", placeholder: "e.g. Proof is expired — please upload the current card.", confirmLabel: "Send rejection", danger: true });
     if (reason === null) return; // user cancelled the prompt
     setBusyId(row.id);
     const { error } = await supabase.rpc("reject_cert_submission", { submission_id: row.id, reason: reason.trim() || null });
@@ -11157,7 +11158,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   }
   useEffect(() => { loadReports(); }, []);
   async function softDelete(d) {
-    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    if (!(await noirConfirm({ title: "Delete this record?", body: "It moves to the trash and can be restored by an admin.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(d.id);
     const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
     setDeletingId(null);
@@ -12384,7 +12385,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
     loadReview(); load(rangeKey);
   }
   async function rejectOffsite(r) {
-    if (!window.confirm(`Reject ${r.member_name || "this member"}'s off-site time for "${r.offsite_label || "this work"}"?\n\nThe record is kept but credits zero hours.`)) return;
+    if (!(await noirConfirm({ title: "Reject this off-site time?", body: `${r.member_name || "This member"}'s off-site time for “${r.offsite_label || "this work"}”.\n\nThe record is kept but credits zero hours.`, confirmLabel: "Reject", danger: true }))) return;
     setBusyId(r.shift_id);
     const { error } = await supabase.rpc("reject_offsite", { p_shift_id: r.shift_id });
     setBusyId(null);
@@ -12393,7 +12394,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
     loadReview(); load(rangeKey);
   }
   async function voidShift(r) {
-    if (!window.confirm(`Void ${r.member_name || "this member"}'s shift from ${new Date(r.checked_in_at).toLocaleString()}?\n\nThe record is kept but credits zero hours.`)) return;
+    if (!(await noirConfirm({ title: "Void this shift?", body: `${r.member_name || "This member"}'s shift from ${new Date(r.checked_in_at).toLocaleString()}.\n\nThe record is kept but credits zero hours.`, confirmLabel: "Void shift", danger: true }))) return;
     setBusyId(r.shift_id);
     const { error } = await supabase.rpc("void_auto_closed_shift", { p_shift_id: r.shift_id });
     setBusyId(null);
@@ -13845,7 +13846,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     setServiceFor(null); setServiceReason(""); setServiceKey((k) => k + 1); loadRigs();
   }
   async function returnToService(rigId, rigName) {
-    if (!window.confirm(`Return "${rigName}" to service? It'll be marked Needs attention until its next check.`)) return;
+    if (!(await noirConfirm({ title: `Return ${rigName} to service?`, body: "It'll be marked Needs attention until its next check.", confirmLabel: "Return to service" }))) return;
     setServiceBusy(rigId);
     const { error } = await supabase.rpc("return_apparatus_to_service", { p_apparatus_id: rigId });
     setServiceBusy(null);
@@ -14012,7 +14013,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
      hard delete and would now understate the undo. Saying it can be put back is the difference
      between a decision someone hesitates over and one they can safely make. */
   async function removeRig(id, name) {
-    if (!window.confirm(`Take "${name}" out of the fleet?\n\nIt stops appearing in lists and checklists. You can put it back from "Recently removed", and the app records that you removed it.`)) return;
+    if (!(await noirConfirm({ title: `Remove ${name}?`, body: "This takes it out of your fleet — it stops appearing in lists and checklists. You can restore it from “Recently removed”, and the app records that you removed it.", confirmLabel: "Remove apparatus", danger: true }))) return;
     const { error } = await supabase.rpc("retire_apparatus", { p_id: id });
     // The RPC raises rather than no-opping, so error.message is a sentence a DA can act on
     // ("Only a Department Admin can remove a rig.") — surface it rather than swallowing it.
@@ -15204,7 +15205,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
     } finally { setBusy(false); }
   }
   async function del(p) {
-    if (!window.confirm(`Remove this photo${p.angle_label ? ` ("${p.angle_label}")` : ""}? It'll be hidden from the rig.`)) return;
+    if (!(await noirConfirm({ title: "Remove this photo?", body: `${p.angle_label ? `“${p.angle_label}” ` : "It "}will be hidden from the rig.`, confirmLabel: "Remove", danger: true }))) return;
     setBusy(true);
     try {
       const { error } = await supabase.from("apparatus_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", p.id);
@@ -15641,7 +15642,7 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
     } finally { setBusy(false); }
   }
   async function remove(row) {
-    if (!row || !window.confirm("Remove this photo?")) return;
+    if (!row || !(await noirConfirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true }))) return;
     setBusy(true);
     try {
       const { error } = await supabase.from("equipment_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", row.id);
@@ -16628,7 +16629,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const [recovering, setRecovering] = useState(null); // held unit being recovered (modal)
   const [lostId, setLostId] = useState(null);         // equipment_id mid mark-lost
   async function markLost(u, idLabel) {
-    if (!window.confirm(`Mark ${idLabel} lost? This records it as missing and closes ${u.holderName || "the holder"}'s custody. It can't be undone in the app.`)) return;
+    if (!(await noirConfirm({ title: `Mark ${idLabel} lost?`, body: `This records it as missing and closes ${u.holderName || "the holder"}'s custody. It can't be undone in the app.`, confirmLabel: "Mark lost", danger: true }))) return;
     setLostId(u.id);
     const { error } = await supabase.rpc("mark_equipment_lost", { p_equipment_id: u.id });
     setLostId(null);
@@ -16710,7 +16711,7 @@ function Equipment({ S, role, members, meId, notify }) {
     setMgrPick(""); loadManagers();
   }
   async function removeManager(memberId, name) {
-    if (!window.confirm(`Remove ${name} as an equipment manager?`)) return;
+    if (!(await noirConfirm({ title: `Remove ${name} as an equipment manager?`, body: "They'll no longer manage the equipment ledger. You can assign them again later.", confirmLabel: "Remove manager", danger: true }))) return;
     setMgrBusy(true);
     const { data, error } = await supabase.rpc("remove_equipment_manager", { p_member_id: memberId });
     setMgrBusy(false);
@@ -17372,7 +17373,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   }
   const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
   async function softDelete(d) {
-    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    if (!(await noirConfirm({ title: "Delete this record?", body: "It moves to the trash and can be restored by an admin.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(d.id);
     const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
     setDeletingId(null);
@@ -17488,7 +17489,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   }
   async function cancelItem(it) {
     if (!canManage) return;
-    const reason = window.prompt(`Why is "${it.text}" no longer needed? (a reason is required)`);
+    const reason = await noirPrompt({ title: "No longer needed?", body: `Why is “${it.text}” no longer needed?`, label: "Reason", placeholder: "e.g. Handled at the last meeting", required: true, confirmLabel: "Mark not needed" });
     if (reason === null) return;                                   // dismissed the prompt
     if (!reason.trim()) { notify({ kind: "error", title: "Reason required", text: "Please give a reason for cancelling this item." }); return; }
     const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });   // server-stamps cancelled_at/by + snapshots assignee_name
@@ -17824,7 +17825,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   }
   const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
   async function softDelete(d) {
-    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    if (!(await noirConfirm({ title: "Delete this record?", body: "It moves to the trash and can be restored by an admin.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(d.id);
     const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
     setDeletingId(null);
@@ -18240,7 +18241,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
     await loadItems();
   }
   async function renameCategory(oldCat) {
-    const newCat = (window.prompt(`Rename category "${oldCat}" to:`, oldCat) || "").trim();
+    const newCat = ((await noirPrompt({ title: "Rename category", body: `Rename “${oldCat}” to:`, label: "New name", initial: oldCat, multiline: false, required: true, confirmLabel: "Rename" })) || "").trim();
     if (!newCat || newCat === oldCat || !deptId) return;
     setBusy(true);
     const { error } = await supabase.from("onboarding_items").update({ category: newCat }).eq("department_id", deptId).eq("category", oldCat);   // bulk rename all items in the category
@@ -18250,7 +18251,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
   }
   async function loadDefaults() {   // idempotent: skip existing (category+label); never add a 2nd mentor item
     if (!deptId) return;
-    if (!window.confirm("Add the default checklist items? Existing items are kept; duplicates are skipped.")) return;
+    if (!(await noirConfirm({ title: "Add the default checklist items?", body: "Existing items are kept; duplicates are skipped.", confirmLabel: "Add defaults" }))) return;
     const existing = new Set((items || []).map((it) => `${it.category}||${it.label}`));
     const hasMentor = (items || []).some((it) => it.is_mentor);
     let ord = (items || []).reduce((mx, it) => Math.max(mx, it.sort_order), 0);
@@ -19177,9 +19178,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
        proceed, never by accident. */
     const presentCount = (s.attendance || []).length;
     if (presentCount === 0) {
-      if (!window.confirm(`Nobody is marked present for "${s.title}". Finalizing locks it with an empty roll — no one earns training credit for it. Finalize anyway?`)) return;
+      if (!(await noirConfirm({ title: "Finalize with an empty roll?", body: `Nobody is marked present for “${s.title}”. Finalizing locks it with an empty roll — no one earns training credit for it.`, confirmLabel: "Finalize anyway", danger: true }))) return;
     } else {
-      if (!window.confirm(`Lock attendance for "${s.title}"? You can reopen it later if needed.`)) return;
+      if (!(await noirConfirm({ title: "Lock attendance?", body: `“${s.title}” — you can reopen it later if needed.`, confirmLabel: "Finalize & lock" }))) return;
     }
     // auto-close any open QR sign-in so no stale code lingers / no post-lock scans
     if (s.signinOpen) {
@@ -19195,8 +19196,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
        Asked only while it is still blank, so re-finalizing never nags. */
     let dur = s.durationMin ?? null;
     if (dur == null) {
-      const answer = window.prompt(
-        `How long was "${s.title}"? Minutes, e.g. 180.\n\nThis gives everyone marked present their training hours (recorded, not credited toward ISO/LOSAP).\n\nLeave blank or press Cancel — you can add it later.`, "");
+      const answer = await noirPrompt({ title: `How long was “${s.title}”?`, body: "This gives everyone marked present their training hours (recorded, not credited toward ISO/LOSAP). Leave it blank or skip — you can add it later.", label: "Length in minutes", placeholder: "e.g. 180", multiline: false, inputMode: "numeric", confirmLabel: "Save length", cancelLabel: "Skip" });
       const nMin = answer == null ? null : parseInt(String(answer).trim(), 10);
       if (Number.isFinite(nMin) && nMin >= 1 && nMin <= 1440) dur = nMin;
       else if (answer != null && String(answer).trim() !== "") {
@@ -20581,7 +20581,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   async function clearAllCheckmarks() {
     const targets = duties.filter((d) => isDoneThisPeriod(d, weekStartDay));
     if (!targets.length) { notify({ kind: "error", title: "Nothing to clear", text: "No duties are checked off right now." }); return; }
-    if (!window.confirm(`Clear ${targets.length} checkmark${targets.length === 1 ? "" : "s"}? The duties stay on the list, and past completions stay in the log.`)) return;
+    if (!(await noirConfirm({ title: `Clear ${targets.length} checkmark${targets.length === 1 ? "" : "s"}?`, body: "The duties stay on the list, and past completions stay in the log.", confirmLabel: "Clear" }))) return;
     setClearingAll(true);
     // One call per duty — uncomplete_duty is the only write primitive and it is per-duty. Fine at this
     // scale; if a station ever runs dozens of duties this wants a bulk RPC rather than N round-trips.

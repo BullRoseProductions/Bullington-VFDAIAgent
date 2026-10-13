@@ -7,6 +7,7 @@ import { SetNewPassword } from "./SetPassword.jsx";
 import { capturePendingScan } from "./pendingScan";
 import { markBundleHealthy, watchLiveUpdates } from "./liveUpdate";
 import { DestructiveConfirmHost } from "./ConfirmDestructive.jsx";
+import { NoirDialogHost } from "./NoirDialogs.jsx";
 import { FIRE } from "./theme.js";
 
 /* ---------------- Password-recovery URL capture ----------------
@@ -199,7 +200,7 @@ function Root() {
   /* The confirm host is a SIBLING of <App/>, not a child of any screen. It renders
      through a portal and has to outlive whichever screen asked the question — a delete
      that unmounts its own list on the way out would otherwise take the dialog with it. */
-  return <><App /><DestructiveConfirmHost /></>;
+  return <><App /><DestructiveConfirmHost /><NoirDialogHost /></>;
 }
 
 /* LAST RESORT, below the per-screen boundary in App.jsx.
