@@ -5821,7 +5821,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
     catch { setErr("Couldn't draft that just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
+    <PageShell band watermark="DOCS" above={loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
       kicker="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place"
       sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."}>
       <NoirSkin>
@@ -5854,7 +5854,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
             <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><FilePlus size={16} /> Draft document</>}
             </button>
-            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {err && <div style={NOIR_ERR}>{err}</div>}
             {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact dark /><RichOutput S={S} text={out} dark /></div>}
           </div>
         </Card>
