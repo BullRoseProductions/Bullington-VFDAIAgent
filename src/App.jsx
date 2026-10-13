@@ -11189,17 +11189,16 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     loadReports();   // deleted row falls out via the .is("deleted_at", null) filter
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={FS.kicker}>REPORTS · CHIEF'S REPORT</div>
-      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Chief's Report</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 14 }}>The board &amp; city readiness report — the chief's narrative over your locked, period-filtered facts.</div>
+    <PageShell band watermark="REPORTS" kicker="REPORTS · CHIEF'S REPORT" title="Chief's Report"
+      sub="The board & city readiness report — the chief's narrative over your locked, period-filtered facts."
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
       <div style={{ marginBottom: 14 }}>
         <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 8 }}>Report period: <strong style={{ color: FIRE.textSecondary }}>{periodLabel}</strong> · Generated {todayLabel}</div>
       </div>
-      <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>DURING THIS PERIOD · {periodLabel}</div>
+      <div style={{ ...FS.cardNoir, padding: "10px 16px", marginBottom: 14 }}>
+        <CardHead icon={CalendarCheck} title="During this period" right={periodLabel} style={{ marginTop: 4 }} />
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
           <Stat S={S} dark n={String(drillsHeld)} label="Training sessions" />
           <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
@@ -11214,7 +11213,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
           <CoverageNote cov={cov} />
         </div>
       </div>
-      <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
+      <div style={{ ...FS.cardNoir, padding: "10px 16px", marginBottom: 14 }}>
         {/* Station hours belong to the PERIOD block: they describe the window, not today. */}
         {sh.err ? (
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
@@ -11235,7 +11234,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
             {sh.totals.autoClosed > 0 && <Line>⚠ {sh.totals.autoClosed} auto-closed shift{sh.totals.autoClosed > 1 ? "s" : ""} awaiting officer confirmation — not credited</Line>}
           </>
         )}
-        <div style={{ ...FS.kicker, marginBottom: 2 }}>AS OF TODAY · CURRENT STATUS</div>
+        <CardHead icon={Clock} title="As of today · current status" style={{ marginTop: 14 }} />
         <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
         {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
         <SubHead>Flagged certifications — {expd} expired · {expg} expiring</SubHead>
@@ -11261,9 +11260,9 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       </div>
       <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Turn your numbers into a report — in one tap</h3>
-          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, and participation.</p>
+          <CardHead icon={BarChart3} title="Board & city report" />
+          <h3 style={NOIR_FEAT_TITLE}>Turn your numbers into a report — in one tap</h3>
+          <p style={NOIR_HELP}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, and participation.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
@@ -11279,11 +11278,11 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
               </button>
             )}
           </div>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {out && (
             <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-                <div style={{ ...FS.kicker, marginBottom: 0 }}>DRAFT PREVIEW</div>
+                <SectionBar label="Draft preview" style={{ margin: 0, flex: 1 }} />
                 <button title="Clear" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => { setOut(""); setErr(""); }}><X size={14} color={FIRE.deleteRed} /></button>
               </div>
               <RichOutput S={S} text={out} dark />
@@ -11293,13 +11292,13 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       </div>
 
       {/* SAVED REPORTS — persisted Chief's Reports (feature="report"); Open to view, DA/PA soft-delete. Mirrors the Minutes saved-drafts list. */}
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED REPORTS</div>
-      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 8 }}>
+      <SectionBar icon={FileText} label="Saved reports" count={reports.length} style={{ marginTop: 22 }} />
+      <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 8 }}>
         {reports.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved reports yet.</div> : reports.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Chief's Report"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}</div>
@@ -11312,17 +11311,15 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       </div>
 
       {openReport && (
-        <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openReport.title || "Chief's Report"}</div>
-              <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={() => setOpenReport(null)}><X size={14} color={FIRE.btnIcon} /></button>
-            </div>
-            <RichOutput S={S} text={openReport.current_text ?? openReport.ai_text} dark />
+        <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%" }}>
+            <NoirModalHead icon={BarChart3} title={openReport.title || "Chief's Report"} sub="Saved report" onClose={() => setOpenReport(null)} />
+            <div style={{ padding: "14px 18px 18px" }}><RichOutput S={S} text={openReport.current_text ?? openReport.ai_text} dark /></div>
           </div>
         </div>
       )}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
