@@ -5145,7 +5145,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
       <CardHead icon={Sparkles} title="AI drill planner" style={{ marginBottom: 4 }} />
       <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>Describe your crew and constraints — you'll get a structured drill plan to adapt, then save it to a session.</div>
       <div style={S.aiGrid}>
-        <div style={{ ...S.aiForm, ...FS.cardNoir }}>
+        <div style={{ ...S.aiForm, ...NOIR_INSET, padding: 14 }}>
           <AIField S={S} dark label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
           <AIField S={S} dark label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
           <AIField S={S} dark label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
@@ -5157,27 +5157,27 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
           <button style={{ ...FS.btnPrimary, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate drill plan</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
         </div>
-        <div style={{ ...S.aiResult, ...FS.cardNoir }}>
+        <div style={{ ...S.aiResult, ...NOIR_INSET, padding: 14 }}>
           {!plan && !loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Sparkles size={28} color={FIRE.textMuted2} /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
           {loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Loader2 size={28} className="spin" color={FIRE.textMuted2} /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
           {plan && (
             <div>
               <Disclaimer S={S} compact dark />
-              <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{form.topic}</h3>
-              <div style={{ display: "flex", gap: 8, margin: "6px 0 12px" }}>
+              <h3 style={{ ...NOIR_FEAT_TITLE, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, letterSpacing: ".01em", margin: "10px 0 4px" }}>{form.topic}</h3>
+              <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, margin: "6px 0 12px" }}>
                 {["full", "quick"].map((k) => (
-                  <button key={k} onClick={() => setView(k)} style={{ ...FS.btn, ...(view === k ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{k === "quick" ? "Quick run sheet" : "Full plan"}</button>
+                  <button key={k} onClick={() => setView(k)} aria-pressed={view === k} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: view === k ? FIRE.redBright : "transparent", color: view === k ? "#fff" : FIRE.textSecondary }}>{k === "quick" ? "Quick run sheet" : "Full plan"}</button>
                 ))}
               </div>
               {view === "quick" ? (
                 <>
                   {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
                   {Array.isArray(plan.steps) && (
-                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Run it</div>
+                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, letterSpacing: ".02em" }}><FileText size={16} color={FIRE.redBright} /> Run it</div>
                       <div style={S.steps}>{plan.steps.map((s, i) => (
-                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
+                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.redText, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, fontFamily: DISPLAY_FONT }}>{String(i + 1).padStart(2, "0")}</span>
                           <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div>{Array.isArray(s.actions) && s.actions.length ? <ul style={{ ...S.list, color: FIRE.textSecondary, marginTop: 4 }}>{s.actions.map((a, j) => <li key={j}>{a}</li>)}</ul> : (s.detail ? <div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div> : null)}</div></div>
                       ))}</div></div>
                   )}
@@ -5191,9 +5191,9 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                   <AIList S={S} dark Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
                   <AIList S={S} dark Icon={Wrench} title="Equipment" items={plan.equipment} />
                   {Array.isArray(plan.steps) && (
-                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Drill steps</div>
+                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, letterSpacing: ".02em" }}><FileText size={16} color={FIRE.redBright} /> Drill steps</div>
                       <div style={S.steps}>{plan.steps.map((s, i) => (
-                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
+                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.redText, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, fontFamily: DISPLAY_FONT }}>{String(i + 1).padStart(2, "0")}</span>
                           <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div>{Array.isArray(s.actions) && s.actions.length ? <ul style={{ ...S.list, color: FIRE.textSecondary, marginTop: 4 }}>{s.actions.map((a, j) => <li key={j}>{a}</li>)}</ul> : (s.detail ? <div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div> : null)}</div></div>
                       ))}</div></div>
                   )}
@@ -5213,16 +5213,16 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
               </div>
               {canManage && (
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
-                  <div style={{ width: "100%", fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>— or schedule on a new date —</div>
+                  <SectionBar icon={Calendar} label="Or schedule on a new date" style={{ width: "100%", margin: "4px 0 0" }} />
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input type="date" style={FS.input} value={newDate} onChange={(e) => setNewDate(e.target.value)} /></label>
                   <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Start time (optional)</span><input type="time" style={FS.input} value={newTime} onChange={(e) => setNewTime(e.target.value)} /></label>
                   <label style={{ ...S.field, minWidth: 150, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={form.topic} /></label>
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={newCat} onChange={(e) => setNewCat(e.target.value)}><option value="">One-off (no category)</option>{(categories || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
                   <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Audience</span>
-                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, background: FIRE.insetNoir }}>
                       {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                         const on = newAudience === val;
-                        return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                        return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.lineNoir}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.textPrimary) : FIRE.textSecondary }}>{lbl}</button>;
                       })}
                     </div></label>
                   <CountsAttendanceCheckbox checked={newCounts} onChange={setNewCounts} fieldStyle={S.field} labelStyle={{ ...S.fieldLabel, color: FIRE.textSecondary }} />
@@ -5244,7 +5244,7 @@ function AIList({ S, Icon, title, items, warn, dark }) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ ...S.aiListHead, color: warn ? (dark ? FIRE.redText : "#8A1620") : (dark ? FIRE.textPrimary : "#191C20") }}><Icon size={16} /> {title}</div>
+      <div style={{ ...S.aiListHead, color: warn ? (dark ? FIRE.redText : "#8A1620") : (dark ? FIRE.textPrimary : "#191C20"), ...(dark ? { fontFamily: DISPLAY_FONT, letterSpacing: ".02em" } : null) }}><Icon size={16} color={dark ? (warn ? FIRE.redText : FIRE.redBright) : undefined} /> {title}</div>
       <ul style={dark ? { ...S.list, color: FIRE.textSecondary } : S.list}>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
     </div>
   );
