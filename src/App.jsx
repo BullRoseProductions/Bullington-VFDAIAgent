@@ -4913,7 +4913,7 @@ function StationQA({ S }) {
   }
   const submit = () => { const t = input.trim(); if (!t || loading) return; send(t); };
   return (
-    <PageShell kicker={<>STATION Q&amp;A</>} title="Ask the station assistant" sub={<>{ground.has ? "Grounded in your uploaded SOPs — always verify locally." : "General fire & EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally."}{ground.has && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>This assistant reads your department's uploaded SOP text to answer.{ground.note ? ` (${ground.note})` : ""}</div>}</>}>
+    <PageShell band watermark="Q&A" kicker={<>STATION Q&amp;A</>} title="Ask the station assistant" sub={<>{ground.has ? "Grounded in your uploaded SOPs — always verify locally." : "General fire & EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally."}{ground.has && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>This assistant reads your department's uploaded SOP text to answer.{ground.note ? ` (${ground.note})` : ""}</div>}</>}>
       <NoirSkin>
       <Disclaimer S={S} compact dark />
       <div style={{ marginTop: 12 }}>
@@ -4928,7 +4928,7 @@ function StationQA({ S }) {
         ))}
         {turns.length === 0 && !loading && <div style={{ fontSize: 13, color: FIRE.textMuted, fontStyle: "italic" }}>Ask anything — e.g. &ldquo;What's the difference between an offensive and defensive attack?&rdquo;, &ldquo;How does a RIT work?&rdquo;, &ldquo;What goes into a primary search?&rdquo;</div>}
         {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Thinking…</div>}
-        {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+        {err && <div style={NOIR_ERR}>{err}</div>}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder="Ask a question…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
