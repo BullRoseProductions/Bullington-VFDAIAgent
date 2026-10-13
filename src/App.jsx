@@ -15049,9 +15049,9 @@ function HandoffModal({ items, notify, onClose }) {
 
   return createPortal(
     <div onClick={cancelAndClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0", textAlign: "center" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0", textAlign: "center" }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <div style={FS.kicker}>START TRANSFER</div>
+          <CardHead icon={ArrowLeftRight} title="Start transfer" style={{ marginBottom: 0, width: "auto" }} />
           <button onClick={cancelAndClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
         </div>
 
@@ -15129,6 +15129,7 @@ function MyEquipment({ S, meId, notify }) {
   const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
   return (
     <PageShell kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it.">
+      <NoirSkin>
       {rows.some(transferable) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           {!selMode
@@ -15201,6 +15202,7 @@ function MyEquipment({ S, meId, notify }) {
           onClose={() => { setHandoffItems(null); exitSelMode(); load(); }}
         />
       )}
+      </NoirSkin>
     </PageShell>
   );
 }
