@@ -12519,11 +12519,15 @@ function StationHoursReport({ S, role, dept, notify, back }) {
   const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
   const log = showAll ? shiftsForLog : shiftsForLog.slice(0, LOG_CAP);
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>STATION HOURS REPORT</div>
-        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
+    <PageShell band watermark="HOURS" kicker="STATION HOURS REPORT" title={dept?.name || "Department"} sub="Credited, de-overlapped hours · all stations"
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}
+      actions={
+        /* The range picker, moved into the band as the mocks' .segctl — same RANGES, same setRangeKey. */
+        <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap", position: "relative" }}>
+          {Object.entries(RANGES).map(([k, fn]) => <button key={k} onClick={() => setRangeKey(k)} aria-pressed={rangeKey === k} style={{ fontSize: 11, fontWeight: 600, padding: "5px 11px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: rangeKey === k ? FIRE.redBright : "transparent", color: rangeKey === k ? "#fff" : FIRE.textSecondary }}>{fn().label}</button>)}
+        </div>}>
+      <NoirSkin>
+      <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Who's putting in time at the station, and how much of it was verified on location.</div>
       </div>
       {/* PDF export. Hands the builder the figures THIS SCREEN ALREADY COMPUTED — the same `rows` the
@@ -12550,7 +12554,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         </div>
       )}
       {err && (
-        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
           <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load station hours</div>
@@ -12563,7 +12567,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           Sits above the figures because it changes how they should be read: those hours are missing
           from Credited on purpose. */}
       {review.length > 0 && (
-        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
           <AlertTriangle size={18} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{review.length} shift{review.length === 1 ? "" : "s"} auto-closed — needs review</div>
@@ -12576,8 +12580,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           the dedicated RPCs, which raise rather than no-op, so a rejected correction is always visible
           to the leader rather than silently discarded. */}
       {reviewOpen && review.length > 0 && (
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 12 }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFTS NEEDING REVIEW</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 12 }}>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead title="Shifts needing review" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             Oldest first, and not limited to the selected period — a shift flagged weeks ago still shows here.
           </div>
@@ -12684,7 +12688,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           sits on a screen leaders read for other reasons, and a panel that is always present stops
           being noticed. It appears only when there is something to do. */}
       {isDA && openLong.length > 0 && (
-        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
           <AlertTriangle size={18} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{openLong.length} open shift{openLong.length === 1 ? "" : "s"} that may have missed a checkout</div>
@@ -12696,8 +12700,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         </div>
       )}
       {isDA && openLongShown && openLong.length > 0 && (
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 12 }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>OPEN SHIFTS — MAY HAVE MISSED A CHECKOUT</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 12 }}>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead title="Open shifts — may have missed a checkout" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             Longest-running first, and not limited to the selected period. Times are Central.
           </div>
@@ -12741,13 +12745,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           })}
         </div>
       )}
-      {/* range chips */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-        {Object.entries(RANGES).map(([k, fn]) => {
-          const on = rangeKey === k;
-          return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
-        })}
-      </div>
+      {/* range chips — moved into the hero band */}
       {/* summary — the credited figures lead; unverified is shown beside them, never inside them */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 10 }}>
         <Stat S={S} dark n={h1(dept_total)} label="Verified hours (credited)" />
@@ -12757,11 +12755,60 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         <Stat S={S} dark n={`${dept_vpct}%`} label="Verified at station" pct={dept_vpct} />
       </div>
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 14 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
+      {/* TOP CONTRIBUTORS (the mock's .leadgrid) — the same credited per-member rows the table below ranks, top 8,
+          bars relative to the leader. Presentation over loaded data; no new read. */}
+      {(() => {
+        const top = [...rows].filter((r) => (Number(r.total) || 0) > 0).sort((x, y) => y.total - x.total).slice(0, 8);
+        if (!top.length) return null;
+        const max = top[0].total || 1;
+        return (
+          <Card padding="14px 16px" style={{ marginBottom: 14 }}>
+            <CardHead icon={Award} title="Top contributors" right={<span>credited hours · {RANGES[rangeKey]().label.toLowerCase()}</span>} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", columnGap: 22 }}>
+              {top.map((r, i) => (
+                <div key={`${r.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                  <span style={{ width: 16, textAlign: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: i === 0 ? FIRE.redText : FIRE.textMuted, ...FS.num }}>{i + 1}</span>
+                  <span style={{ width: 30, height: 30, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, color: FIRE.textPrimary, flexShrink: 0 }}>{(r.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name || "—"}</div>
+                    <div style={{ height: 4, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", marginTop: 5 }}><div style={{ width: `${Math.round((r.total / max) * 100)}%`, height: "100%", borderRadius: 999, background: FIRE.redBright }} /></div>
+                  </div>
+                  <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flexShrink: 0, ...FS.num }}>{h1(r.total)}<span style={{ fontSize: 10, color: FIRE.textMuted, fontWeight: 500, fontFamily: "inherit" }}> hrs</span></span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
       {/* Monthly trend of the credited figure above — fixed trailing window, independent of the range chips. */}
       <DeptHoursByMonthPanel multiStation={multiStation} />
+      {/* MONTH AT A GLANCE (the mock's .hcal) — how many shifts started each day of the range's latest month, from
+          the shift rows already loaded. A count of shifts, not hours: crediting stays with the figures above. */}
+      {shifts.length > 0 && (() => {
+        const latest = shifts.reduce((m, x) => { const d = new Date(x.checked_in_at); return isNaN(d) ? m : (!m || d > m ? d : m); }, null);
+        if (!latest) return null;
+        const y = latest.getFullYear(), mo = latest.getMonth();
+        const dim = new Date(y, mo + 1, 0).getDate(), lead = new Date(y, mo, 1).getDay();
+        const perDay = new Array(dim + 1).fill(0);
+        shifts.forEach((x) => { const d = new Date(x.checked_in_at); if (!isNaN(d) && d.getFullYear() === y && d.getMonth() === mo) perDay[d.getDate()]++; });
+        const peak = Math.max(1, ...perDay);
+        const shade = (n) => n === 0 ? FIRE.insetNoir : `rgba(224,58,68,${(0.12 + 0.68 * (n / peak)).toFixed(2)})`;
+        return (
+          <Card padding="14px 16px" style={{ marginBottom: 14 }}>
+            <CardHead icon={CalendarCheck} title="Month at a glance" right={<span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{new Date(y, mo, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })} · shifts per day · less {[0.12, 0.32, 0.55, 0.8].map((o) => <i key={o} style={{ width: 10, height: 10, borderRadius: 2, background: `rgba(224,58,68,${o})`, display: "inline-block" }} />)} more</span>} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, maxWidth: 520 }}>
+              {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} style={{ textAlign: "center", fontSize: 9.5, fontWeight: 600, color: FIRE.textMuted }}>{d}</div>)}
+              {Array.from({ length: lead }, (_, i) => <div key={`b${i}`} />)}
+              {Array.from({ length: dim }, (_, i) => i + 1).map((d) => (
+                <div key={d} title={`${new Date(y, mo, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: ${perDay[d]} shift${perDay[d] === 1 ? "" : "s"}`} style={{ aspectRatio: "1 / .8", borderRadius: 6, background: shade(perDay[d]), border: `1px solid ${FIRE.lineNoir}`, fontSize: 10, fontWeight: 600, color: perDay[d] ? "#fff" : FIRE.textMuted, padding: "3px 5px" }}>{d}</div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
       {/* on station right now */}
-      <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
-        <div style={FS.kicker}>ON STATION RIGHT NOW</div>
+      <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 14 }}>
+        <CardHead title="On station right now" />
         {onNow.length === 0 && !onNowByHouse ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 10 }}>No one is clocked in right now.</div>
         ) : onNowByHouse ? (
@@ -12815,8 +12862,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         )}
       </div>
       {/* hours by member */}
-      <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>HOURS BY MEMBER</div>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead title="Hours by member" style={{ marginBottom: 0 }} /></div>
         {rows.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
         ) : (
@@ -12858,8 +12905,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           The explainer names both in plain words and labels the number neutrally, because a chief who
           spots a gap without an explanation will assume the report is broken, and a gap that was
           labelled "overlap" when it is partly boundary clipping is worse than no label at all. */}
-      <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS — NO DOUBLE-COUNTING</div>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead title="Iso hours — no double-counting" style={{ marginBottom: 0 }} /></div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
           Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This is the per-member breakdown of the <b style={{ color: FIRE.textSecondary }}>Credited</b> figure above; the two agree exactly, because they are the same numbers.
           {/* Was a reconciliation note explaining a legitimate gap between two derivations. There is
@@ -12921,8 +12968,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
 
            SUPPRESSED ENTIRELY FOR A SINGLE-STATION DEPARTMENT — see multiStation. */}
       {multiStation && isoByStation.length > 0 && (
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS BY HOUSE</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead title="Iso hours by house" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             The same ISO total above, split across your houses. Every minute is counted once and lands in exactly one house, so these add up to the department total.
           </div>
@@ -12955,8 +13002,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         </div>
       )}
       {/* shift log */}
-      <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
-        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFT LOG</div>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", overflowX: "auto" }}>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead title="Shift log" style={{ marginBottom: 0 }} /></div>
         {/* Station filter, reusing the shipped all-houses idiom: ALL_STATIONS first and default,
             then each house, then Unassigned only when there is something in it. Chips rather than
             a select because the house count is small and a chip row shows the whole choice set at
@@ -13030,9 +13077,11 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           )}
         </>)}
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
+
 function AttendanceReport({ S, members, sessions, dept, back }) {
   const [presetKey, setPresetKey] = useState("year");                  // default This Year (matches prior on-load behavior)
   const [range, setRange] = useState(() => presetRange("year"));
