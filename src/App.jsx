@@ -8405,6 +8405,168 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
   );
 }
 
+/* ---------------- Funding hub · overview (b4c_funding_noir.html) ----------------
+   The mock's one-page hub: four stat chips, the funds with their bars, the fundraisers beside the
+   planner, and the donation tracker. Every figure is computed here from rows the sub-pages already
+   read (same tables, same RLS — is_canmanage(), so the caller only mounts this inside that gate).
+   Each section links DOWN into the existing page that owns the edits; nothing is written here.
+
+   NEW HUB READS (flagged for review before promote): donation_campaigns, donation_activity (all kinds,
+   for raised-per-fund, received-per-donor and last contact), fundraisers, donation_donors.
+
+   LEFT OUT OF THE MOCK ON PURPOSE — no data behind them: "tickets sold", "tasks 4 of 11 done", and the
+   planner's inline prompt + idea chips (the planner's state lives in Fundraisers; the card opens it).
+   App wording kept for donor stages (Prospect / Talking / Committed / Gave / Declined). */
+function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open }) {
+  const [funds, setFunds] = useState(null), [acts, setActs] = useState(null), [frs, setFrs] = useState(null), [donors, setDonors] = useState(null);
+  const [err, setErr] = useState(false);
+  const load = () => {
+    let failed = false;
+    const done = () => setErr(failed);
+    const take = (setter) => ({ data, error }) => { if (error || !data) { failed = true; return; } setter(data); };
+    Promise.all([
+      supabase.from("donation_campaigns").select("id, name, tagline, status, goal_amount, sort, created_at")
+        .order("sort", { ascending: true }).order("created_at", { ascending: true }).then(take(setFunds)),
+      supabase.from("donation_activity").select("donor_id, campaign_id, kind, amount, occurred_on").then(take(setActs)),
+      supabase.from("fundraisers").select("id, name, target_date, goal_amount, status, proceeds").then(take(setFrs)),
+      supabase.from("donation_donors").select("id, name, organization, role, amount_committed, stage, next_follow_up")
+        .eq("active", true).order("name", { ascending: true }).then(take(setDonors)),
+    ]).then(done);
+  };
+  useEffect(() => { load(); }, []);
+  useReconnect(() => { if (err) load(); });
+
+  const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
+  const short = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : money(v));
+  const todayIso = toISO(new Date());
+  const fmtD = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+
+  // derived — every one stays null (renders "—") until its rows arrived
+  const contributions = (acts || []).filter((a) => a.kind === "contribution");
+  const raisedBy = (key) => { const m = {}; for (const a of contributions) if (a[key]) m[a[key]] = (m[a[key]] || 0) + (Number(a.amount) || 0); return m; };
+  const byFund = acts ? raisedBy("campaign_id") : null, byDonor = acts ? raisedBy("donor_id") : null;
+  const lastContact = {}; for (const a of acts || []) if (a.donor_id && a.occurred_on && (!lastContact[a.donor_id] || a.occurred_on > lastContact[a.donor_id])) lastContact[a.donor_id] = a.occurred_on;
+  const liveFunds = (funds || []).filter((f) => f.status !== "archived");
+  const goalFunds = liveFunds.filter((f) => Number(f.goal_amount) > 0);
+  const goalSum = goalFunds.reduce((t, f) => t + Number(f.goal_amount), 0);
+  const goalRaised = byFund ? goalFunds.reduce((t, f) => t + (byFund[f.id] || 0), 0) : null;
+  const openFrs = (frs || []).filter((r) => r.status === "planning" || r.status === "active");
+  const liveN = openFrs.filter((r) => r.status === "active").length;
+  const dueFollow = (donors || []).filter((d) => d.next_follow_up && d.next_follow_up <= todayIso).length;
+  const frRows = [
+    ...openFrs.slice().sort((a, b) => (a.target_date || "9999").localeCompare(b.target_date || "9999")),
+    ...(frs || []).filter((r) => r.status === "done").sort((a, b) => (b.target_date || "").localeCompare(a.target_date || "")).slice(0, 2),
+  ].slice(0, 5);
+  const trackRows = (donors || []).slice().sort((a, b) => ((a.next_follow_up || "9999") <= todayIso ? 0 : 1) - ((b.next_follow_up || "9999") <= todayIso ? 0 : 1)).slice(0, 6);
+
+  const chip = (Icon, label, value, sub, color) => (
+    <div style={{ ...FS.cardNoir, boxShadow: FIRE.tileShadowNoir, borderRadius: 11, padding: "10px 13px", flex: "1 1 160px", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}><Icon size={13} color={FIRE.redBright} />{label}</div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1.1, marginTop: 5, color: color || FIRE.textPrimary, ...FS.num }}>{value}</div>
+      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
+    </div>
+  );
+  const link = (label, to) => <button onClick={() => open(to)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, color: FIRE.textSecondary }}>{label} ›</button>;
+  const pill = (text, color) => <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", padding: "2px 8px", borderRadius: 999, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{text}</span>;
+  const FR_PILL = { active: ["LIVE", FIRE.greenText], planning: ["PLANNING", FIRE.amberText], done: ["DONE", FIRE.textSecondary] };
+
+  return (<>
+    {err && <OfflineNotice onRetry={load} what="part of the funding overview" />}
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+      {chip(DollarSign, "Raised this year", money(raisedTotal), raisedTotal == null ? "waiting on both totals" : `donations ${short(donationsYtd)} · fundraisers ${short(fundraisersYtd)}`, raisedTotal ? FIRE.greenText : undefined)}
+      {chip(TrendingUp, "Toward goals", goalRaised == null || !funds ? "—" : goalSum ? `${Math.round((goalRaised / goalSum) * 100)}%` : "—", !funds || goalRaised == null ? "loading" : goalSum ? `${short(goalRaised)} of ${short(goalSum)}` : "no fund goals set", goalSum ? FIRE.amberText : undefined)}
+      {chip(PartyPopper, "Active fundraisers", frs ? String(openFrs.length) : "—", frs ? `${liveN} live · ${openFrs.length - liveN} planning` : "loading")}
+      {chip(Users, "Donors tracked", donors ? String(donors.length) : "—", donors ? (dueFollow ? `${dueFollow} need a follow-up` : "no follow-ups due") : "loading", undefined)}
+    </div>
+    <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "-4px 0 12px" }}>Raised this year counts donations and fundraiser proceeds dated in {year}; the Fundraisers quick-log isn't dated, so it isn't included.</div>
+
+    <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+      <CardHead icon={DollarSign} title="Funds" right={link("Manage funds", "donations")} />
+      {funds && liveFunds.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No funds yet — set one up under Manage funds.</div> : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 10 }}>
+          {liveFunds.map((f) => {
+            const got = byFund ? (byFund[f.id] || 0) : null, goal = Number(f.goal_amount) || 0;
+            const pct = goal && got != null ? Math.round((got / goal) * 100) : null;
+            return (
+              <div key={f.id} style={{ ...NOIR_INSET, padding: "12px 13px", display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>{f.name}</div>
+                {f.tagline && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{f.tagline}</div>}
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+                  <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, color: FIRE.textPrimary, ...FS.num }}>{money(got)}</span>
+                  {goal > 0 && <span style={{ fontSize: 12, color: FIRE.textMuted }}>of {money(goal)}</span>}
+                </div>
+                {pct != null && <>
+                  {/* neutral until the goal is met, then green — same rule as onboarding progress */}
+                  <ProgressBar pct={pct} tone={pct >= 100 ? "green" : "muted"} />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: FIRE.textMuted }}><span><b style={{ color: FIRE.textPrimary }}>{pct}%</b> funded</span><span>{got >= goal ? "goal met" : `${money(goal - got)} to go`}</span></div>
+                </>}
+                <button onClick={() => open("donations")} style={{ ...FS.btn, alignSelf: "flex-start", marginTop: 6, padding: "5px 10px", fontSize: 12 }}><Plus size={13} color={FIRE.btnIcon} /> Record a gift</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+
+    <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+      <CardHead icon={PartyPopper} title="Fundraisers" right={link("Funding calendar", "fundraisers")} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
+        <div>
+          {frs && frRows.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No fundraisers yet.</div>}
+          {frRows.map((r, i) => {
+            const [pt, pc] = FR_PILL[r.status] || FR_PILL.planning;
+            const goal = Number(r.goal_amount) || 0, got = Number(r.proceeds) || 0;
+            const sub = [r.target_date ? fmtD(r.target_date) : null, r.status === "done" && goal ? `raised ${money(got)} of ${money(goal)}` : goal ? `goal ${money(goal)}` : null].filter(Boolean).join(" · ");
+            return (
+              <button key={r.id} onClick={() => open("fundraisers")} style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: i === frRows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, padding: "10px 0", cursor: "pointer", fontFamily: "inherit" }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><PartyPopper size={14} color={FIRE.redText} /></span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name} {pill(pt, pc)}</span>
+                  {sub && <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{sub}</span>}
+                </span>
+                <span style={{ textAlign: "right", flexShrink: 0 }}>
+                  <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary, ...FS.num }}>{r.status === "done" && goal ? `${Math.round((got / goal) * 100)}%` : money(got)}</span>
+                  <span style={{ display: "block", fontSize: 10.5, color: FIRE.textMuted }}>{r.status === "done" && goal ? "of goal" : "raised"}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ ...NOIR_INSET, padding: "14px 15px", background: `radial-gradient(120% 120% at 100% 0%, rgba(200,50,58,.12), transparent 55%), ${FIRE.card2Noir}` }}>
+          <CardHead icon={Sparkles} title="Fundraiser planner" style={{ marginBottom: 4 }} />
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>Describe a goal — AI drafts a plan you can turn into a fundraiser.</div>
+          <button onClick={() => open("fundraisers")} style={{ ...FS.btnPrimary, width: "100%", justifyContent: "center" }}><Sparkles size={15} /> Open the planner</button>
+        </div>
+      </div>
+    </Card>
+
+    <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+      <CardHead icon={HeartHandshake} title="Donation tracker" right={<>{donors && <span style={{ color: FIRE.textMuted }}>{donors.length} supporter{donors.length === 1 ? "" : "s"}</span>}{link("Add a donor", "donations")}</>} />
+      {donors && donors.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No supporters tracked yet.</div> : trackRows.map((d, i) => {
+        const st = stageMeta(d.stage);
+        const due = d.next_follow_up && d.next_follow_up <= todayIso;
+        const soon = d.next_follow_up && !due && d.next_follow_up <= toISO(new Date(Date.now() + 7 * 864e5));
+        const initials = (d.organization || d.name || "?").split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
+        return (
+          <button key={d.id} onClick={() => open("donations")} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none", padding: "10px 0", cursor: "pointer", fontFamily: "inherit" }}>
+            <span style={{ width: 30, height: 30, borderRadius: 999, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 700, color: FIRE.textSecondary, flexShrink: 0 }}>{initials}</span>
+            <span style={{ flex: "1 1 160px", minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.organization || d.name}</span>
+              <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>{d.organization ? d.name : (d.role || "Donor")}</span>
+            </span>
+            {pill(st.label.toUpperCase(), stageColor(d.stage))}
+            <span style={{ width: 92, textAlign: "right", fontSize: 12, color: FIRE.textSecondary, ...FS.num }}><span style={{ display: "block", fontSize: 10, color: FIRE.textMuted }}>pledged</span>{d.amount_committed != null ? money(Number(d.amount_committed)) : "—"}</span>
+            <span style={{ width: 92, textAlign: "right", fontSize: 12, color: FIRE.textPrimary, fontWeight: 600, ...FS.num }}><span style={{ display: "block", fontSize: 10, color: FIRE.textMuted, fontWeight: 400 }}>received</span>{byDonor ? money(byDonor[d.id] || 0) : "—"}</span>
+            <span style={{ width: 130, textAlign: "right", fontSize: 11.5, color: due ? FIRE.redText : soon ? FIRE.amberText : FIRE.textMuted }}>
+              {due ? (d.next_follow_up < todayIso ? "Follow up — overdue" : "Follow up — today") : soon ? `Follow up — ${fmtD(d.next_follow_up)}` : lastContact[d.id] ? `Last contact ${fmtD(lastContact[d.id])}` : "No contact logged"}
+            </span>
+          </button>
+        );
+      })}
+      {donors && donors.length > trackRows.length && <div style={{ marginTop: 8 }}>{link(`All ${donors.length} supporters`, "donations")}</div>}
+    </Card>
+  </>);
+}
 /* ---------------- Funding hub ----------------
    Funding used to BE the fundraiser page. It is now a hub of sub-pages, so donations (and grants
    later) have somewhere to live that is not another collapsible section on an already-long screen.
@@ -8485,13 +8647,6 @@ function Funding({ S, role, notify, dept, meId, members }) {
      department that genuinely raised that much. Each split figure still shows its own state, so a
      half-loaded block says exactly which half it knows. */
   const raisedTotal = (donationsYtd == null || fundraisersYtd == null) ? null : donationsYtd + fundraisersYtd;
-  const stat = (label, value, caption, color) => (
-    <Card padding={14} style={{ flex: "1 1 210px", minWidth: 180 }}>
-      <SectionLabel style={{ marginBottom: 6 }}>{label}</SectionLabel>
-      <div style={{ fontSize: 22, fontWeight: 800, color, ...FS.num, lineHeight: 1.1 }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.45 }}>{caption}</div>
-    </Card>
-  );
 
   if (view === "fundraisers") {
     return <Fundraisers S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} back={() => setView(null)} />;
@@ -8502,10 +8657,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
 
   const card = (key, Icon, title, desc) => (
     <Card key={key} padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView(key)}>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-        <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-        <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
-      </div>
+      <CardHead icon={Icon} title={title} style={{ marginBottom: 0 }} />
       <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{desc}</div>
       <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
         <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
@@ -8513,36 +8665,24 @@ function Funding({ S, role, notify, dept, meId, members }) {
     </Card>
   );
 
-  return (<PageShell kicker="FUNDING" title="Money in, and where it came from" sub="Plan and run fundraisers, and keep track of the people and businesses who give.">
-    {/* Headline, then the two dated figures it is made of — see the note above for what it does
-        and does not include. Whole block gated: a PA gets no money figures rather than a false $0. */}
-    {canSeeDonations && (
-      <div style={{ marginBottom: 18 }}>
-        <Card padding="16px 18px" style={{ marginBottom: 10 }}>
-          <SectionLabel style={{ marginBottom: 6 }}>RAISED THIS YEAR</SectionLabel>
-          <div style={{ fontSize: 34, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.05 }}>{money(raisedTotal)}</div>
-          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
-            {raisedTotal == null
-              ? `Waiting on ${donationsYtd == null ? "donations" : "fundraiser proceeds"} — the total is held back rather than shown short.`
-              : `Donations and fundraiser proceeds dated in ${year}. The quick-log on the Fundraisers page isn't dated by year, so it isn't counted here.`}
-          </div>
-        </Card>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {stat(`Donations · ${year}`, money(donationsYtd), `Gifts logged with a date in ${year}.`, FIRE.red)}
-          {stat(`Fundraisers · ${year}`, money(fundraisersYtd), `Proceeds recorded on fundraisers with a ${year} target date.`, FIRE.amberText)}
-        </div>
+  /* THE MOCK'S HUB (b4c_funding_noir.html) for the people who can see the money (canManage — see above);
+     everyone else in leadership keeps the tile list, which only offers what their RLS can read. */
+  return (<PageShell band watermark="FUNDS" kicker={dept?.name ? `FUNDING · ${dept.name}` : "FUNDING"} title="Money in, and where it came from" sub="Plan and run fundraisers, and keep track of the people and businesses who give."
+    actions={canSeeDonations ? (
+      <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
+        <button style={FS.btn} onClick={() => setView("fundraisers")}><PartyPopper size={14} color={FIRE.btnIcon} /> New fundraiser</button>
+        <button style={FS.btnPrimary} onClick={() => setView("donations")}><Plus size={15} /> Record a gift</button>
+      </div>
+    ) : null}>
+    <NoirSkin>
+    {canSeeDonations ? (
+      <FundingOverview year={year} raisedTotal={raisedTotal} donationsYtd={donationsYtd} fundraisersYtd={fundraisersYtd} open={setView} />
+    ) : (
+      <div style={S.opGrid}>
+        {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
       </div>
     )}
-
-    <div style={S.opGrid}>
-      {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
-      {/* GATED ON canManage, not on the nav's LEADERSHIP role. The two differ by exactly one role:
-          LEADERSHIP includes Project Admin, is_canmanage() does not — so a PA can reach the Funding
-          page but the donations RLS returns them nothing. Showing the tile anyway would open a
-          screen that is permanently, inexplicably empty. The mismatch is deliberate on both sides
-          (donor PII is department business), so the tile follows the DATA rule, not the nav rule. */}
-      {canManage(role) && card("donations", HeartHandshake, "Donations", "Track who gives — pledges, gifts received, and where each conversation stands.")}
-    </div>
+    </NoirSkin>
   </PageShell>);
 }
 
