@@ -648,7 +648,7 @@ function YourSix({ S, role, meId, members, notify }) {
     const sponsorTag = r.is_business && r.is_national;
     const hasTag = localTag || sponsorTag || r.is_wellness;
     return (
-      <div key={r.id} style={{ ...FS.card, ...YS_CARD, marginBottom: 0, display: "flex", flexDirection: "column", ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
+      <div key={r.id} style={{ ...FS.cardNoir, ...YS_CARD, marginBottom: 0, display: "flex", flexDirection: "column", ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
           {r.is_crisis && <LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0, marginTop: 2 }} />}
           <span style={{ ...YS_CARD_NAME, flex: 1, minWidth: 0, lineHeight: 1.25 }}>{r.name}</span>
@@ -693,21 +693,22 @@ function YourSix({ S, role, meId, members, notify }) {
             {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit resources</>}
           </button>
         )}>
+      <NoirSkin>
       {resources === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
       ) : (<>
         {/* Reach out — calm invitation (not an alarm), pinned at top. Opens the ordered flow. */}
-        <button onClick={() => setReachOpen(true)} style={{ ...FS.card, ...YS_CARD, width: "100%", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: `1px solid ${FIRE.greenText}44`, borderLeft: `3px solid ${FIRE.greenText}` }}>
+        <button onClick={() => setReachOpen(true)} style={{ ...FS.cardNoir, ...YS_CARD, width: "100%", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit", border: `1px solid ${FIRE.greenText}44`, borderLeft: `3px solid ${FIRE.greenText}` }}>
           <HeartHandshake size={22} color={FIRE.greenText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: FIRE.textPrimary }}>Reach out</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontSize: 17, fontWeight: 700, letterSpacing: ".02em", color: FIRE.textPrimary }}>Reach out</div>
             <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.35 }}>Talk to someone — your person, a wellness contact, or a 24/7 line.</div>
           </div>
           <ChevronRight size={18} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
         </button>
         {reachOpen && createPortal(
           <div onClick={() => setReachOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 120, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 460, width: "100%", padding: "18px 18px calc(18px + env(safe-area-inset-bottom))" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 460, width: "100%", padding: "18px 18px calc(18px + env(safe-area-inset-bottom))" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <HeartHandshake size={20} color={FIRE.greenText} />
                 <div style={{ flex: 1, fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 20, fontWeight: 700, color: FIRE.textPrimary }}>Reach out</div>
@@ -726,7 +727,7 @@ function YourSix({ S, role, meId, members, notify }) {
               {wellnessContacts.length > 0 && (<>
                 <SectionLabel style={{ textTransform: "none", letterSpacing: "normal", margin: reachPerson ? "12px 0 6px" : "0 0 6px" }}>Department wellness contacts</SectionLabel>
                 {wellnessContacts.map((r) => (
-                  <div key={r.id} style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.greenText}` }}>
+                  <div key={r.id} style={{ ...FS.cardNoir, ...YS_CARD, borderLeft: `3px solid ${FIRE.greenText}` }}>
                     <div style={YS_CARD_NAME}>{r.name}</div>
                     {r.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 2, lineHeight: 1.4 }}>{r.description}</div>}
                     <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
@@ -739,7 +740,7 @@ function YourSix({ S, role, meId, members, notify }) {
               {/* Crisis lines — always seeded, so the flow is NEVER empty. Calm, below the people. */}
               <SectionLabel style={{ textTransform: "none", letterSpacing: "normal", margin: (reachPerson || wellnessContacts.length) ? "12px 0 6px" : "0 0 6px", display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Crisis lines · 24/7</SectionLabel>
               {crisisItems.map((r) => (
-                <div key={r.id} style={{ ...FS.card, ...YS_CARD, borderLeft: `3px solid ${FIRE.redText}` }}>
+                <div key={r.id} style={{ ...FS.cardNoir, ...YS_CARD, borderLeft: `3px solid ${FIRE.redText}` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}><LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0 }} /><span style={YS_CARD_NAME}>{r.name}</span></div>
                   <ResourceActions r={r} />
                 </div>
@@ -751,7 +752,7 @@ function YourSix({ S, role, meId, members, notify }) {
         {/* Crisis lines: same unified card as everywhere, calm accent, at top so they're findable. */}
         {crisisItems.length > 0 && (
           <div style={{ marginBottom: 18 }}>
-            <SectionLabel style={{ textTransform: "none", letterSpacing: "normal", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><LifeBuoy size={12} color={FIRE.redText} /> Support lines · always here</SectionLabel>
+            <CardHead icon={LifeBuoy} title="Support lines · always here" />
             <div style={YS_GRID}>{crisisItems.map(renderCard)}</div>
           </div>
         )}
@@ -770,15 +771,15 @@ function YourSix({ S, role, meId, members, notify }) {
         {groups.length === 0 && crisisItems.length === 0 ? (
           <Card padding={24} style={{ color: FIRE.textMuted, fontSize: 14 }}>No resources yet.</Card>
         ) : groups.map(({ cat, items }) => (
-          <div key={cat} style={{ marginBottom: 18 }}>
-            <SectionLabel style={{ marginBottom: 8 }}>{cat.toUpperCase()}</SectionLabel>
+          <div key={cat} style={{ marginBottom: 14 }}>
+            <CardHead icon={BookOpen} title={cat} />
             <div style={YS_GRID}>{items.map(renderCard)}</div>
           </div>
         ))}
         {/* Businesses who support us — bottom section. Sponsors (national) pinned top per ordering (B). */}
         {(businessItems.length > 0 || (canManage && editMode)) && (
           <div style={{ marginTop: 4, marginBottom: 18 }}>
-            <SectionLabel style={{ marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Briefcase size={12} color={FIRE.btnIcon} /> BUSINESSES WHO SUPPORT US</SectionLabel>
+            <CardHead icon={Briefcase} title="Businesses who support us" />
             {canManage && editMode && (adding && formKind === "business" ? formCard(addResource, "Add business") : (
               <button style={{ ...FS.btn, marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddBusiness}><Plus size={14} color={FIRE.btnIcon} /> Add business</button>
             ))}
@@ -787,6 +788,7 @@ function YourSix({ S, role, meId, members, notify }) {
           </div>
         )}
       </>)}
+      </NoirSkin>
     </PageShell>
   );
 }
