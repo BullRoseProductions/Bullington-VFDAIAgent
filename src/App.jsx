@@ -773,10 +773,10 @@ function YourSix({ S, role, meId, members, notify }) {
     return cats.map((cat) => ({ cat, items: byCat.get(cat).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name)) }));
   }, [resources]);
   return (
-    <PageShell kicker="YOUR SIX" title={<>Support &amp; resources</>}
+    <PageShell band kicker="YOUR SIX" title={<>Support &amp; resources</>}
       sub="Help is here when you need it — for you, or someone on your crew. Every line below is real and answered."
       actions={canManage && resources && (
-          <button onClick={toggleEditMode} style={{ ...FS.btn, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
             {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit resources</>}
           </button>
         )}>
@@ -14392,7 +14392,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
            they sat above the fleet: Edit/Done when there are rigs; Add apparatus whenever the add form is reachable. */
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
           {rigs.length > 0 && (
-            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
               {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit apparatus</>}
             </button>
           )}
@@ -14873,7 +14873,7 @@ function ApparatusChecklist({ S, rig, notify }) {
           {!loading && items && items.length > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{items.length} item{items.length === 1 ? "" : "s"}</span>
-              <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+              <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
                 {editMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={FIRE.btnIcon} /> Edit checklist</>}
               </button>
             </div>
@@ -15447,7 +15447,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
               {(photos || []).length > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{photos.length} photo{photos.length === 1 ? "" : "s"}</span>
-                  <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+                  <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
                     {editMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={FIRE.btnIcon} /> Edit photos</>}
                   </button>
                 </div>
@@ -17247,7 +17247,7 @@ function Equipment({ S, role, members, meId, notify }) {
       actions={(canManage || isManager || isDA) ? (
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
           {types.length > 0 && (
-            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
               {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
             </button>
           )}
@@ -21049,7 +21049,7 @@ function StationDuties({ S, role, members, meId, notify }) {
               station — a duty added here would land in the STORED house, silently and wrongly.
               "Go to this station" is the way in. */}
           {canManage && !allMode && <button disabled={clearingAll} style={{ ...FS.btn, opacity: clearingAll ? 0.6 : 1 }} onClick={clearAllCheckmarks}>{clearingAll ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} color={FIRE.btnIcon} />} Clear all checkmarks now</button>}
-          {(canManage || canCreate) && !allMode && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
+          {(canManage || canCreate) && !allMode && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
           {canCreate && !allMode && (editMode || duties.length === 0) && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
@@ -21214,7 +21214,7 @@ function Admin({ S, library, setLibrary, feedback }) {
     setLibrary([np, ...library]); setTitle(""); setObjective(""); setDone(true); setTimeout(() => setDone(false), 2500);
   }
   return (
-    <PageShell kicker="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately.">
+    <PageShell band kicker="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately.">
       <NoirSkin>
       <div style={{ ...S.formCard, ...FS.cardNoir, padding: "16px 18px", gap: 12 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Packet title</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Tanker Shuttle Operations" /></label>
