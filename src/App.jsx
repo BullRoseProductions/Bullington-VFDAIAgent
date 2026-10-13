@@ -9631,8 +9631,8 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   const rosterList = members.filter(countsInStats);
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} dept={dept} />;
   return (
-    <PageShell band kicker={dept?.name ? `ROSTER · ${dept.name}` : "ROSTER"} title="Your people, all in one place"
-      watermark="CREW"
+    <PageShell band kicker={(() => { const k = tab === "certs" ? "CERTIFICATIONS" : tab === "attendance" ? "ATTENDANCE" : "ROSTER"; return dept?.name ? `${k} · ${dept.name}` : k; })()} title="Your people, all in one place"
+      watermark={tab === "certs" ? "CERTS" : tab === "attendance" ? "DRILLS" : "ROSTER"}
       sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
       <NoirSkin>
       <div style={S.segRow}>
@@ -17826,7 +17826,7 @@ function MyOnboarding({ S, me, members }) {
   const total = (items || []).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
   return (
-    <PageShell kicker="YOUR ONBOARDING" title="Getting started" sub="Your new-member checklist. An officer signs each item off as you complete it.">
+    <PageShell band watermark="INTAKE" kicker="YOUR ONBOARDING" title="Getting started" sub="Your new-member checklist. An officer signs each item off as you complete it.">
       <NoirSkin>
       {err && !items ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Couldn't load your checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
@@ -17835,29 +17835,40 @@ function MyOnboarding({ S, me, members }) {
       ) : total === 0 ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Your department hasn't set up an onboarding checklist yet.</Card>
       ) : (<>
-        <Card padding={16} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>{done} of {total} complete</span><span>{pct}%</span></div>
+        <Card padding="16px 18px" style={{ marginBottom: 14 }}>
+          {/* Featured progress (the onboarding mock's head card): big Oswald %, the count, then the bar. */}
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 6 }}>Your progress</div>
+              <div style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{done} of {total} signed off</div>
+            </div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{pct}%</div>
+          </div>
           <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
           {err && <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={reload}>Retry</button></div>}
         </Card>
-        {groupOnboarding(items).map((g) => (
-          <div key={g.category} style={{ marginBottom: 6 }}>
-            <CardHead icon={ClipboardCheck} title={g.category} />
-            {g.items.map((it) => {
+        {groupOnboarding(items).map((g) => {
+          const gDone = g.items.filter((it) => onboardingDone(it, me, prog)).length;
+          return (
+          <Card key={g.category} padding="14px 16px" style={{ marginBottom: 12 }}>
+            <CardHead icon={ClipboardCheck} title={g.category} right={<span style={{ color: gDone === g.items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{gDone}/{g.items.length}</span>} />
+            {g.items.map((it, i) => {
               const ok = onboardingDone(it, me, prog);
               const sub = it.is_mentor ? (mentorName ? `Mentor: ${mentorName}` : null) : onboardingSignedLine(prog[it.id], members);
               return (
-                <div key={it.id} style={FS.row}>
-                  {ok ? <CheckCircle2 size={18} color={FIRE.green} style={{ flexShrink: 0 }} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block", flexShrink: 0 }} />}
+                <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                  {/* Signed off = an earned green check; open = the neutral ring (the shared CheckMark). */}
+                  <CheckMark state={ok ? "pass" : "todo"} size={20} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: FIRE.textPrimary, fontSize: 14 }}>{it.label}</div>
-                    <div style={{ fontSize: 12, color: FIRE.textMuted }}>{ok ? sub : "Open"}</div>
+                    <div style={{ color: ok ? FIRE.textSecondary : FIRE.textPrimary, fontSize: 13.5 }}>{it.label}</div>
+                    <div style={{ fontSize: 11.5, color: ok ? FIRE.textMuted : FIRE.amberText, marginTop: 1 }}>{ok ? sub : "Open"}</div>
                   </div>
                 </div>
               );
             })}
-          </div>
-        ))}
+          </Card>
+          );
+        })}
       </>)}
       </NoirSkin>
     </PageShell>
@@ -19120,7 +19131,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const num = FS.num;
 
     return (
-      <PageShell above={mounts} kicker="MY TRAINING" title="Your training calendar"
+      <PageShell band watermark="TRAIN" above={mounts} kicker="MY TRAINING" title="Your training calendar"
         sub="See what's scheduled, what you've missed, and where your attendance stands.">
       <NoirSkin>
 
