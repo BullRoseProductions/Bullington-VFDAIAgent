@@ -16142,6 +16142,7 @@ const issueKindLabel = (k) => (ISSUE_KINDS.find(([v]) => v === k) || [null, "Iss
 function MyEquipment({ S, meId, notify }) {
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);   // a failed read is not "you're not signed for anything"
   const [busyId, setBusyId] = useState(null);   // equipment_id mid mark/cancel
   const [selMode, setSelMode] = useState(false);
   const [sel, setSel] = useState(() => new Set());        // equipment_ids picked to transfer
@@ -16159,9 +16160,10 @@ function MyEquipment({ S, meId, notify }) {
       .select("id, equipment_id, equipment_name, opened_at, condition_at_open, open_action, opened_by_name, return_requested_at, equipment(manufacture_date, condition, equipment_type(service_life_years))")
       .eq("holder_member_id", meId).is("closed_at", null)   // .eq is REQUIRED: a manager's "read all custody" RLS would otherwise return the whole dept — scope to self
       .order("opened_at", { ascending: false })
-      .then(({ data, error }) => { if (!error && data) setRows(data); setLoaded(true); });
+      .then(({ data, error }) => { if (!error && data) { setRows(data); setLoadErr(false); } else setLoadErr(true); setLoaded(true); });
   };
   useEffect(() => { load(); }, [meId]);
+  useReconnect(() => { if (loadErr) load(); });
   // APPROVED NEW READ (B3): MY open issues — the "Issue reported" line on a held item. .eq(reported_by) is REQUIRED:
   // a manager's "managers read issues" RLS would otherwise return the whole dept. Failed read keeps last-known.
   const [myIssues, setMyIssues] = useState([]);
@@ -16241,7 +16243,7 @@ function MyEquipment({ S, meId, notify }) {
         );
       })()}
       {selMode && <div style={{ fontSize: 12, color: FIRE.textSecondary, margin: "-4px 0 10px" }}>Pick the items to hand off, then Start transfer.</div>}
-      {!loaded ? null : rows.length === 0 ? (
+      {loaded && loadErr && rows.length === 0 ? <OfflineNotice onRetry={load} what="your equipment" /> : !loaded ? null : rows.length === 0 ? (
         <Card padding="26px 18px" style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6 }}>
           <HardHat size={26} color={FIRE.textMuted2} />
           <div style={{ fontSize: 14, color: FIRE.textSecondary }}>You're not signed for any equipment.</div>
