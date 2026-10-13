@@ -16372,7 +16372,7 @@ function StationHours({ S, dept, notify }) {
   const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   const fmtHm2 = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
   return (
-    <PageShell kicker="STATION HOURS" title="Your time at the station" sub="Clock in when you get to the station, out when you leave. If your phone shares its location we check it against the station and mark the shift verified — the location itself is never stored.">
+    <PageShell band watermark="ON DUTY" kicker="STATION HOURS" title="Your time at the station" sub="Clock in when you get to the station, out when you leave. If your phone shares its location we check it against the station and mark the shift verified — the location itself is never stored.">
       <NoirSkin>
       {!tried ? null : (
         <>
