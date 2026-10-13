@@ -9842,7 +9842,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   useEditorOpen(editing);   // cert editor: a roster refresh must not swap the row being edited
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [showMissed, setShowMissed] = useState(false);   // TRAINING HISTORY: absent sessions collapsed by default
+  const [showAllHist, setShowAllHist] = useState(false);   // TRAINING HISTORY: 4 most recent; "Show all N" expands
   const [showAllCerts, setShowAllCerts] = useState(false);   // CERTIFICATIONS: capped list, "Show all N" expands
   const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
   // Live 90-day participation — same deptAttendance calc as the roster + Reports; NOT the stale stored field.
@@ -10116,47 +10116,131 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
 
       {(() => {
         const memberLeader = isLeader(member.access);   // score + list off the VIEWED member's actual roles
-        const done = [...trainDone].sort((a, b) => sessDate(b) - sessDate(a));   // trainDone (above): finalized TRAINING, leadership events excluded   // TRAINING only — leadership EVENTS excluded (event filter; the member is still fully counted for regular training)
-        const expected = done.filter((s) => expectedAfterJoin(member, s));   // pre-join drills listed as "—", not counted
-        const went = expected.filter((s) => (s.attendance || []).includes(member.id)).length;
+        const done = [...trainDone].sort((a, b) => sessDate(b) - sessDate(a));   // trainDone (above): finalized TRAINING, leadership events excluded
+        // CONDENSED HISTORY — a 3-stat strip (last 90 days), the 4 most recent sessions, "Show all N". Same rows and
+        // the same attended / missed / pre-join rules as before; the full list is one tap away.
+        const since90 = new Date(); since90.setDate(since90.getDate() - 90);
+        const recent = done.filter((s) => sessDate(s) >= since90);
+        const recentExpected = recent.filter((s) => expectedAfterJoin(member, s));
+        const recentWent = recentExpected.filter((s) => (s.attendance || []).includes(member.id)).length;
+        const reqPct = recentExpected.length ? Math.round((recentWent / recentExpected.length) * 100) : null;
+        // credited station hours for the last 3 calendar months — the tail of the 6-month series the chart already loaded
+        const hrs3 = hoursOn && Array.isArray(hrs.vals) && !hrs.err && hrs.vals.length ? hrs.vals.slice(-3).reduce((t, v) => t + (Number(v) || 0), 0) : null;
+        const HIST_CAP = 4;
+        const shown = showAllHist ? done : done.slice(0, HIST_CAP);
+        const sum = (n, l, tone) => (
+          <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "10px 12px", minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{n}</div>
+            <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 3, letterSpacing: ".02em" }}>{l}</div>
+          </div>
+        );
         return (
-          <>
-            <CardHead icon={CalendarCheck} title="Training history" />
-            <Card padding="15px 16px" style={{ marginBottom: 16 }}>
-              {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
-                <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 8 }}>Attended <b>{went}</b> of <b>{expected.length}</b> recorded sessions{expected.length < done.length ? ` since joining` : ""}.</div>
-                {(() => {
-                  // Shown by default: everything except a MISS. Absent sessions sit behind the toggle; the
-                  // "Attended N of M" line above still counts them. Pre-join rows ("—") aren't misses.
-                  const row = (s, i, arr) => {
-                    const present = (s.attendance || []).includes(member.id);
-                    const preJoin = !present && !expectedAfterJoin(member, s);
-                    return (
-                      <div key={s.id} style={{ ...S.certRow, borderBottom: i === arr.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                        <CalendarCheck size={15} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright} style={{ flexShrink: 0 }} />
-                        <div style={{ flex: 1, minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</span><EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {fmtSess(s)}</span></div>
-                        <Pill S={S} color={present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redBright}>{present ? "PRESENT" : preJoin ? "—" : "ABSENT"}</Pill>
-                      </div>
-                    );
-                  };
-                  const missed = done.filter((s) => !(s.attendance || []).includes(member.id) && expectedAfterJoin(member, s));
-                  const shown = done.filter((s) => !missed.includes(s));
-                  return (<>
-                    {shown.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "4px 0 8px" }}>No sessions attended yet.</div>}
-                    {shown.map(row)}
-                    {missed.length > 0 && (<>
-                      {/* The kit's collapsible header (as on NEEDS YOUR ATTENTION): SectionLabel as a button + chevron. */}
-                      <SectionLabel as="button" onClick={() => setShowMissed((v) => !v)} aria-expanded={showMissed}
-                        style={{ marginTop: 12, marginBottom: showMissed ? 6 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
-                        {showMissed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{showMissed ? "Hide" : "Show"} {missed.length} missed
-                      </SectionLabel>
-                      {showMissed && missed.map(row)}
-                    </>)}
-                  </>);
-                })()}
-              </>)}
+          <Card padding="14px 16px" style={{ marginBottom: 10 }}>
+            <CardHead icon={CalendarCheck} title="Training history" right={done.length > HIST_CAP ? <button onClick={() => setShowAllHist((v) => !v)} style={{ background: "none", border: "none", cursor: "pointer", color: FIRE.textSecondary, fontSize: 11.5, fontFamily: "inherit" }}>{showAllHist ? "Show recent" : `View all ${done.length} sessions ›`}</button> : null} />
+            {done.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No training sessions recorded yet.</div> : (<>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 9, marginBottom: 12 }}>
+                {sum(String(recentWent), "sessions · last 90 days")}
+                {sum(hrs3 == null ? "—" : <>{(Math.round(hrs3 * 10) / 10).toFixed(1)}<span style={{ fontSize: 13, color: FIRE.textMuted, fontWeight: 600 }}> hrs</span></>, "credited · last 3 months")}
+                {sum(reqPct == null ? "—" : `${reqPct}%`, "of required attended", reqPct == null ? null : reqPct >= 75 ? FIRE.greenText : reqPct >= 50 ? FIRE.amberText : FIRE.redText)}
+              </div>
+              {shown.map((s, i, arr) => {
+                const present = (s.attendance || []).includes(member.id);
+                const preJoin = !present && !expectedAfterJoin(member, s);
+                const tone = present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redText;
+                return (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                    <div style={{ width: 40, textAlign: "center", flexShrink: 0 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: FIRE.textMuted }}>{sessDate(s).toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</div>
+                      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{sessDate(s).getDate()}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></div>
+                      <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 1 }}>{fmtSess(s)}</div>
+                    </div>
+                    <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", flexShrink: 0, color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}>{present ? "Attended" : preJoin ? "Before joining" : "Missed"}</span>
+                  </div>
+                );
+              })}
+              {done.length > HIST_CAP && (
+                <button onClick={() => setShowAllHist((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "9px 0 2px", cursor: "pointer", background: "none", border: "none", borderTop: `1px solid ${FIRE.lineNoir}`, marginTop: 4, fontFamily: "inherit" }}>
+                  {showAllHist ? "Show fewer" : `Show all ${done.length} sessions`} {showAllHist ? <ChevronUp size={13} style={{ verticalAlign: "-2px" }} /> : <ChevronDown size={13} style={{ verticalAlign: "-2px" }} />}
+                </button>
+              )}
+            </>)}
+          </Card>
+        );
+      })()}
+
+      {/* READINESS + QUALIFIED TO OPERATE — both read only the certs and attendance already on this screen. */}
+      {(() => {
+        const certPct = certs.length ? Math.round((nCur / certs.length) * 100) : null;
+        const parts = [certPct, part90].filter((v) => v != null);
+        // READY = the mean of cert compliance (current ÷ on file) and 90-day participation, whichever are known.
+        const ready = parts.length ? Math.round(parts.reduce((t, v) => t + v, 0) / parts.length) : null;
+        const R = 41, C = 2 * Math.PI * R;
+        const needs = [
+          ...certs.filter((c) => c.st.rank === 0).map((c) => ({ k: `x${c.id}`, tone: FIRE.redBright, text: <><b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{c.name}</b> expired — needs renewal</> })),
+          ...certs.filter((c) => c.st.rank === 1).map((c) => ({ k: `e${c.id}`, tone: FIRE.amberText, text: <><b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{c.name}</b> {expPhrase(c.exp)}</> })),
+          ...(nUndated ? [{ k: "u", tone: FIRE.amberText, text: <><b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{nUndated} cert{nUndated === 1 ? "" : "s"}</b> missing an expiry date</> }] : []),
+          ...(part90 != null && part90 < 75 ? [{ k: "p", tone: part90 < 50 ? FIRE.redBright : FIRE.amberText, text: <>Participation <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{part90}%</b> over the last 90 days</> }] : []),
+        ];
+        const shownNeeds = needs.slice(0, 4);
+        // QUALIFIED TO OPERATE — a fixed list of operating positions, each cleared by ANY matching cert that is
+        // currently valid (certStatus current or expiring). A position with only a lapsed/undated match shows dimmed.
+        const norm = (t) => (t || "").toLowerCase();
+        const QUAL_POSITIONS = [
+          ["Interior FF", ["firefighter i", "firefighter ii", "structural firefighter", "interior qualified"]],
+          ["Exterior FF", ["exterior firefighter", "exterior qualified", "basic firefighter"]],
+          ["Driver / Operator", ["emergency vehicle operator", "driver operator", "driver cleared"]],
+          ["Pump Operator", ["driver operator pumper", "pump operator qualified"]],
+          ["Aerial / Ladder", ["driver operator aerial", "ladder qualified"]],
+          ["Tanker / Tender", ["mobile water supply", "tender qualified", "tanker shuttle"]],
+          ["EMT", ["emergency medical technician", "advanced emt", "paramedic"]],
+          ["First Responder", ["medical first responder", "emergency medical responder"]],
+          ["HazMat Ops", ["hazmat operations", "hazmat technician"]],
+          ["Rescue", ["vehicle extrication", "rope rescue", "technical rescue", "rescue qualified"]],
+        ];
+        const quals = QUAL_POSITIONS.map(([role2, keys]) => {
+          const hits = certs.filter((c) => keys.some((k) => norm(c.name) === k || norm(c.name).startsWith(k + " ") || norm(c.name).includes(k)));
+          return { role2, cleared: hits.some((c) => c.st.rank === 1 || c.st.rank === 2), lapsed: hits.length > 0 };
+        }).filter((q) => q.lapsed);
+        return (
+          <div className="mf-grid" style={{ marginBottom: 10 }}>
+            <Card padding="14px 16px" style={{ minWidth: 0 }}>
+              <CardHead icon={ShieldAlert} title="Readiness" right={<span>as of today</span>} />
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ position: "relative", width: 96, height: 96, flexShrink: 0 }} title="Mean of cert compliance and 90-day participation">
+                  <svg width="96" height="96" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
+                    <circle cx="48" cy="48" r={R} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="9" />
+                    {ready != null && ready > 0 && <circle cx="48" cy="48" r={R} fill="none" stroke={ready >= 75 ? FIRE.green : ready >= 50 ? FIRE.amberText : FIRE.redText} strokeWidth="9" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - ready / 100)} />}
+                  </svg>
+                  <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{ready == null ? "—" : <>{ready}<span style={{ fontSize: 14, color: FIRE.textMuted }}>%</span></>}</div>
+                    <div style={{ fontSize: 9, color: FIRE.textMuted, letterSpacing: ".08em", marginTop: 2 }}>READY</div>
+                  </div>
+                </div>
+                <div style={{ flex: "1 1 180px", minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {shownNeeds.length === 0
+                    ? <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: FIRE.textSecondary }}><span style={{ width: 7, height: 7, borderRadius: 999, background: FIRE.greenText, flexShrink: 0 }} />{certs.length ? "All certifications current" : "No certifications on file yet"}</div>
+                    : shownNeeds.map((n) => <div key={n.k} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: FIRE.textSecondary }}><span style={{ width: 7, height: 7, borderRadius: 999, background: n.tone, flexShrink: 0 }} /><span>{n.text}</span></div>)}
+                  {needs.length > shownNeeds.length && <div style={{ fontSize: 11, color: FIRE.textMuted }}>+{needs.length - shownNeeds.length} more in Certifications above</div>}
+                </div>
+              </div>
             </Card>
-          </>
+            <Card padding="14px 16px" style={{ minWidth: 0 }}>
+              <CardHead icon={CheckCircle2} title="Qualified to operate" />
+              {quals.length === 0 ? <EmptyState icon={null} text="No operating roles matched to the certifications on file yet." /> : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {quals.map((q) => (
+                    <span key={q.role2} title={q.cleared ? "Cleared by a current certification" : "Matching certification has lapsed or has no expiry date"} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "7px 13px", fontSize: 12, fontWeight: 600, color: q.cleared ? FIRE.textPrimary : FIRE.textMuted, opacity: q.cleared ? 1 : 0.7 }}>
+                      {q.cleared ? <CheckCircle2 size={13} color={FIRE.greenText} /> : <Lock size={13} color={FIRE.textMuted} />}{q.role2}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 10 }}>Cleared roles are driven by current certifications on file.</div>
+            </Card>
+          </div>
         );
       })()}
 
