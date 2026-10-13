@@ -389,7 +389,7 @@ const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
   : true;
 // Provenance pill for minutes that a human brought in (ai_outputs.source='imported') — so a human-authored
 // document is NEVER shown as if Claude drafted it. Shown wherever imported minutes appear.
-const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
+const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
 
 const TRACKS = {
   Fire:        { label: "Fire",        accent: FIRE.red,       Icon: Flame },        // Industrial Noir categorical set
@@ -561,22 +561,22 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
 }
 /* ---------------- Your Six — membership support & crisis resources (6a: read-only member page) ---------------- */
 const RESOURCE_CATEGORY_ORDER = ["Crisis lines", "Mental health & support", "Physical health", "Line-of-duty & family"];
-const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.btnBg, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.card2Noir, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const CRISIS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#fff", background: FIRE.redBright, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
-const WELLNESS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.amberText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const WELLNESS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.amberText, background: FIRE.card2Noir, border: `1px solid ${FIRE.amberText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: want digits (keep a leading +)
 // Only the contact methods a resource actually has, as tappable actions (real dial/text/compose on a phone).
 function ResourceActions({ r, compact }) {
   // Labeled buttons (full-width contexts: the Reach-out modal). Icon-only (compact) for grid tiles.
   const labelBtn = (href, Icon, label) => (
     <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
-       style={{ ...YS_ACTION_BTN, background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }}>
+       style={{ ...YS_ACTION_BTN, background: FIRE.card2Noir, color: FIRE.btnText, border: `1px solid ${FIRE.line2Noir}` }}>
       <Icon size={14} color={FIRE.btnIcon} /> {label}
     </a>
   );
   const iconBtn = (href, Icon, label) => (
     <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer" title={label} aria-label={label}
-       style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 36, borderRadius: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, textDecoration: "none" }}>
+       style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 36, borderRadius: 8, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, textDecoration: "none" }}>
       <Icon size={16} color={FIRE.btnIcon} />
     </a>
   );
@@ -600,7 +600,7 @@ const YS_CARD_NAME  = { fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }
 const YS_ACTION_BTN = { display: "inline-flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, textDecoration: "none", fontFamily: "inherit" };   // ~34px tall, tappable
 // Deck/grid layout: cards tile side-by-side within each section (~2-up on a phone, more on desktop).
 const YS_GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 };
-const YS_TILE_EDIT_BTN = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 24, borderRadius: 6, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, cursor: "pointer", padding: 0 };
+const YS_TILE_EDIT_BTN = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 24, borderRadius: 6, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, cursor: "pointer", padding: 0 };
 // One "Directions" link, no chooser: open the device's likely default — Apple Maps on iOS/iPadOS,
 // Google Maps on Android/desktop. Address is URL-encoded so spaces/commas survive (space->%20, comma->%2C).
 const mapsHref = (addr) => {
@@ -688,7 +688,7 @@ function YourSix({ S, role, meId, members, notify }) {
   const formCard = (onSave, saveLabel) => {
     const isBiz = formKind === "business";
     return (
-    <Card padding={12} style={{ background: FIRE.btnBg, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+    <Card padding={12} style={{ background: FIRE.card2Noir, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} placeholder={isBiz ? "e.g. Miller's Hardware" : "e.g. Chaplain Dave, or Peer support"} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
         {!isBiz && <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><input style={FS.input} list="ys-cats" value={form.category} placeholder="e.g. Department wellness" onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} /><datalist id="ys-cats">{allCategories.map((c) => <option key={c} value={c} />)}</datalist></label>}
@@ -807,7 +807,7 @@ function YourSix({ S, role, meId, members, notify }) {
                     {r.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 2, lineHeight: 1.4 }}>{r.description}</div>}
                     <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
                       <a href={`tel:${telDigits(r.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call</a>
-                      {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={{ ...YS_ACTION_BTN, background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
+                      {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={{ ...YS_ACTION_BTN, background: FIRE.card2Noir, color: FIRE.btnText, border: `1px solid ${FIRE.line2Noir}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
                     </div>
                   </div>
                 ))}
@@ -4301,14 +4301,14 @@ function StationClockCard({ S, dept, go }) {
     return `${h}:${p(m)}:${p(sec)}`;
   })();
   return (
-    <div style={{ ...face, padding: noir ? "12px 14px" : "14px 16px", borderTop: `3px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
+    <div style={{ ...face, padding: noir ? "12px 14px" : "14px 16px", borderTop: `3px solid ${onClock ? FIRE.green : FIRE.line2Noir}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {noir ? <CardHead icon={Clock} title="Station hours" style={{ marginBottom: 0, width: "auto" }} /> : (<>
         <Clock size={14} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
         <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>STATION HOURS</div></>)}
         {/* on/off state pill — the dot pulses while on duty */}
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: ".1em",
-                       color: onClock ? FIRE.greenText : FIRE.textMuted, border: `0.5px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
+                       color: onClock ? FIRE.greenText : FIRE.textMuted, border: `0.5px solid ${onClock ? FIRE.green : FIRE.line2Noir}` }}>
           <HealthDot tone={onClock ? "green" : "muted"} size={7} className={onClock ? "duty-pulse" : undefined} />
           {onClock ? "ON DUTY" : "OFF DUTY"}
         </span>
@@ -4541,7 +4541,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
           {NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)))   // same equipment-manager exception as the sidebar
             .filter((n) => moduleEnabled(n.key, dept?.disabled_modules)).map((n) => (                                 // and the same module gate (dept is already a prop here)
-            <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
+            <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
               <n.Icon size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: FIRE.btnText }}>{n.label}</span>
               <ChevronRight size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
@@ -4580,7 +4580,7 @@ function Library({ S, library, openPacket }) {
       <div style={{ ...S.chipRow, marginBottom: 12 }}>
         {[["All", "All", null], ...Object.keys(TRACKS).map((k) => [k, TRACKS[k].label, TRACKS[k].accent])].map(([k, label, accent]) => {
           const on = track === k;
-          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? tint(accent || FIRE.redBright, "26") : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `1px solid ${on ? (accent || FIRE.redBright) : FIRE.btnBorder}` }}>{label}</button>;
+          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? tint(accent || FIRE.redBright, "26") : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `1px solid ${on ? (accent || FIRE.redBright) : FIRE.line2Noir}` }}>{label}</button>;
         })}
       </div>
       {results.length === 0 ? (
@@ -4854,7 +4854,7 @@ function StudySession({ S }) {
           </select></label>
         <div style={S.segRow}>
           {[["quiz", isDeptQual(cert) ? "Skill check" : "Quiz me"], ["explain", "Explain"]].map(([k, l]) => (
-            <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: mode === k ? FIRE.redBright : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
+            <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: mode === k ? FIRE.redBright : FIRE.line2Noir, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
           ))}
         </div>
       </Card>
@@ -4882,7 +4882,7 @@ function StudySession({ S }) {
               <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length:</span>
               <div style={S.segRow}>
                 {[5, 10, 20].map((n) => (
-                  <button key={n} onClick={() => setQuizLen(n)} style={{ ...S.segBtn, background: quizLen === n ? "rgba(224,58,68,.16)" : "transparent", borderColor: quizLen === n ? FIRE.redBright : FIRE.btnBorder, color: quizLen === n ? FIRE.textPrimary : FIRE.navLabel }}>{n}</button>
+                  <button key={n} onClick={() => setQuizLen(n)} style={{ ...S.segBtn, background: quizLen === n ? "rgba(224,58,68,.16)" : "transparent", borderColor: quizLen === n ? FIRE.redBright : FIRE.line2Noir, color: quizLen === n ? FIRE.textPrimary : FIRE.navLabel }}>{n}</button>
                 ))}
               </div>
               <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={() => startStructuredQuiz(quizLen)} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
@@ -5022,7 +5022,7 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
     setSent(true);
   }
   if (sent) return (
-    <div style={{ ...S.fbDone, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
+    <div style={{ ...S.fbDone, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
       <CheckCircle2 size={18} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />
       <div><strong>Logged — thank you.</strong> Critiques like this are exactly what sharpen the next plan. Your team reviews them and tunes the system from them.</div>
     </div>
@@ -5032,13 +5032,13 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
       <div style={{ ...S.fbHead, color: FIRE.textPrimary }}><MessageSquare size={15} color={FIRE.btnIcon} /> Help it get better</div>
       <div style={S.fbRow}>
         <span style={{ ...S.fbLabel, color: FIRE.textSecondary }}>Was this useful?</span>
-        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "up" ? { border: `0.5px solid ${FIRE.green}`, color: FIRE.greenText } : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
-        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "down" ? { border: `0.5px solid ${FIRE.redBright}`, color: FIRE.redText } : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
+        <button style={{ ...S.fbThumb, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.btnText, ...(rating === "up" ? { border: `0.5px solid ${FIRE.green}`, color: FIRE.greenText } : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
+        <button style={{ ...S.fbThumb, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.btnText, ...(rating === "down" ? { border: `0.5px solid ${FIRE.redBright}`, color: FIRE.redText } : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
       </div>
       <div style={{ ...S.fbLabel2, color: FIRE.textMuted }}>What was off? (tap any)</div>
       <div style={S.chipRow}>
         {CRITIQUE_TAGS.map((t) => (
-          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.navLabel, ...(tags.includes(t) ? { border: `0.5px solid ${FIRE.red}`, color: FIRE.textPrimary } : {}) }}>{t}</button>
+          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.navLabel, ...(tags.includes(t) ? { border: `0.5px solid ${FIRE.red}`, color: FIRE.textPrimary } : {}) }}>{t}</button>
         ))}
       </div>
       {!editing ? (
@@ -5899,7 +5899,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
           <select style={{ ...FS.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
             {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select></label>
-        <label style={{ ...S.docDrop, background: FIRE.btnBg, border: `2px dashed ${FIRE.btnBorder}` }}
+        <label style={{ ...S.docDrop, background: FIRE.card2Noir, border: `2px dashed ${FIRE.line2Noir}` }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); uploadFiles(Array.from(e.dataTransfer.files || [])); }}>
           <Upload size={22} color={FIRE.btnIcon} />
@@ -6058,8 +6058,8 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
     wrap: dark ? { ...FS.card, overflow: "hidden", marginBottom: 10 } : { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
     bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}` },
     mlabel: { fontWeight: 700, fontSize: 15, color: dark ? FIRE.textPrimary : "#211C2B" },
-    nav: { border: `${dark ? "0.5px" : "1px"} solid ${dark ? FIRE.btnBorder : "#E0DEE8"}`, background: dark ? FIRE.btnBg : "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: dark ? FIRE.btnIcon : "#54506B", display: "inline-flex", alignItems: "center" },
-    dow: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", background: dark ? FIRE.btnBg : "#F7F6FA" },
+    nav: { border: `${dark ? "0.5px" : "1px"} solid ${dark ? FIRE.line2Noir : "#E0DEE8"}`, background: dark ? FIRE.card2Noir : "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: dark ? FIRE.btnIcon : "#54506B", display: "inline-flex", alignItems: "center" },
+    dow: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", background: dark ? FIRE.card2Noir : "#F7F6FA" },
     dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: dark ? FIRE.textMuted : "#8A8696", letterSpacing: 0.4 },
     grid: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))" },
     cell: { minHeight: compact ? 52 : 74, minWidth: 0, borderTop: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, borderLeft: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, padding: compact ? 4 : 5, display: "flex", flexDirection: "column", gap: compact ? 2 : 3 },
@@ -6127,7 +6127,7 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
         {cells.map((d, i) => {
           const dayItems = d == null ? [] : items.filter((it) => it.d === d);
           return (
-            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? (dark ? FIRE.btnBg : "#FBFAFC") : (dark ? "transparent" : "#fff") }}>
+            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? (dark ? FIRE.card2Noir : "#FBFAFC") : (dark ? "transparent" : "#fff") }}>
               {d != null && (<>
                 <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
                 {dayItems.slice(0, chipCap).map((it) => {
@@ -6259,7 +6259,7 @@ function ContentCalendar({ S, role, notify }) {
         {categories.map((cat) => (
           <span key={cat.id} style={{ position: "relative", display: "inline-flex" }}>
             <button onClick={() => quickAdd(cat.id)}
-              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: FIRE.card2Noir, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <Plus size={13} /> {cat.tag}
             </button>
             {canEditCategories && !cat.isDefault && canDeleteShared && (
@@ -6272,7 +6272,7 @@ function ContentCalendar({ S, role, notify }) {
         ))}
         {canEditCategories && (
           <button onClick={() => setShowCat((v) => !v)}
-            style={{ border: `1.5px dashed ${FIRE.btnBorder}`, color: FIRE.navLabel, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            style={{ border: `1.5px dashed ${FIRE.line2Noir}`, color: FIRE.navLabel, background: FIRE.card2Noir, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <Plus size={13} /> New
           </button>
         )}
@@ -6286,7 +6286,7 @@ function ContentCalendar({ S, role, notify }) {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setCatColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
               ))}
             </div>
           </div>
@@ -6317,7 +6317,7 @@ function ContentCalendar({ S, role, notify }) {
         todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={
-          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
+          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
         }
       />
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
@@ -6392,7 +6392,7 @@ function RecruitmentCalendar({ S, role, notify }) {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
               ))}
             </div>
           </div>
@@ -6408,7 +6408,7 @@ function RecruitmentCalendar({ S, role, notify }) {
         todayColor={FIRE.catGreen}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
@@ -6513,7 +6513,7 @@ function FundingCalendar({ S, role, notify }) {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
               ))}
             </div>
           </div>
@@ -6538,7 +6538,7 @@ function FundingCalendar({ S, role, notify }) {
         todayColor="#9A6B12"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
@@ -6618,9 +6618,9 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <CardHead icon={Calendar} title="Station calendar" style={{ marginBottom: 0, width: "auto" }} />
         {withImportanceMode && (
-          <div style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${FIRE.btnBorder}`, borderRadius: 8, overflow: "hidden" }}>
+          <div style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, overflow: "hidden" }}>
             {[["grid", "Grid"], ["importance", "By importance"]].map(([k, l], i) => (
-              <button key={k} onClick={() => setView(k)} style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: view === k ? FIRE.red : FIRE.btnBg, color: view === k ? "#fff" : FIRE.navLabel, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+              <button key={k} onClick={() => setView(k)} style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: view === k ? FIRE.red : FIRE.card2Noir, color: view === k ? "#fff" : FIRE.navLabel, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
             ))}
           </div>
         )}
@@ -7940,7 +7940,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
           {CATEGORY_COLORS.map((col) => (
             <button key={col} title={col} onClick={() => setF((x) => ({ ...x, color: col }))}
-              style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: f.color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+              style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: f.color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
           ))}
         </div>
       </div>
@@ -9656,7 +9656,7 @@ function Pill({ S, color, children }) {
 }
 function Initials({ S, name, dark }) {
   const i = name.split(" ").map((w) => w[0]).slice(0, 2).join("");
-  return <span style={dark ? { ...S.avatar, border: `0.5px solid ${FIRE.btnBorder}` } : S.avatar}>{i}</span>;
+  return <span style={dark ? { ...S.avatar, border: `1px solid ${FIRE.line2Noir}` } : S.avatar}>{i}</span>;
 }
 
 // Standalone black-on-white printable roster (browser print / save-as-PDF). Reuses the ALREADY-loaded,
@@ -10077,7 +10077,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[["all", "All", rosterTotal], ["Active", "Active", nActive], ["Probationary", "Probationary", nProb]].map(([k, l, n]) => {
             const on = statusTab === k;
-            return <button key={k} onClick={() => setStatusTab(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: on ? 700 : 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, padding: "5px 11px", background: on ? FIRE.redBright : FIRE.btnBg, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, color: on ? FIRE.white : FIRE.textSecondary }}>{l} <b style={FS.num}>{n}</b></button>;
+            return <button key={k} onClick={() => setStatusTab(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: on ? 700 : 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, padding: "5px 11px", background: on ? FIRE.redBright : FIRE.card2Noir, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, color: on ? FIRE.white : FIRE.textSecondary }}>{l} <b style={FS.num}>{n}</b></button>;
           })}
         </div>
         <select aria-label="Sort members" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...S.select, marginLeft: "auto" }}>
@@ -10092,7 +10092,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
         <div style={{ fontSize: 12, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
       {members.some((m) => m.status === "Inactive") && (
         <div style={{ marginLeft: "auto" }}>
-          <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
+          <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.card2Noir : "transparent", borderColor: showInactive ? FIRE.red : FIRE.line2Noir, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
         </div>
       )}
       </div>
@@ -11847,7 +11847,7 @@ function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {RANGE_PRESETS.map(([k, label]) => {
           const on = presetKey === k;
-          return <button key={k} onClick={() => pick(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>;
+          return <button key={k} onClick={() => pick(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.card2Noir, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>;
         })}
       </div>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From</span><input type="date" style={FS.input} value={range.from} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, from: e.target.value })); }} /></label>
@@ -13083,7 +13083,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: r.vpct == null ? FIRE.textMuted2 : vColor(r.vpct), fontWeight: 700 }}>{r.vpct == null ? "—" : `${r.vpct}%`}</td>
                 </tr>
               ))}
-              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+              <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
                 <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_standby)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_training)}</td>
@@ -13129,7 +13129,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(r.iso_total_hours)}</td>
                 </tr>
               ))}
-              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+              <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
                 <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_training)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_standby)}</td>
@@ -13189,7 +13189,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(h.iso_total_hours)}</td>
                 </tr>
               ))}
-              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+              <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
                 <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_training)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_standby)}</td>
@@ -14638,8 +14638,8 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
       {it.location && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{it.location}</div>}
       {mk && <div style={{ fontSize: 11.5, color: mk.result === "fail" ? FIRE.redText : FIRE.greenText, marginTop: 3 }}>{mk.result === "fail" ? "✗ Fail" : "✓ Pass"} · {mk.marked_by_name || "—"}{mk.result === "fail" && mk.note ? ` · ${mk.note}` : ""}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button disabled={savingItemId === it.id} onClick={() => onPass(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: mk?.result === "pass" ? FIRE.green : FIRE.btnBg, color: mk?.result === "pass" ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><CheckCircle2 size={16} /> Pass</button>
-        <button disabled={savingItemId === it.id} onClick={() => openFail(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: (mk?.result === "fail" || editingNote) ? FIRE.redBright : FIRE.btnBg, color: (mk?.result === "fail" || editingNote) ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><X size={16} /> Fail</button>
+        <button disabled={savingItemId === it.id} onClick={() => onPass(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: mk?.result === "pass" ? FIRE.green : FIRE.card2Noir, color: mk?.result === "pass" ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><CheckCircle2 size={16} /> Pass</button>
+        <button disabled={savingItemId === it.id} onClick={() => openFail(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: (mk?.result === "fail" || editingNote) ? FIRE.redBright : FIRE.card2Noir, color: (mk?.result === "fail" || editingNote) ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><X size={16} /> Fail</button>
       </div>
       {editingNote && (
         <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
@@ -14875,7 +14875,7 @@ function ApparatusChecklist({ S, rig, notify }) {
             </div>
           )}
           {(editMode || (items && items.length === 0)) && (adding ? (
-            <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ ...FS.cardNoir, background: FIRE.card2Noir, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={label} placeholder="e.g. SCBA pressure" onChange={(e) => setLabel(e.target.value)} /></label>
               <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={location} onChange={setLocation} /></div>
               <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={description} placeholder="Optional detail, shown on tap" onChange={(e) => setDescription(e.target.value)} /></label>
@@ -14908,7 +14908,7 @@ function ApparatusChecklist({ S, rig, notify }) {
                     </div>
                     {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 8px", lineHeight: 1.45 }}>{it.description}</div>}
                     {editingId === it.id && (
-                      <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 12, margin: "6px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ ...FS.cardNoir, background: FIRE.card2Noir, padding: 12, margin: "6px 0", display: "flex", flexDirection: "column", gap: 10 }}>
                         <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={editBuf.label} onChange={(e) => setEditBuf((b) => ({ ...b, label: e.target.value }))} /></label>
                         <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={editBuf.location} onChange={(v) => setEditBuf((b) => ({ ...b, location: v }))} /></div>
                         <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={editBuf.description} onChange={(e) => setEditBuf((b) => ({ ...b, description: e.target.value }))} /></label>
@@ -14937,7 +14937,7 @@ function ApparatusChecklist({ S, rig, notify }) {
                   <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: 13, color: FIRE.textMuted, textDecoration: "line-through" }}>{it.label}</span>
-                      {it.location && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.navLabel, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.location}</span>}
+                      {it.location && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.navLabel, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.location}</span>}
                     </div>
                     <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => restore(it.id)}><RotateCcw size={13} color={FIRE.btnIcon} /> Restore</button>
                   </div>
@@ -15238,7 +15238,7 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
                 onClick={(e) => { if (drag) return; if (!editable) return; /* check mode: empty-photo click is a NO-OP — panning across a truck makes near-clicks constantly; never disturb the selected item / Pass-Fail panel. Selection changes only by tapping a dot. */ const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
                 {url
                   ? <img ref={imgRef} src={url} alt={photo.angle_label || "Apparatus photo"} draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} />
-                  : <div style={{ height: 260, background: FIRE.btnBg, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
+                  : <div style={{ height: 260, background: FIRE.card2Noir, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
                 {dots.map((it) => {
                   const dragging = drag && drag.id === it.id;
                   const x = dragging ? drag.xp : it.x_pct;
@@ -15476,7 +15476,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                 const editingDots = editDotsId === p.id;
                 return (
                 <div key={p.id} style={{ marginBottom: 6 }}>
-                  <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ ...FS.cardNoir, background: FIRE.card2Noir, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     {urls[p.id]
                       ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `1px solid ${FIRE.lineNoir}` }} />
                       : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
@@ -15802,7 +15802,7 @@ function SignaturePad({ onChange, height = 160 }) {
   return (
     <div>
       <canvas ref={canvasRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
-        style={{ width: "100%", height, background: "#fff", borderRadius: 8, border: `1px solid ${FIRE.btnBorder}`, touchAction: "none", display: "block", cursor: "crosshair" }} />
+        style={{ width: "100%", height, background: "#fff", borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, touchAction: "none", display: "block", cursor: "crosshair" }} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
         <span style={{ fontSize: 11, color: FIRE.textMuted }}>Sign above</span>
         <button type="button" onClick={clear} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}>Clear</button>
@@ -15882,7 +15882,7 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
               <div style={{ position: "relative", width: 122, height: 84 }}>
                 <img src={url} alt={label} style={{ width: 122, height: 84, objectFit: "cover", borderRadius: 10, border: `1px solid ${FIRE.line2Noir}`, display: "block" }} />
                 {cap}
-                {canManage && <button title="Remove photo" onClick={() => remove(row)} disabled={busy} style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 999, background: FIRE.pageBg, border: `1px solid ${FIRE.btnBorder}`, cursor: busy ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={12} color={FIRE.deleteRed} /></button>}
+                {canManage && <button title="Remove photo" onClick={() => remove(row)} disabled={busy} style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 999, background: FIRE.pageBg, border: `1px solid ${FIRE.line2Noir}`, cursor: busy ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={12} color={FIRE.deleteRed} /></button>}
               </div>
             ) : canManage ? (
               <label style={{ width: 122, height: 84, borderRadius: 10, border: `1.5px dashed ${FIRE.line2Noir}`, background: FIRE.card2Noir, color: FIRE.textMuted, display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1, fontSize: 10.5, textAlign: "center" }}>
@@ -16562,7 +16562,7 @@ function MyEquipment({ S, meId, notify }) {
 // no client policies, so a direct table select is denied by design — never add one here.
 function StationHours({ S, dept, notify }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const BADGE = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", background: FIRE.btnBg, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+  const BADGE = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", background: FIRE.card2Noir, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
   const [open, setOpen] = useState(null);       // the open station_presence row, or null when clocked out
   const [ready, setReady] = useState(false);    // a read has SUCCEEDED — gates the status card
   const [tried, setTried] = useState(false);    // a read has finished either way — stops the first-paint flash
@@ -19699,7 +19699,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const Lcard = { ...FS.cardNoir, padding: 14 };                                  // base + leader padding (borderRadius FIRE.cardRadius == 16)
   const Lkick = { ...FS.kicker, display: "flex", alignItems: "center", gap: 6 };
   const Lnum = FS.num;
-  const Lbtn = FS.btn;                                                        // FIRE.btnBg/.btnBorder/.btnText == prior literals
+  const Lbtn = FS.btn;                                                        // FIRE.card2Noir/.btnBorder/.btnText == prior literals
   const LbtnIcon = FIRE.btnIcon;                                             // == "#9AA1AC"
   const Lfield = { display: "flex", flexDirection: "column", gap: 6 };       // unchanged (not in the consolidation set)
   const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }; // unchanged (not in the consolidation set)
@@ -19829,7 +19829,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
-        <div style={{ display: "flex", gap: 9, alignItems: "center", background: FIRE.btnBg, border: `1px solid ${FIRE.redText}55`, borderLeft: `3px solid ${FIRE.redText}`, color: FIRE.redText, borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 9, alignItems: "center", background: FIRE.card2Noir, border: `1px solid ${FIRE.redText}55`, borderLeft: `3px solid ${FIRE.redText}`, color: FIRE.redText, borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
           <AlertTriangle size={16} style={{ flexShrink: 0 }} />
           <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
         </div>
@@ -19957,10 +19957,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
-            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}` }}>
               {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                 const on = sAudience === val;
-                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
+                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
               })}
             </div></label>
           <CountsAttendanceCheckbox checked={sCounts} onChange={setSCounts} fieldStyle={Lfield} labelStyle={LfieldLabel} />
@@ -20068,10 +20068,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sessEdit.durationMin} onChange={(e) => setSessEdit((b) => ({ ...b, durationMin: e.target.value }))} /></label>
                       <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category</span><select style={Linput} value={sessEdit.planId} onChange={(e) => setSessEdit((b) => ({ ...b, planId: e.target.value }))}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="">One-off (no category)</option></select></label>
                       <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
-                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}` }}>
                           {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                             const on = sessEdit.audience === val;
-                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
+                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
                           })}
                         </div></label>
                       <CountsAttendanceCheckbox checked={sessEdit.countsAttendance} onChange={(v) => setSessEdit((b) => ({ ...b, countsAttendance: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />
@@ -20275,7 +20275,7 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
   const swatch = (k, label) => (
     <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 8, background: FIRE.card2Noir, padding: 2, cursor: canManage ? "pointer" : "default" }} />
+        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, background: FIRE.card2Noir, padding: 2, cursor: canManage ? "pointer" : "default" }} />
         <input style={{ ...FS.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
       </div>
     </label>
@@ -20524,14 +20524,14 @@ function GraphicStudio({ S, brand }) {
       <p style={{ ...S.helpP, color: FIRE.textMuted }}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {GFX_TEMPLATES.map((t) => (
-          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
+          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
         ))}
       </div>
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {GFX_SIZES.map((sz) => (
-            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(sizeKey === sz.key ? S.segBtnOn : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
+            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(sizeKey === sz.key ? S.segBtnOn : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
           ))}
         </div>
       </div>
@@ -20539,7 +20539,7 @@ function GraphicStudio({ S, brand }) {
         <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>STYLE</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {STYLES.map((sy) => (
-            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(styleKey === sy.key ? S.segBtnOn : {}) }}>{sy.name}</button>
+            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(styleKey === sy.key ? S.segBtnOn : {}) }}>{sy.name}</button>
           ))}
         </div>
       </div>
@@ -20553,20 +20553,20 @@ function GraphicStudio({ S, brand }) {
             );
           })}
           {tk === "spotlight" && (
-            <label style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
+            <label style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
           )}
-          <div style={{ marginTop: 14, padding: 12, border: `1px dashed ${FIRE.btnBorder}`, borderRadius: 10, background: FIRE.btnBg }}>
+          <div style={{ marginTop: 14, padding: 12, border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 10, background: FIRE.card2Noir }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ImageIcon size={14} /> BACKGROUND IMAGE</div>
             <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Add a photo behind your text — your text stays readable over it. Optional.</p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
+              <label style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
               {bg && <label style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use it</label>}
-              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.btnBg, color: FIRE.redText, borderColor: FIRE.btnBorder }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
+              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.card2Noir, color: FIRE.redText, borderColor: FIRE.line2Noir }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted, display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: FIRE.btnBg, color: FIRE.textMuted, padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
-                <button style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
+                <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted, display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: FIRE.card2Noir, color: FIRE.textMuted, padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
+                <button style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
               </div>
               {aiOpen && <div style={{ marginTop: 10 }}>
                 <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
@@ -20574,13 +20574,13 @@ function GraphicStudio({ S, brand }) {
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
                   <button style={{ ...FS.btnPrimary, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
                 </div>
-                {aiErr && <div style={{ ...S.errBox, marginTop: 8, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.redText }}>{aiErr}</div>}
+                {aiErr && <div style={{ ...S.errBox, marginTop: 8, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.redText }}>{aiErr}</div>}
               </div>}
             </div>
           </div>
         </div>
         <div style={{ width: 300, maxWidth: "100%" }}>
-          <div style={{ display: "flex", justifyContent: "center", background: FIRE.btnBg, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, padding: 10 }}>
+          <div style={{ display: "flex", justifyContent: "center", background: FIRE.card2Noir, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, padding: 10 }}>
             <img src={dataUrl} alt="graphic preview" style={{ maxWidth: "100%", maxHeight: 420, borderRadius: 6, display: "block" }} />
           </div>
           <button style={{ ...FS.btnPrimary, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
@@ -20959,16 +20959,16 @@ function StationDuties({ S, role, members, meId, notify }) {
                   <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
                   {a.done && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
                 </div>
-                {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
+                {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
                 {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
                   const d = new Date(a.dueDate + "T00:00:00");
                   const t = new Date(); t.setHours(0, 0, 0, 0);
                   const days = Math.round((d - t) / 86400000);
                   const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted
                   const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                  return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                  return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
                 })()}
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
                 {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
                 {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
@@ -21028,7 +21028,7 @@ function StationDuties({ S, role, members, meId, notify }) {
         <div style={{ display: "inline-flex", gap: 6, marginBottom: 14 }}>
           {[["checklist", "Checklist"], ["history", "History"]].map(([k, l]) => {
             const on = view === k;
-            return <button key={k} onClick={() => setView(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 14px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.btnBg : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? FIRE.red : FIRE.btnBorder}` }}>{l}</button>;
+            return <button key={k} onClick={() => setView(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 14px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.card2Noir : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? FIRE.red : FIRE.line2Noir}` }}>{l}</button>;
           })}
         </div>
       )}
@@ -21222,7 +21222,7 @@ function Admin({ S, library, setLibrary, feedback }) {
             The button now says why it can't run instead of looking broken. */}
         <button style={{ ...FS.btnPrimary, opacity: title.trim() ? 1 : 0.55, cursor: title.trim() ? "pointer" : "not-allowed" }} onClick={publish} disabled={!title.trim()}><Plus size={16} /> Publish to library</button>
         {!title.trim() && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: -4 }}>Add a packet title to publish.</div>}
-        {done && <div style={{ ...S.successBox, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
+        {done && <div style={{ ...S.successBox, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -21992,7 +21992,7 @@ function NoEmailFixPanel({ S, deptId, notify, onFixed }) {
     onFixed?.();   // refresh the radar so the count drops
   }
   return (
-    <div style={{ ...FS.card, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, padding: "14px 16px", marginTop: 10 }}>
+    <div style={{ ...FS.card, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, padding: "14px 16px", marginTop: 10 }}>
       <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, marginBottom: 10 }}>Add an email so these members can sign in</div>
       {list === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.textMuted, fontSize: 13 }}><Loader2 size={14} className="spin" /> Loading…</div>
@@ -22124,7 +22124,7 @@ function SvgTip({ x, y, text, vbW }) {
   const top = Math.max(2, y - h - 10);
   return (
     <g pointerEvents="none">
-      <rect x={left} y={top} width={w} height={h} rx={6} fill={FIRE.sidebar} stroke={FIRE.btnBorder} />
+      <rect x={left} y={top} width={w} height={h} rx={6} fill={FIRE.sidebar} stroke={FIRE.line2Noir} />
       <text x={left + w / 2} y={top + 16} textAnchor="middle" fontSize={11.5} fill={FIRE.textPrimary} style={FS.num}>{text}</text>
     </g>
   );
@@ -22190,7 +22190,7 @@ function AttendanceTrend({ series }) {
       )}
       {[100, 50, 0].map((p) => (
         <g key={p}>
-          <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? (noir ? FIRE.line2Noir : FIRE.btnBorder) : FIRE.track} strokeDasharray={noir && p !== 0 ? "3 3" : undefined} />
+          <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? (noir ? FIRE.line2Noir : FIRE.line2Noir) : FIRE.track} strokeDasharray={noir && p !== 0 ? "3 3" : undefined} />
           <text x={x0 - 6} y={yAt(p) + 3} textAnchor="end" fontSize={10} fill={FIRE.textMuted}>{p}%</text>
         </g>
       ))}
@@ -22375,7 +22375,7 @@ function MonthlyBars({ months, vals, tip, aria }) {
       )}
       {[niceMax, niceMax / 2, 0].map((v) => (
         <g key={v}>
-          <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? (noir ? FIRE.line2Noir : FIRE.btnBorder) : FIRE.track} strokeDasharray={noir && v !== 0 ? "3 3" : undefined} />
+          <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? (noir ? FIRE.line2Noir : FIRE.line2Noir) : FIRE.track} strokeDasharray={noir && v !== 0 ? "3 3" : undefined} />
           <text x={x0 - 5} y={base - hAt(v) + 3} textAnchor="end" fontSize={9.5} fill={FIRE.textMuted}>{Math.round(v)}</text>
         </g>
       ))}
@@ -22498,7 +22498,7 @@ function HoursTrend({ months, vals }) {
         </defs>
         {[niceMax, niceMax / 2, 0].map((v) => (
           <g key={v}>
-            <line x1={x0} y1={yAt(v)} x2={x1} y2={yAt(v)} stroke={v === 0 ? FIRE.btnBorder : FIRE.track} />
+            <line x1={x0} y1={yAt(v)} x2={x1} y2={yAt(v)} stroke={v === 0 ? FIRE.line2Noir : FIRE.track} />
             <text x={x0 - 5} y={yAt(v) + 3} textAnchor="end" fontSize={9.5} fill={FIRE.textMuted}>{Math.round(v)}</text>
           </g>
         ))}
@@ -22832,7 +22832,7 @@ function Section({ S, Icon, title, children }) {
   return <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 10 }}><CardHead icon={Icon} title={title} />{children}</div>;
 }
 function Disclaimer({ S, compact, dark }) {
-  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
+  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
 }
 function Logo() {
   return <img src="/b4c-logo.png" alt="Before the Call" style={{ height: 34, width: "auto", flexShrink: 0, display: "block" }} />;
