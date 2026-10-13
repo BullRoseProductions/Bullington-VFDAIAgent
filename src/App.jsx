@@ -19863,11 +19863,12 @@ function DepartmentAdmin({ S, role, target, notify }) {
 
   return (
     <PageShell kicker="PROJECT ADMIN · DEPARTMENT" title={deptName || "Department"} sub="Choose which parts of the app this department sees. Hidden modules leave everyone's navigation here — including this department's admins. This hides modules; it does not restrict data.">
+      <NoirSkin>
       {err && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.red}`, color: FIRE.redText, marginBottom: 12 }}>Couldn't load module visibility: {err}</Card>}
       {disabled === null && !err && <Card padding={24} style={{ color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading…</Card>}
       {disabled !== null && (
-        <Card padding={18} style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460 }}>
-          <SectionLabel>MODULE VISIBILITY</SectionLabel>
+        <Card padding="14px 16px" style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460 }}>
+          <CardHead icon={LayoutDashboard} title="Module visibility" style={{ marginBottom: 2 }} />
           {TOGGLEABLE_MODULES.map((k) => {
             const n = NAV.find((x) => x.key === k);
             if (!n) return null;
@@ -19901,8 +19902,8 @@ function DepartmentAdmin({ S, role, target, notify }) {
            their own stations under someone else's heading — worse than showing nothing. If that
            read fails the screen falls back to what it did before: add, then confirm by opening
            the department. It never renders an empty list it cannot vouch for. */}
-      <Card padding={18} style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
-        <SectionLabel>STATIONS</SectionLabel>
+      <Card padding="14px 16px" style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
+        <CardHead icon={Building2} title="Stations" style={{ marginBottom: 2 }} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 8px", lineHeight: 1.5 }}>
           The houses in {deptName || "this department"}. Once it has two or more, its members get a station picker.
         </div>
@@ -19971,8 +19972,8 @@ function DepartmentAdmin({ S, role, target, notify }) {
            gated on is_project_admin(). This is what replaced hand-INSERTing members in the Supabase
            console for a department the PA is not in. The member row it writes is the SAME shape the
            department's own add-member form writes. */}
-      <Card padding={18} style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
-        <SectionLabel>ROSTER</SectionLabel>
+      <Card padding="14px 16px" style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
+        <CardHead icon={Users} title="Roster" style={{ marginBottom: 2 }} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 8px", lineHeight: 1.5 }}>
           The members of {deptName || "this department"}. Adding someone here is the same as adding them from the department's own Roster.
         </div>
@@ -20054,8 +20055,8 @@ function DepartmentAdmin({ S, role, target, notify }) {
           },
         ];
         return (
-          <Card padding={18} style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
-            <SectionLabel>PER-STATION ADD-ONS</SectionLabel>
+          <Card padding="14px 16px" style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
+            <CardHead icon={MapPin} title="Per-station add-ons" style={{ marginBottom: 2 }} />
             {addonErr && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 6, lineHeight: 1.45 }}>Couldn't load add-ons: {addonErr} — showing everything off, which may not be accurate.</div>}
             {ADD_ONS.map((a) => (
               <label key={a.key} style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "8px 0", cursor: "pointer" }}>
@@ -20075,6 +20076,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </Card>
         );
       })()}
+      </NoirSkin>
     </PageShell>
   );
 }
