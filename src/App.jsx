@@ -21447,8 +21447,7 @@ function Fonts() {
       /* Member file facelift: certs two-up and hours | profile side by side on a wide screen, one column on a phone. */
       .mf-certgrid { display: grid; grid-template-columns: 1fr; column-gap: 22px; }
       /* Training v2: category progress cards two-up; hero stacks its ring/stats under the feature on a phone. */
-      .tr-catgrid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-      @media (min-width: 760px) { .tr-catgrid { grid-template-columns: 1fr 1fr; } }
+      .tr-catgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }   /* fills the row: 3 across on a wide screen, then 2-up, then 1-up */
       @media (max-width: 640px) { .tr-hero { padding: 18px !important; } .tr-hero-r { border-left: none !important; padding-left: 0 !important; } }
       .mf-grid { display: grid; grid-template-columns: 1fr; gap: 10px; align-items: start; }
       @media (min-width: 760px) { .mf-certgrid { grid-template-columns: 1fr 1fr; } }
