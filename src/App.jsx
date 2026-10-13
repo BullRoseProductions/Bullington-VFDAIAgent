@@ -254,6 +254,18 @@ function MiniChart({ title, swatch, caption, onOpen, children }) {
   );
 }
 // Red uppercase tracked label. `as="button"` for a collapsible section header.
+// The mocks' .segctl as one component: a dark track, compact segments, the active one solid red.
+// options = [[value, label], …]. Same pattern the inline segmented controls on Reports/Meetings/Training use.
+function NoirSeg({ options, value, onChange, style }) {
+  return (
+    <div style={{ display: "inline-flex", flexWrap: "wrap", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, ...style }}>
+      {options.map(([v, l]) => {
+        const on = value === v;
+        return <button key={String(v)} type="button" onClick={() => onChange(v)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: on ? FIRE.redBright : "transparent", color: on ? "#fff" : FIRE.textSecondary }}>{l}</button>;
+      })}
+    </div>
+  );
+}
 function SectionLabel({ as: Tag = "div", style, children, ...rest }) {
   // Inside <NoirSkin>: the SectionBar label face (muted caps, .08em) instead of the red pre-Noir kicker.
   // Callers' own overrides (colour, case, margins) still win. Outside NoirSkin unchanged.
@@ -4852,11 +4864,7 @@ function StudySession({ S }) {
               </optgroup>
             ))}
           </select></label>
-        <div style={S.segRow}>
-          {[["quiz", isDeptQual(cert) ? "Skill check" : "Quiz me"], ["explain", "Explain"]].map(([k, l]) => (
-            <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: mode === k ? FIRE.redBright : FIRE.line2Noir, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
-          ))}
-        </div>
+        <NoirSeg options={[["quiz", isDeptQual(cert) ? "Skill check" : "Quiz me"], ["explain", "Explain"]]} value={mode} onChange={(k) => { setMode(k); reset(); }} style={{ marginBottom: 12 }} />
       </Card>
       <Disclaimer S={S} compact dark />
       {structuredQuiz && quizN > 0 && !quizDone && (
@@ -4880,11 +4888,7 @@ function StudySession({ S }) {
           quizN === 0 ? (
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length:</span>
-              <div style={S.segRow}>
-                {[5, 10, 20].map((n) => (
-                  <button key={n} onClick={() => setQuizLen(n)} style={{ ...S.segBtn, background: quizLen === n ? "rgba(224,58,68,.16)" : "transparent", borderColor: quizLen === n ? FIRE.redBright : FIRE.line2Noir, color: quizLen === n ? FIRE.textPrimary : FIRE.navLabel }}>{n}</button>
-                ))}
-              </div>
+              <NoirSeg options={[[5, "5"], [10, "10"], [20, "20"]]} value={quizLen} onChange={setQuizLen} />
               <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={() => startStructuredQuiz(quizLen)} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
             </div>
           ) : quizDone ? (
