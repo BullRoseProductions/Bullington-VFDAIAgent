@@ -9594,7 +9594,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
       <div style={S.segRow}>
         {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: tab === k ? FIRE.redBright : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
       </div>
-      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} />}
+      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} sessions={sessions} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
@@ -9602,7 +9602,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
     </PageShell>
   );
 }
-function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
+function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, sessions }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
@@ -9633,7 +9633,39 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
     .slice().sort((x, y) => sortBy === "name" ? (x.name || "").localeCompare(y.name || "")
       : sortBy === "compliance" ? (compliance(y) ?? -1) - (compliance(x) ?? -1)
       : sortBy === "status" ? (STATUS_RANK[x.status] ?? 3) - (STATUS_RANK[y.status] ?? 3) : 0);
-  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redText);
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 78 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 78–89 amber · <78 red
+  // CREW SPOTLIGHT — three cards from data already on this screen (roster rows + the loaded sessions):
+  //  · Service milestone: longest tenure by the join YEAR on file (the roster carries the year, not the month).
+  //  · Top responder: most sessions attended in the last 90 days (station hours aren't loaded on the roster).
+  //  · Readiness leader: highest cert compliance (ties → more certs on file).
+  const yrNow = new Date().getFullYear();
+  const since90 = new Date(); since90.setDate(since90.getDate() - 90);
+  const recentDone = (sessions || []).filter((x) => x.done && sessDate(x) >= since90);
+  const activeRoster = rosterAll.filter((m) => m.status !== "Inactive");
+  const pick = (arr, score) => arr.reduce((best, m) => { const v = score(m); return v != null && (best == null || v > best.v) ? { m, v } : best; }, null);
+  const vet = pick(activeRoster, (m) => (m.joined && /^\d{4}$/.test(String(m.joined)) ? yrNow - Number(m.joined) : null));
+  const resp = pick(activeRoster, (m) => { const n = recentDone.filter((x) => (x.attendance || []).includes(m.id)).length; return n > 0 ? n : null; });
+  const lead = pick(activeRoster, (m) => { const c = compliance(m); return c == null ? null : c * 1000 + (m.certs || []).length; });
+  const initialsOf = (m) => (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const rankOf = (m) => m.role || "Member";   // station rank text (Firefighter, Captain…) — shared by the spotlight and the cards
+  const spot = (key, label, title, hit, big, unit, gold, tone) => (
+    <div key={key} style={{ position: "relative", overflow: "hidden", ...FS.cardNoir, borderRadius: 14, padding: "16px 17px", display: "flex", alignItems: "center", gap: 14, minWidth: 0, cursor: hit && onOpen ? "pointer" : "default" }} onClick={hit && onOpen ? () => onOpen(hit.m.id) : undefined}>
+      <span aria-hidden="true" style={{ position: "absolute", right: -30, top: -30, width: 130, height: 130, borderRadius: "50%", background: "radial-gradient(circle, rgba(200,50,58,.22), transparent 70%)", pointerEvents: "none" }} />
+      <span style={{ position: "absolute", top: 12, right: 14, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted }}>{label}</span>
+      <div style={{ width: 52, height: 52, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.white, background: "linear-gradient(135deg, #1B222C, #11151B)", border: `2px solid ${gold ? "rgba(204,158,82,.6)" : "rgba(255,255,255,.1)"}`, boxShadow: gold ? "0 0 16px rgba(204,158,82,.25)" : "none" }}>{hit ? initialsOf(hit.m) : "—"}</div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 11, color: FIRE.redText, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" }}>{title}</div>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1.1, marginTop: 3, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hit ? hit.m.name : "Not enough data yet"}</div>
+        {hit && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{rankOf(hit.m)}</div>}
+      </div>
+      {hit && (
+        <div style={{ marginLeft: "auto", textAlign: "right", flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 10 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{big}</div>
+          <div style={{ fontSize: 10, color: FIRE.textMuted, letterSpacing: ".04em" }}>{unit}</div>
+        </div>
+      )}
+    </div>
+  );
   const chip = (Icon, label, value, sub, tone) => (
     <div style={{ ...FS.cardNoir, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", minWidth: 0 }}>
       <div style={{ fontSize: 11, color: FIRE.textSecondary, display: "flex", alignItems: "center", gap: 6 }}><Icon size={13} color={FIRE.redText} />{label}</div>
@@ -9687,6 +9719,11 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
         {chip(CheckCircle2, "Active", String(nActive), rosterTotal ? `${Math.round((nActive / rosterTotal) * 100)}% of roster` : null, nActive ? FIRE.greenText : null)}
         {chip(UserPlus, "Probationary", String(nProb), "in onboarding")}
         {chip(Award, "Avg cert compliance", avgCompliance == null ? "—" : `${avgCompliance}%`, rated.length ? `across ${rated.length} with certs on file` : "No certs on file yet", avgCompliance == null ? null : pctColor(avgCompliance))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(250px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
+        {spot("vet", "★ MILESTONE", "Service milestone", vet, vet ? vet.v : null, vet && vet.v === 1 ? "year of service" : "years of service", true)}
+        {spot("resp", "▲ TOP RESPONDER", "Most sessions · 90 days", resp, resp ? resp.v : null, "sessions attended")}
+        {spot("lead", "✦ READINESS LEADER", "Highest compliance", lead, lead ? <>{Math.floor(lead.v / 1000)}<span style={{ fontSize: 14, color: FIRE.textMuted }}>%</span></> : null, "certs current", false, lead ? pctColor(Math.floor(lead.v / 1000)) : null)}
       </div>
       {canAdd && (adding ? (
         <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -9754,10 +9791,12 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept }) {
         {filtered.map((m) => { const cp = compliance(m); const ini = (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase(); return (
           <Card key={m.id} padding="13px 14px" style={{ display: "flex", flexDirection: "column", gap: 10, ...(onOpen ? { cursor: "pointer" } : null) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-              <div style={{ width: 42, height: 42, borderRadius: 11, background: "linear-gradient(135deg, #242A32, #12161C)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.redText, flexShrink: 0 }}>{ini}</div>
+              <div title={cp == null ? "No certs on file" : `Cert compliance ${cp}%`} style={{ position: "relative", width: 46, height: 46, flexShrink: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: `conic-gradient(${cp == null ? "rgba(255,255,255,.09)" : pctColor(cp)} ${cp == null ? 0 : (cp * 3.6).toFixed(1)}deg, rgba(255,255,255,.09) 0)` }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{ini}</div>
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14.5, lineHeight: 1.15, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
-                <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 2 }}>{m.role || "Member"}</div>
+                <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 2 }}>{rankOf(m)}</div>
               </div>
               {m.status ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 999, color: sColor(m.status), background: `${sColor(m.status)}1F`, border: `1px solid ${sColor(m.status)}66`, flexShrink: 0 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: sColor(m.status) }} />{m.status}</span> : null}
               {canAdd && canDeleteShared && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
