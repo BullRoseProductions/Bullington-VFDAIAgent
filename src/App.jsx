@@ -8,7 +8,7 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check,
 } from "lucide-react";
 import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
@@ -168,6 +168,48 @@ function CardHead({ icon: Icon, title, count, right, as: Tag = "div", style, ...
       {right != null && <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: FIRE.textSecondary, minWidth: 0 }}>{right}</span>}
     </Tag>
   );
+}
+// Noir section label bar (the mocks' .slbar / .fsec .sl): small uppercase muted label with a red icon, an optional
+// count and a right-hand slot. With onToggle it is the collapse control (chevron at the end) — the right slot sits
+// OUTSIDE the toggle button so it can hold its own buttons.
+function SectionBar({ icon: Icon, label, count, right, open, onToggle, style }) {
+  const labelEl = (<>
+    {Icon && <Icon size={13} color={FIRE.redBright} style={{ flexShrink: 0 }} />}
+    <span>{label}</span>
+    {count != null && <span style={{ color: FIRE.textSecondary, fontWeight: 600 }}>· {count}</span>}
+  </>);
+  const txt = { display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase" };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, margin: "18px 0 10px", minWidth: 0, ...style }}>
+      {onToggle
+        ? <button type="button" onClick={onToggle} aria-expanded={!!open} style={{ ...txt, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+            {labelEl}{open ? <ChevronUp size={14} color={FIRE.textMuted} style={{ marginLeft: 2 }} /> : <ChevronDown size={14} color={FIRE.textMuted} style={{ marginLeft: 2 }} />}
+          </button>
+        : <div style={{ ...txt, flex: 1, minWidth: 0 }}>{labelEl}</div>}
+      {right != null && <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11, color: FIRE.textSecondary, flexShrink: 0 }}>{right}</span>}
+    </div>
+  );
+}
+// The mocks' inset panel (.card2 surface) — sections inside an expanded card sit on this.
+const NOIR_INSET = { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10 };
+// The mocks' .ck ring: "pass" = green ring + check, "fail" = red ring + X, "todo" = neutral ring (an item to check,
+// not a result — a template item must never wear a green check it hasn't earned).
+function CheckMark({ state = "pass", size = 18 }) {
+  const ring = state === "pass" ? { background: "rgba(47,168,105,.16)", border: "1px solid rgba(47,168,105,.5)" }
+    : state === "fail" ? { background: "rgba(200,50,58,.16)", border: "1px solid rgba(200,50,58,.5)" }
+    : { background: "transparent", border: `1px solid ${FIRE.line2Noir}` };
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, ...ring }}>
+      {state === "pass" ? <Check size={Math.round(size * 0.6)} color={FIRE.greenText} strokeWidth={3} />
+        : state === "fail" ? <X size={Math.round(size * 0.6)} color={FIRE.redBright} strokeWidth={3} />
+        : <span style={{ width: 5, height: 5, borderRadius: "50%", background: FIRE.textMuted2 }} />}
+    </span>
+  );
+}
+// The mocks' .h2res result pill: pass = green, fail = red (a failed check is bad, not a warning).
+function ResultBadge({ pass, children }) {
+  const c = pass ? FIRE.greenText : FIRE.redText;
+  return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "3px 11px", flexShrink: 0, color: c, background: pass ? "rgba(47,168,105,.10)" : "rgba(200,50,58,.10)", border: `1px solid ${pass ? "rgba(47,168,105,.4)" : "rgba(200,50,58,.4)"}`, ...FS.num }}>{children}</span>;
 }
 // Noir inset sub-panel (the mock's .minichart): a key swatch + Oswald title, an optional open chevron, the chart,
 // and a small caption under it.
@@ -13919,10 +13961,13 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       <div key={`${r.id}-detail`} style={{ gridColumn: "1 / -1", ...FS.cardNoir, padding: "16px 18px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary }}>{r.name}</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary, lineHeight: 1.1 }}>{r.name}</div>
             <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[r.type, r.purchaseYear, outOfService ? "Out of service" : ok ? "In service" : "Needs attention"].filter(Boolean).join(" · ")}</div>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+          {(() => { const tone = outOfService ? FIRE.redBright : ok ? FIRE.green : FIRE.amberText; return (
+            <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 6, letterSpacing: ".03em", color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: tone }} />{outOfService ? "Out of service" : ok ? "In service" : "Needs attention"}</span>
+          ); })()}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
           {/* canRemove, NOT canManage — removal is Department-Admin-only. An Officer in edit
               mode sees Edit and no X, which is the whole permission change on this screen. */}
@@ -13982,15 +14027,20 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
             <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
           </Card>
         )}
-        {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
+        {/* Mock order (b4c_apparatus_noir.html): photo strip → [checklist | maintenance log] → check history →
+            service history → capital tiles. Same components, same gates — only their order and dress changed. */}
         {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
+        <div className="ap-cols" style={{ marginTop: 2 }}>
+          {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
+          <div style={{ minWidth: 0, marginTop: 18 }}>
+            <RigMaintenanceLog rig={r} canManage={canManage} meId={meId} meName={(members || []).find((m) => m.id === meId)?.name || "Unknown"} notify={notify} />
+          </div>
+        </div>
         <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
         <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
-        <div className="ap-cols" style={{ marginTop: 14 }}>
-          <RigMaintenanceLog rig={r} canManage={canManage} meId={meId} meName={(members || []).find((m) => m.id === meId)?.name || "Unknown"} notify={notify} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 }}>Capital &amp; replacement</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))", gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+            <SectionBar icon={Landmark} label="Capital & replacement" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 12 }}>
               {[[r.purchaseYear || "—", `PURCHASED${r.purchaseCost != null ? ` · ${money(r.purchaseCost)}` : ""}`], [r.replaceYear || "—", "REPLACE YEAR"], [money(r.replaceCost), "EST. REPLACEMENT COST"]].map(([n, l]) => (
                 <div key={l} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 13px", minWidth: 0 }}>
                   <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary, ...FS.num }}>{n}</div>
@@ -13998,7 +14048,6 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
                 </div>
               ))}
             </div>
-          </div>
         </div>
       </div>
     );
@@ -14018,7 +14067,19 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     return <AfterCallRun S={S} rigs={rigs} meId={meId} notify={notify} onBack={() => setAftercallOpen(false)} />;
   }
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />} kicker={<>APPARATUS & EQUIPMENT</>} title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}>
+    <PageShell band watermark="FLEET" above={loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />} kicker={dept?.name ? `APPARATUS · ${dept.name}` : "APPARATUS"} title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}
+      actions={canManage && !allMode && (rigs.length > 0 || !adding) ? (
+        /* The page's two actions, moved INSIDE the band (the mock's .ph-actions) — same gates, same handlers as when
+           they sat above the fleet: Edit/Done when there are rigs; Add apparatus whenever the add form is reachable. */
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
+          {rigs.length > 0 && (
+            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+              {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit apparatus</>}
+            </button>
+          )}
+          {(editMode || rigs.length === 0) && !adding && <button style={FS.btnPrimary} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>}
+        </div>
+      ) : null}>
       <NoirSkin>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
         {(() => {
@@ -14077,13 +14138,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       {/* Add and edit are hidden in all-houses mode: it is a read/scan view, and "Go to this
           station" is the way into the house where both already work. That also removes any
           path by which a new rig could be created without a real station. */}
-      {canManage && !allMode && rigs.length > 0 && (
-        <div style={{ display: "flex", marginBottom: 12 }}>
-          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
-            {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit apparatus</>}
-          </button>
-        </div>
-      )}
+      {/* Edit/Done and Add apparatus now live in the hero band (actions, above). */}
       {canManage && !allMode && (editMode || rigs.length === 0) && (adding ? (
         <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name / unit</span><input style={FS.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
@@ -14095,7 +14150,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           <button style={FS.btnPrimary} onClick={addRig}><Plus size={15} /> Add to station</button>
           <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); setCap(CAP_BLANK); }}>Cancel</button>
         </Card>
-      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
+      ) : null)}
       {grouped ? (
         /* One section per house. The global empty state is skipped here on purpose: with houses
            to show, "no apparatus" belongs under the house it is true of, not over the whole page. */
@@ -14490,13 +14545,10 @@ function ApparatusChecklist({ S, rig, notify }) {
     return out.sort((a, b) => a.localeCompare(b));
   })();
   return (
-    <div style={{ marginTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
-      <button onClick={toggleOpen} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <ClipboardList size={14} color={FIRE.btnIcon} /> Checklist{items ? ` (${items.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={ClipboardList} label="Truck checklist" count={items ? items.length : null} open={open} onToggle={toggleOpen} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ ...NOIR_INSET, padding: "8px 14px" }}>
           {/* Clean by default: read-only text. "Edit checklist" reveals add/edit/retire on all rows
               (reading vs restructuring). An empty list shows Add directly to bootstrap the first item. */}
           {!loading && items && items.length > 0 && (
@@ -14530,9 +14582,10 @@ function ApparatusChecklist({ S, rig, notify }) {
                 <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "8px 0 2px" }}>{loc}</div>
                 {gmap.get(loc).map((it) => (
                   <div key={it.id}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                      <CheckMark state="todo" />
                       <button onClick={() => it.description && setExpandedItemId(expandedItemId === it.id ? null : it.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: it.description ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
-                        <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
+                        <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{it.label}</span>
                         {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
                       </button>
                       {editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(it)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
@@ -14632,14 +14685,14 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
     }
   }
   const fmtWhen = (iso) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  // Opens with the rig detail (the mock shows history inline) — the same read toggleOpen always made, fired when the
+  // rig is expanded instead of on a second click. Collapsing still works.
+  useEffect(() => { if (!open && checks === null) toggleOpen(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   return (
-    <div style={{ marginTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
-      <button onClick={toggleOpen} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <ClipboardCheck size={14} color={FIRE.btnIcon} /> Check history{checks ? ` (${checks.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={ClipboardCheck} label="Truck check history" count={checks ? checks.length : null} open={open} onToggle={toggleOpen} right={<span>pass / fail per check</span>} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ ...NOIR_INSET, padding: "2px 14px" }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
           ) : (checks && checks.length === 0) ? (
@@ -14647,17 +14700,18 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
           ) : (checks || []).map((c) => {
             const failed = c.outcome === "fail"; const isOpen = expanded === c.id;
             return (
-              <div key={c.id} style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: "9px 12px", marginBottom: 6 }}>
-                <button onClick={() => toggleCheck(c.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                  <Pill S={S} color={failed ? FIRE.redBright : FIRE.green}>{failed ? "FAIL" : "PASS"}</Pill>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
-                    <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
-                  </div>
+              <div key={c.id} style={{ padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                {/* The mock's .h2row: date · who + count · PASS/FAIL pill. Tap to see the items (same lazy load). */}
+                <button onClick={() => toggleCheck(c.id)} title={fmtWhen(c.performed_at)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                  <span style={{ width: 54, fontSize: 11, color: FIRE.textMuted, flexShrink: 0, fontWeight: 600 }}>{new Date(c.performed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: FIRE.textSecondary }}>
+                    <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{c.performed_by_name}</b> · {(c.pass_count || 0) + (c.fail_count || 0)} item{(c.pass_count || 0) + (c.fail_count || 0) === 1 ? "" : "s"}{failed ? ` · ${c.fail_count} failed` : ""}
+                  </span>
+                  <ResultBadge pass={!failed}>{failed ? `${c.pass_count || 0}/${(c.pass_count || 0) + (c.fail_count || 0)} · FAIL` : `${c.pass_count || 0}/${c.pass_count || 0} PASS`}</ResultBadge>
                   {isOpen ? <ChevronUp size={14} color={FIRE.textMuted} /> : <ChevronDown size={14} color={FIRE.textMuted} />}
                 </button>
                 {isOpen && (
-                  <div style={{ marginTop: 8, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+                  <div style={{ marginTop: 8, padding: "4px 0 2px", borderTop: `1px dashed ${FIRE.lineNoir}` }}>
                     {/* County report. INSIDE the expanded block and gated on resultsById[c.id]
                         deliberately: the items are lazy-loaded on expand, so a button on the
                         collapsed row would fire with items === undefined and hand the county a
@@ -14689,10 +14743,10 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
                       const isResolved = !!it.resolved_at;
                       const editing = resolveFor === it.id;
                       return (
-                        <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "4px 0" }}>
-                          {itFail ? <X size={15} color={FIRE.redBright} style={{ flexShrink: 0, marginTop: 1 }} /> : <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />}
+                        <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "5px 0" }}>
+                          <CheckMark state={itFail ? "fail" : "pass"} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{it.item_label}</div>
+                            <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: "18px" }}>{it.item_label}</div>
                             {itFail && it.note && <div style={{ fontSize: 12, color: FIRE.redText, marginTop: 1 }}>{it.note}</div>}
                             {itFail && isResolved && (
                               <div style={{ fontSize: 11.5, color: FIRE.green, marginTop: 2 }}>Resolved by {it.resolved_by_name || "—"}{it.resolved_at ? ` · ${fmtWhen(it.resolved_at)}` : ""}{it.resolution_note ? `: ${it.resolution_note}` : ""}</div>
@@ -14742,13 +14796,10 @@ function ApparatusServiceHistory({ S, rig }) {
   }
   const fmtD = (iso) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={toggle} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <Wrench size={13} color={FIRE.btnIcon} /> Service history{periods ? ` (${periods.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={Wrench} label="Service history" count={periods ? periods.length : null} open={open} onToggle={toggle} right={<span>out-of-service periods</span>} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ ...NOIR_INSET, padding: "4px 14px" }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
           ) : (periods && periods.length === 0) ? (
@@ -14756,8 +14807,8 @@ function ApparatusServiceHistory({ S, rig }) {
           ) : (periods || []).map((p) => {
             const stillOut = !p.back_at;
             return (
-              <div key={p.id} style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: "8px 12px", marginBottom: 6, fontSize: 12.5 }}>
-                <div style={{ color: FIRE.textPrimary }}>{stillOut ? `Out of service since ${fmtD(p.out_at)}` : `Out of service ${fmtD(p.out_at)} – ${fmtD(p.back_at)}`}</div>
+              <div key={p.id} style={{ padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 12.5 }}>
+                <div style={{ color: stillOut ? FIRE.redText : FIRE.textPrimary, fontWeight: 600 }}>{stillOut ? `Out of service since ${fmtD(p.out_at)}` : `Out of service ${fmtD(p.out_at)} – ${fmtD(p.back_at)}`}</div>
                 <div style={{ color: FIRE.textSecondary, marginTop: 2 }}>{p.out_reason}</div>
                 <div style={{ color: FIRE.textMuted, marginTop: 2 }}>Out by {p.out_by_name || "—"}{p.back_at ? ` · back by ${p.back_by_name || "—"}` : ""}</div>
               </div>
@@ -14958,6 +15009,8 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
     setLoading(false);
   }
   async function toggle() { const next = !open; setOpen(next); if (next && photos === null) await load(); }
+  // Opens with the rig detail (the mock's inline photo strip) — the same load toggle always ran, fired on expand.
+  useEffect(() => { if (!open && photos === null) toggle(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   // Dot placement writes (apparatus_check_items UPDATE/INSERT — gated by ops-manage-check-items RLS).
   async function createDot(photo, xp, yp, label) {
     const name = (label || "").trim(); if (!name) return;
@@ -15046,13 +15099,10 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
     } finally { setBusy(false); }
   }
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={toggle} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <ImageIcon size={13} color={FIRE.btnIcon} /> Photos{photos ? ` (${photos.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={ImageIcon} label="Photos" count={photos ? photos.length : null} open={open} onToggle={toggle} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
           ) : (
@@ -15065,8 +15115,30 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                   </button>
                 </div>
               )}
-              {(photos || []).length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 8 }}>No photos yet — add one so you can build a visual check later.</div>}
-              {(photos || []).map((p, i) => {
+              {(photos || []).length === 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 8 }}>No photos yet — add one so you can build a visual check later.</div>}
+              {/* VIEW: the mock's photo strip — captioned thumbnails + an Add photo tile (same addPhoto as the edit-mode
+                  buttons; library picker, which on a phone also offers the camera). EDIT: the full rows below. */}
+              {!editMode && (
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+                  {(photos || []).map((p) => {
+                    const dots = (items || []).filter((it) => it.photo_id === p.id && it.x_pct != null).length;
+                    return (
+                      <div key={p.id} title={p.angle_label || "Unlabeled"} style={{ width: 124, height: 84, borderRadius: 10, position: "relative", overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "flex-end", background: FIRE.card2Noir, flexShrink: 0 }}>
+                        {urls[p.id]
+                          ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                          : <ImageIcon size={20} color={FIRE.textMuted2} style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-60%)" }} />}
+                        {dots > 0 && <span title={`${dots} checklist dot${dots === 1 ? "" : "s"} placed`} style={{ position: "absolute", top: 6, right: 6, zIndex: 1, display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,.55)", borderRadius: 999, padding: "2px 6px" }}><MapPin size={10} color="#fff" />{dots}</span>}
+                        <span style={{ position: "relative", zIndex: 1, width: "100%", fontSize: 9.5, fontWeight: 600, color: "#eaf0f6", padding: "14px 8px 6px", background: "linear-gradient(0deg, rgba(0,0,0,.72), transparent)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontStyle: p.angle_label ? "normal" : "italic" }}>{p.angle_label || "Unlabeled"}</span>
+                      </div>
+                    );
+                  })}
+                  <label title="Add a photo" style={{ width: 124, height: 84, borderRadius: 10, border: `1.5px dashed ${FIRE.line2Noir}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, color: FIRE.textMuted, fontSize: 10.5, cursor: busy ? "default" : "pointer", background: FIRE.card2Noir, opacity: busy ? 0.6 : 1, flexShrink: 0 }}>
+                    {busy ? <Loader2 size={18} className="spin" /> : <Plus size={19} />}{busy ? "Working…" : "Add photo"}
+                    <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addPhoto(f); }} />
+                  </label>
+                </div>
+              )}
+              {editMode && (photos || []).map((p, i) => {
                 const dotCount = (items || []).filter((it) => it.photo_id === p.id && it.x_pct != null).length;
                 const editingDots = editDotsId === p.id;
                 return (
@@ -15115,7 +15187,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                   onLink={(it, xp, yp) => linkDot(it, p, xp, yp)}
                   onMove={moveDot} onUnlink={unlinkDot} onClose={() => setEditDotsId(null)} busy={busy} editable />;
               })()}
-              {(editMode || (photos || []).length === 0) && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {editMode && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {/* Take photo: capture="environment" opens the REAR camera on a phone. */}
                 <label title="Take a photo with the camera" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
                   {busy ? <><Loader2 size={13} className="spin" /> Working…</> : <><Camera size={14} color={FIRE.btnIcon} /> Take photo</>}
