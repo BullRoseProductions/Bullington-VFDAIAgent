@@ -22587,13 +22587,16 @@ function CertNote({ cov, onShowUncovered }) {
 }
 
 function Stat({ S, n, label, warn, dark, onClick, pct }) {
-  const box = dark ? { ...S.stat, ...FS.card } : S.stat;
+  // Inside <NoirSkin> a dark Stat takes the Noir tile face (cardNoir + tile shadow, Oswald figure); elsewhere unchanged.
+  const inNoir = React.useContext(NoirCtx);   // always called — hook order stays fixed
+  const noir = dark && inNoir;
+  const box = dark ? { ...S.stat, ...(noir ? { ...FS.cardNoir, boxShadow: FIRE.tileShadowNoir } : FS.card) } : S.stat;
   // pct (a percentage 0-100) → threshold color: <30 red · 30-75 amber · >75 green.
   // Falls back to the existing warn/neutral coloring when pct isn't provided (count stats + every other Stat usage).
   const numColor = pct != null
     ? (pct > 75 ? FIRE.green : pct >= 30 ? FIRE.amberText : FIRE.redText)
     : (warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20"));
-  const num = <div style={{ ...S.statN, color: numColor }}>{n}</div>;
+  const num = <div style={{ ...S.statN, color: numColor, ...(noir ? { fontFamily: DISPLAY_FONT, fontWeight: 700, letterSpacing: "-.01em" } : null) }}>{n}</div>;
   const lbl = <div style={dark ? { ...S.statLabel, color: FIRE.textMuted } : S.statLabel}>{label}</div>;
   if (!onClick) return <div style={box}>{num}{lbl}</div>;   // unchanged for every other Stat usage
   return (
