@@ -11311,7 +11311,8 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
   if (view === "capital") return <CapitalPlanReport S={S} dept={dept} back={() => setView(null)} />;
   if (view === "apparatuschecks") return <ApparatusChecksReport S={S} dept={dept} back={() => setView(null)} />;
   return (
-    <PageShell kicker="REPORTS" title="Reporting hub" sub="The records your department gets audited on — attendance, readiness, and board reports — in one place.">
+    <PageShell band watermark="REPORTS" kicker="REPORTS" title="Reporting hub" sub="The records your department gets audited on — attendance, readiness, and board reports — in one place.">
+      <NoirSkin>
       <div style={S.opGrid}>
         <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("attendance")}>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -11384,6 +11385,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
           </Card>
         )}
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
