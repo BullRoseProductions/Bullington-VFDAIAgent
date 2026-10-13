@@ -11338,30 +11338,21 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
       <NoirSkin>
       <div style={S.opGrid}>
         <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("attendance")}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <CalendarCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Yearly Attendance Report</div></div>
-          </div>
+          <CardHead icon={CalendarCheck} title="Yearly Attendance Report" style={{ marginBottom: 0 }} />
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Full-year training attendance per member — the durable record for audits, not the rolling calendar view.</div>
           <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
             <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
           </div>
         </Card>
         <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("chief")}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <BarChart3 size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Chief's Report</div></div>
-          </div>
+          <CardHead icon={BarChart3} title="Chief's Report" style={{ marginBottom: 0 }} />
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
           <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
             <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
           </div>
         </Card>
         <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("actions")}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Action Items</div></div>
-          </div>
+          <CardHead icon={ClipboardCheck} title="Action Items" style={{ marginBottom: 0 }} />
           <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.</div>
           <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
             <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
@@ -11370,10 +11361,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
         {/* hidden for a department that's switched the Station Hours module off — the report is that module's data */}
         {moduleEnabled("stationhours", dept?.disabled_modules) && (
           <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("stationhours")}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <Clock size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Station Hours</div></div>
-            </div>
+            <CardHead icon={Clock} title="Station Hours" style={{ marginBottom: 0 }} />
             <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Verified standby and training hours by member — for ISO, LOSAP, and staffing.</div>
             <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
               <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
@@ -11383,10 +11371,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
         {/* hidden for a department that's switched the Apparatus module off — the plan is that module's data */}
         {moduleEnabled("apparatus", dept?.disabled_modules) && (
           <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("capital")}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <Truck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Capital Replacement Plan</div></div>
-            </div>
+            <CardHead icon={Truck} title="Capital Replacement Plan" style={{ marginBottom: 0 }} />
             <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>What the fleet cost and when each unit comes due — the forecast a chief hands the selectboard.</div>
             <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
               <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
@@ -11397,10 +11382,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
             so a department that switched the module off should not be offered either. */}
         {moduleEnabled("apparatus", dept?.disabled_modules) && (
           <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("apparatuschecks")}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Apparatus Checks</div></div>
-            </div>
+            <CardHead icon={ClipboardCheck} title="Apparatus Checks" style={{ marginBottom: 0 }} />
             <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Completed truck checks per unit — download any one as the county report.</div>
             <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
               <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
@@ -11534,7 +11516,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
   const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
 
   return (
-    <PageShell kicker={dept?.name ? `DEPARTMENT STATS · ${dept.name}` : "DEPARTMENT STATS"} title="Department at a glance"
+    <PageShell band watermark="REPORTS" kicker={dept?.name ? `DEPARTMENT STATS · ${dept.name}` : "DEPARTMENT STATS"} title="Department at a glance"
       sub="The live numbers behind the Chief's Report — the same figures your Department Admin sees. Read-only.">
       <NoirSkin>
       <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
@@ -11563,7 +11545,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
             <div style={{ ...FS.cardNoir, padding: 18 }}>
               <ApparatusReadinessView ap={ap} />
               {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
-                <div style={{ marginTop: 10, paddingTop: 4, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ marginTop: 10, paddingTop: 4, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <StatsRigList label="Needs attention" rigs={ap.flaggedRigs} />
                   <StatsRigList label="Out of service" rigs={ap.oosRigs} />
                 </div>
@@ -11601,7 +11583,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
             {funds && funds.length > 0 && (
               <div style={{ ...FS.cardNoir, padding: "6px 16px", marginTop: 12 }}>
                 {funds.map((c, i) => (
-                  <div key={c.id} style={{ borderBottom: i < funds.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                  <div key={c.id} style={{ borderBottom: i < funds.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
                     <FundProgress name={c.name} raised={raised == null ? null : (raised[c.id] || 0)} goal={c.goal_amount} />
                   </div>
                 ))}
@@ -11631,7 +11613,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
         </StatsGrid>
         <div style={{ ...FS.cardNoir, padding: "6px 16px", marginTop: 12 }}>
           {upcoming.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>Nothing scheduled.</div> : upcoming.map((s, i) => (
-            <div key={s.id} style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "9px 0", borderBottom: i < upcoming.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+            <div key={s.id} style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "9px 0", borderBottom: i < upcoming.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
               <span style={{ fontSize: 12.5, color: FIRE.textMuted, minWidth: 150, ...FS.num }}>{fmtSess(s)}</span>
               <span style={{ flex: 1, minWidth: 140, fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{s.title}<EventAudienceTag audience={s.audience} /></span>
             </div>
