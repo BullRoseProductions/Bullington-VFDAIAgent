@@ -16737,6 +16737,7 @@ function MyOnboarding({ S, me, members }) {
   const pct = total ? Math.round((done / total) * 100) : 0;
   return (
     <PageShell kicker="YOUR ONBOARDING" title="Getting started" sub="Your new-member checklist. An officer signs each item off as you complete it.">
+      <NoirSkin>
       {err && !items ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Couldn't load your checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
       ) : items === null ? (
@@ -16751,7 +16752,7 @@ function MyOnboarding({ S, me, members }) {
         </Card>
         {groupOnboarding(items).map((g) => (
           <div key={g.category} style={{ marginBottom: 6 }}>
-            <SectionLabel style={{ marginBottom: 8 }}>{g.category.toUpperCase()}</SectionLabel>
+            <CardHead icon={ClipboardCheck} title={g.category} />
             {g.items.map((it) => {
               const ok = onboardingDone(it, me, prog);
               const sub = it.is_mentor ? (mentorName ? `Mentor: ${mentorName}` : null) : onboardingSignedLine(prog[it.id], members);
@@ -16768,6 +16769,7 @@ function MyOnboarding({ S, me, members }) {
           </div>
         ))}
       </>)}
+      </NoirSkin>
     </PageShell>
   );
 }
