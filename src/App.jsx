@@ -10650,7 +10650,45 @@ function Bar({ S, pct, color, track }) {
 function RosterAttendance({ S, members, sessions, plan }) {
   // Live 90-day participation — same deptAttendance calc as Reports (consistent numbers), rolling window.
   // Replaces the stale stored m.participation field for DISPLAY only (column + writes retired-in-place, drop later).
-  const pctById = new Map(deptAttendance(members, sessions, null, rolling90()).rows.map((r) => [r.id, r.pct]));
+  // ---- facelift (all over the sessions + roster already loaded; the same accountability rules as the participation
+  //      metric: deptAttendance's counting sessions — finalized TRAINING with a roll, optional events excluded — and
+  //      expectedAfterJoin per member) ----
+  const att90 = deptAttendance(members, sessions, null, rolling90());
+  const rated90 = att90.rows.filter((r) => r.pct != null);
+  const overall = rated90.length ? att90.avg : null;   // null when no drills — "No drills yet", never 0%
+  const t = new Date(); const qStartISO = toISODate(new Date(t.getFullYear(), Math.floor(t.getMonth() / 3) * 3, 1)); const todayIso = toISODate(t);
+  const attQ = deptAttendance(members, sessions, null, { from: qStartISO, to: todayIso });
+  const sessQ = attQ.doneThisYear;
+  const rosterRows = attQ.rows.filter((r) => r.status !== "Inactive");
+  const expectedAt = (s) => members.filter((m) => m.status !== "Inactive" && expectedAfterJoin(m, s)).length;
+  const avgPerSession = sessQ.length ? Math.round(sessQ.reduce((tot, s) => tot + (s.attendance || []).length, 0) / sessQ.length) : null;
+  const avgExpected = sessQ.length ? Math.round(sessQ.reduce((tot, s) => tot + expectedAt(s), 0) / sessQ.length) : null;
+  const perfect = rosterRows.filter((r) => r.eligible > 0 && r.attended === r.eligible).length;
+  const allCounting = deptAttendance(members, sessions, null, {}).doneThisYear.slice().sort((a, b) => sessDate(b) - sessDate(a));
+  const last10 = allCounting.slice(0, 10);
+  const last8 = allCounting.slice(0, 8).reverse();
+  const heatPeople = members.filter((m) => m.status !== "Inactive").map((m) => {
+    const cells = last10.map((s) => ((s.attendance || []).includes(m.id) ? "p" : expectedAfterJoin(m, s) ? "a" : "n"));
+    const exp = cells.filter((c) => c !== "n").length, got = cells.filter((c) => c === "p").length;
+    return { m, cells, pct: exp ? Math.round((got / exp) * 100) : null };
+  }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || (a.m.name || "").localeCompare(b.m.name || ""));
+  const ranked = att90.rows.filter((r) => r.pct != null && members.some((m) => m.id === r.id && m.status !== "Inactive"));
+  const top3 = ranked.slice().sort((a, b) => b.pct - a.pct || b.attended - a.attended).slice(0, 3);
+  const nudge3 = ranked.filter((r) => r.pct < 75).sort((a, b) => a.pct - b.pct).slice(0, 3);
+  const { draftFor, runDraft, draftBox } = useInsightDrafts();
+  const pTone = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText);
+  const ini = (n) => (n || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const av = (n, size) => <span style={{ width: size, height: size, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: size <= 26 ? 10 : 11, color: FIRE.textPrimary, flexShrink: 0 }}>{ini(n)}</span>;
+  const chip = (Icon, label, value, sub, tone) => (
+    <div style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+      <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{label}</div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>}
+    </div>
+  );
+  const small = (x) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{x}</span>;
+  const fmtShort = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const pctById = new Map(att90.rows.map((r) => [r.id, r.pct]));   // same 90-day call as the tiles (att90)
   const people = [...members].sort((a, b) => (pctById.get(b.id) ?? -1) - (pctById.get(a.id) ?? -1));
   const activeMembers = (members || []).filter((m) => countsInStats(m) && m.status === "Active");
   const activeLeaders = activeMembers.filter((m) => isLeader(m.access));
@@ -10669,6 +10707,96 @@ function RosterAttendance({ S, members, sessions, plan }) {
     }));
   return (
     <div>
+      {/* STAT TILES */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
+        {chip(BarChart3, "Overall attendance", overall == null ? "No drills yet" : `${overall}%`, "last 90 days", overall == null ? FIRE.textMuted : pTone(overall))}
+        {chip(CalendarCheck, "Sessions", String(sessQ.length), "this quarter")}
+        {chip(Users, "Avg per session", avgPerSession == null ? "—" : <>{avgPerSession}{small(`/${avgExpected}`)}</>, "members present this quarter")}
+        {chip(Award, "Perfect attendance", String(perfect), `member${perfect === 1 ? "" : "s"}, this quarter`, perfect ? FIRE.greenText : null)}
+      </div>
+      {/* ATTENDANCE TREND — last 8 counting sessions, attendees ÷ members expected at each */}
+      {last8.length > 1 && (() => {
+        const pts = last8.map((s) => { const e = expectedAt(s); return { s, v: e ? Math.min(1, (s.attendance || []).length / e) : 0, e }; });
+        const W = 820, H = 160, x0 = 14, x1 = W - 14, top = 18, base = 146;
+        const xAt = (i) => x0 + (i * (x1 - x0)) / (pts.length - 1);
+        const yAt = (v) => base - v * (base - top);
+        const line = pts.map((pt, i) => `${xAt(i).toFixed(1)},${yAt(pt.v).toFixed(1)}`).join(" ");
+        const avgV = pts.reduce((s2, pt) => s2 + pt.v, 0) / pts.length;
+        return (
+          <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+            <CardHead icon={BarChart3} title="Attendance trend" right={<span>last {pts.length} sessions · of members expected</span>} />
+            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 160, display: "block" }}
+              aria-label={`Attendance, last ${pts.length} sessions: ${pts.map((pt) => `${pt.s.title} ${(pt.s.attendance || []).length} of ${pt.e}`).join(", ")}`}>
+              <defs><linearGradient id="ra-trend" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgba(200,50,58,.35)" /><stop offset="1" stopColor="rgba(200,50,58,0)" /></linearGradient></defs>
+              <line x1={x0} y1={yAt(avgV)} x2={x1} y2={yAt(avgV)} stroke="rgba(255,255,255,.08)" strokeDasharray="4 4" />
+              <polygon points={`${x0},${base} ${line} ${x1},${base}`} fill="url(#ra-trend)" />
+              <polyline points={line} fill="none" stroke={FIRE.redBright} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+              {pts.map((pt, i) => <circle key={pt.s.id} cx={xAt(i)} cy={yAt(pt.v)} r="3.4" fill={FIRE.card} stroke={FIRE.redBright} strokeWidth="2.2"><title>{`${pt.s.title} · ${(pt.s.attendance || []).length}/${pt.e}`}</title></circle>)}
+            </svg>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 9.5, color: FIRE.textMuted }}>{pts.map((pt) => <span key={pt.s.id}>{fmtShort(pt.s)}</span>)}</div>
+          </Card>
+        );
+      })()}
+      {/* HEATMAP — member × last 10 counting sessions. Present / Absent; a session before the member joined is
+          "not expected" (no fill). The data has no "excused" state, so none is drawn. */}
+      {last10.length > 0 && (
+        <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+          <CardHead icon={Users} title="Who's showing up" right={<span>member × last {last10.length} sessions</span>} />
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 172 + last10.length * 34 }}>
+              <div style={{ display: "flex", alignItems: "flex-end", paddingLeft: 172, marginBottom: 7 }}>
+                {last10.map((s) => <span key={s.id} title={`${s.title} · ${fmtShort(s)}`} style={{ width: 34, textAlign: "center", fontSize: 9, color: FIRE.textMuted, lineHeight: 1.15 }}>{sessDate(s).toLocaleDateString("en-US", { month: "short" }).slice(0, 1)}{sessDate(s).getDate()}</span>)}
+              </div>
+              {heatPeople.map(({ m, cells, pct }) => (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", padding: "4px 0" }}>
+                  <div style={{ width: 138, flexShrink: 0, display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>{av(m.name, 26)}<span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span></div>
+                  <span style={{ width: 22, flexShrink: 0, textAlign: "right", fontSize: 11, fontWeight: 700, marginRight: 12, color: pTone(pct), ...FS.num }}>{pct == null ? "—" : pct}</span>
+                  {cells.map((c, i) => <span key={last10[i].id} title={`${last10[i].title} · ${fmtShort(last10[i])} — ${c === "p" ? "present" : c === "a" ? "absent" : "before joining"}`}
+                    style={{ width: 30, height: 22, margin: "0 2px", borderRadius: 5, flexShrink: 0, background: c === "p" ? "rgba(47,168,105,.85)" : c === "a" ? "rgba(200,50,58,.8)" : "transparent", border: c === "n" ? `1px dashed ${FIRE.lineNoir}` : "none" }} />)}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 16, marginTop: 14, fontSize: 11, color: FIRE.textSecondary, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 14, height: 14, borderRadius: 4, background: "rgba(47,168,105,.85)" }} />Present</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 14, height: 14, borderRadius: 4, background: "rgba(200,50,58,.8)" }} />Absent</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 14, height: 14, borderRadius: 4, border: `1px dashed ${FIRE.lineNoir}` }} />Before joining</span>
+          </div>
+        </Card>
+      )}
+      {/* LEADERBOARDS — the 90-day participation rows */}
+      {ranked.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginBottom: 12 }}>
+          <Card padding="14px 16px" style={{ minWidth: 0 }}>
+            <CardHead icon={Award} title="Showing up strong" right={<span>top turnout · 90 days</span>} />
+            {top3.map((r, i) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", borderBottom: i === top3.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <span style={{ fontSize: 13, width: 18, textAlign: "center" }}>{["🥇", "🥈", "🥉"][i]}</span>{av(r.name, 30)}
+                <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
+                <span style={{ width: 90, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><span style={{ display: "block", width: `${r.pct}%`, height: "100%", borderRadius: 999, background: FIRE.greenText }} /></span>
+                <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: FIRE.greenText, ...FS.num }}>{r.pct}%</span>
+              </div>
+            ))}
+          </Card>
+          <Card padding="14px 16px" style={{ minWidth: 0 }}>
+            <CardHead icon={AlertTriangle} title="Needs a nudge" right={<span>under 75% · 90 days</span>} />
+            {nudge3.length === 0 ? <EmptyState text=" Everyone with drills on record is at 75% or better." /> : nudge3.map((r, i) => {
+              const key = `att-${r.id}`; const ctx = `Member: ${r.name}. Training attendance is ${r.pct}% over the last 90 days.`;
+              return (
+                <div key={r.id} style={{ borderBottom: i === nudge3.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, width: 18, textAlign: "center", color: FIRE.redText, fontWeight: 700 }}>!</span>{av(r.name, 30)}
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
+                    <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: pTone(r.pct), ...FS.num }}>{r.pct}%</span>
+                    <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => runDraft(key, CHECKIN_SYS, ctx)}>Draft a check-in</button>
+                  </div>
+                  {draftFor === key && <div style={{ padding: "0 0 8px 30px" }}>{draftBox(key, CHECKIN_SYS, ctx)}</div>}
+                </div>
+              );
+            })}
+          </Card>
+        </div>
+      )}
       <CardHead icon={CalendarCheck} title="Recent events" />
       <Card padding="4px 16px" style={{ marginBottom: 14 }}>
         {recentEvents.length === 0 ? <div style={{ padding: "12px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
