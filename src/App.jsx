@@ -13563,6 +13563,90 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
   );
 }
 
+// APPROVED NEW READ (fleet facelift): one rig's maintenance log — every apparatus_maintenance_log entry for that rig,
+// newest first. Mounted only inside an EXPANDED rig on the fleet board, so it loads on expand and never for the whole
+// fleet. Dept-scoped by the existing apparatus_maintenance_log RLS. A failed read keeps what was shown.
+// LOG MAINTENANCE (ad-hoc): one apparatus_maintenance_log INSERT with maintenance_id NULL (nullable, confirmed live
+// 2026-10-13) — work that isn't a scheduled task. Same insert Mark done makes, same gate: the button shows only for
+// the Apparatus page's DA/Officer flag (CANMANAGE_OPS_ROLES), matching aml_insert's is_canmanage_ops(). apparatus_id and task are
+// nullable in the DB, so the form always sets the rig and requires a task. Never touches apparatus_maintenance.
+function RigMaintenanceLog({ rig, canManage, meId, meName, notify }) {
+  const [rows, setRows] = useState(null);   // null = loading
+  const [err, setErr] = useState("");
+  const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const [logOpen, setLogOpen] = useState(false);
+  const [lb, setLb] = useState({ task: "", date: "", cost: "", notes: "" });
+  const [logBusy, setLogBusy] = useState(false);
+  const openLog = () => { setLb({ task: "", date: todayStr(), cost: "", notes: "" }); setLogOpen(true); };
+  async function submitLog() {
+    const task = lb.task.trim();
+    if (!task) { notify({ kind: "error", title: "Add what was done", text: "A short description of the work is required." }); return; }
+    const cs = String(lb.cost ?? "").replace(/[$,\s]/g, "").trim();
+    const cost = cs === "" ? null : Number(cs);
+    if (cost !== null && !(Number.isFinite(cost) && cost >= 0)) { notify({ kind: "error", title: "Check the cost", text: "Enter a number (e.g. 240), or leave it blank." }); return; }
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(lb.date || "");
+    if (!m || lb.date > todayStr()) { notify({ kind: "error", title: "Check the date", text: "Pick the day the work was done — today or earlier." }); return; }
+    const doneAt = lb.date === todayStr() ? new Date() : new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12);   // past day → local noon, never shifts a day
+    setLogBusy(true);
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");   // same dept-id source as Mark done
+    if (deptErr || !deptId) { setLogBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+    const { data: logged, error } = await supabase.from("apparatus_maintenance_log")
+      .insert({ department_id: deptId, maintenance_id: null, apparatus_id: rig.id, task, done_at: doneAt.toISOString(), done_by: meId, done_by_name: meName, notes: lb.notes.trim() || null, cost })
+      .select("id");
+    setLogBusy(false);
+    if (error || !logged || logged.length === 0) { notify({ kind: "error", title: "Couldn't log the maintenance", text: "Nothing was saved — please try again.", details: error?.message }); return; }   // 0 rows = RLS blocked
+    notify({ kind: "success", title: "Maintenance logged", text: `${task} · ${rig.name}` });
+    setLogOpen(false); load();
+  }
+  const load = () => {
+    setErr("");
+    supabase.from("apparatus_maintenance_log")
+      .select("id, task, done_at, done_by_name, notes, cost")
+      .eq("apparatus_id", rig.id)
+      .order("done_at", { ascending: false })
+      .limit(50)
+      .then(({ data, error }) => { if (error || !data) { setErr(error?.message || "Please try again."); return; } setRows(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rig.id]);
+  const yr = new Date().getFullYear();
+  const ytd = (rows || []).filter((r) => r.done_at && new Date(r.done_at).getFullYear() === yr).reduce((t, r) => t + (Number(r.cost) || 0), 0);
+  const money = (n) => `$${Math.round(n).toLocaleString()}`;
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+        Maintenance log{rows && ytd > 0 && <span style={{ color: FIRE.textSecondary, fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>· {money(ytd)} this year</span>}
+        {canManage && !logOpen && <button onClick={openLog} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, letterSpacing: 0, textTransform: "none" }}><Plus size={13} color={FIRE.btnIcon} /> Log maintenance</button>}
+      </div>
+      {canManage && logOpen && (
+        <div style={{ background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: 12, marginBottom: 12, display: "grid", gap: 9 }}>
+          <input style={FS.input} placeholder="What was done (e.g. Replaced front brake pads)" maxLength={200} value={lb.task} onChange={(e) => setLb((b) => ({ ...b, task: e.target.value }))} />
+          <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+            <label style={{ flex: "1 1 140px", fontSize: 11, color: FIRE.textMuted }}>Date<input type="date" max={todayStr()} style={{ ...FS.input, marginTop: 4 }} value={lb.date} onChange={(e) => setLb((b) => ({ ...b, date: e.target.value }))} /></label>
+            <label style={{ flex: "1 1 120px", fontSize: 11, color: FIRE.textMuted }}>Cost (optional)<input inputMode="decimal" placeholder="$" style={{ ...FS.input, marginTop: 4 }} value={lb.cost} onChange={(e) => setLb((b) => ({ ...b, cost: e.target.value }))} /></label>
+          </div>
+          <input style={FS.input} placeholder="Notes (optional) — vendor, parts, mileage" maxLength={500} value={lb.notes} onChange={(e) => setLb((b) => ({ ...b, notes: e.target.value }))} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button disabled={logBusy} onClick={submitLog} style={{ ...FS.btnPrimary, opacity: logBusy ? 0.6 : 1 }}><CheckCircle2 size={15} /> {logBusy ? "Saving…" : "Save to log"}</button>
+            <button disabled={logBusy} onClick={() => setLogOpen(false)} style={FS.btn}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {err ? <div style={{ fontSize: 12.5, color: FIRE.amberText }}>Couldn't load the log — not shown as empty. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={load}>Retry</button></div>
+        : rows == null ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>—</div>
+        : rows.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No maintenance logged for this rig yet. Mark done (below) and Log maintenance both record here.</div>
+        : rows.slice(0, 6).map((r, i, arr) => (
+          <div key={r.id} style={{ padding: "9px 0", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5 }}>
+              <span style={{ fontWeight: 600, color: FIRE.textPrimary, minWidth: 0 }}>{r.task}</span>
+              {r.cost != null && <span style={{ color: FIRE.amberText, fontWeight: 700, fontFamily: DISPLAY_FONT, flexShrink: 0 }}>{money(Number(r.cost))}</span>}
+            </div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{r.done_at ? new Date(r.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}{r.done_by_name ? ` · by ${r.done_by_name}` : ""}{r.notes ? ` · ${r.notes}` : ""}</div>
+          </div>
+        ))}
+      {rows && rows.length > 6 && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6 }}>+{rows.length - 6} earlier entries</div>}
+    </div>
+  );
+}
 function Apparatus({ S, role, members, meId, notify, dept }) {
   const activeStationId = useActiveStation();   // undefined = still loading
   const [rigs, setRigs] = useState([]);
@@ -13637,6 +13721,34 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     return { purchase_year: py, purchase_cost: pc, current_cost: cc, inflation_rate: ir, replace_year: ry, replace_cost: rc };
   }
   const fmtMoney = (n) => (n == null ? "—" : `$${Math.round(Number(n) || 0).toLocaleString("en-US")}`);
+  const [openRigId, setOpenRigId] = useState(null);   // fleet board: the rig expanded in place (null = none)
+  // CHECK SCHEDULING (B2). The interval is written ONLY through set_apparatus_check_interval (is_canmanage_ops;
+  // a guard trigger refuses direct writes to the column). Next due / overdue are derived here, never stored.
+  const [schedFor, setSchedFor] = useState(null); const [schedBuf, setSchedBuf] = useState(""); const [schedBusy, setSchedBusy] = useState(false);
+  const DAY_MS = 86400000;
+  const fmtDue = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // null = no schedule. Out of service pauses the schedule (no check can be run). Never checked = due now.
+  const checkDue = (r) => {
+    if (!r.checkIntervalDays) return null;
+    if (!r.inService) return { state: "paused", text: "Schedule paused — out of service" };
+    if (!r.lastCheckAt) return { state: "overdue", text: "Check due now — never checked" };
+    const due = new Date(new Date(r.lastCheckAt).getTime() + r.checkIntervalDays * DAY_MS);
+    const late = Math.floor((Date.now() - due.getTime()) / DAY_MS);
+    if (Date.now() > due.getTime()) return { state: "overdue", text: late >= 1 ? `Check overdue · ${late}d late` : "Check due today" };
+    return { state: "ok", text: `Next check ${fmtDue(due)}` };
+  };
+  async function saveSchedule(r, clear) {
+    const t = String(schedBuf).trim();
+    const days = clear || t === "" ? null : Number(t);
+    if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= 365)) { notify({ kind: "error", title: "Check the interval", text: "Whole days, 1–365 — or clear it for no schedule." }); return; }
+    setSchedBusy(true);
+    const { error } = await supabase.rpc("set_apparatus_check_interval", { p_apparatus_id: r.id, p_days: days });
+    setSchedBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the schedule", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: days ? `${r.name}: check every ${days} day${days === 1 ? "" : "s"}.` : `${r.name}: check schedule cleared.` });
+    setSchedFor(null); loadRigs();
+  }
+  const [maintItems, setMaintItems] = useState([]);   // reported up by MaintenancePanel (its existing read) — open-maintenance flags
   const [editMode, setEditMode] = useState(false);   // false = clean cards; true = reveal Add + per-rig Edit/Remove. Service/Start-Check stay at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingRigId(null); setAdding(false); } return !v; }); }
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
@@ -13671,7 +13783,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   const loadRigs = () => {
     // Scoped to the active station. NOT filtered when the id is unknown — see useActiveStation.
     let q = supabase.from("apparatus")
-      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost, station_id")
+      .select("id, name, type, status, note, last_check_at, checked_by, in_service, purchase_year, purchase_cost, current_cost, inflation_rate, replace_year, replace_cost, station_id, check_interval_days")
       .is("deleted_at", null)          // removed rigs are hidden, not gone — see removeRig
       .order("created_at", { ascending: true });
     // ALL_STATIONS drops the filter: RLS still scopes to the department, so this returns every
@@ -13685,6 +13797,8 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           purchaseYear: r.purchase_year ?? null, purchaseCost: r.purchase_cost ?? null,
           currentCost: r.current_cost ?? null, inflationRate: r.inflation_rate ?? null,
           replaceYear: r.replace_year ?? null, replaceCost: r.replace_cost ?? null,
+          everChecked: !!r.last_check_at,   // a rig added as "Ready" is status Pass with NO check on file — keep the two apart
+          lastCheckAt: r.last_check_at || null, checkIntervalDays: r.check_interval_days ?? null,   // check scheduling (B2)
           lastCheck: r.last_check_at ? new Date(r.last_check_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
           by: r.checked_by ? (nameById.get(r.checked_by) || "A member") : "—",
         })));
@@ -13761,24 +13875,79 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   /* One rig card. Extracted from the list so it can be rendered once per house in all-stations
      mode without duplicating 50 lines of card. The card itself is unchanged. */
   const renderRig = (r) => {
-    const ok = r.status === "Pass"; const color = ok ? FIRE.green : FIRE.redBright;
-    const outOfService = !r.inService;   // availability dimension (separate from Pass/Needs-attention readiness)
+    // FLEET BOARD CARD — status at a glance; click to expand the full detail in place underneath.
+    const ok = r.status === "Pass";
+    const outOfService = !r.inService;
+    const openMaint = maintItems.filter((i2) => i2.rigId === r.id && i2.status !== "Current");
+    const tone = outOfService ? FIRE.redBright : ok ? FIRE.green : FIRE.amberText;
+    const statusText = outOfService ? "Out of service" : ok ? "In service" : "Needs attention";
+    const on = openRigId === r.id;
     return (
-      <div key={r.id} style={{ ...S.opCard, ...FS.cardNoir, opacity: outOfService ? 0.68 : 1 }}>
-        <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-          <Truck size={20} color={outOfService ? FIRE.textMuted2 : FIRE.btnIcon} style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, letterSpacing: ".02em", color: FIRE.textPrimary }}>{r.name}</div><div style={{ ...S.personMeta, color: FIRE.textMuted }}>{r.type}</div></div>
-          {outOfService
-            ? <Pill S={S} color={FIRE.textMuted2}>OUT OF SERVICE</Pill>
-            : <Pill S={S} color={color}>{ok ? "READY" : "FLAG"}</Pill>}
+      <button key={r.id} type="button" aria-expanded={on} onClick={() => setOpenRigId(on ? null : r.id)}
+        style={{ position: "relative", overflow: "hidden", ...FS.cardNoir, borderRadius: 14, padding: "16px 17px 16px 21px", cursor: "pointer", minWidth: 0, textAlign: "left", fontFamily: "inherit", color: "inherit", width: "100%", border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}` }}>
+        <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: tone }} />
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 11 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, lineHeight: 1, color: FIRE.textPrimary }}>{r.name}</div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 4 }}>{[r.type, r.purchaseYear].filter(Boolean).join(" · ")}</div>
+          </div>
+          <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, letterSpacing: ".03em", color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: tone }} />{statusText}</span>
+        </div>
+        <div style={{ display: "flex", gap: 18, fontSize: 11.5, color: FIRE.textSecondary, marginBottom: 11, flexWrap: "wrap" }}>
+          {r.everChecked ? <span>Last check <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{ok ? "✓ " : ""}{r.lastCheck}</b></span> : <b style={{ color: FIRE.amberText, fontWeight: 600 }}>Never checked</b>}
+          {r.by !== "—" && <span>By <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{r.by}</b></span>}
+          {(() => { const cd = checkDue(r); return cd && <span style={{ color: cd.state === "overdue" ? FIRE.amberText : FIRE.textMuted, fontWeight: cd.state === "overdue" ? 600 : 400 }}>{cd.text}</span>; })()}
+        </div>
+        {(() => {
+          const flag = (kind, Icon, text) => <div style={{ fontSize: 11.5, fontWeight: 600, borderRadius: 8, padding: "7px 11px", display: "flex", alignItems: "center", gap: 8, ...(kind === "ok" ? { background: FIRE.card2Noir, color: FIRE.textSecondary } : kind === "warn" ? { background: "rgba(204,158,82,.08)", color: FIRE.amberText, border: "1px solid rgba(204,158,82,.25)" } : { background: "rgba(200,50,58,.08)", color: FIRE.redText, border: "1px solid rgba(200,50,58,.25)" }) }}><Icon size={14} style={{ flexShrink: 0 }} />{text}</div>;
+          if (outOfService || (!ok && r.note)) return flag("bad", AlertTriangle, r.note || "Out of service");
+          if (openMaint.length) return flag("warn", Wrench, `${openMaint.length} open · ${openMaint[0].task}${openMaint[0].status === "Overdue" ? " overdue" : " due"}`);
+          return flag("ok", CheckCircle2, "No open maintenance");
+        })()}
+      </button>
+    );
+  };
+  // THE EXPANDED DETAIL — everything the old rig card held (actions, editors, checklist, photos, check history,
+  // service periods; the same components and gates), plus the rig's maintenance log and the capital line.
+  const renderRigDetail = (r) => {
+    const ok = r.status === "Pass";
+    const outOfService = !r.inService;
+    const money = (n) => (n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`);
+    return (
+      <div key={`${r.id}-detail`} style={{ gridColumn: "1 / -1", ...FS.cardNoir, padding: "16px 18px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary }}>{r.name}</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[r.type, r.purchaseYear, outOfService ? "Out of service" : ok ? "In service" : "Needs attention"].filter(Boolean).join(" · ")}</div>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
           {/* canRemove, NOT canManage — removal is Department-Admin-only. An Officer in edit
               mode sees Edit and no X, which is the whole permission change on this screen. */}
           {canRemove && editMode && <button title="Take out of the fleet" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => removeRig(r.id, r.name)}><X size={14} color={FIRE.deleteRed} /></button>}
+            <button aria-label="Collapse" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => setOpenRigId(null)}><ChevronUp size={14} color={FIRE.btnIcon} /></button>
+          </div>
         </div>
         {outOfService && <div style={{ fontSize: 10.5, color: FIRE.textMuted2, marginTop: 4, letterSpacing: ".04em" }}>Readiness frozen (was {ok ? "READY" : "FLAG"})</div>}
         {r.note && <div style={{ fontSize: 13, color: ok ? FIRE.textSecondary : FIRE.redText, marginTop: 10 }}>{r.note}</div>}
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 11 }}>Last check: {r.lastCheck} · {r.by}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
+          <span>Check schedule: <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{r.checkIntervalDays ? `every ${r.checkIntervalDays} day${r.checkIntervalDays === 1 ? "" : "s"}` : "none"}</b></span>
+          {(() => { const cd = checkDue(r); return cd && <span style={{ color: cd.state === "overdue" ? FIRE.amberText : FIRE.textMuted, fontWeight: cd.state === "overdue" ? 600 : 400 }}>· {cd.text}</span>; })()}
+          {canManage && schedFor !== r.id && <button onClick={() => { setSchedFor(r.id); setSchedBuf(r.checkIntervalDays ? String(r.checkIntervalDays) : ""); }} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}><Clock size={12} color={FIRE.btnIcon} /> {r.checkIntervalDays ? "Change" : "Set schedule"}</button>}
+        </div>
+        {canManage && schedFor === r.id && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+            <span style={{ fontSize: 12, color: FIRE.textSecondary }}>Check every</span>
+            <input autoFocus type="number" min={1} max={365} step={1} inputMode="numeric" value={schedBuf} placeholder="7" onChange={(e) => setSchedBuf(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveSchedule(r, false); if (e.key === "Escape") setSchedFor(null); }}
+              style={{ ...FS.input, width: 76, fontSize: 12.5, padding: "6px 8px" }} />
+            <span style={{ fontSize: 12, color: FIRE.textSecondary }}>days</span>
+            <button disabled={schedBusy} onClick={() => saveSchedule(r, false)} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: schedBusy ? 0.5 : 1 }}>{schedBusy ? <Loader2 size={13} className="spin" /> : "Save"}</button>
+            {r.checkIntervalDays && <button disabled={schedBusy} onClick={() => saveSchedule(r, true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Clear schedule</button>}
+            <button disabled={schedBusy} onClick={() => setSchedFor(null)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+          </div>
+        )}
         {/* ACTION ROW. Start Check leads and is allowed to take the full width on a narrow card.
             It previously sat LAST inside a nested flex row that had no flexWrap, pinned right with
             marginLeft:auto — so on a phone-width apparatus card "Take out of service" consumed the
@@ -13815,9 +13984,29 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
         <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
         <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
+        <div className="ap-cols" style={{ marginTop: 14 }}>
+          <RigMaintenanceLog rig={r} canManage={canManage} meId={meId} meName={(members || []).find((m) => m.id === meId)?.name || "Unknown"} notify={notify} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 }}>Capital &amp; replacement</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))", gap: 10 }}>
+              {[[r.purchaseYear || "—", `PURCHASED${r.purchaseCost != null ? ` · ${money(r.purchaseCost)}` : ""}`], [r.replaceYear || "—", "REPLACE YEAR"], [money(r.replaceCost), "EST. REPLACEMENT COST"]].map(([n, l]) => (
+                <div key={l} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 13px", minWidth: 0 }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary, ...FS.num }}>{n}</div>
+                  <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 4, letterSpacing: ".02em" }}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
+  // The board grid: a card per rig; the open rig's detail spans the full row directly beneath it.
+  const fleetGrid = (rows) => (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))", gap: 13, marginBottom: 16 }}>
+      {rows.flatMap((r) => (openRigId === r.id ? [renderRig(r), renderRigDetail(r)] : [renderRig(r)]))}
+    </div>
+  );
   /* THE BRANCH. Rendered INSTEAD of the rig list, so the main page below is reached only when the
      checklist is closed and is otherwise exactly what it was. The flag is re-tested here and not
      only on the entry card: a department that switches the feature off while somebody has the
@@ -13829,10 +14018,37 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
   return (
     <PageShell above={loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />} kicker={<>APPARATUS & EQUIPMENT</>} title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}>
       <NoirSkin>
-      <div style={S.statRow}>
-        <StatTile value={String(ready)} label="Ready to roll" />
-        <StatTile value={String(flagged)} tone={flagged > 0 ? "red" : undefined} label="Needs attention" />
-        <StatTile value={String(rigs.length)} label="Apparatus in station" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+        {(() => {
+          const openN = maintItems.filter((i2) => i2.status !== "Current").length, overdueN = maintItems.filter((i2) => i2.status === "Overdue").length;
+          const chip = (Icon, l, v, sub, tone) => (
+            <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
+              {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>}
+            </div>
+          );
+          const small = (t) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{t}</span>;
+          return [
+            chip(Truck, "In service", <>{inServiceRigs.length}{small(`/${rigs.length}`)}</>, outOfServiceCount ? `${outOfServiceCount} out of service` : "whole fleet available", outOfServiceCount ? FIRE.amberText : FIRE.greenText),
+            // Honest count: "passed" requires a check on file. A Pass rig with no check ever logged (added as
+            // "Ready") is split out as never checked rather than reading as passed.
+            (() => {
+              const passedChecked = inServiceRigs.filter((r) => r.status === "Pass" && r.everChecked).length;
+              const neverChecked = inServiceRigs.filter((r) => r.status === "Pass" && !r.everChecked).length;
+              return chip(CheckCircle2, "Ready to roll", String(passedChecked), neverChecked ? `checked & passed · ${neverChecked} never checked` : "checked & passed", passedChecked ? FIRE.greenText : null);
+            })(),
+            // Overdue checks (derived by checkDue — in-service, scheduled, past due or never checked) ride under
+            // the flagged count as their own line; they are NOT added to it — a missed check isn't a failed one.
+            (() => {
+              const odN = inServiceRigs.filter((r) => checkDue(r)?.state === "overdue").length;
+              return chip(AlertTriangle, "Needs attention", String(flagged),
+                odN ? <>in service, flagged<br /><span style={{ color: FIRE.amberText, fontWeight: 600 }}>{odN} check{odN === 1 ? "" : "s"} overdue</span></> : "in service, flagged",
+                flagged ? FIRE.redText : null);
+            })(),
+            chip(Wrench, "Open maintenance", String(openN), overdueN ? `${overdueN} overdue` : "nothing overdue", overdueN ? FIRE.redText : openN ? FIRE.amberText : null),
+          ];
+        })()}
       </div>
       {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
       {/* AFTER-CALL CHECKLIST — the way into the branch view.
@@ -13886,7 +14102,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
             <StationSectionHead station={sec.station} notify={notify} />
             {sec.rows.length === 0
               ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "2px 0 10px" }}>Nothing here yet.</div>
-              : <div style={S.opGrid}>{sec.rows.map(renderRig)}</div>}
+              : fleetGrid(sec.rows)}
           </div>
         ))
       ) : rigs.length === 0 ? (
@@ -13895,9 +14111,9 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           <div>No apparatus in the station yet.{canManage ? " Use “Add apparatus” to build your list." : ""}</div>
         </Card>
       ) : (
-        <div style={S.opGrid}>{rigs.map(renderRig)}</div>
+        fleetGrid(rigs)
       )}
-      <MaintenancePanel S={S} role={role} rigs={rigs} meId={meId} members={members} notify={notify} />
+      <MaintenancePanel S={S} role={role} rigs={rigs} meId={meId} members={members} notify={notify} onItems={setMaintItems} />
       {/* ---- RECENTLY REMOVED (DA-only) ----
            The undo and the accountability answer in one place. This is the screen that would
            have answered "who took Brush 25 out?" — it names the person and the moment, and it
@@ -14930,7 +15146,7 @@ function maintStatus(cadence, lastDoneAt) {
 }
 const MAINT_COLOR = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.green };   // the status set: red bad, amber warning, green good
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
-function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
+function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // DA/Officer — matches is_canmanage_ops INSERT/DELETE RLS on apparatus_maintenance
@@ -14970,6 +15186,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify }) {
       });
   };
   useEffect(() => { loadMaint(); }, [rigs]);   // reload when rigs load/change so rig_id → unit name resolves
+  useEffect(() => { if (onItems) onItems(items); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [items]);   // fleet board's open-maintenance flags read this same list
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const order = { Overdue: 0, "Due soon": 1, Current: 2 };
   const sorted = [...items].sort((a, b) => order[a.status] - order[b.status]);
@@ -15264,6 +15481,84 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+// Per-item custody ledger — APPROVED NEW READ (own commit). Loads only when opened: every
+// equipment_custody period for this unit (open + closed), plus the condition photos attached
+// to those periods (equipment_photos kind='condition'). Dept scoping is the tables' existing
+// RLS. Read-only — issue / transfer / return / recover keep their own flows. Photos are signed
+// one at a time, on click.
+function EquipmentCustodyLedger({ unit }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(null);       // null = not loaded yet
+  const [photos, setPhotos] = useState({});     // custody_id → [storage_path]
+  const [err, setErr] = useState(false);
+  const [shown, setShown] = useState({});       // storage_path → signed url
+  async function load() {
+    setErr(false);
+    const { data, error } = await supabase.from("equipment_custody")
+      .select("id, holder_name, opened_at, opened_by_name, open_action, closed_at, closed_by_name, close_action, condition_at_open, condition_at_close, note")
+      .eq("equipment_id", unit.id).order("opened_at", { ascending: false }).limit(100);
+    if (error) { setErr(true); return; }        // keep whatever was shown; never blank on a failed read
+    const list = data || [];
+    const ids = list.map((r) => r.id);
+    const byC = {};
+    if (ids.length) {
+      const { data: ph } = await supabase.from("equipment_photos")
+        .select("custody_id, storage_path").in("custody_id", ids).eq("kind", "condition").is("deleted_at", null);
+      (ph || []).forEach((p) => { if (p.storage_path) (byC[p.custody_id] = byC[p.custody_id] || []).push(p.storage_path); });
+    }
+    setRows(list); setPhotos(byC);
+  }
+  useEffect(() => { if (open && rows === null) load(); }, [open]);
+  async function view(path) {
+    if (shown[path]) { setShown((m) => { const n = { ...m }; delete n[path]; return n; }); return; }
+    const { data } = await supabase.storage.from("station-documents").createSignedUrl(path, 3600);
+    if (data?.signedUrl) setShown((m) => ({ ...m, [path]: data.signedUrl }));
+  }
+  const fmt = (t) => t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "";
+  const OPEN = { issue: "Issued", transfer_accepted: "Transferred in" };
+  const CLOSE = { returned: "Returned", transferred_out: "Transferred out", manager_recovery: "Recovered by manager", marked_lost: "Marked lost" };
+  return (
+    <div style={{ margin: "0 0 10px" }}>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} style={{ ...FS.btn, padding: "6px 11px", fontSize: 11.5 }}>
+        <Clock size={13} color={FIRE.btnIcon} /> {open ? "Hide custody history" : "Custody history"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "8px 12px" }}>
+          {err && <div style={{ fontSize: 12, color: FIRE.amberText, padding: "6px 0" }}>Couldn't load the custody history. <button onClick={load} style={{ background: "none", border: "none", color: FIRE.redText, cursor: "pointer", padding: 0, fontSize: 12 }}>Retry</button></div>}
+          {rows === null && !err && <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>}
+          {rows && rows.length === 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "6px 0" }}>Never issued — no custody records yet.</div>}
+          {rows && rows.map((r, i) => {
+            const lost = r.close_action === "marked_lost";
+            const tone = !r.closed_at ? FIRE.blueText : lost ? FIRE.redText : FIRE.textMuted;
+            return (
+              <div key={r.id} style={{ padding: "9px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.holder_name || "—"}</span>
+                  <span style={{ fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{fmt(r.opened_at)} → {r.closed_at ? fmt(r.closed_at) : "now"}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: tone }}>{r.closed_at ? (CLOSE[r.close_action] || "Closed").toUpperCase() : "HOLDING"}</span>
+                </div>
+                <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.45 }}>
+                  {[`${OPEN[r.open_action] || "Opened"}${r.opened_by_name ? ` by ${r.opened_by_name}` : ""}`,
+                    r.condition_at_open ? `out: ${r.condition_at_open}` : null,
+                    r.closed_at && r.closed_by_name ? `closed by ${r.closed_by_name}` : null,
+                    r.condition_at_close ? `back: ${r.condition_at_close}` : null].filter(Boolean).join(" · ")}
+                </div>
+                {r.note && <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 3 }}>“{r.note}”</div>}
+                {(photos[r.id] || []).length > 0 && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {photos[r.id].map((path, k) => shown[path]
+                      ? <img key={path} src={shown[path]} alt="Condition photo" onClick={() => view(path)} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, cursor: "pointer" }} />
+                      : <button key={path} onClick={() => view(path)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11 }}><Camera size={12} color={FIRE.btnIcon} /> Condition photo {photos[r.id].length > 1 ? k + 1 : ""}</button>)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -15598,6 +15893,9 @@ function HandoffModal({ items, notify, onClose }) {
     document.body
   );
 }
+// equipment_issues.kind → label (the CHECK constraint's four values).
+const ISSUE_KINDS = [["damaged", "Damaged"], ["not_working", "Not working"], ["missing_part", "Missing part"], ["other", "Other"]];
+const issueKindLabel = (k) => (ISSUE_KINDS.find(([v]) => v === k) || [null, "Issue"])[1];
 function MyEquipment({ S, meId, notify }) {
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -15621,6 +15919,32 @@ function MyEquipment({ S, meId, notify }) {
       .then(({ data, error }) => { if (!error && data) setRows(data); setLoaded(true); });
   };
   useEffect(() => { load(); }, [meId]);
+  // APPROVED NEW READ (B3): MY open issues — the "Issue reported" line on a held item. .eq(reported_by) is REQUIRED:
+  // a manager's "managers read issues" RLS would otherwise return the whole dept. Failed read keeps last-known.
+  const [myIssues, setMyIssues] = useState([]);
+  const loadMyIssues = () => {
+    if (!meId) return;
+    supabase.from("equipment_issues")
+      .select("id, equipment_id, kind, created_at")
+      .eq("reported_by", meId).is("resolved_at", null)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => { if (!error && data) setMyIssues(data); });
+  };
+  useEffect(() => { loadMyIssues(); }, [meId]);
+  // REPORT ISSUE (B3) — the ONLY write is report_equipment_issue; the RPC itself requires that the caller holds
+  // the item (open custody period) and snapshots who/what. Condition is not touched — a manager inspects.
+  const [reportFor, setReportFor] = useState(null);   // equipment_id whose report form is open
+  const [rKind, setRKind] = useState("damaged"); const [rNote, setRNote] = useState(""); const [rBusy, setRBusy] = useState(false);
+  async function submitReport(r) {
+    const note = rNote.trim();
+    if (!note) { notify({ kind: "error", title: "Describe the issue", text: "A short note helps the manager know what to look at." }); return; }
+    setRBusy(true);
+    const { error } = await supabase.rpc("report_equipment_issue", { p_equipment_id: r.equipment_id, p_kind: rKind, p_note: note.slice(0, 1000) });
+    setRBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't report the issue", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Issue reported", text: `${r.equipment_name} — an equipment manager will follow up.` });
+    setReportFor(null); setRNote(""); loadMyIssues();
+  }
   async function markReturned(r) {
     setBusyId(r.equipment_id);
     const { error } = await supabase.rpc("mark_equipment_returned", { p_equipment_id: r.equipment_id });
@@ -15639,8 +15963,30 @@ function MyEquipment({ S, meId, notify }) {
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
   const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
   return (
-    <PageShell kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it.">
+    <PageShell band kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it."
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>}>
       <NoirSkin>
+      {/* CHIPS — counted from the rows already loaded (same gearStatus rule as each row's pill) */}
+      {loaded && rows.length > 0 && (() => {
+        const pendingN = rows.filter((r) => !!r.return_requested_at).length;
+        const agingN = rows.filter((r) => gearStatus(r.equipment?.manufacture_date, r.equipment?.equipment_type?.service_life_years).rank <= 1).length;
+        const attnN = rows.filter((r) => (r.equipment?.condition || r.condition_at_open) !== "Serviceable").length;
+        const chip = (Icon, l, v, sub, tone) => (
+          <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+            {chip(HardHat, "Signed for", String(rows.length), rows.length === 1 ? "item in your custody" : "items in your custody")}
+            {chip(CheckCircle2, "Condition", attnN ? String(attnN) : "OK", attnN ? "not serviceable" : "all serviceable", attnN ? FIRE.amberText : FIRE.greenText)}
+            {chip(AlertTriangle, "Aging out", String(agingN), "past or within 3 mo of service life", agingN ? FIRE.amberText : null)}
+            {chip(ArrowLeftRight, "Return pending", String(pendingN), "awaiting manager receipt", pendingN ? FIRE.amberText : null)}
+          </div>
+        );
+      })()}
       {rows.some(transferable) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           {!selMode
@@ -15655,7 +16001,8 @@ function MyEquipment({ S, meId, notify }) {
           <div style={{ fontSize: 12, color: FIRE.textMuted }}>When an equipment manager issues you gear, it shows up here.</div>
         </Card>
       ) : (
-        <Card padding="6px 16px">
+        <Card padding="10px 16px">
+          <CardHead icon={HardHat} title="In your custody" count={rows.length} right={<span>live condition · service life</span>} />
           {rows.map((r, i) => {
             const pending = !!r.return_requested_at;
             const busy = busyId === r.equipment_id;
@@ -15673,21 +16020,38 @@ function MyEquipment({ S, meId, notify }) {
             // deriving this from `cond` would make correctness depend on that fallback staying in place.
             const signedFor = (r.equipment?.condition && r.equipment.condition !== r.condition_at_open) ? r.condition_at_open : null;
             return (
-              <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 {selMode && (
                   <input type="checkbox" disabled={!transferable(r)} checked={sel.has(r.equipment_id)} onChange={() => toggleSel(r.equipment_id)}
                     style={{ width: 16, height: 16, marginTop: 3, flexShrink: 0, accentColor: FIRE.red, opacity: transferable(r) ? 1 : 0.35 }} />
                 )}
+                <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.card2Noir, border: `1px solid ${gear.rank === 0 ? FIRE.redText + "66" : gear.rank === 1 ? FIRE.amberText + "66" : FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={18} color={gear.rank === 0 ? FIRE.redText : gear.rank === 1 ? FIRE.amberText : FIRE.textMuted} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
                   {gear.tracked && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Made {r.equipment.manufacture_date.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                   {signedFor && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Signed for as {signedFor}</div>}
                   {pending && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Return pending — a manager will confirm receipt.</div>}
+                  {(() => { const iss = myIssues.find((x) => x.equipment_id === r.equipment_id); return iss && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Issue reported · {issueKindLabel(iss.kind)} — a manager will follow up.</div>; })()}
+                  {reportFor === r.equipment_id && (
+                    <div style={{ marginTop: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: 10, display: "grid", gap: 8 }}>
+                      <select value={rKind} onChange={(e) => setRKind(e.target.value)} style={{ ...FS.input, fontSize: 12.5 }}>
+                        {ISSUE_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <textarea value={rNote} maxLength={1000} rows={3} placeholder="What's wrong? (required)" onChange={(e) => setRNote(e.target.value)} style={{ ...FS.input, fontSize: 12.5, resize: "vertical", fontFamily: "inherit" }} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button disabled={rBusy || !rNote.trim()} onClick={() => submitReport(r)} style={{ ...FS.btnPrimary, padding: "6px 12px", fontSize: 12, opacity: (rBusy || !rNote.trim()) ? 0.5 : 1 }}>{rBusy ? <Loader2 size={13} className="spin" /> : "Send report"}</button>
+                        <button disabled={rBusy} onClick={() => setReportFor(null)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+                        <span style={{ marginLeft: "auto", fontSize: 10.5, color: FIRE.textMuted }}>{rNote.length}/1000</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                   {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
                   {!hideServiceable && <Pill S={S} color={condColor(cond)}>{(cond || "—").toUpperCase()}</Pill>}
+                  {r.equipment_id && reportFor !== r.equipment_id && !myIssues.some((x) => x.equipment_id === r.equipment_id) &&
+                    <button onClick={() => { setReportFor(r.equipment_id); setRKind("damaged"); setRNote(""); }} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><AlertTriangle size={12} color={FIRE.amberText} /> Report issue</button>}
                   {pending
                     ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
                     : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
@@ -16008,6 +16372,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const [tb, setTb] = useState({ name: "", catSel: "__new__", catNew: "", returnable: true });
   const [managers, setManagers] = useState([]);   // active equipment_manager rows for the dept (members-read)
   const [mgrPick, setMgrPick] = useState(""); const [mgrBusy, setMgrBusy] = useState(false);
+  const [mgrOpen, setMgrOpen] = useState(false);   // facelift: the managers bar's toggle reveals the existing assign / remove controls
   const [issuing, setIssuing] = useState(false);   // issue-equipment modal open
   const [pending, setPending] = useState([]);         // open custody rows flagged for return (manager queue)
   const [confirming, setConfirming] = useState(null); // pending row being confirmed (modal)
@@ -16065,6 +16430,28 @@ function Equipment({ S, role, members, meId, notify }) {
     if (error || !data) return;   // keep last-known on a flaky read
     setPending(data);
   };
+  // APPROVED NEW READ (B3): the dept's OPEN equipment issues. Loaded only for canManage (= is_dept_admin() OR
+  // is_equipment_manager(), the "managers read issues" RLS + resolve gate); RLS does the dept scoping. Drives the
+  // derived NEEDS ATTENTION pill — condition is never written. Failed read keeps last-known, says so.
+  const [openIssues, setOpenIssues] = useState([]); const [issuesErr, setIssuesErr] = useState(false);
+  const loadIssues = async () => {
+    const { data, error } = await supabase.from("equipment_issues")
+      .select("id, equipment_id, equipment_name, kind, note, reported_by_name, created_at")
+      .is("resolved_at", null).order("created_at", { ascending: false }).limit(200);
+    if (error || !data) { setIssuesErr(true); return; }
+    setIssuesErr(false); setOpenIssues(data);
+  };
+  // RESOLVE (B3) — the ONLY write is resolve_equipment_issue (is_equipment_manager() OR is_dept_admin(), own dept,
+  // open issues only). Resolving does NOT change condition: inspect and set it with Edit as usual.
+  const [resolvingId, setResolvingId] = useState(null); const [resNote, setResNote] = useState(""); const [resBusy, setResBusy] = useState(false);
+  async function resolveIssue(x) {
+    setResBusy(true);
+    const { error } = await supabase.rpc("resolve_equipment_issue", { p_issue_id: x.id, p_note: resNote.trim().slice(0, 1000) || null });
+    setResBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't resolve the issue", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", title: "Issue resolved", text: `${x.equipment_name} — set its condition with Edit if it changed.` });
+    setResolvingId(null); setResNote(""); loadIssues();
+  }
   async function assignManager(memberId) {
     if (!memberId) return;
     setMgrBusy(true);
@@ -16100,6 +16487,8 @@ function Equipment({ S, role, members, meId, notify }) {
   // Deliberately NOT reused by MaintenancePanel — that's a separate component with its own DA/Officer
   // canManage on apparatus_maintenance, and this change must not widen it.
   const canManage = isDA || isManager;
+  useEffect(() => { if (canManage && activeStationId !== undefined) loadIssues(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [canManage, activeStationId]);
+  const issuesByEq = new Map(); openIssues.forEach((x) => issuesByEq.set(x.equipment_id, (issuesByEq.get(x.equipment_id) || 0) + 1));
   const eligibleForMgr = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !managers.some((mg) => mg.memberId === m.id));
   const availableUnits = types.flatMap((t) => t.units.filter((u) => u.status === "in_inventory")
     .map((u) => ({ id: u.id, typeName: t.name, category: t.category, serial: u.serial, asset: u.asset, condition: u.condition })));
@@ -16273,6 +16662,7 @@ function Equipment({ S, role, members, meId, notify }) {
                           {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
                           {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                         </div>
+                        {issuesByEq.get(u.id) > 0 && <Pill S={S} color={FIRE.amberText}>NEEDS ATTENTION</Pill>}
                         {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
                         {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
                         {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
@@ -16290,6 +16680,7 @@ function Equipment({ S, role, members, meId, notify }) {
                         </Card>
                       )}
                       <EquipmentUnitPhotos unit={u} canManage={canManage} meId={meId} notify={notify} />
+                      <EquipmentCustodyLedger unit={u} />
                     </div>
                   );
                 })}
@@ -16335,22 +16726,52 @@ function Equipment({ S, role, members, meId, notify }) {
     );
   };
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got" sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
+    <PageShell band above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got"
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>} sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
       <NoirSkin>
-      <div style={S.statRow}>
-        <StatTile value={String(totalUnits)} label="Total units" />
-        <StatTile value={String(available)} label="Available" />
-        <StatTile value={String(flagged)} tone={flagged > 0 ? "red" : undefined} label="Needs attention" />
-      </div>
+      {/* GEAR CHIPS — from the units already loaded (gearStatus unchanged: past life = retire, regardless of condition) */}
+      {(() => {
+        const lifeById = new Map(types.map((t) => [t.id, t.serviceLifeYears]));
+        const unitsWithType = types.flatMap((t) => t.units.map((u) => ({ u, t })));
+        const issuedN = allUnits.filter((u) => u.status === "held").length;
+        const servPct = totalUnits ? Math.round((allUnits.filter((u) => u.condition === "Serviceable").length / totalUnits) * 100) : null;
+        const agingN = unitsWithType.filter(({ u, t }) => gearStatus(u.manufactureDate, lifeById.get(t.id)).rank <= 1).length;
+        const chip = (Icon, l, v, sub, tone) => (
+          <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
+            {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>}
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+            {chip(Briefcase, "Total gear", String(totalUnits), "tracked items")}
+            {chip(Users, "Issued", <>{issuedN}<span style={{ fontSize: 14, color: FIRE.textMuted }}> / {available} free</span></>, "held by members")}
+            {chip(CheckCircle2, "Serviceable", servPct == null ? "—" : `${servPct}%`, flagged ? `${flagged} need attention` : "by condition", servPct == null ? null : servPct >= 90 ? FIRE.greenText : servPct >= 70 ? FIRE.amberText : FIRE.redText)}
+            {chip(AlertTriangle, "Aging out", String(agingN), "past or within 3 mo of service life", agingN ? FIRE.amberText : null)}
+          </div>
+        );
+      })()}
       {(isManager || isDA) && (
         <div style={{ marginBottom: 12 }}>
           <button onClick={() => setIssuing(true)} style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={15} /> Issue equipment</button>
         </div>
       )}
       {(isDA || isManager) && (
-        <Card padding="12px 16px" style={{ marginBottom: 14 }}>
-          <CardHead icon={Users} title="Equipment managers" style={{ marginBottom: 0 }} />
-          <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 10px", lineHeight: 1.4 }}>Up to two people control the equipment ledger.{isDA ? " You assign them." : ""}</div>
+        <Card padding="12px 16px" style={{ marginBottom: 14, background: FIRE.card2Noir }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, color: FIRE.textPrimary, fontWeight: 600 }}><Users size={16} color={FIRE.redBright} />Equipment managers <span style={{ color: FIRE.textMuted, fontSize: 11, fontWeight: 400 }}>· full data-entry rights · {managers.length} of 2</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: FIRE.textSecondary, flexWrap: "wrap" }}>
+              {managers.map((m) => <span key={m.id} title={m.name} style={{ width: 28, height: 28, borderRadius: "50%", background: FIRE.card, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, fontFamily: DISPLAY_FONT, color: FIRE.textPrimary }}>{(m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>)}
+              <span>{managers.length ? managers.map((m) => `${m.name}${m.memberId === meId ? " (you)" : ""}`).join(", ") : "No managers assigned yet"}</span>
+            </div>
+            {isDA && (<>
+              <button onClick={() => setMgrOpen((v) => !v)} aria-expanded={mgrOpen} style={{ ...FS.btn, marginLeft: "auto", padding: "8px 13px", fontSize: 12 }}><Pencil size={13} color={FIRE.btnIcon} /> {mgrOpen ? "Done" : "Manage access"}</button>
+              <span style={{ fontSize: 9.5, color: FIRE.textMuted, letterSpacing: ".04em" }}>Dept Admin only</span>
+            </>)}
+          </div>
+          {mgrOpen && (<div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px", lineHeight: 1.4 }}>Up to two people control the equipment ledger.{isDA ? " You assign them." : ""}</div>
           {managers.length === 0 ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>No managers assigned yet.</div>
           ) : (
@@ -16376,6 +16797,35 @@ function Equipment({ S, role, members, meId, notify }) {
             </div>
           ) : (
             <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 10 }}>Two managers is the maximum — remove one to assign someone else.</div>
+          ))}
+          </div>)}
+        </Card>
+      )}
+      {/* OPEN ISSUES — reported by holders; each flags its unit NEEDS ATTENTION until resolved. */}
+      {canManage && (openIssues.length > 0 || issuesErr) && (
+        <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+          <CardHead icon={AlertTriangle} title="Open issues" count={openIssues.length} right={<span>reported by holders · condition is still yours to set</span>} />
+          {issuesErr && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 6 }}>Couldn't refresh issues — showing the last list. <button onClick={loadIssues} style={{ ...FS.btn, padding: "2px 8px" }}>Retry</button></div>}
+          {openIssues.map((x, i) => (
+            <div key={x.id} style={{ padding: "10px 0", borderBottom: i === openIssues.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{x.equipment_name}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: FIRE.amberText }}>{issueKindLabel(x.kind).toUpperCase()}</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: FIRE.textMuted }}>{x.reported_by_name} · {new Date(x.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+              </div>
+              <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.45 }}>{x.note}</div>
+              {resolvingId === x.id ? (
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                  <input autoFocus value={resNote} maxLength={1000} placeholder="What was done? (optional)" onChange={(e) => setResNote(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") resolveIssue(x); if (e.key === "Escape") setResolvingId(null); }}
+                    style={{ ...FS.input, flex: "1 1 200px", minWidth: 0, fontSize: 12.5, padding: "6px 8px" }} />
+                  <button disabled={resBusy} onClick={() => resolveIssue(x)} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12, opacity: resBusy ? 0.5 : 1 }}>{resBusy ? <Loader2 size={13} className="spin" /> : "Mark resolved"}</button>
+                  <button disabled={resBusy} onClick={() => setResolvingId(null)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => { setResolvingId(x.id); setResNote(""); }} style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, marginTop: 8 }}><CheckCircle2 size={12} color={FIRE.btnIcon} /> Resolve</button>
+              )}
+            </div>
           ))}
         </Card>
       )}
@@ -16405,6 +16855,61 @@ function Equipment({ S, role, members, meId, notify }) {
           )}
         </div>
       )}
+      {/* AGING OUT + BY CATEGORY — over the loaded units and their type's NFPA service life */}
+      {(() => {
+        const rows = types.flatMap((t) => t.units.map((u) => ({ u, t, g: gearStatus(u.manufactureDate, t.serviceLifeYears) })));
+        const aging = rows.filter((r) => r.g.rank <= 1).sort((a, b) => a.g.rank - b.g.rank || a.g.retire - b.g.retire);
+        const cats = [...new Set(types.map((t) => t.category || "Other"))].map((c) => {
+          const cr = rows.filter((r) => (r.t.category || "Other") === c);
+          return { c, n: cr.length, retire: cr.filter((r) => r.g.rank === 0).length, soon: cr.filter((r) => r.g.rank === 1).length, attn: cr.filter((r) => r.u.condition !== "Serviceable" && r.g.rank !== 0).length };
+        }).filter((x) => x.n > 0);
+        const lifeLeft = (g) => { const mo = Math.round((g.retire - new Date()) / (30.44 * 86400000)); return mo <= 0 ? "past service life" : `retires in ${mo} mo`; };
+        return (<>
+          {aging.length > 0 && (
+            <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+              <CardHead icon={AlertTriangle} title="Aging out — retire or replace" count={aging.length} right={<span>NFPA service life · age retires regardless of condition</span>} />
+              {aging.slice(0, 8).map(({ u, t, g }, i, arr) => {
+                const tone = g.rank === 0 ? FIRE.redText : FIRE.amberText;
+                const yrs = Number(t.serviceLifeYears) || 0;
+                const made = /^(\d{4})-(\d{2})/.exec(u.manufactureDate || "");
+                const usedPct = made && yrs ? Math.min(100, Math.round(((Date.now() - new Date(Number(made[1]), Number(made[2]) - 1, 1)) / (yrs * 365.25 * 86400000)) * 100)) : 100;
+                return (
+                  <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+                    <span style={{ width: 36, height: 36, borderRadius: 9, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={17} color={FIRE.textMuted} /></span>
+                    <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{t.name}</div>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{[u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : null, u.holderName || (u.status === "in_inventory" ? "available" : null)].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <div style={{ width: 200, maxWidth: "100%", flexShrink: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: FIRE.textMuted, marginBottom: 4 }}><span>service life{yrs ? ` · ${yrs} yr` : ""}</span><span>{lifeLeft(g)}</span></div>
+                      <div style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${usedPct}%`, height: "100%", borderRadius: 999, background: g.rank === 0 ? FIRE.redBright : FIRE.amberText }} /></div>
+                    </div>
+                    <span style={{ width: 74, textAlign: "center", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 0", flexShrink: 0, letterSpacing: ".03em", color: tone, background: `${tone}1A`, border: `1px solid ${tone}66` }}>{g.rank === 0 ? "RETIRE" : "SOON"}</span>
+                  </div>
+                );
+              })}
+              {aging.length > 8 && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6 }}>+{aging.length - 8} more — see the inventory below.</div>}
+            </Card>
+          )}
+          {cats.length > 0 && (
+            <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+              <CardHead icon={Briefcase} title="By category" right={<span>counts &amp; condition</span>} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 11 }}>
+                {cats.map((x) => (
+                  <div key={x.c} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 11, padding: "13px 14px", minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 7 }}>{x.c}</div>
+                    <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{x.n}</div>
+                    <div style={{ fontSize: 10.5, marginTop: 6, color: x.retire || x.soon || x.attn ? FIRE.amberText : FIRE.greenText }}>
+                      {x.retire || x.soon || x.attn ? [x.retire ? `${x.retire} retire` : null, x.soon ? `${x.soon} soon` : null, x.attn ? `${x.attn} need attention` : null].filter(Boolean).join(" · ") : "all serviceable"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+          <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} style={{ marginTop: 4 }} />
+        </>);
+      })()}
       {canManage && addingType && (
         <Card padding={12} style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={tName} placeholder="e.g. Structure Helmet" onChange={(e) => setTName(e.target.value)} /></label>
@@ -21730,6 +22235,8 @@ function Fonts() {
       /* Member file facelift: certs two-up and hours | profile side by side on a wide screen, one column on a phone. */
       .mf-certgrid { display: grid; grid-template-columns: 1fr; column-gap: 22px; }
       /* Training v2: category progress cards two-up; hero stacks its ring/stats under the feature on a phone. */
+      .ap-cols { display: grid; grid-template-columns: 1fr; gap: 20px; }
+      @media (min-width: 760px) { .ap-cols { grid-template-columns: 1fr 1fr; } }
       .tr-catgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }   /* fills the row: 3 across on a wide screen, then 2-up, then 1-up */
       @media (max-width: 640px) { .tr-hero { padding: 18px !important; } .tr-hero-r { border-left: none !important; padding-left: 0 !important; } }
       .mf-grid { display: grid; grid-template-columns: 1fr; gap: 10px; align-items: start; }
