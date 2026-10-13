@@ -9460,6 +9460,8 @@ function expPhrase(exp) {
   return `expires ${mon} ${y}`;
 }
 function Pill({ S, color, children }) {
+  // Inside <NoirSkin>: the Noir status pill (the Equipment pages' npill) — body font, not mono. Elsewhere unchanged.
+  if (React.useContext(NoirCtx)) return <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 10px", borderRadius: 999, flexShrink: 0, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{children}</span>;
   return <span style={{ ...S.opChip, color, borderColor: `${color}55`, background: `${color}14` }}>{children}</span>;
 }
 function Initials({ S, name, dark }) {
