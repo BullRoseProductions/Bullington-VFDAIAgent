@@ -17418,7 +17418,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     saveOrShareText(csv, "action-items-completed.csv");
   }
   return (
-    <PageShell kicker="MEETINGS" title={<>Agendas &amp; minutes</>} sub="Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.">
+    <PageShell band watermark="MEETINGS" kicker="MEETINGS" title={<>Agendas &amp; minutes</>} sub="Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.">
       <NoirSkin>
       <div style={S.segRow}>
         {[["agenda", "Agenda"], ["minutes", "Minutes"]].map(([k, l]) => (
@@ -17441,7 +17441,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><ClipboardList size={16} /> Draft the minutes</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
@@ -17478,7 +17478,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               {impFile && <div style={{ fontSize: 12.5, color: FIRE.textPrimary, marginTop: 6, fontWeight: 600 }}>{impFile.name}</div>}
             </div>
           )}
-          {impErr && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 10 }}>{impErr}</div>}
+          {impErr && <div style={NOIR_ERR}>{impErr}</div>}
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: importing ? 0.7 : 1 }} onClick={saveImported} disabled={importing}>{importing ? <><Loader2 size={16} className="spin" /> Importing…</> : <><Upload size={16} /> Save imported minutes</>}</button>
           </>)}
         </Card>
