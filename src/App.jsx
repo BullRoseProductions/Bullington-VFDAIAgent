@@ -19464,8 +19464,9 @@ function AddDepartment({ S, role, notify, go }) {
 
   return (
     <PageShell kicker="PROJECT ADMIN" title="Add a department" sub="Create a new department and its first admin in one step. They sign in with a login link — no password to set up.">
+      <NoirSkin>
 
-      <div style={{ ...S.formCard, ...FS.card, maxWidth: 620 }}>
+      <div style={{ ...S.formCard, ...FS.cardNoir, maxWidth: 620 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name *</span><input style={FS.input} value={f.name} onChange={set("name")} placeholder="e.g. North Hood Volunteer Fire" /></label>
         <div style={S.twoColForm}>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={f.station} onChange={set("station")} placeholder="e.g. Station 1" /></label>
@@ -19487,7 +19488,7 @@ function AddDepartment({ S, role, notify, go }) {
           <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>{f.houses === "several" ? "The details above create the first house. You'll add the rest straight after." : "The details above become this department's station."}</div>
         </div>
         <div style={{ height: 1, background: FIRE.hairline, margin: "2px 0" }} />
-        <SectionLabel>FIRST ADMIN</SectionLabel>
+        <CardHead icon={UserPlus} title="First admin" />
         <div style={S.twoColForm}>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin name *</span><input style={FS.input} value={f.adminName} onChange={set("adminName")} placeholder="e.g. Scott Miller" /></label>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin email *</span><input style={FS.input} type="email" value={f.adminEmail} onChange={set("adminEmail")} placeholder="scott@northhood.org" /></label>
@@ -19516,6 +19517,7 @@ function AddDepartment({ S, role, notify, go }) {
           )}
         </Card>
       )}
+      </NoirSkin>
     </PageShell>
   );
 }
