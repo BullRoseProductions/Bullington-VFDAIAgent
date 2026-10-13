@@ -45,7 +45,7 @@ const APP = "Before the Call";
 /* ---------------- Fire-luxury shared style recipes (reference FIRE tokens; reused across reskinned pages) ---------------- */
 const FS = {
   kicker: { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 },
-  card: { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
+  card: { background: FIRE.card, border: `1px solid ${FIRE.lineNoir}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
   // Industrial Noir card (DA dashboard): gradient face, 1px hairline, 12px radius, soft drop shadow.
   cardNoir: { background: FIRE.cardNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 12, boxShadow: FIRE.cardShadowNoir },
   num: { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" },
@@ -146,7 +146,7 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
 // The department crest PageShell takes as `lead`: logo when set, monogram otherwise.
 function DeptCrest({ dept }) {
   return (
-    <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+    <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
       {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
     </div>
   );
@@ -382,7 +382,7 @@ const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
   : true;
 // Provenance pill for minutes that a human brought in (ai_outputs.source='imported') — so a human-authored
 // document is NEVER shown as if Claude drafted it. Shown wherever imported minutes appear.
-const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
+const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
 
 const TRACKS = {
   Fire:        { label: "Fire",        accent: FIRE.red,       Icon: Flame },        // Industrial Noir categorical set
@@ -3127,7 +3127,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
                 );
               })}
               {mineDone.length > 0 && (
-                <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `1px solid ${FIRE.lineNoir}` : "none" }}>
                   {mineDone.map((d) => {
                     const dl = d.done_at ? new Date(d.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
                     return (
@@ -3160,7 +3160,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
                 (a lead-time nudge for something with no period is always too late) does not apply
                 to showing them. */}
             {mineOpen.length === 0 && crewOpen.length > 0 && (
-              <div style={{ marginTop: (mineOpen.length + mineDone.length) > 0 ? 10 : 12, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ marginTop: (mineOpen.length + mineDone.length) > 0 ? 10 : 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                 <div style={{ ...FS.kicker, marginBottom: 8 }}>STATION DUTIES STILL OPEN</div>
                 {crewShown.map((d) => (
                   <div key={d.id} style={{ ...FS.row, padding: "8px 0" }}>
@@ -3787,7 +3787,7 @@ function useInsightDrafts() {
   function closeDraft() { setDraftFor(null); setDraftText(""); setDraftErr(""); setCopied(false); }
   async function copyDraft() { try { await navigator.clipboard.writeText(draftText); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setDraftErr("Couldn't copy — select the text and copy manually."); } }
   const draftBox = (key, sys, ctx) => (
-    <div style={{ marginTop: 6, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+    <div style={{ marginTop: 6, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 8 }}>
       {draftLoading ? (
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Drafting…</div>
       ) : draftErr ? (
@@ -4053,7 +4053,7 @@ function ActionItemsCard({ meId, go, style }) {
           const yours = it.assigned_to === meId;
           const due = fmtDue(it.due_date);
           return (
-            <div key={it.id} style={{ padding: "4px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={it.id} style={{ padding: "4px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, lineHeight: 1.35 }}>{it.text}</div>
                 <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", padding: "1px 5px", borderRadius: 5, color: yours ? FIRE.greenText : FIRE.textMuted2, border: `0.5px solid ${yours ? FIRE.greenText + "55" : FIRE.hairline}` }}>{yours ? "Yours" : "Unassigned"}</span>
@@ -4337,7 +4337,7 @@ function StationClockCard({ S, dept, go }) {
               member on a manual row still has to clock out themselves even with the fence
               running, and telling them otherwise would cost them the end of their shift. */}
           {autoPresence && open.source === "gps_geofence" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(255,255,255,.06)", border: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(255,255,255,.06)", border: `1px solid ${FIRE.lineNoir}` }}>
               <MapPin size={12} color={FIRE.textSecondary} style={{ flexShrink: 0 }} />
               <span style={{ fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.4 }}>Started automatically — this closes when you leave the station.</span>
             </div>
@@ -4480,7 +4480,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
             )}
           </div>
           {prepOpen && nextPlans.length > 0 && (
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${FIRE.lineNoir}` }}>
               {nextPlans.map((p) => (
                 <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
                   <FileText size={13} color={p.kind === "ai" ? FIRE.amberText : FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -5015,7 +5015,7 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
     setSent(true);
   }
   if (sent) return (
-    <div style={{ ...S.fbDone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
+    <div style={{ ...S.fbDone, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
       <CheckCircle2 size={18} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />
       <div><strong>Logged — thank you.</strong> Critiques like this are exactly what sharpen the next plan. Your team reviews them and tunes the system from them.</div>
     </div>
@@ -5157,7 +5157,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
           <button style={{ ...FS.btnPrimary, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate drill plan</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.redText }}>{err}</div>}
         </div>
         <div style={{ ...S.aiResult, ...FS.cardNoir }}>
           {!plan && !loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Sparkles size={28} color={FIRE.textMuted2} /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
@@ -5203,7 +5203,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                 </>
               )}
               <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 14, paddingTop: 14, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                 <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save to session</span>
                   <select style={FS.input} value={saveSession} onChange={(e) => setSaveSession(e.target.value)}>
                     <option value="">Choose a session…</option>
@@ -5474,7 +5474,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled draft"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -5934,7 +5934,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
         <Card padding="2px 14px">
           {docs.map((d) => (
             <div key={d.id}>
-              <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
                 <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span></div>
                 {/* ONE flex group: inline on desktop, drops below the title as a unit on a phone (no overlap) */}
@@ -5951,7 +5951,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
                   {historyLoading ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>
                    : history.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>No previous versions — this is the original.</div>
                    : history.map((v) => (
-                     <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                     <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                        <FileText size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
                        <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: FIRE.textSecondary }}>Uploaded {v.created_at ? new Date(v.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}{v.uploaded_by ? ` · ${v.uploaded_by}` : ""}</div>
                        <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }} onClick={() => openDoc(v)}><Download size={13} /> View</button>
@@ -5971,7 +5971,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
             trashLoading ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Loading…</Card>
             : trashed.length === 0 ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Trash is empty.</Card>
             : <Card padding="2px 14px">{trashed.map((d) => (
-              <div key={d.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={d.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <Trash2 size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
                 <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
                   <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span>
@@ -6618,7 +6618,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
           </div>
         )}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10, alignItems: "center", paddingTop: 9, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10, alignItems: "center", paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}` }}>
         <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted2, fontWeight: 700, marginRight: 4 }}>Filter</span>
         {FILTERS.map((f) => {
           const active = filter === f.key;
@@ -6639,7 +6639,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
               const group = monthItems.filter((it) => it.source === src).slice().sort((a, b) => a.d - b.d);   // date order within a tier
               if (!group.length) return null;
               return (
-                <div key={src} style={{ padding: "6px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div key={src} style={{ padding: "6px 0", borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: SOURCE_COLORS[src], marginBottom: 3 }}>{lbl}</div>
                   {group.map((it) => (
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
@@ -6675,7 +6675,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={() => setDetailEvent(null)}>
             <div style={{ ...FS.card, width: "min(460px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ width: 10, height: 10, borderRadius: 999, background: it.color, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>{SRC_LABEL[it.source] || it.source}</div>
@@ -10435,7 +10435,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
           <button style={FS.btnPrimary} onClick={addNote}>Add</button>
         </div>
         {notes.map((n, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, alignItems: "flex-start" }}>
+          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{n.by} · {fmtLongDate((n.created_at || "").slice(0, 10)) || "recent"}</div></div>
           </div>
         ))}
@@ -10814,7 +10814,7 @@ function RosterPending({ S, members, notify }) {
   return (
     <div style={{ marginTop: 4 }}>
       {rows.map((r) => (
-        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           <Award size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
           <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
             <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {nameFor(r.member_id)}</span>
@@ -12662,7 +12662,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                a narrower edit permission into a narrower view of the department's own hours. */
             const canAct = isOffsite || isDA;
             return (
-              <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={r.shift_id} style={{ padding: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: isOffsite ? FIRE.amberText : FIRE.textMuted2 }}>
@@ -12765,7 +12765,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           {openLong.map((r) => {
             const busy = busyId === r.shift_id;
             return (
-              <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={r.shift_id} style={{ padding: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{r.kind === "offsite" ? "Off-site" : "Standby"}</span>
@@ -12875,12 +12875,12 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           <div style={{ marginTop: 6 }}>
             {onNowByHouse.map((g) => (
               <div key={g.key} style={{ marginTop: 10 }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingBottom: 4, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingBottom: 4, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: g.people.length ? FIRE.textSecondary : FIRE.textMuted2 }}>{g.name}</span>
                   <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{g.people.length || "nobody"}{g.people.length ? (g.people.length === 1 ? " person" : " people") : " there"}</span>
                 </div>
                 {g.people.map((p, i) => (
-                  <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === g.people.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                  <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === g.people.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                     <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
                     <div style={FS.rowTitle}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
@@ -12900,7 +12900,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         ) : (
           <div style={{ marginTop: 8 }}>
             {onNow.map((p, i) => (
-              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === onNow.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === onNow.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
                 <div style={FS.rowTitle}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
@@ -12929,7 +12929,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Credited</th><th style={{ ...TH, textAlign: "right", color: FIRE.textMuted2 }}>Unverified</th><th style={{ ...TH, textAlign: "right" }}>Verified</th></tr></thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={i} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <tr key={i} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name || "—"}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training)}</td>
@@ -12980,7 +12980,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             <tbody>
               {/* order comes from the RPC (credited time desc, ties by name) — not re-sorted here */}
               {iso.map((r) => (
-                <tr key={r.member_id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <tr key={r.member_id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training_hours)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby_hours)}</td>
@@ -13033,7 +13033,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             <thead><tr><th style={TH}>House</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>ISO total</th></tr></thead>
             <tbody>
               {byHouse.map((h) => (
-                <tr key={h.key} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <tr key={h.key} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <td style={{ ...TD, fontWeight: 600, color: h.station_id ? FIRE.textPrimary : FIRE.textMuted2 }}>
                     {h.station_name || "Station not recorded"}
                     {/* The Unassigned bucket is a REAL, PERMANENT category, not a configuration
@@ -13410,7 +13410,7 @@ function CapitalFields({ S, v, set }) {
   const projected = projectCost(num(v.currentCost), num(v.inflationRate), num(v.replaceYear), thisYear);
   const overridden = num(v.replaceCost) != null;
   return (
-    <div style={{ flexBasis: "100%", borderTop: `0.5px solid ${FIRE.hairline}`, marginTop: 4, paddingTop: 10 }}>
+    <div style={{ flexBasis: "100%", borderTop: `1px solid ${FIRE.lineNoir}`, marginTop: 4, paddingTop: 10 }}>
       <div style={{ ...FS.kicker, marginBottom: 2 }}>CAPITAL PLANNING (OPTIONAL)</div>
       <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 6 }}>What it cost, what it costs today, and when it's due — the app projects the replacement figure. Feeds the Capital Replacement Plan report.</div>
       {/* GRID, not a wrapping flex row. Six fields with hints of different heights left the inputs
@@ -14365,7 +14365,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
                 These rigs are out of the fleet but not gone. Putting one back returns it to its station with its checks and history intact.
               </div>
               {removed.map((r) => (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}{r.type && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6, fontWeight: 400 }}>{r.type}</span>}</div>
                     {/* WHO AND WHEN, stated plainly. This is the line the incident was about. */}
@@ -14491,7 +14491,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
     <button key={p.id} onClick={() => setCheckPhotoId(p.id)} style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0, ...(active ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{p.angle_label || "Photo"} {md}/{ds.length}</button>
   ); }) : null;
   const checkPanel = (it) => { const mk = marks[it.id]; const editingNote = noteItemId === it.id; return (
-    <div style={{ background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: "12px 16px" }}>
+    <div style={{ background: FIRE.card, borderTop: `1px solid ${FIRE.lineNoir}`, padding: "12px 16px" }}>
       <div style={{ fontSize: 14.5, fontWeight: 700, color: FIRE.textPrimary }}>{it.label}</div>
       {it.location && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{it.location}</div>}
       {mk && <div style={{ fontSize: 11.5, color: mk.result === "fail" ? FIRE.redText : FIRE.greenText, marginTop: 3 }}>{mk.result === "fail" ? "✗ Fail" : "✓ Pass"} · {mk.marked_by_name || "—"}{mk.result === "fail" && mk.note ? ` · ${mk.note}` : ""}</div>}
@@ -14529,7 +14529,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
         dots={dotsFor(checkPhoto.id)} unplaced={[]} marks={marks} editable={false}
         tabs={photoTabs} checkPanel={checkPanel} onClose={() => setPhotoOpen(false)} busy={false} />}
       <div style={{ ...FS.cardNoir, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           <Truck size={18} color={FIRE.btnIcon} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Truck check</div>
@@ -14555,7 +14555,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
                 {gmap.get(loc).map((it) => {
                   const mk = marks[it.id];
                   return (
-                    <div key={it.id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <div key={it.id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <button onClick={() => it.description && setExpandedItemId(expandedItemId === it.id ? null : it.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: it.description ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
                           <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
@@ -14584,7 +14584,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
             ))}
           </>)}
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
           {!loading && !err && items && items.length > 0 && !allMarked && (
             <div style={{ marginRight: "auto", fontSize: 12, color: FIRE.textMuted }}>{unmarked} item{unmarked === 1 ? "" : "s"} still unmarked</div>
           )}
@@ -14792,10 +14792,10 @@ function ApparatusChecklist({ S, rig, notify }) {
                 ) : (retired && retired.length === 0) ? (
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 6 }}>No retired items.</div>
                 ) : (retired || []).map((it) => (
-                  <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                  <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: 13, color: FIRE.textMuted, textDecoration: "line-through" }}>{it.label}</span>
-                      {it.location && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.location}</span>}
+                      {it.location && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.navLabel, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.location}</span>}
                     </div>
                     <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => restore(it.id)}><RotateCcw size={13} color={FIRE.btnIcon} /> Restore</button>
                   </div>
@@ -15120,7 +15120,7 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
         </TransformWrapper>
       </div>
       {editable && (pending || selected) && (
-        <div style={{ flexShrink: 0, background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", maxHeight: "48vh", overflowY: "auto" }}>
+        <div style={{ flexShrink: 0, background: FIRE.card, borderTop: `1px solid ${FIRE.lineNoir}`, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", maxHeight: "48vh", overflowY: "auto" }}>
           {pending ? (<>
             <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8 }}>Place a dot here:</div>
             {/* portrait: field on its own full-width line, actions wrap below (never a fixed row) */}
@@ -15336,7 +15336,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                 <div key={p.id} style={{ marginBottom: 6 }}>
                   <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     {urls[p.id]
-                      ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
+                      ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `1px solid ${FIRE.lineNoir}` }} />
                       : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
                     {editMode && editLabelId === p.id ? (
                       <input autoFocus value={labelDraft} placeholder="Label (e.g. Front, Driver side)" onChange={(e) => setLabelDraft(e.target.value)}
@@ -16621,7 +16621,7 @@ function StationHours({ S, dept, notify }) {
               {/* Only rendered when there IS more than one house. These lines sum to the
                   headline above — same verified-only set — so the two can never disagree. */}
               {byStation.length > 0 && (
-                <div style={{ marginTop: 12, paddingTop: 11, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ marginTop: 12, paddingTop: 11, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginBottom: 7 }}>Verified hours by station</div>
                   {byStation.map((b) => (
                     <div key={b.name} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "3px 0" }}>
@@ -16636,7 +16636,7 @@ function StationHours({ S, dept, notify }) {
               ) : (
                 <div style={{ marginTop: 12 }}>
                   {(showAllHours ? myShifts : myShifts.slice(0, MY_LOG_CAP)).map((s, i, shown) => (
-                    <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, padding: "9px 2px" }}>
+                    <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, padding: "9px 2px" }}>
                       <div style={FS.rowTitle}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{fmtDay(s.checked_in_at)}</div>
                         <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}{multiStation ? ` · ${stationOf(s)}` : ""}</div>
@@ -17210,7 +17210,7 @@ function Equipment({ S, role, members, meId, notify }) {
         <Card padding="14px 16px" style={{ marginBottom: 12 }}>
           <CardHead icon={ClipboardCheck} title="Pending returns" count={pending.length} />
           {pending.map((p, i) => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: i === pending.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: i === pending.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.equipment_name}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 1 }}>{p.holder_name} · requested {new Date(p.return_requested_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
@@ -18835,7 +18835,7 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
       <div style={{ ...FS.card, width: "min(480px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           <ClipboardList size={16} color={FIRE.btnIcon} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Attach agenda</div>
@@ -18849,7 +18849,7 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
           ) : agendas.length === 0 ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted, padding: 8, lineHeight: 1.5 }}>No saved agendas yet. Draft one in Minutes → Agenda, then attach it here.</div>
           ) : agendas.map((a) => (
-            <button key={a.id} disabled={!!busyId} onClick={() => pick(a)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `0.5px solid ${FIRE.hairline}`, padding: "10px 6px", cursor: "pointer", fontFamily: "inherit", opacity: busyId && busyId !== a.id ? 0.5 : 1 }}>
+            <button key={a.id} disabled={!!busyId} onClick={() => pick(a)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `1px solid ${FIRE.lineNoir}`, padding: "10px 6px", cursor: "pointer", fontFamily: "inherit", opacity: busyId && busyId !== a.id ? 0.5 : 1 }}>
               <ClipboardList size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title || "Untitled agenda"}</span>
               {busyId === a.id ? <Loader2 size={13} className="spin" color={FIRE.textMuted} /> : <ChevronRight size={14} color={FIRE.textMuted} />}
@@ -20421,7 +20421,7 @@ function GraphicStudio({ S, brand }) {
               {bg && <label style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use it</label>}
               {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.btnBg, color: FIRE.redText, borderColor: FIRE.btnBorder }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
             </div>
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.hairline}` }}>
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted, display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: FIRE.btnBg, color: FIRE.textMuted, padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
                 <button style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
@@ -20432,13 +20432,13 @@ function GraphicStudio({ S, brand }) {
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
                   <button style={{ ...FS.btnPrimary, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
                 </div>
-                {aiErr && <div style={{ ...S.errBox, marginTop: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{aiErr}</div>}
+                {aiErr && <div style={{ ...S.errBox, marginTop: 8, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.redText }}>{aiErr}</div>}
               </div>}
             </div>
           </div>
         </div>
         <div style={{ width: 300, maxWidth: "100%" }}>
-          <div style={{ display: "flex", justifyContent: "center", background: FIRE.btnBg, borderRadius: 12, border: `1px solid ${FIRE.hairline}`, padding: 10 }}>
+          <div style={{ display: "flex", justifyContent: "center", background: FIRE.btnBg, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, padding: 10 }}>
             <img src={dataUrl} alt="graphic preview" style={{ maxWidth: "100%", maxHeight: 420, borderRadius: 6, display: "block" }} />
           </div>
           <button style={{ ...FS.btnPrimary, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
@@ -20826,7 +20826,7 @@ function StationDuties({ S, role, members, meId, notify }) {
                   const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                   return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
                 })()}
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
                 {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
                 {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
@@ -20905,7 +20905,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           {(canManage || canCreate) && !allMode && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
           {canCreate && !allMode && (editMode || duties.length === 0) && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
           <RefreshCw size={13} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
           <span>Recurring duties roll over on their own — weekly, monthly, or quarterly. One-time duties stay until done.</span>
           {isDeptAdmin(role)
@@ -21080,7 +21080,7 @@ function Admin({ S, library, setLibrary, feedback }) {
             The button now says why it can't run instead of looking broken. */}
         <button style={{ ...FS.btnPrimary, opacity: title.trim() ? 1 : 0.55, cursor: title.trim() ? "pointer" : "not-allowed" }} onClick={publish} disabled={!title.trim()}><Plus size={16} /> Publish to library</button>
         {!title.trim() && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: -4 }}>Add a packet title to publish.</div>}
-        {done && <div style={{ ...S.successBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
+        {done && <div style={{ ...S.successBox, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -21201,7 +21201,7 @@ function AddDepartment({ S, role, notify, go }) {
               there is deliberately no second creation path. This just carries the PA to it with the
               form open. */}
           {created.several && (
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>You said this department has several stations. Its first house is set up — add the others now.</div>
               <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => go?.("department", { id: created.id, name: created.name, focus: "stations" })}><Building2 size={15} color={FIRE.btnIcon} /> Add its other houses</button>
             </div>
@@ -21605,7 +21605,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </div>
         )}
         {(stRows || []).map((r) => (
-          <div key={r.station_id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={r.station_id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             {stEditId === r.station_id ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0 6px" }}>
                 <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
@@ -21675,7 +21675,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </div>
         )}
         {(mbRows || []).map((m) => (
-          <div key={m.member_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={m.member_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div>
                 <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</span>
@@ -21850,7 +21850,7 @@ function NoEmailFixPanel({ S, deptId, notify, onFixed }) {
     onFixed?.();   // refresh the radar so the count drops
   }
   return (
-    <div style={{ ...FS.card, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, padding: "14px 16px", marginTop: 10 }}>
+    <div style={{ ...FS.card, background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, padding: "14px 16px", marginTop: 10 }}>
       <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, marginBottom: 10 }}>Add an email so these members can sign in</div>
       {list === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.textMuted, fontSize: 13 }}><Loader2 size={14} className="spin" /> Loading…</div>
@@ -22690,7 +22690,7 @@ function Section({ S, Icon, title, children }) {
   return <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 10 }}><CardHead icon={Icon} title={title} />{children}</div>;
 }
 function Disclaimer({ S, compact, dark }) {
-  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
+  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.btnBg, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
 }
 function Logo() {
   return <img src="/b4c-logo.png" alt="Before the Call" style={{ height: 34, width: "auto", flexShrink: 0, display: "block" }} />;
