@@ -16122,6 +16122,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const [tb, setTb] = useState({ name: "", catSel: "__new__", catNew: "", returnable: true });
   const [managers, setManagers] = useState([]);   // active equipment_manager rows for the dept (members-read)
   const [mgrPick, setMgrPick] = useState(""); const [mgrBusy, setMgrBusy] = useState(false);
+  const [mgrOpen, setMgrOpen] = useState(false);   // facelift: the managers bar's toggle reveals the existing assign / remove controls
   const [issuing, setIssuing] = useState(false);   // issue-equipment modal open
   const [pending, setPending] = useState([]);         // open custody rows flagged for return (manager queue)
   const [confirming, setConfirming] = useState(null); // pending row being confirmed (modal)
@@ -16449,22 +16450,52 @@ function Equipment({ S, role, members, meId, notify }) {
     );
   };
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got" sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
+    <PageShell band above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got"
+      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>} sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
       <NoirSkin>
-      <div style={S.statRow}>
-        <StatTile value={String(totalUnits)} label="Total units" />
-        <StatTile value={String(available)} label="Available" />
-        <StatTile value={String(flagged)} tone={flagged > 0 ? "red" : undefined} label="Needs attention" />
-      </div>
+      {/* GEAR CHIPS — from the units already loaded (gearStatus unchanged: past life = retire, regardless of condition) */}
+      {(() => {
+        const lifeById = new Map(types.map((t) => [t.id, t.serviceLifeYears]));
+        const unitsWithType = types.flatMap((t) => t.units.map((u) => ({ u, t })));
+        const issuedN = allUnits.filter((u) => u.status === "held").length;
+        const servPct = totalUnits ? Math.round((allUnits.filter((u) => u.condition === "Serviceable").length / totalUnits) * 100) : null;
+        const agingN = unitsWithType.filter(({ u, t }) => gearStatus(u.manufactureDate, lifeById.get(t.id)).rank <= 1).length;
+        const chip = (Icon, l, v, sub, tone) => (
+          <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
+            {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>}
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+            {chip(Briefcase, "Total gear", String(totalUnits), "tracked items")}
+            {chip(Users, "Issued", <>{issuedN}<span style={{ fontSize: 14, color: FIRE.textMuted }}> / {available} free</span></>, "held by members")}
+            {chip(CheckCircle2, "Serviceable", servPct == null ? "—" : `${servPct}%`, flagged ? `${flagged} need attention` : "by condition", servPct == null ? null : servPct >= 90 ? FIRE.greenText : servPct >= 70 ? FIRE.amberText : FIRE.redText)}
+            {chip(AlertTriangle, "Aging out", String(agingN), "past or within 3 mo of service life", agingN ? FIRE.amberText : null)}
+          </div>
+        );
+      })()}
       {(isManager || isDA) && (
         <div style={{ marginBottom: 12 }}>
           <button onClick={() => setIssuing(true)} style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={15} /> Issue equipment</button>
         </div>
       )}
       {(isDA || isManager) && (
-        <Card padding="12px 16px" style={{ marginBottom: 14 }}>
-          <CardHead icon={Users} title="Equipment managers" style={{ marginBottom: 0 }} />
-          <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 10px", lineHeight: 1.4 }}>Up to two people control the equipment ledger.{isDA ? " You assign them." : ""}</div>
+        <Card padding="12px 16px" style={{ marginBottom: 14, background: FIRE.card2Noir }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, color: FIRE.textPrimary, fontWeight: 600 }}><Users size={16} color={FIRE.redBright} />Equipment managers <span style={{ color: FIRE.textMuted, fontSize: 11, fontWeight: 400 }}>· full data-entry rights · {managers.length} of 2</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: FIRE.textSecondary, flexWrap: "wrap" }}>
+              {managers.map((m) => <span key={m.id} title={m.name} style={{ width: 28, height: 28, borderRadius: "50%", background: FIRE.card, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, fontFamily: DISPLAY_FONT, color: FIRE.textPrimary }}>{(m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>)}
+              <span>{managers.length ? managers.map((m) => `${m.name}${m.memberId === meId ? " (you)" : ""}`).join(", ") : "No managers assigned yet"}</span>
+            </div>
+            {isDA && (<>
+              <button onClick={() => setMgrOpen((v) => !v)} aria-expanded={mgrOpen} style={{ ...FS.btn, marginLeft: "auto", padding: "8px 13px", fontSize: 12 }}><Pencil size={13} color={FIRE.btnIcon} /> {mgrOpen ? "Done" : "Manage access"}</button>
+              <span style={{ fontSize: 9.5, color: FIRE.textMuted, letterSpacing: ".04em" }}>Dept Admin only</span>
+            </>)}
+          </div>
+          {mgrOpen && (<div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+          <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px", lineHeight: 1.4 }}>Up to two people control the equipment ledger.{isDA ? " You assign them." : ""}</div>
           {managers.length === 0 ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>No managers assigned yet.</div>
           ) : (
@@ -16491,6 +16522,7 @@ function Equipment({ S, role, members, meId, notify }) {
           ) : (
             <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 10 }}>Two managers is the maximum — remove one to assign someone else.</div>
           ))}
+          </div>)}
         </Card>
       )}
       {(isManager || isDA) && pending.length > 0 && (
@@ -16519,6 +16551,61 @@ function Equipment({ S, role, members, meId, notify }) {
           )}
         </div>
       )}
+      {/* AGING OUT + BY CATEGORY — over the loaded units and their type's NFPA service life */}
+      {(() => {
+        const rows = types.flatMap((t) => t.units.map((u) => ({ u, t, g: gearStatus(u.manufactureDate, t.serviceLifeYears) })));
+        const aging = rows.filter((r) => r.g.rank <= 1).sort((a, b) => a.g.rank - b.g.rank || a.g.retire - b.g.retire);
+        const cats = [...new Set(types.map((t) => t.category || "Other"))].map((c) => {
+          const cr = rows.filter((r) => (r.t.category || "Other") === c);
+          return { c, n: cr.length, retire: cr.filter((r) => r.g.rank === 0).length, soon: cr.filter((r) => r.g.rank === 1).length, attn: cr.filter((r) => r.u.condition !== "Serviceable" && r.g.rank !== 0).length };
+        }).filter((x) => x.n > 0);
+        const lifeLeft = (g) => { const mo = Math.round((g.retire - new Date()) / (30.44 * 86400000)); return mo <= 0 ? "past service life" : `retires in ${mo} mo`; };
+        return (<>
+          {aging.length > 0 && (
+            <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+              <CardHead icon={AlertTriangle} title="Aging out — retire or replace" count={aging.length} right={<span>NFPA service life · age retires regardless of condition</span>} />
+              {aging.slice(0, 8).map(({ u, t, g }, i, arr) => {
+                const tone = g.rank === 0 ? FIRE.redText : FIRE.amberText;
+                const yrs = Number(t.serviceLifeYears) || 0;
+                const made = /^(\d{4})-(\d{2})/.exec(u.manufactureDate || "");
+                const usedPct = made && yrs ? Math.min(100, Math.round(((Date.now() - new Date(Number(made[1]), Number(made[2]) - 1, 1)) / (yrs * 365.25 * 86400000)) * 100)) : 100;
+                return (
+                  <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+                    <span style={{ width: 36, height: 36, borderRadius: 9, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={17} color={FIRE.textMuted} /></span>
+                    <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{t.name}</div>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{[u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : null, u.holderName || (u.status === "in_inventory" ? "available" : null)].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <div style={{ width: 200, maxWidth: "100%", flexShrink: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: FIRE.textMuted, marginBottom: 4 }}><span>service life{yrs ? ` · ${yrs} yr` : ""}</span><span>{lifeLeft(g)}</span></div>
+                      <div style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${usedPct}%`, height: "100%", borderRadius: 999, background: g.rank === 0 ? FIRE.redBright : FIRE.amberText }} /></div>
+                    </div>
+                    <span style={{ width: 74, textAlign: "center", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 0", flexShrink: 0, letterSpacing: ".03em", color: tone, background: `${tone}1A`, border: `1px solid ${tone}66` }}>{g.rank === 0 ? "RETIRE" : "SOON"}</span>
+                  </div>
+                );
+              })}
+              {aging.length > 8 && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6 }}>+{aging.length - 8} more — see the inventory below.</div>}
+            </Card>
+          )}
+          {cats.length > 0 && (
+            <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+              <CardHead icon={Briefcase} title="By category" right={<span>counts &amp; condition</span>} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 11 }}>
+                {cats.map((x) => (
+                  <div key={x.c} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 11, padding: "13px 14px", minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 7 }}>{x.c}</div>
+                    <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{x.n}</div>
+                    <div style={{ fontSize: 10.5, marginTop: 6, color: x.retire || x.soon || x.attn ? FIRE.amberText : FIRE.greenText }}>
+                      {x.retire || x.soon || x.attn ? [x.retire ? `${x.retire} retire` : null, x.soon ? `${x.soon} soon` : null, x.attn ? `${x.attn} need attention` : null].filter(Boolean).join(" · ") : "all serviceable"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+          <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} style={{ marginTop: 4 }} />
+        </>);
+      })()}
       {canManage && addingType && (
         <Card padding={12} style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={tName} placeholder="e.g. Structure Helmet" onChange={(e) => setTName(e.target.value)} /></label>
