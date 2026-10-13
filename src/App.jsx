@@ -518,16 +518,14 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+    <PageShell band kicker="DEPARTMENT SETTINGS" title="Department details"
+      sub="Your department's name, station number, and city — shown on the crest and in reports.">
+      <NoirSkin>
       {/* Stations sit above the department profile because adding one is the thing that makes a
-          department multi-station at all — without it the picker can never appear. */}
+          department multi-station at all — without it the picker can never appear. (The page
+          header now sits in the band above both.) */}
       <StationsAdmin S={S} setDept={setDept} />
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>DEPARTMENT SETTINGS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Department details</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Your department's name, station number, and city — shown on the crest and in reports.</div>
-      </div>
-      <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 12, maxWidth: 460 }}>
+      <div style={{ ...FS.cardNoir, padding: 18, display: "flex", flexDirection: "column", gap: 12, maxWidth: 460 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station number</span><input style={FS.input} value={form.station} placeholder="e.g. Station 20" onChange={(e) => set("station", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={form.city} onChange={(e) => set("city", e.target.value)} /></label>
@@ -536,8 +534,8 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
             READ-ONLY pointer rather than deleted: a DA who knows where this lived would otherwise
             conclude the setting was lost. Two independently writable fields over the same fact is
             what D2a's resync existed to clean up — do not reintroduce one. */}
-        <div style={{ borderTop: `0.5px solid ${FIRE.hairline}`, margin: "6px 0 2px" }} />
-        <div style={FS.kicker}>STATION LOCATION</div>
+        <div style={{ borderTop: `1px solid ${FIRE.lineNoir}`, margin: "6px 0 2px" }} />
+        <SectionBar icon={MapPin} label="Station location" style={{ margin: "0" }} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 4px", lineHeight: 1.45 }}>
           Each house now carries its own location, set under <b style={{ color: FIRE.textSecondary }}>Stations</b> at the top of this page.
           {dept?.station_lat != null && dept?.station_lng != null
@@ -550,7 +548,8 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
           {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
         </div>
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 /* ---------------- Your Six — membership support & crisis resources (6a: read-only member page) ---------------- */
@@ -1713,14 +1712,14 @@ function StationsAdmin({ S, setDept }) {
   }
   const list = rows || [];
   return (
-    <div style={{ ...FS.card, padding: 18, marginBottom: 14, maxWidth: 460 }}>
-      <div style={FS.kicker}>STATIONS</div>
-      <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 10px", lineHeight: 1.5 }}>
+    <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 14, maxWidth: 460 }}>
+      <CardHead icon={Building2} title="Stations" />
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px", lineHeight: 1.5 }}>
         The houses in this department. Apparatus, gear and duties belong to one of them.
       </div>
       {rows === null && !err && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
       {list.map((r) => (
-        <div key={r.id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+        <div key={r.id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           {editId === r.id ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0 6px" }}>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
@@ -1733,8 +1732,8 @@ function StationsAdmin({ S, setDept }) {
                    This is what makes automatic arrival possible for THIS house. Before D2a only the
                    default house had coordinates, copied from the department; every other house had
                    none, so there was nothing for a fence to be built from. */}
-              <div style={{ height: 1, background: FIRE.hairline, margin: "2px 0" }} />
-              <div style={FS.kicker}>LOCATION</div>
+              <div style={{ height: 1, background: FIRE.lineNoir, margin: "2px 0" }} />
+              <SectionBar icon={MapPin} label="Location" style={{ margin: "2px 0 0" }} />
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 122 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Latitude</span>
                   <input style={FS.input} value={ef.lat} placeholder="e.g. 32.540300" onChange={(e) => setEf((x) => ({ ...x, lat: e.target.value }))} /></label>
@@ -1789,7 +1788,7 @@ function StationsAdmin({ S, setDept }) {
           )}
         </div>
       ))}
-      {err && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+      {err && <div style={NOIR_ERR}>{err}</div>}
       {!adding ? (
         <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => { setAdding(true); setErr(""); }}><Plus size={15} /> Add a station</button>
       ) : (
