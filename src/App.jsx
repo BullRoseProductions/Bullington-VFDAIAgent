@@ -5123,7 +5123,7 @@ function IdeaGrid({ S, items, dark }) {
   return (
     <div style={S.ideaGrid}>
       {items.map((i) => (
-        <div key={i.h} style={dark ? { ...S.ideaCard, ...FS.card } : S.ideaCard}><div style={dark ? { ...S.ideaH, color: FIRE.textPrimary } : S.ideaH}>{i.h}</div><div style={dark ? { ...S.ideaP, color: FIRE.textSecondary } : S.ideaP}>{i.p}</div></div>
+        <div key={i.h} style={dark ? { ...S.ideaCard, ...FS.cardNoir } : S.ideaCard}><div style={dark ? { ...S.ideaH, color: FIRE.textPrimary } : S.ideaH}>{i.h}</div><div style={dark ? { ...S.ideaP, color: FIRE.textSecondary } : S.ideaP}>{i.p}</div></div>
       ))}
     </div>
   );
@@ -5259,13 +5259,14 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
   }
   return (
     <PageShell kicker="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.">
+      <NoirSkin>
       <div style={S.phaseRow}>
-        <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent="#B11E2A" />
-        <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent="#1F4E79" />
-        <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent="#0E6B62" />
+        <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent={FIRE.red} />
+        <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent={FIRE.catBlue} />
+        <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent={FIRE.catGreen} />
       </div>
 
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
         <div style={{ flex: 1 }}>
           <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
@@ -5310,7 +5311,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
 
       <GraphicStudio S={S} brand={brand} />
 
-      <SectionLabel style={{ marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</SectionLabel>
+      <CardHead icon={FileText} title="Saved drafts" style={{ marginTop: 14 }} />
       <Card padding="4px 16px" style={{ marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved drafts yet.</div> : drafts.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
@@ -5329,9 +5330,9 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
       </Card>
       {openDraft && (
         <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <SectionLabel style={{ marginBottom: 0 }}>{openDraft.title || "Draft"}</SectionLabel>
+              <CardHead icon={FileText} title={openDraft.title || "Draft"} style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
                 {canManage && !editing && <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={startEdit}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
                 <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={closeDraft}><X size={14} color={FIRE.btnIcon} /></button>
@@ -5351,12 +5352,13 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
           </div>
         </div>
       )}
+      </NoirSkin>
     </PageShell>
   );
 }
 function Phase({ S, n, weeks, title, items, accent }) {
   return (
-    <div style={{ ...S.phaseCard, ...FS.card, borderTop: `3px solid ${accent}` }}>
+    <div style={{ ...S.phaseCard, ...FS.cardNoir, borderTop: `3px solid ${accent}` }}>
       <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={{ ...S.phaseWeeks, color: FIRE.textMuted }}>{weeks}</span></div>
       <div style={{ ...S.phaseTitle, color: FIRE.textPrimary }}>{title}</div>
       <ul style={{ ...S.phaseList, color: FIRE.textSecondary }}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
@@ -6165,7 +6167,7 @@ function RecruitmentCalendar({ S, role, notify }) {
   return (
     <div>
       {show && canEdit && (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
             <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Open house at Station 20" /></label>
           <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
@@ -6187,7 +6189,7 @@ function RecruitmentCalendar({ S, role, notify }) {
         cur={cur} setCur={setCur} dark
         items={monthItems}
         renderChip={(it) => ({ color: it.c, label: it.title, title: (canEdit && canDeleteShared) ? `${it.title} (tap to remove)` : it.title, onClick: (canEdit && canDeleteShared) ? () => removeEvent(it.id, it.title) : undefined })}
-        todayColor="#0E6B62"
+        todayColor={FIRE.catGreen}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
           <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
