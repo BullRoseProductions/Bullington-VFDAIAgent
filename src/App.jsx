@@ -253,7 +253,12 @@ function MiniChart({ title, swatch, caption, onOpen, children }) {
 }
 // Red uppercase tracked label. `as="button"` for a collapsible section header.
 function SectionLabel({ as: Tag = "div", style, children, ...rest }) {
-  return <Tag style={{ ...FS.kicker, ...style }} {...rest}>{children}</Tag>;
+  // Inside <NoirSkin>: the SectionBar label face (muted caps, .08em) instead of the red pre-Noir kicker.
+  // Callers' own overrides (colour, case, margins) still win. Outside NoirSkin unchanged.
+  const base = React.useContext(NoirCtx)
+    ? { fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700, margin: 0 }
+    : FS.kicker;
+  return <Tag style={{ ...base, ...style }} {...rest}>{children}</Tag>;
 }
 // The card surface. `as="button"` for a whole-card link; `style` for an accent edge or layout.
 function Card({ as: Tag = "div", padding = "14px 16px", style, children, ...rest }) {
