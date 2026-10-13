@@ -18612,7 +18612,7 @@ function CheckinConfirm({ S, result, members, meId, go }) {
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
       <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }}>
         {pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />}
-        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary }}>{pending ? "Checking you in…" : ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
+        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, letterSpacing: ".01em" }}>{pending ? "Checking you in…" : ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
         <p style={{ color: FIRE.textSecondary, fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
           {pending
             ? "One moment while we confirm your sign-in."
@@ -18644,7 +18644,7 @@ function HandoffConfirm({ S, result, go }) {
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
       <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }}>
         {pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />}
-        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
+        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, letterSpacing: ".01em" }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
         <p style={{ color: FIRE.textSecondary, fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
           {pending
             ? "One moment while we move custody to you."
