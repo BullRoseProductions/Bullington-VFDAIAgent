@@ -12110,20 +12110,15 @@ function CapitalPlanReport({ S, dept, back }) {
   const TH = { textAlign: "left", padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" };
   const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={{ marginBottom: 16, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={FS.kicker}>CAPITAL REPLACEMENT PLAN</div>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
-          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>What the fleet cost, when each unit is due for replacement, and what that adds up to by year.</div>
-        </div>
-        {loaded && !err && (planned.length > 0 || unplanned.length > 0) && (
-          <button style={FS.btn} onClick={() => downloadCapitalPlan({ deptName: dept?.name || "Department", station: dept?.station || "", groups, unplanned, grandTotal, recommendedAnnual })}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
-        )}
-      </div>
+    <PageShell band watermark="REPORTS" kicker="CAPITAL REPLACEMENT PLAN" title={dept?.name || "Department"}
+      sub="What the fleet cost, when each unit is due for replacement, and what that adds up to by year."
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}
+      actions={loaded && !err && (planned.length > 0 || unplanned.length > 0) ? (
+        <button style={FS.btn} onClick={() => downloadCapitalPlan({ deptName: dept?.name || "Department", station: dept?.station || "", groups, unplanned, grandTotal, recommendedAnnual })}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
+      ) : null}>
+      <NoirSkin>
       {err && (
-        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
           <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load the apparatus list</div>
@@ -12133,7 +12128,7 @@ function CapitalPlanReport({ S, dept, back }) {
         </div>
       )}
       {!loaded || err ? null : rigs.length === 0 ? (
-        <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+        <div style={{ ...FS.cardNoir, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus on record yet.</div>
         </div>
@@ -12143,9 +12138,9 @@ function CapitalPlanReport({ S, dept, back }) {
             does — it is the number that goes in a budget line. Above the forecast because it is
             the answer, and the tables below it are the working. */}
         {groups.length > 0 && (
-          <div style={{ ...FS.card, padding: "16px 18px", marginBottom: 14, borderLeft: `3px solid ${FIRE.red}` }}>
-            <div style={{ ...FS.kicker, marginBottom: 6 }}>RECOMMENDED SET-ASIDE</div>
-            <div style={{ fontSize: 30, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.05 }}>
+          <div style={{ ...FS.cardNoir, padding: "16px 18px", marginBottom: 14 }}>
+            <CardHead icon={DollarSign} title="Recommended set-aside" />
+            <div style={{ fontFamily: DISPLAY_FONT, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, ...FS.num, lineHeight: 1.05 }}>
               {money(recommendedAnnual)}{recommendedAnnual != null && <span style={{ fontSize: 16, fontWeight: 700, color: FIRE.textSecondary }}> / year</span>}
             </div>
             <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
@@ -12156,8 +12151,8 @@ function CapitalPlanReport({ S, dept, back }) {
           </div>
         )}
         {/* forecast */}
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>FORECAST BY YEAR</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+          <CardHead icon={BarChart3} title="Forecast by year" style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
           {groups.length === 0 ? (
             <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No apparatus has a planned replacement year yet. Add one from the Apparatus page.</div>
           ) : (<>
@@ -12165,13 +12160,13 @@ function CapitalPlanReport({ S, dept, back }) {
               <thead><tr><th style={TH}>Year</th><th style={{ ...TH, textAlign: "right" }}>Units</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th></tr></thead>
               <tbody>
                 {groups.map((g) => (
-                  <tr key={g.year} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <tr key={g.year} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                     <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary, ...FS.num }}>{g.year}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num }}>{g.rows.length}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</td>
                   </tr>
                 ))}
-                <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+                <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
                   <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Total</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{planned.length}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{money(grandTotal)}</td>
@@ -12183,13 +12178,13 @@ function CapitalPlanReport({ S, dept, back }) {
         </div>
         {/* per-year detail */}
         {groups.map((g) => (
-          <div key={g.year} style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-            <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>{g.year} — {money(g.subtotal)}</div>
+          <div key={g.year} style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+            <CardHead icon={Calendar} title={String(g.year)} right={<span style={{ ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</span>} style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
               <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th><th style={{ ...TH, textAlign: "right" }}>Set aside / yr</th></tr></thead>
               <tbody>
                 {g.rows.map((r) => (
-                  <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                     <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</td>
                     <td style={TD}>{r.type || "—"}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
@@ -12210,14 +12205,14 @@ function CapitalPlanReport({ S, dept, back }) {
         ))}
         {/* not yet planned */}
         {unplanned.length > 0 && (
-          <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
-            <div style={{ ...FS.kicker, padding: "10px 12px 4px", color: FIRE.textMuted2 }}>NOT YET PLANNED</div>
+          <div style={{ ...FS.cardNoir, padding: "8px 0", overflowX: "auto" }}>
+            <CardHead icon={Truck} title="Not yet planned" style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
             <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "0 12px 6px" }}>No planned replacement year on record.</div>
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
               <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th></tr></thead>
               <tbody>
                 {unplanned.map((r) => (
-                  <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                     <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</td>
                     <td style={TD}>{r.type || "—"}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
@@ -12229,7 +12224,8 @@ function CapitalPlanReport({ S, dept, back }) {
           </div>
         )}
       </>)}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
