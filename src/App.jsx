@@ -18293,7 +18293,8 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
     catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <PageShell band kicker={dept?.name ? `NEW-MEMBER ONBOARDING · ${dept.name}` : "NEW-MEMBER ONBOARDING"} title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
+    <PageShell band kicker={dept?.name ? `NEW-MEMBER ONBOARDING · ${dept.name}` : "NEW-MEMBER ONBOARDING"} title="Get new members started right"
+      above={loadErr ? <OfflineNotice onRetry={() => { setLoadErr(false); loadDeptId(); loadItems(); }} what="the onboarding checklist" /> : null} sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
       watermark="INTAKE"
       actions={
         /* The old Viewing/progress toolbar card, folded into the band: the member picker (still needed — candidates
