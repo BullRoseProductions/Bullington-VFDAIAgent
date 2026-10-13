@@ -17979,80 +17979,6 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
     </div>
   );
 }
-// "Notify crew" confirm sheet. Opens with a DRY RUN of /api/notify-session (nothing sent) so the counts per
-// channel and the message preview are what the server would actually do; then an explicit confirm. The
-// server re-checks everything (is_dept_admin(), same department, is_muted fail-closed, dedupe) — this UI
-// only asks.
-function NotifyCrewModal({ session, onClose, notify }) {
-  const [state, setState] = useState({ loading: true, data: null, err: "" });
-  const [busy, setBusy] = useState("");
-  const [result, setResult] = useState(null);
-  const call = async (params) => {
-    const qs = new URLSearchParams({ session_id: String(session.id), ...params }).toString();
-    const r = await authedFetch(`/api/notify-session?${qs}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `Request failed (HTTP ${r.status})`);
-    return j;
-  };
-  useEffect(() => {
-    let alive = true;
-    call({ dry: "1" }).then((d) => alive && setState({ loading: false, data: d, err: "" })).catch((e) => alive && setState({ loading: false, data: null, err: e.message }));
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id]);
-  const send = async (mode) => {
-    setBusy(mode);
-    try {
-      const out = await call(mode === "self" ? { only: "self" } : {});
-      setResult(out);
-      const s = out.sent || {};
-      notify({ kind: "success", title: mode === "self" ? "Test sent to you" : "Crew notified",
-        text: `Inbox ${s.inbox ?? 0} · push ${s.push?.sent ?? 0} device${(s.push?.sent ?? 0) === 1 ? "" : "s"} · email ${s.email?.sent ?? 0}` });
-      if (mode !== "self") onClose();
-    } catch (e) { notify({ kind: "error", title: "Couldn't send", text: e.message }); }
-    setBusy("");
-  };
-  const d = state.data, w = d?.wouldSendTo;
-  const row = (label, n, note) => (
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
-      <span style={{ fontSize: 13, color: FIRE.textSecondary }}>{label}{note && <span style={{ fontSize: 11, color: FIRE.textMuted }}> · {note}</span>}</span>
-      <b style={{ fontFamily: DISPLAY_FONT, fontSize: 18, color: FIRE.textPrimary, ...FS.num }}>{n}</b>
-    </div>
-  );
-  return createPortal(
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 130, background: "rgba(0,0,0,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 460, padding: "18px 18px 16px", margin: "40px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-          <CardHead icon={Megaphone} title="Notify crew" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={onClose} aria-label="Close" style={{ ...FS.btn, marginLeft: "auto", padding: "5px 8px" }}><X size={15} color={FIRE.btnIcon} /></button>
-        </div>
-        <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 10 }}>{session.title}</div>
-        {state.loading && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}><Loader2 size={14} className="spin" style={{ verticalAlign: "-2px" }} /> Checking who would get it…</div>}
-        {state.err && <div style={{ fontSize: 13, color: FIRE.redText, padding: "8px 0", lineHeight: 1.45 }}>{state.err}</div>}
-        {d && (<>
-          <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
-            <div style={{ fontSize: 10.5, letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700, marginBottom: 4 }}>PREVIEW</div>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>{d.preview.push.title}</div>
-            <div style={{ fontSize: 13, color: FIRE.textSecondary }}>{d.preview.push.body}</div>
-            <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>Email subject: {d.preview.email.subject}</div>
-          </div>
-          {row("Inbox", w.inbox, `${d.eligible} eligible`)}
-          {row("Push", w.push.members, w.push.off ? w.push.off : `${w.push.devices} device${w.push.devices === 1 ? "" : "s"}`)}
-          {row("Email", w.email, w.emailOff || "members with an email on file")}
-          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.45 }}>
-            {d.muted ? `${d.muted} muted event reminders and won't get this. ` : ""}{d.alreadyNotified ? `${d.alreadyNotified} already got this reminder and won't get it twice. ` : ""}Audience: {d.session.audience === "board" ? "Board only" : d.session.audience === "leadership" ? "Leadership only" : "everyone"} in your department.
-          </div>
-          {result && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 8 }}>Test sent — check your inbox, phone and email.</div>}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
-            <button style={FS.btn} disabled={!!busy} onClick={() => send("self")}>{busy === "self" ? <Loader2 size={14} className="spin" /> : <Send size={14} color={FIRE.btnIcon} />} Send a test to me</button>
-            <button style={{ ...FS.btnPrimary, opacity: busy || !w.inbox ? 0.6 : 1 }} disabled={!!busy || !w.inbox} onClick={() => send("crew")}>{busy === "crew" ? <Loader2 size={14} className="spin" /> : <Megaphone size={14} />} Send to {w.inbox} {w.inbox === 1 ? "member" : "members"}</button>
-          </div>
-        </>)}
-      </div>
-    </div>,
-    document.body
-  );
-}
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, notify, dept, addFeedback }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
@@ -18074,7 +18000,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
-  const [notifyFor, setNotifyFor] = useState(null);   // session whose "Notify crew" confirm sheet is open
   const [openPlans, setOpenPlans] = useState(null);   // per-session attached-plans section: collapsed by default (calm-at-rest), expand deliberately
   /* Live codes come from open_signin. They are held here for display, and RESTORED on load
      from current_signin_token() — a leadership-gated read of the same column member_check_in
@@ -18729,7 +18654,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               <div style={{ display: "flex", gap: 9, marginTop: 17, flexWrap: "wrap" }}>
                 {nextSession && canRunSignin && !nextSession.done && <button style={thbtn} onClick={() => goToNext(() => setOpenSignin(nextSession.id))}><QrCode size={14} color={FIRE.redText} /> QR sign-in</button>}
                 {nextSession && nextPlans.length > 0 && <button style={thbtn} onClick={() => openSessionPlans(nextSession)}><FileText size={14} color={FIRE.textMuted} /> View plan</button>}
-                {nextSession && !nextSession.done && isDeptAdmin(role) && <button style={thbtn} onClick={() => setNotifyFor(nextSession)}><Megaphone size={14} color={FIRE.textMuted} /> Notify crew</button>}
                 {canPlanAI && <button style={thbtn} onClick={() => setDraftOpen((v) => !v)}><Sparkles size={14} color={FIRE.redText} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
                 {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
               </div>
@@ -18761,7 +18685,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       })()}
 
       {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} />}
-      {notifyFor && <NotifyCrewModal session={notifyFor} notify={notify} onClose={() => setNotifyFor(null)} />}
       {agendaSession && <AttachAgendaModal S={S} session={agendaSession} byName={me?.name} notify={notify} onAttached={loadSessions} onClose={() => setAgendaSession(null)} />}
       {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
