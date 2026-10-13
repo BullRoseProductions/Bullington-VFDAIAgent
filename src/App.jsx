@@ -11861,16 +11861,13 @@ function ApparatusChecksReport({ S, dept, back }) {
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }); };
 
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>APPARATUS CHECKS</div>
-        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Completed checks for each unit, newest first. Download any one as the county report.</div>
-      </div>
+    <PageShell band watermark="REPORTS" kicker="APPARATUS CHECKS" title={dept?.name || "Department"}
+      sub="Completed checks for each unit, newest first. Download any one as the county report."
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
 
       {err && (
-        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
           <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load the apparatus list</div>
@@ -11887,7 +11884,7 @@ function ApparatusChecksReport({ S, dept, back }) {
       {loaded && !err && rigs.length > 0 && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
           <label style={{ ...S.field, minWidth: 220 }}>
-            <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Apparatus</span>
+            <span style={S.fieldLabel}>Apparatus</span>
             <select style={FS.input} value={scope} onChange={(e) => setScope(e.target.value)}>
               <option value={ALL_RIGS}>All apparatus — combined report</option>
               {rigs.map((r) => <option key={r.id} value={r.id}>{r.name}{r.type ? ` — ${r.type}` : ""}</option>)}
@@ -11900,11 +11897,10 @@ function ApparatusChecksReport({ S, dept, back }) {
       {/* FLEET MODE — one combined PDF for every unit over the range. The per-rig list below is
           untouched and still runs the single-check path. */}
       {loaded && !err && rigs.length > 0 && isFleet && (
-        <div style={{ ...FS.card, padding: "16px 18px" }}>
+        <div style={{ ...FS.cardNoir, padding: "16px 18px" }}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 2 }} />
             <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Combined apparatus report</div>
+              <CardHead icon={ClipboardCheck} title="Combined apparatus report" style={{ marginBottom: 4 }} />
               <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
                 Every unit's completed checks between the selected dates, in one PDF: a fleet summary,
                 then each truck's checks. Failed checks are expanded item by item.
@@ -11916,7 +11912,7 @@ function ApparatusChecksReport({ S, dept, back }) {
             </button>
           </div>
           {fleetErr && (
-            <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 12, padding: "9px 11px", borderRadius: 9, background: "rgba(200,50,58,.10)", border: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ ...NOIR_ERR, display: "flex", alignItems: "center", gap: 9, marginTop: 12 }}>
               <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
               <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{fleetErr}</span>
             </div>
@@ -11925,13 +11921,13 @@ function ApparatusChecksReport({ S, dept, back }) {
       )}
 
       {!loaded || err || isFleet ? null : rigs.length === 0 ? (
-        <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+        <div style={{ ...FS.cardNoir, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus on record yet.</div>
         </div>
       ) : (<>
         {checksErr && (
-          <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ ...FS.cardNoir, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
             <AlertTriangle size={17} color={FIRE.redText} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>{checksErr}</div>
             <button onClick={() => loadChecks(rigId)} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
@@ -11940,15 +11936,15 @@ function ApparatusChecksReport({ S, dept, back }) {
         {checksLoading ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading checks…</div>
         ) : (checks.length === 0 && !checksErr) ? (
-          <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+          <div style={{ ...FS.cardNoir, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
             <ClipboardCheck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
             <div>No completed checks recorded for {rig?.name || "this unit"} yet.</div>
           </div>
         ) : checks.map((c) => {
           const failed = c.outcome === "fail";
           return (
-            <div key={c.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <Pill S={S} color={failed ? FIRE.redBright : FIRE.green}>{failed ? "FAIL" : "PASS"}</Pill>
+            <div key={c.id} style={{ ...NOIR_INSET, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <ResultBadge pass={!failed}>{failed ? "FAIL" : "PASS"}</ResultBadge>
               <div style={{ flex: 1, minWidth: 180 }}>
                 <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
@@ -11961,7 +11957,8 @@ function ApparatusChecksReport({ S, dept, back }) {
           );
         })}
       </>)}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
