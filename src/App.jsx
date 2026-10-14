@@ -1631,7 +1631,10 @@ function StationsAdmin({ S, setDept }) {
 
      NOTE the shape difference this introduces: my_stations() returns `station_id`, the table
      returns `id`. Every reference below uses r.id. */
+  const [loadErr, setLoadErr] = useState(false);   // the LIST read failed (kept apart from form errors in `err`)
   const load = async () => {
+    setLoadErr(false);
+    try {
     // Belt-and-braces only: the SELECT policy already scopes this to my_department_id(). So a
     // failure to resolve the id does NOT block the list — RLS is the boundary either way, and
     // refusing to render over a redundant filter would break never-blank-on-error for nothing.
@@ -1640,10 +1643,19 @@ function StationsAdmin({ S, setDept }) {
     if (deptId) q = q.eq("department_id", deptId);
     const { data, error } = await q.order("is_default", { ascending: false }).order("name");
     // A failed read keeps the last-known list rather than claiming the department has none.
-    if (error) { setErr(error.message || "Please try again."); return; }
-    setErr(""); setRows(Array.isArray(data) ? data : []);
+    if (error) { setLoadErr(true); return; }
+    setRows(Array.isArray(data) ? data : []);
+    } catch { setLoadErr(true); }   // a thrown fetch (offline, dead keep-alive) must not leave "Loading…" up forever
   };
   useEffect(() => { load(); }, []);
+  useReconnect(() => { if (loadErr) load(); });
+  // A read that never settles (stalled connection) is treated as failed after 15 s, so the card offers
+  // Try again instead of spinning. A late success still lands and replaces it.
+  useEffect(() => {
+    if (rows !== null) return;
+    const t = setTimeout(() => setLoadErr(true), 15000);
+    return () => clearTimeout(t);
+  }, [rows]);
   async function saveEdit(id, isDefault) {
     const name = ef.name.trim();
     if (!name) { setErr("Give the station a name."); return; }
@@ -1728,7 +1740,9 @@ function StationsAdmin({ S, setDept }) {
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px", lineHeight: 1.5 }}>
         The houses in this department. Apparatus, gear and duties belong to one of them.
       </div>
-      {rows === null && !err && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
+      {loadErr && rows === null && <ReadRetry what="the stations" onRetry={load} />}
+      {loadErr && rows !== null && <ReadRetry what="the latest stations — showing the last list loaded" onRetry={load} />}
+      {rows === null && !loadErr && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
       {list.map((r) => (
         <div key={r.id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           {editId === r.id ? (
