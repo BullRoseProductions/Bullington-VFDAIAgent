@@ -1,0 +1,308 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 706e0b9..e7ff7fe 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -12133,8 +12133,6 @@ async function fetchResultsForChecks(ids) {
+   return { data: out };
+ }
+ 
+-// "All apparatus" is a scope, not a rig id. A sentinel that cannot collide with a uuid.
+-const ALL_RIGS = "__all__";
+ 
+ /* ---------------- Apparatus Checks (leadership) ----------------
+    A home in Reports for the county PDF that previously existed only as a button on an
+@@ -12158,15 +12156,14 @@ function ApparatusChecksReport({ S, dept, back }) {
+   const [rigs, setRigs] = useState([]);
+   const [loaded, setLoaded] = useState(false);
+   const [err, setErr] = useState("");            // a failed read is not "no apparatus" — never show empty as fact
+-  const [scope, setScope] = useState("");          // a rig id, or ALL_RIGS
++  const [selected, setSelected] = useState(() => new Set());   // rig ids ticked for Combined / Separate PDFs
++  const [expanded, setExpanded] = useState("");                // the one rig whose finalized checks are listed
+   const [range, setRange] = useState(() => presetRange("month"));
+   const [presetKey, setPresetKey] = useState("month");
+   const [fleetBusy, setFleetBusy] = useState(false);
+   const [fleetErr, setFleetErr] = useState("");
+-  const isFleet = scope === ALL_RIGS;
+-  // The per-rig list keeps reading a plain rig id, so fleet mode simply parks it. Nothing in the
+-  // existing single-check path had to change to make room for the combined one.
+-  const rigId = isFleet ? "" : scope;
++  // The per-rig check list reads a plain rig id — now the EXPANDED row rather than a dropdown choice.
++  const rigId = expanded;
+   const [checks, setChecks] = useState([]);
+   const [checksLoading, setChecksLoading] = useState(false);
+   const [checksErr, setChecksErr] = useState("");
+@@ -12180,12 +12177,29 @@ function ApparatusChecksReport({ S, dept, back }) {
+         if (error) { setErr(error.message || "Please try again."); return; }
+         const list = data || [];
+         setRigs(list);
+-        // Land on the first unit rather than an empty screen. Only when nothing is chosen yet,
+-        // so a retry after an error does not yank the user off the rig they were looking at.
+-        setScope((cur) => cur || (list[0]?.id ?? ""));
++        // Every truck ticked on first load (the old default was "all apparatus" for the combined report);
++        // a retry keeps whatever the user had ticked.
++        setSelected((cur) => (cur.size ? cur : new Set(list.map((r) => r.id))));
+       });
+   };
+   useEffect(() => { loadRigs(); }, []);
++  /* PER-TRUCK SUMMARY for the list — last finalized check, its PASS/FAIL, total finalized checks. One light read
++     of the same table (apparatus_checks, finalized, three columns), dept-scoped by its existing RLS. A failure
++     shows "—" in those columns, never "never checked". */
++  const [summary, setSummary] = useState(null);   // { [apparatus_id]: { last, outcome, n } } | null = not loaded
++  const [summaryErr, setSummaryErr] = useState(false);
++  const loadSummary = () => {
++    setSummaryErr(false);
++    supabase.from("apparatus_checks").select("apparatus_id, performed_at, outcome").eq("state", "finalized").order("performed_at", { ascending: false })
++      .then(({ data, error }) => {
++        if (error || !data) { setSummaryErr(true); return; }
++        const m = {};
++        for (const c of data) { const e = m[c.apparatus_id]; if (!e) m[c.apparatus_id] = { last: c.performed_at, outcome: c.outcome, n: 1 }; else e.n += 1; }
++        setSummary(m);
++      });
++  };
++  useEffect(() => { loadSummary(); }, []);
++  useReconnect(() => { if (summaryErr) loadSummary(); });
+ 
+   const loadChecks = (id) => {
+     if (!id) { setChecks([]); return; }
+@@ -12230,20 +12244,22 @@ function ApparatusChecksReport({ S, dept, back }) {
+      Local-midnight bounds, and `< the day after` rather than `<= the end date`. A YYYY-MM-DD
+      compared against a timestamptz means midnight, so a naive .lte() would drop almost the whole
+      final day of the range — on a county report, silently. */
+-  async function downloadFleet() {
+-    setFleetErr(""); setFleetBusy(true);
++  async function downloadFleet(ids, opts = {}) {
++    if (!ids || !ids.length) { setFleetErr("Tick at least one truck first."); return false; }
++    setFleetErr(""); setFleetBusy(opts.label || true);
+     try {
+       const startAt = new Date(`${range.from}T00:00:00`);
+       const endAt = new Date(`${range.to}T00:00:00`); endAt.setDate(endAt.getDate() + 1);
+-      if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) { setFleetErr("Those dates don't look right — nothing was downloaded."); return; }
++      if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) { setFleetErr("Those dates don't look right — nothing was downloaded."); return false; }
+ 
+       const { data: checks, error: cErr } = await supabase.from("apparatus_checks")
+         .select(APPARATUS_CHECK_COLS)
++        .in("apparatus_id", ids)   // only the ticked trucks
+         .eq("state", "finalized")
+         .gte("performed_at", startAt.toISOString())
+         .lt("performed_at", endAt.toISOString())
+         .order("performed_at", { ascending: false });
+-      if (cErr) { setFleetErr(cErr.message || "Couldn't load the checks — nothing was downloaded."); return; }
++      if (cErr) { setFleetErr(cErr.message || "Couldn't load the checks — nothing was downloaded."); return false; }
+ 
+       // Items for every check in the range, batched. REFUSE on failure: a combined packet missing
+       // its checklists is a WRONG document, not a partial one, and the wrong one gets filed.
+@@ -12251,27 +12267,37 @@ function ApparatusChecksReport({ S, dept, back }) {
+       const itemsByCheck = {};
+       if (ids.length) {
+         const { data: rows, error: rErr } = await fetchResultsForChecks(ids);
+-        if (rErr) { setFleetErr(rErr.message || "Couldn't load the checklist items — nothing was downloaded."); return; }
++        if (rErr) { setFleetErr(rErr.message || "Couldn't load the checklist items — nothing was downloaded."); return false; }
+         for (const r of rows) { (itemsByCheck[r.check_id] = itemsByCheck[r.check_id] || []).push(r); }
+       }
+ 
+       // Grouped by truck in the rig order already on screen. Every rig is included even with no
+       // checks in the period: a truck missing from a county packet reads as an oversight, while a
+       // truck listed as "no checks in this period" is a finding.
+-      const byRig = rigs.map((r) => ({
++      const byRig = rigs.filter((r) => ids.includes(r.id)).map((r) => ({
+         name: r.name, type: r.type,
+         checks: (checks || []).filter((c) => c.apparatus_id === r.id)
+           .map((c) => ({ ...c, items: itemsByCheck[c.id] || [] })),
+       }));
+ 
+-      downloadFleetCheck({
++      await downloadFleetCheck({
+         deptName: dept?.name || "Department",
+         station: dept?.station || "",
+         range: { from: range.from, to: range.to },
+         rigs: byRig,
+       });
++      return true;
+     } finally { setFleetBusy(false); }
+   }
++  /* SEPARATE PDFs — one per ticked truck for the same window: the combined generator scoped to one rig at a time,
++     in order, each awaited (so a phone's share sheet opens once per truck rather than all at once). */
++  async function downloadSeparate(ids) {
++    if (!ids || !ids.length) { setFleetErr("Tick at least one truck first."); return; }
++    for (const id of ids) {
++      const r = rigs.find((x) => x.id === id);
++      if (!(await downloadFleet([id], { label: r?.name || "truck" }))) break;   // stop at the first failure; its error is on screen
++    }
++  }
+ 
+   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }); };
+ 
+@@ -12292,86 +12318,104 @@ function ApparatusChecksReport({ S, dept, back }) {
+         </div>
+       )}
+ 
+-      {/* TOOLBAR. Scope first: a single unit keeps the per-check list exactly as it was, and
+-          "All apparatus" swaps in a date range plus one combined download. The date controls
+-          appear only in fleet mode — a range would do nothing in single-rig mode, and a control
+-          that does nothing is worse than no control. */}
+-      {loaded && !err && rigs.length > 0 && (
+-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+-          <label style={{ ...S.field, minWidth: 220 }}>
+-            <span style={S.fieldLabel}>Apparatus</span>
+-            <select style={FS.input} value={scope} onChange={(e) => setScope(e.target.value)}>
+-              <option value={ALL_RIGS}>All apparatus — combined report</option>
+-              {rigs.map((r) => <option key={r.id} value={r.id}>{r.name}{r.type ? ` — ${r.type}` : ""}</option>)}
+-            </select>
+-          </label>
+-          {isFleet && <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />}
+-        </div>
+-      )}
+-
+-      {/* FLEET MODE — one combined PDF for every unit over the range. The per-rig list below is
+-          untouched and still runs the single-check path. */}
+-      {loaded && !err && rigs.length > 0 && isFleet && (
+-        <div style={{ ...FS.cardNoir, padding: "16px 18px" }}>
+-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+-            <div style={{ flex: 1, minWidth: 200 }}>
+-              <CardHead icon={ClipboardCheck} title="Combined apparatus report" style={{ marginBottom: 4 }} />
+-              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
+-                Every unit's completed checks between the selected dates, in one PDF: a fleet summary,
+-                then each truck's checks. Failed checks are expanded item by item.
+-              </div>
++      {/* TRUCK LIST (b4c_reports_apparatus_noir.html): tick the trucks, pick the window, then one Combined PDF or a
++          Separate PDF per truck. Expanding a row still lists that truck's finalized checks with the per-check
++          County report — the single-check path, unchanged. */}
++      {loaded && !err && rigs.length > 0 && (() => {
++        const ids = rigs.filter((r) => selected.has(r.id)).map((r) => r.id);
++        const allOn = ids.length === rigs.length;
++        const toggle = (id) => setSelected((cur) => { const n = new Set(cur); n.has(id) ? n.delete(id) : n.add(id); return n; });
++        const box = (on) => ({ width: 18, height: 18, borderRadius: 5, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${on ? FIRE.redBright : FIRE.line2Noir}`, background: on ? FIRE.redBright : "transparent" });
++        const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
++        return (<>
++          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
++            <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
++            <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
++              <button disabled={!!fleetBusy || !ids.length} onClick={() => downloadFleet(ids)} style={{ ...FS.btnPrimary, opacity: (fleetBusy || !ids.length) ? 0.6 : 1 }}>
++                {fleetBusy === true ? <><Loader2 size={14} className="spin" /> Building…</> : <><Download size={15} /> Combined report ({ids.length})</>}
++              </button>
++              <button disabled={!!fleetBusy || !ids.length} onClick={() => downloadSeparate(ids)} style={{ ...FS.btn, opacity: (fleetBusy || !ids.length) ? 0.6 : 1 }}>
++                {typeof fleetBusy === "string" ? <><Loader2 size={14} className="spin" /> {fleetBusy}…</> : <><Download size={14} color={FIRE.btnIcon} /> Separate PDFs ({ids.length})</>}
++              </button>
+             </div>
+-            <button disabled={fleetBusy} onClick={downloadFleet}
+-              style={{ ...FS.btnPrimary, opacity: fleetBusy ? 0.6 : 1 }}>
+-              {fleetBusy ? <><Loader2 size={14} className="spin" /> Building…</> : <><Download size={15} /> Download combined report</>}
+-            </button>
+           </div>
++          <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "-4px 2px 10px", lineHeight: 1.45 }}>Reports cover the ticked trucks' completed checks between the selected dates. Combined: a fleet summary, then each truck. Failed checks are expanded item by item.</div>
+           {fleetErr && (
+-            <div style={{ ...NOIR_ERR, display: "flex", alignItems: "center", gap: 9, marginTop: 12 }}>
++            <div style={{ ...NOIR_ERR, display: "flex", alignItems: "center", gap: 9, margin: "0 0 12px" }}>
+               <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
+               <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{fleetErr}</span>
+             </div>
+           )}
+-        </div>
+-      )}
+-
+-      {!loaded || err || isFleet ? null : rigs.length === 0 ? (
++          <div style={{ ...FS.cardNoir, padding: "4px 14px" }}>
++            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>
++              <button onClick={() => setSelected(allOn ? new Set() : new Set(rigs.map((r) => r.id)))} aria-pressed={allOn} title={allOn ? "Clear all" : "Select all"} style={{ ...box(allOn), cursor: "pointer", padding: 0 }}>{allOn && <Check size={12} color="#fff" strokeWidth={3} />}</button>
++              <span style={{ flex: 1 }}>{allOn ? "All trucks" : `${ids.length} of ${rigs.length} selected`}</span>
++              <span style={{ width: 120, textAlign: "right" }}>Last check</span>
++              <span style={{ width: 60, textAlign: "right" }}>Checks</span>
++              <span style={{ width: 22 }} />
++            </div>
++            {summaryErr && <ReadRetry what="the last-check summary" onRetry={loadSummary} />}
++            {rigs.map((r, i) => {
++              const sm = summary ? summary[r.id] : undefined, on = selected.has(r.id), open = expanded === r.id;
++              return (
++                <div key={r.id} style={{ borderBottom: i === rigs.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
++                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
++                    <button onClick={() => toggle(r.id)} aria-pressed={on} aria-label={`${on ? "Untick" : "Tick"} ${r.name}`} style={{ ...box(on), cursor: "pointer", padding: 0 }}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</button>
++                    <button onClick={() => setExpanded(open ? "" : r.id)} style={{ flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
++                      <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
++                      {r.type && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.type}</div>}
++                    </button>
++                    <span style={{ width: 120, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
++                      {summary === null ? <span style={{ fontSize: 12, color: FIRE.textMuted }}>—</span>
++                        : sm ? <><span style={{ fontSize: 11.5, color: FIRE.textSecondary }}>{fmtDay(sm.last)}</span><ResultBadge pass={sm.outcome !== "fail"}>{sm.outcome === "fail" ? "FAIL" : "PASS"}</ResultBadge></>
++                        : <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Never checked</span>}
++                    </span>
++                    <span style={{ width: 60, textAlign: "right", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, ...FS.num }}>{summary === null ? "—" : (sm ? sm.n : 0)}</span>
++                    <button onClick={() => setExpanded(open ? "" : r.id)} aria-expanded={open} title={open ? "Hide checks" : "Show checks"} style={{ width: 22, background: "none", border: "none", padding: 0, cursor: "pointer", color: FIRE.textMuted, display: "inline-flex", justifyContent: "center" }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
++                  </div>
++                  {open && (
++                    <div style={{ padding: "0 0 12px 28px" }}>
++                      {checksErr && (
++                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
++                          <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
++                          <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>{checksErr}</div>
++                          <button onClick={() => loadChecks(rigId)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><RefreshCw size={13} color={FIRE.btnIcon} /> Try again</button>
++                        </div>
++                      )}
++                      {checksLoading ? (
++                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading checks…</div>
++                      ) : (checks.length === 0 && !checksErr) ? (
++                        <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No completed checks recorded for {r.name} yet.</div>
++                      ) : checks.map((c) => {
++                        const failed = c.outcome === "fail";
++                        return (
++                          <div key={c.id} style={{ ...NOIR_INSET, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
++                            <ResultBadge pass={!failed}>{failed ? "FAIL" : "PASS"}</ResultBadge>
++                            <div style={{ flex: 1, minWidth: 160 }}>
++                              <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
++                              <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
++                            </div>
++                            <button disabled={busyId === c.id} onClick={() => downloadOne(c)}
++                              style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: busyId === c.id ? 0.6 : 1 }}>
++                              {busyId === c.id ? <><Loader2 size={13} className="spin" /> Preparing…</> : <><Download size={13} color={FIRE.btnIcon} /> County report</>}
++                            </button>
++                          </div>
++                        );
++                      })}
++                    </div>
++                  )}
++                </div>
++              );
++            })}
++          </div>
++        </>);
++      })()}
++      {loaded && !err && rigs.length === 0 && (
+         <div style={{ ...FS.cardNoir, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+           <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
+           <div>No apparatus on record yet.</div>
+         </div>
+-      ) : (<>
+-        {checksErr && (
+-          <div style={{ ...FS.cardNoir, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+-            <AlertTriangle size={17} color={FIRE.redText} style={{ flexShrink: 0 }} />
+-            <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>{checksErr}</div>
+-            <button onClick={() => loadChecks(rigId)} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
+-          </div>
+-        )}
+-        {checksLoading ? (
+-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading checks…</div>
+-        ) : (checks.length === 0 && !checksErr) ? (
+-          <div style={{ ...FS.cardNoir, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+-            <ClipboardCheck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
+-            <div>No completed checks recorded for {rig?.name || "this unit"} yet.</div>
+-          </div>
+-        ) : checks.map((c) => {
+-          const failed = c.outcome === "fail";
+-          return (
+-            <div key={c.id} style={{ ...NOIR_INSET, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+-              <ResultBadge pass={!failed}>{failed ? "FAIL" : "PASS"}</ResultBadge>
+-              <div style={{ flex: 1, minWidth: 180 }}>
+-                <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
+-                <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
+-              </div>
+-              <button disabled={busyId === c.id} onClick={() => downloadOne(c)}
+-                style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: busyId === c.id ? 0.6 : 1 }}>
+-                {busyId === c.id ? <><Loader2 size={13} className="spin" /> Preparing…</> : <><Download size={13} color={FIRE.btnIcon} /> County report</>}
+-              </button>
+-            </div>
+-          );
+-        })}
+-      </>)}
++      )}
+       </NoirSkin>
+     </PageShell>
+   );
