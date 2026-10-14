@@ -13627,6 +13627,7 @@ function ActionItemsReport({ S, members, back }) {
   // Current snapshot: ALL currently-open, regardless of range
   const open      = all.filter((it) => it.status === "open").sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"));
   const nothing = !completed.length && !cancelled.length && !open.length;
+  const overdueN = open.filter((it) => it.due_date && it.due_date < todayISO).length;   // same rule row() flags OVERDUE with
 
   const fmtD  = (d)  => d  ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
   const fmtTs = (ts) => ts ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
@@ -13645,7 +13646,11 @@ function ActionItemsReport({ S, members, back }) {
       <div key={it.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
         {icon}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ fontWeight: 600, color: kind === "open" ? FIRE.textPrimary : FIRE.textMuted2, textDecoration: kind === "open" ? "none" : "line-through" }}>{it.text}</span>
+          {/* Resolved rows stay READABLE: a soft strike-through on near-primary text (green-tinted for done,
+              neutral for cancelled) instead of the near-invisible muted grey they used to drop to. */}
+          <span style={{ fontWeight: 600, color: kind === "open" ? FIRE.textPrimary : kind === "done" ? "#CDD3DC" : "#AEB5C0",
+            textDecoration: kind === "open" ? "none" : "line-through", textDecorationThickness: "1.5px",
+            textDecorationColor: kind === "done" ? "rgba(85,190,135,.6)" : "rgba(255,255,255,.28)" }}>{it.text}</span>
           <div style={{ fontSize: 12, color: overdue ? FIRE.redText : FIRE.textMuted, marginTop: 1 }}>{meta}</div>
         </div>
       </div>
@@ -13701,6 +13706,14 @@ function ActionItemsReport({ S, members, back }) {
       ) : nothing ? (
         <div style={{ ...FS.cardNoir, padding: 24, color: FIRE.textMuted }}>No action items resolved in this period, and none currently open.</div>
       ) : (<>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(130px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
+          {[["Completed", completed.length, FIRE.greenText], ["Cancelled", cancelled.length, FIRE.textSecondary], ["Still open", open.length, FIRE.amberText], ["Overdue", overdueN, overdueN ? FIRE.redText : FIRE.textSecondary]].map(([l, n, c]) => (
+            <div key={l} style={{ ...FS.cardNoir, borderTop: `3px solid ${c}`, borderRadius: 11, padding: "11px 13px" }}>
+              <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 24, lineHeight: 1, color: c, ...FS.num }}>{n}</div>
+              <div style={{ fontSize: 11, color: FIRE.textSecondary, marginTop: 4 }}>{l}</div>
+            </div>
+          ))}
+        </div>
         {section("✓ Completed (in range)", completed.length, null, completed.map((it) => row(it, "done")), "None completed in this period.")}
         {section("✕ Cancelled (in range)", cancelled.length, null, cancelled.map((it) => row(it, "cancelled")), "None cancelled in this period.")}
         {section("○ Still open", open.length, `current snapshot — as of ${fmtD(todayISO)}`, open.map((it) => row(it, "open")), "Nothing currently open.")}
