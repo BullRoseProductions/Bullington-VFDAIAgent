@@ -13798,7 +13798,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
           <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 6, height: 150, padding: "18px 2px 0" }}>
             {doneThisYear.length > 0 && (
               <div style={{ position: "absolute", left: 0, right: 0, bottom: 19 + avgPct,   /* px: 15px month label + 4px gap + the bar scale (1px = 1%) */ borderTop: `1px dashed ${FIRE.line2Noir}`, pointerEvents: "none" }}>
-                <span style={{ position: "absolute", right: 0, top: -16, fontSize: 10, color: FIRE.textSecondary }}>{avgPct}% avg</span>
+                <span style={{ position: "absolute", left: 0, top: -15, fontSize: 10, color: FIRE.textSecondary, background: FIRE.cardNoir, padding: "0 4px 0 0" }}>{avgPct}% avg</span>
               </div>
             )}
             {trend.map((m, i) => (
