@@ -18151,11 +18151,14 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
   const [loadErr, setLoadErr] = useState(false);
+  // Loaded flags so the context strip shows "—" until a read lands, never a false 0. Same two queries.
+  const [dutiesLoaded, setDutiesLoaded] = useState(false), [pendLoaded, setPendLoaded] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false);   // the per-item detail behind the strip's chips
   const loadAgendaContext = () => {
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });                 // dept-scoped by RLS
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); setDutiesLoaded(true); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); setPendLoaded(true); });   // dept-scoped by RLS
   };
   useEffect(() => { loadAgendaContext(); }, []);
   useReconnect(() => { if (loadErr) { setLoadErr(false); loadAgendaContext(); } });
@@ -18273,43 +18276,74 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
   const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
   const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
+  /* WHAT'S GOING INTO THIS AGENDA (b4c_meetings_agenda_noir.html): the same facts generate() hands the AI, as
+     chips — so the leader sees, before drafting, exactly what the agenda can draw on. No new reads: duties,
+     pendingCerts, certContext, sessions, sh (station hours, same 30-day window) and ap (apparatus readiness).
+     A figure not loaded yet, or whose read failed, shows "—" rather than a zero. */
+  const TONE_C = { red: FIRE.redText, amber: FIRE.amberText, blue: NOIR_AI.blueText, green: FIRE.greenText, muted: FIRE.textMuted };
+  const TONE_BG = { red: "rgba(200,50,58,.13)", amber: "rgba(204,158,82,.13)", blue: "rgba(79,144,214,.13)", green: "rgba(47,168,105,.13)", muted: "rgba(255,255,255,.04)" };
+  const ctxChip = (Icon, tone, value, label, small) => (
+    <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9, padding: "9px 11px", display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+      <span style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: TONE_BG[tone], color: TONE_C[tone] }}><Icon size={15} /></span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: small ? 12.5 : 15, lineHeight: 1, color: tone === "muted" ? FIRE.textPrimary : TONE_C[tone], ...FS.num }}>{value}</div>
+        <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+      </div>
+    </div>
+  );
+  const nextSess = upcoming[0];
+  const apAttn = apOk ? ap.totals.flagged + ap.totals.oos : null;
   return (
     <div>
+      <div style={{ ...FS.cardNoir, padding: "13px 15px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".03em", color: FIRE.textPrimary, marginBottom: 4 }}>
+          <ClipboardList size={14} color={FIRE.redBright} /> What's going into this agenda
+        </div>
+        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 11, lineHeight: 1.45 }}>Pulled live from your department — the AI uses <b style={{ color: FIRE.greenText }}>only these real facts</b>, and won't invent a duty, cert, name, or date.</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))", gap: 9 }}>
+          {ctxChip(ClipboardCheck, !dutiesLoaded ? "muted" : overdueDuties.length ? "red" : "muted", dutiesLoaded ? overdueDuties.length : "—", `overdue dut${overdueDuties.length === 1 ? "y" : "ies"}${dutiesLoaded ? ` · ${openDuties.length} open` : ""}`)}
+          {ctxChip(Award, expiring.length ? "amber" : "muted", certContext ? expiring.length : "—", `cert${expiring.length === 1 ? "" : "s"} expiring${expired.length ? ` · ${expired.length} expired` : ""}`)}
+          {ctxChip(FilePlus, !pendLoaded ? "muted" : pendingCerts.length ? "amber" : "muted", pendLoaded ? pendingCerts.length : "—", `cert${pendingCerts.length === 1 ? "" : "s"} pending approval`)}
+          {ctxChip(CalendarCheck, "blue", nextSess ? sessDate(nextSess).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None", nextSess ? `next training · ${nextSess.title}` : "next training", true)}
+          {ctxChip(Clock, shOk ? "green" : "muted", shOk ? `${h1r(sh.totals.credited)} h` : "—", shOk ? `credited · ${agendaSpan}` : (sh.err ? "station hours unavailable" : "station hours · loading"), true)}
+          {ctxChip(Truck, apOk ? (apAttn ? "red" : "green") : "muted", apOk ? apAttn : "—", apOk ? `apparatus need attention${ap.totals.oos ? ` · ${ap.totals.oos} out of service` : ""}` : (ap.err ? "apparatus unavailable" : "apparatus · loading"))}
+        </div>
+        {loadErr && <ReadRetry what="part of the agenda context" onRetry={() => { setLoadErr(false); loadAgendaContext(); }} />}
+        <button onClick={() => setCtxOpen((v) => !v)} aria-expanded={ctxOpen} style={{ ...NOIR_LABEL, display: "inline-flex", alignItems: "center", gap: 5, marginTop: 11, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+          {ctxOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />} {ctxOpen ? "Hide the details" : "Show the details"}
+        </button>
+        {ctxOpen && (
+          <div style={{ ...NOIR_INSET, padding: "4px 14px 10px", marginTop: 8 }}>
+            <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
+            {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
+            <SubHead>Upcoming training — {upcoming.length}</SubHead>
+            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "board" ? " · board" : s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+            <SubHead>Certifications — {expired.length} expired · {expiring.length} expiring</SubHead>
+            {expired.length === 0 && expiring.length === 0 ? <None /> : [...expired, ...expiring].slice(0, 8).map((r, i) => <Line key={i}>{r.member} · {r.cert} · {r.phrase}</Line>)}
+            <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
+            {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
+          </div>
+        )}
+      </div>
+
       <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <CardHead icon={ClipboardList} title="AI agenda builder" />
+          <div style={{ ...NOIR_AI.chip, background: "none", border: "none", padding: 0, marginBottom: 9 }}><Sparkles size={13} /> AI agenda drafter</div>
           <h3 style={NOIR_FEAT_TITLE}>Draft an agenda from your real department data</h3>
-          <p style={NOIR_HELP}>Pulled live from your station — the draft references only what's real below, nothing invented.</p>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
             <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
             <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={mtgDate} placeholder="e.g. Jul 8, 2026" onChange={(e) => setMtgDate(e.target.value)} /></label>
           </div>
 
-          <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Additional topics <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>— optional, your own items to add</span></span>
+          <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Your topics <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>— your own items; the AI slots them in, won't add detail you didn't give</span></span>
             <textarea style={{ ...FS.input, minHeight: 52, resize: "vertical" }} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="e.g. tanker purchase decision, fundraiser date vote, Johnson recognition" /></label>
-
-          <div style={{ ...NOIR_INSET, padding: "10px 14px", marginBottom: 12 }}>
-            <CardHead icon={Sparkles} title="Context we'll use" style={{ marginBottom: 4 }} />
-
-            <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
-            {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
-
-            <SubHead>Upcoming training — {upcoming.length}</SubHead>
-            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "board" ? " · board" : s.audience === "leadership" ? " · leadership" : ""}</Line>)}
-
-            <SubHead>Certifications — {expired.length} expired · {expiring.length} expiring</SubHead>
-            {expired.length === 0 && expiring.length === 0 ? <None /> : [...expired, ...expiring].slice(0, 8).map((r, i) => <Line key={i}>{r.member} · {r.cert} · {r.phrase}</Line>)}
-
-            <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
-            {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
-          </div>
 
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate agenda</>}
           </button>
           {err && <div style={NOIR_ERR}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
+          {out && <div style={{ marginTop: 12, borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 10 }}><RichOutput S={S} text={out} dark /></div>}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Agenda title" /></label>
