@@ -22898,7 +22898,7 @@ function Fonts() {
   return (
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
-      * { box-sizing: border-box; } body { margin: 0; }
+      * { box-sizing: border-box; } body { margin: 0; font-family: 'Public Sans', system-ui, sans-serif; }   /* portals (dialogs, viewers, modals) mount on <body>, outside the app root's font — without this they fell back to Times */
       .spin { animation: spin .9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
       .duty-pulse { animation: dutyPulse 2s ease-out infinite; }
       @keyframes dutyPulse { 0% { box-shadow: 0 0 0 0 rgba(63,184,96,.55); } 70% { box-shadow: 0 0 0 7px rgba(63,184,96,0); } 100% { box-shadow: 0 0 0 0 rgba(63,184,96,0); } }
