@@ -12398,7 +12398,7 @@ function ApparatusChecksReport({ S, dept, back }) {
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>
               <button onClick={() => setSelected(allOn ? new Set() : new Set(rigs.map((r) => r.id)))} aria-pressed={allOn} title={allOn ? "Clear all" : "Select all"} style={{ ...box(allOn), cursor: "pointer", padding: 0 }}>{allOn && <Check size={12} color="#fff" strokeWidth={3} />}</button>
               <span style={{ flex: 1 }}>{allOn ? "All trucks" : `${ids.length} of ${rigs.length} selected`}</span>
-              <span style={{ width: 120, textAlign: "right" }}>Last check</span>
+              <span style={{ width: 150, textAlign: "right" }}>Last check</span>
               <span style={{ width: 60, textAlign: "right" }}>Checks</span>
               <span style={{ width: 22 }} />
             </div>
@@ -12413,7 +12413,7 @@ function ApparatusChecksReport({ S, dept, back }) {
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
                       {r.type && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.type}</div>}
                     </button>
-                    <span style={{ width: 120, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
+                    <span style={{ width: 150, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, whiteSpace: "nowrap" }}>
                       {summary === null ? <span style={{ fontSize: 12, color: FIRE.textMuted }}>—</span>
                         : sm ? <><span style={{ fontSize: 11.5, color: FIRE.textSecondary }}>{fmtDay(sm.last)}</span><ResultBadge pass={sm.outcome !== "fail"}>{sm.outcome === "fail" ? "FAIL" : "PASS"}</ResultBadge></>
                         : <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Never checked</span>}
