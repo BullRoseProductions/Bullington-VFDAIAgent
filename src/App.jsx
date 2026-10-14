@@ -16924,15 +16924,93 @@ function StationHours({ S, dept, notify }) {
           ))}
           {geoNote && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 12, lineHeight: 1.45 }}>{geoNote}</div>}
           {ready && !stationSet && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.45 }}>Your department hasn't set a station location yet, so shifts can't be marked verified. An admin can add it under Settings &amp; Support.</div>}
+          {/* ---- MY STATION HOURS, member build (b4c_mystationhours_noir.html) ----
+               Everything below reads ONLY this member's rows: myShifts (my_station_shifts — scoped in SQL to
+               my_member_id()), the totals from the shared myHoursTotals rule, and vShifts (the same on-location
+               subset the totals use). No new read. The range buttons moved up here from the card below. */}
+          {(() => {
+            const onLoc = new Set(vShifts);   // identity set: the very rows the credited total counts
+            const known = hoursLoaded && !hoursFailed;
+            const tile = (label, value, sub, good) => (
+              <div style={{ ...FS.cardNoir, borderRadius: 11, padding: "12px 13px", minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginBottom: 7, letterSpacing: ".04em" }}>{label}</div>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 23, lineHeight: 1, color: good ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{value}</div>
+                <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 4 }}>{sub}</div>
+              </div>
+            );
+            const hrs = (n) => known ? <>{h1n(n)}<small style={{ fontSize: 12, color: FIRE.textSecondary, fontWeight: 400, fontFamily: "inherit" }}> h</small></> : "—";
+            // month at a glance: the range's own month (last month for "Last month", else this month)
+            const base = new Date(); if (rangeKey === "last") base.setMonth(base.getMonth() - 1, 1);
+            const y = base.getFullYear(), mo = base.getMonth(), dim = new Date(y, mo + 1, 0).getDate(), lead = new Date(y, mo, 1).getDay();
+            const byDay = {};
+            myShifts.forEach((s) => {
+              const d = new Date(s.checked_in_at); if (isNaN(d.getTime()) || d.getFullYear() !== y || d.getMonth() !== mo) return;
+              const k = d.getDate(); const e = byDay[k] || (byDay[k] = { h: 0, loc: false });
+              e.h += Number(s.hours) || 0; if (onLoc.has(s)) e.loc = true;
+            });
+            const isToday = (d) => { const t = new Date(); return t.getFullYear() === y && t.getMonth() === mo && t.getDate() === d; };
+            const tag = (s) => s.source === "gps_geofence" ? ["GEOFENCE", FIRE.greenText] : onLoc.has(s) ? ["ON LOCATION", FIRE.greenText] : ["MANUAL", FIRE.amberText];
+            const recent = myShifts.slice(0, 5);
+            return (<>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "16px 0 10px" }}>
+                <SectionBar icon={BarChart3} label="My hours" style={{ margin: 0, flex: 1 }} />
+                <NoirSeg options={Object.entries(RANGES).map(([k, fn]) => [k, fn().label])} value={rangeKey} onChange={setRangeKey} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
+                {tile("CREDITED", hrs(myTotal), "counts toward ISO/LOSAP", known)}
+                {tile("STANDBY / DUTY", hrs(myStandby), "station presence")}
+                {tile("TRAINING", hrs(myTraining), "drills attended")}
+                {tile("SHIFTS", known ? myShifts.length : "—", known ? `${vShifts.length} on location · ${myShifts.length - vShifts.length} manual` : "this range")}
+              </div>
+              <MyStationHoursPanel />
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+                <div style={{ ...FS.cardNoir, padding: "13px 15px", flex: "1 1 260px", minWidth: 0 }}>
+                  <CardHead icon={Calendar} title={`${CAL_MONTHS[mo]} — at a glance`} style={{ marginBottom: 9 }} />
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4, marginBottom: 4 }}>
+                    {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i} style={{ fontSize: 9.5, fontWeight: 700, color: FIRE.textMuted, textAlign: "center" }}>{d}</span>)}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4 }}>
+                    {Array.from({ length: lead }).map((_, i) => <span key={`o${i}`} />)}
+                    {Array.from({ length: dim }, (_, i) => i + 1).map((d) => {
+                      const e = byDay[d]; const lvl = !e ? 0 : e.h >= 5 ? 0.7 : e.h >= 2 ? 0.42 : 0.22;
+                      return (
+                        <span key={d} title={e ? `${h1n(e.h)} h${e.loc ? " · on location" : " · manual"}` : undefined}
+                          style={{ aspectRatio: "1", borderRadius: 5, border: `1px solid ${isToday(d) ? "rgba(224,58,68,.6)" : FIRE.lineNoir}`, background: lvl ? `rgba(224,58,68,${lvl})` : FIRE.card2Noir, boxShadow: e && e.loc ? `inset 0 0 0 1.5px ${FIRE.greenText}` : "none", display: "flex", alignItems: "flex-start", justifyContent: "flex-end", padding: 3, fontSize: 8.5, color: lvl >= 0.42 ? "#fff" : FIRE.textMuted }}>{d}</span>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 10, color: FIRE.textSecondary, marginTop: 9 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><i style={{ width: 9, height: 9, borderRadius: 2, background: "rgba(224,58,68,.42)", display: "inline-block" }} />hours logged</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><i style={{ width: 9, height: 9, borderRadius: 2, boxShadow: `inset 0 0 0 1.5px ${FIRE.greenText}`, display: "inline-block" }} />on location</span>
+                  </div>
+                  {rangeKey !== "month" && rangeKey !== "last" && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 6 }}>Showing this month from the {RANGES[rangeKey]().label.toLowerCase()} range.</div>}
+                </div>
+                <div style={{ ...FS.cardNoir, padding: "13px 15px", flex: "1 1 260px", minWidth: 0 }}>
+                  <CardHead icon={Clock} title="Recent shifts" style={{ marginBottom: 5 }} />
+                  {!known ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>{hoursFailed ? "Couldn't load your shifts — see below." : "Loading…"}</div>
+                    : recent.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No shifts in this range.</div>
+                    : recent.map((s, i) => {
+                      const d = new Date(s.checked_in_at); const [tl, tc] = tag(s);
+                      return (
+                        <div key={`${s.checked_in_at}-${i}`} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 0", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none" }}>
+                          <div style={{ width: 34, textAlign: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10, lineHeight: 1.15, color: FIRE.textSecondary, flexShrink: 0 }}>{d.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}<br /><span style={{ fontSize: 15, color: FIRE.textPrimary }}>{d.getDate()}</span></div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(s.hours)} h · {s.kind === "training" ? "training" : "standby"}</div>
+                            <div style={{ fontSize: 11, color: FIRE.textMuted }}>{fmtHm2(s.checked_in_at)}–{s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"}</div>
+                          </div>
+                          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", color: tc, background: `${tc}1A`, border: `1px solid ${tc}55`, borderRadius: 5, padding: "2px 7px", flexShrink: 0 }}>{tl}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "10px 2px 0", lineHeight: 1.45 }}>These are <b style={{ color: FIRE.textSecondary }}>your</b> hours — no one else's.</div>
+            </>);
+          })()}
           {/* ---- my hours ---- chips stay put while a range reloads; only the figures below are gated on the read */}
           <Card padding="14px 16px" style={{ marginTop: 10 }}>
-            <CardHead icon={BarChart3} title="My hours" style={{ marginBottom: 0 }} />
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "10px 0 12px" }}>
-              {Object.entries(RANGES).map(([k, fn]) => {
-                const on = rangeKey === k;
-                return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(on ? { background: "rgba(224,58,68,.16)", borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
-              })}
-            </div>
+            <CardHead icon={ClipboardList} title="Shift log" style={{ marginBottom: 0 }} />
+            <div style={{ height: 10 }} />
             {hoursFailed ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
