@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, ClipboardList, Settings, Lock } from "lucide-react";
+import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, ClipboardList, Settings, Lock, ChevronRight, ArrowLeft, Clock } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { useAutoRefresh } from "./useReconnect";
 import { FIRE } from "./theme.js";
@@ -234,6 +234,7 @@ export default function NotificationCenter({ S, meId, back }) {
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("all");   // All / Unread / Training / Gear — display only
 
   const load = useCallback(async () => {
     const data = await fetchNotifications(100);
@@ -270,69 +271,130 @@ export default function NotificationCenter({ S, meId, back }) {
   const dept = rows.filter((r) => r.member_id !== meId);          // leaders only — RLS returns nothing here for a plain member
   const unreadMine = mine.filter((r) => !r.read_at).length;
 
-  const Row = ({ n, dim }) => {
+  /* THE CENTER, built to b4c_notifications_center_noir.html: typed colour tiles, unread rows with a red left
+     accent + status dot, OVERDUE / IN 1 HR style pills read off the stored type, Today / Earlier groups and
+     All / Unread / Training / Gear filters. Same rows, same mark-read rules (only YOUR unread items, on tap). */
+  const DISP = "'Oswald', system-ui, sans-serif";
+  const fam = (t) => String(t || "").split("_")[0];
+  const TILE = {
+    maint: ["rgba(200,50,58,.13)", "#E07982", "rgba(200,50,58,.35)"],
+    event: ["rgba(79,144,214,.13)", "#7FB2E6", "rgba(79,144,214,.35)"],
+    shift: ["rgba(79,144,214,.13)", "#7FB2E6", "rgba(79,144,214,.35)"],
+    cert:  ["rgba(216,162,74,.13)", "#D8A24A", "rgba(216,162,74,.35)"],
+    gear:  ["rgba(216,162,74,.13)", "#D8A24A", "rgba(216,162,74,.35)"],
+    duty:  ["rgba(47,168,105,.13)", "#55BE87", "rgba(47,168,105,.35)"],
+    task:  ["rgba(47,168,105,.13)", "#55BE87", "rgba(47,168,105,.35)"],
+  };
+  const DOT = { critical: "#E03A44", warning: "#CC9E52", info: "#4F90D6" };
+  const pillFor = (t) => {
+    t = String(t || "");
+    if (t.endsWith("_overdue")) return ["OVERDUE", "over"];
+    if (t === "cert_expired") return ["EXPIRED", "over"];
+    if (t === "event_1h") return ["IN 1 HR", "soon"];
+    if (t.endsWith("_due_today")) return ["DUE TODAY", "soon"];
+    if (t === "event_24h" || t.endsWith("_due_tomorrow")) return ["TOMORROW", "soon"];
+    return null;
+  };
+  const PILL = { over: { background: "#241216", color: "#E07982", border: "1px solid rgba(200,50,58,.4)" }, soon: { background: "#1c1509", color: "#CC9E52", border: "1px solid rgba(204,158,82,.35)" } };
+  const FILTERS = [["all", "All"], ["unread", "Unread"], ["training", "Training"], ["gear", "Gear"]];
+  const pass = (n) => filter === "all" ? true
+    : filter === "unread" ? !n.read_at
+    : filter === "training" ? fam(n.type) === "event"
+    : ["gear", "maint"].includes(fam(n.type));
+  const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+  const weekAgo = startToday.getTime() - 6 * 864e5;
+  const groupOf = (n) => { const t = Date.parse(n.created_at); return t >= startToday.getTime() ? "Today" : t >= weekAgo ? "Earlier this week" : "Older"; };
+  const when = (n) => { const t = Date.parse(n.created_at); return t >= weekAgo ? timeAgo(n.created_at) : new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+
+  const Row = ({ n, dim, last }) => {
     const Icon = iconFor(n.type);
-    const color = COLOR[n.severity] || COLOR.info;
-    const unread = !n.read_at;
+    const [bg, fg, bd] = TILE[fam(n.type)] || ["rgba(255,255,255,.05)", "#A4ADBA", "rgba(255,255,255,.13)"];
+    const unread = !n.read_at && !dim;
+    const pill = pillFor(n.type);
     return (
-      <div
-        onClick={() => unread && !dim && markRead(n.id)}
-        style={{ display: "flex", gap: 11, padding: "12px 2px", borderTop: "1px solid rgba(255,255,255,.06)", cursor: unread && !dim ? "pointer" : "default", opacity: dim ? 0.75 : 1 }}
-      >
-        <div style={{ paddingTop: 2, color }}><Icon size={17} /></div>
+      <div onClick={() => unread && markRead(n.id)}
+        style={{ display: "flex", gap: 13, alignItems: "flex-start", padding: "13px 15px", borderBottom: last ? "none" : `1px solid ${FIRE.lineNoir}`, position: "relative", cursor: unread ? "pointer" : "default", background: unread ? "rgba(79,144,214,.04)" : "transparent", opacity: dim ? 0.8 : 1 }}>
+        {unread && <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#E03A44" }} />}
+        <span style={{ width: 38, height: 38, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: bg, color: fg, border: `1px solid ${bd}` }}><Icon size={18} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: unread ? 700 : 500, color: "#F7F8FA", lineHeight: 1.35 }}>{n.title}</div>
-          {n.body && <div style={{ fontSize: 13, color: "#B6BDC8", marginTop: 2, lineHeight: 1.45 }}>{n.body}</div>}
-          <div style={{ fontSize: 11.5, color: "#7E8794", marginTop: 4 }}>
-            {timeAgo(n.created_at)}{!unread && !dim ? " · read" : ""}
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 8 }}>
+            {unread && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: DOT[n.severity] || DOT.info }} />}{n.title}
+          </div>
+          {n.body && <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.45 }}>{n.body}</div>}
+          <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+            {pill && <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 5, padding: "2px 7px", letterSpacing: ".03em", ...PILL[pill[1]] }}>{pill[0]}</span>}
+            <span>· {when(n)}{!n.read_at || dim ? "" : " · read"}</span>
           </div>
         </div>
-        {unread && !dim && <div aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: color, marginTop: 6, flexShrink: 0 }} />}
+        {unread && <ChevronRight size={16} color={FIRE.textMuted} style={{ alignSelf: "center", flexShrink: 0 }} />}
       </div>
     );
   };
+  const listBox = { background: "linear-gradient(180deg, #0F131A, #0B0E13)", border: `1px solid ${FIRE.lineNoir}`, borderRadius: 13, overflow: "hidden", marginBottom: 18 };
+  const grpHead = { fontFamily: DISP, fontWeight: 700, fontSize: 11, letterSpacing: ".11em", textTransform: "uppercase", color: FIRE.textMuted, margin: "4px 0 9px" };
+  const shown = mine.filter(pass);
+  const groups = ["Today", "Earlier this week", "Older"].map((g) => [g, shown.filter((n) => groupOf(n) === g)]).filter(([, l]) => l.length);
+  const deptShown = dept.filter(pass);
 
   return (
-    <div>
-      {back && <button style={{ ...BACK_BTN, marginBottom: 14 }} onClick={back}>← Back</button>}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: "#F7F8FA", margin: 0 }}>Notifications</h1>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          {unreadMine > 0 && (
-            <button onClick={markAll} disabled={busy} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", color: "#B6BDC8", borderRadius: 8, padding: "5px 10px", fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>
-              <CheckCheck size={13} /> {busy ? "Marking…" : "Mark all read"}
-            </button>
-          )}
-          {/* Always present, unlike "Mark all read" — a member who wants to turn notifications
-              down is most likely to look for it while their inbox is empty of unread items. */}
-          <button onClick={() => setView("settings")} aria-label="Notification settings" title="Notification settings"
-                  style={{ display: "inline-flex", alignItems: "center", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", color: "#B6BDC8", borderRadius: 8, padding: "6px 8px", cursor: "pointer" }}>
-            <Settings size={14} />
+    <div style={{ maxWidth: 720 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        {back && <button style={BACK_BTN} onClick={back}><ArrowLeft size={13} /> Back</button>}
+        <h1 style={{ fontFamily: DISP, fontWeight: 700, fontSize: 22, margin: 0, flex: 1, color: FIRE.textPrimary, minWidth: 150 }}>
+          Notifications
+          {unreadMine > 0 && <span style={{ fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: "#E07982", background: "rgba(200,50,58,.16)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 999, padding: "2px 9px", marginLeft: 8, verticalAlign: "middle" }}>{unreadMine} new</span>}
+        </h1>
+        {unreadMine > 0 && (
+          <button onClick={markAll} disabled={busy} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#55BE87", background: "#0e1c14", border: "1px solid rgba(47,168,105,.3)", borderRadius: 9, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>
+            <CheckCheck size={13} /> {busy ? "Marking…" : "Mark all read"}
           </button>
-        </div>
+        )}
+        {/* Always present, unlike "Mark all read" — a member who wants to turn notifications
+            down is most likely to look for it while their inbox is empty of unread items. */}
+        <button onClick={() => setView("settings")} aria-label="Notification settings" title="Notification settings"
+                style={{ width: 36, height: 36, borderRadius: 9, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+          <Settings size={15} />
+        </button>
       </div>
 
-      {err && <div style={{ fontSize: 13, color: "#E58A90", margin: "8px 0" }}>{err}</div>}
+      <div style={{ display: "inline-flex", flexWrap: "wrap", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: 3, marginBottom: 18 }}>
+        {FILTERS.map(([k, l]) => {
+          const on = filter === k;
+          return (
+            <button key={k} onClick={() => setFilter(k)} aria-pressed={on} style={{ fontSize: 12, fontWeight: 600, padding: "6px 13px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit", background: on ? "#E03A44" : "transparent", color: on ? "#fff" : FIRE.textSecondary }}>
+              {l}{k === "unread" && unreadMine > 0 ? <span style={{ opacity: 0.8, marginLeft: 4 }}>{unreadMine}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {err && <div style={{ fontSize: 12.5, color: "#E07982", margin: "0 0 12px", padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)" }}>{err}</div>}
 
       {!loaded ? (
-        <div style={{ fontSize: 13.5, color: "#7E8794", marginTop: 14 }}>Loading…</div>
+        <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 14 }}>Loading…</div>
       ) : (
         <>
           {mine.length === 0 && dept.length === 0 && !err && (
-            <div style={{ fontSize: 13.5, color: "#7E8794", marginTop: 16, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.6 }}>
               Nothing needs your attention right now. Expiring certifications, gear past its service life,
               and overdue maintenance will show up here.
             </div>
           )}
-          {mine.length > 0 && <div style={{ marginTop: 10 }}>{mine.map((n) => <Row key={n.id} n={n} />)}</div>}
-          {dept.length > 0 && (
+          {(mine.length > 0 || dept.length > 0) && groups.length === 0 && deptShown.length === 0 && (
+            <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 4 }}>Nothing in this filter.</div>
+          )}
+          {groups.map(([g, list]) => (
+            <div key={g}>
+              <div style={grpHead}>{g}</div>
+              <div style={listBox}>{list.map((n, i) => <Row key={n.id} n={n} last={i === list.length - 1} />)}</div>
+            </div>
+          ))}
+          {deptShown.length > 0 && (
             <>
-              <div style={{ fontSize: 11.5, letterSpacing: ".06em", textTransform: "uppercase", color: "#7E8794", fontWeight: 700, margin: "22px 0 2px" }}>
-                Department-wide
-              </div>
+              <div style={{ ...grpHead, marginTop: 8 }}>Department-wide</div>
               {/* Leader view. Read-only on purpose: marking another member's item read on their
                   behalf would corrupt the "they were told" record — the RPC refuses it too. */}
-              <div>{dept.map((n) => <Row key={n.id} n={n} dim />)}</div>
+              <div style={listBox}>{deptShown.map((n, i) => <Row key={n.id} n={n} dim last={i === deptShown.length - 1} />)}</div>
             </>
           )}
         </>
