@@ -13022,8 +13022,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           the dedicated RPCs, which raise rather than no-op, so a rejected correction is always visible
           to the leader rather than silently discarded. */}
       {reviewOpen && review.length > 0 && (
-        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 12 }}>
-          <div style={{ padding: "8px 12px 6px" }}><CardHead title="Shifts needing review" style={{ marginBottom: 0 }} /></div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}`, background: `radial-gradient(120% 140% at 100% 0%, rgba(204,158,82,.10), transparent 55%), ${FIRE.cardNoir}` }}>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead icon={AlertTriangle} title="Shifts needing review" count={review.length} style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             Oldest first, and not limited to the selected period — a shift flagged weeks ago still shows here.
           </div>
@@ -13143,7 +13143,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
       )}
       {isDA && openLongShown && openLong.length > 0 && (
         <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 12 }}>
-          <div style={{ padding: "8px 12px 6px" }}><CardHead title="Open shifts — may have missed a checkout" style={{ marginBottom: 0 }} /></div>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Clock} title="Open shifts — may have missed a checkout" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             Longest-running first, and not limited to the selected period. Times are Central.
           </div>
@@ -13250,7 +13250,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
       })()}
       {/* on station right now */}
       <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 14 }}>
-        <CardHead title="On station right now" />
+        <CardHead icon={MapPin} title="On station right now" />
         {onNow.length === 0 && !onNowByHouse ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 10 }}>No one is clocked in right now.</div>
         ) : onNowByHouse ? (
@@ -13305,7 +13305,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
       </div>
       {/* hours by member */}
       <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-        <div style={{ padding: "8px 12px 6px" }}><CardHead title="Hours by member" style={{ marginBottom: 0 }} /></div>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Users} title="Hours by member" style={{ marginBottom: 0 }} /></div>
         {rows.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
         ) : (
@@ -13348,7 +13348,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           spots a gap without an explanation will assume the report is broken, and a gap that was
           labelled "overlap" when it is partly boundary clipping is worse than no label at all. */}
       <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-        <div style={{ padding: "8px 12px 6px" }}><CardHead title="Iso hours — no double-counting" style={{ marginBottom: 0 }} /></div>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ShieldAlert} title="ISO hours — no double-counting" style={{ marginBottom: 0 }} /></div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
           Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This is the per-member breakdown of the <b style={{ color: FIRE.textSecondary }}>Credited</b> figure above; the two agree exactly, because they are the same numbers.
           {/* Was a reconciliation note explaining a legitimate gap between two derivations. There is
@@ -13411,7 +13411,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
            SUPPRESSED ENTIRELY FOR A SINGLE-STATION DEPARTMENT — see multiStation. */}
       {multiStation && isoByStation.length > 0 && (
         <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-          <div style={{ padding: "8px 12px 6px" }}><CardHead title="Iso hours by house" style={{ marginBottom: 0 }} /></div>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Building2} title="ISO hours by house" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             The same ISO total above, split across your houses. Every minute is counted once and lands in exactly one house, so these add up to the department total.
           </div>
@@ -13445,7 +13445,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
       )}
       {/* shift log */}
       <div style={{ ...FS.cardNoir, padding: "8px 0", overflowX: "auto" }}>
-        <div style={{ padding: "8px 12px 6px" }}><CardHead title="Shift log" style={{ marginBottom: 0 }} /></div>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ClipboardList} title="Shift log" style={{ marginBottom: 0 }} /></div>
         {/* Station filter, reusing the shipped all-houses idiom: ALL_STATIONS first and default,
             then each house, then Unassigned only when there is something in it. Chips rather than
             a select because the house count is small and a chip row shows the whole choice set at
