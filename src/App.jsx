@@ -13501,6 +13501,16 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const rangeText = `${fmtD(range.from)} – ${fmtD(range.to)}`;
   const rows = [...attRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
+  // b4c_reports_attendance_noir.html — the monthly trend is BoardStats' series (attendanceSeries over monthsBetween,
+  // same deptAttendance per month), so the two screens can't disagree; the crew split buckets the per-member pct above.
+  const trendMonths = useMemo(() => monthsBetween(range.from, range.to, 12), [range.from, range.to]);
+  const trend = useMemo(() => attendanceSeries(members, sessions, trendMonths.months), [members, sessions, trendMonths]);
+  const bands = [
+    ["strong (≥75%)", rows.filter((r) => r.pct != null && r.pct >= 75).length, FIRE.green],
+    ["fair (50–74%)", rows.filter((r) => r.pct != null && r.pct >= 50 && r.pct < 75).length, FIRE.amberText],
+    ["low (<50%)", rows.filter((r) => r.pct != null && r.pct < 50).length, FIRE.redBright],
+    ["too new to rate", rows.filter((r) => r.pct == null).length, "#2A2F38"],
+  ];
   const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
   const [fullYear, setFullYear] = useState(false);  // grid scope: false = recent 10, true = all sessions in year
   const chron = [...doneThisYear].sort(sessSort);   // chronological columns
@@ -13563,6 +13573,39 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         <Stat S={S} dark n={String(rows.length)} label="Members" />
       </div>
 
+      {!detail && trend.length > 0 && (
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", marginTop: 14 }}>
+          <CardHead icon={BarChart3} title="Attendance trend" right={<span>avg per month{doneThisYear.length ? <> · period <b style={{ color: FIRE.textPrimary }}>{avgPct}%</b></> : ""}</span>} />
+          <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 6, height: 150, padding: "18px 2px 0" }}>
+            {doneThisYear.length > 0 && (
+              <div style={{ position: "absolute", left: 0, right: 0, bottom: 19 + avgPct,   /* px: 15px month label + 4px gap + the bar scale (1px = 1%) */ borderTop: `1px dashed ${FIRE.line2Noir}`, pointerEvents: "none" }}>
+                <span style={{ position: "absolute", right: 0, top: -16, fontSize: 10, color: FIRE.textSecondary }}>{avgPct}% avg</span>
+              </div>
+            )}
+            {trend.map((m, i) => (
+              <div key={i} title={m.pct == null ? `${m.label}: no drills` : `${m.label}: ${m.pct}% · ${m.drills} drill${m.drills === 1 ? "" : "s"}`} style={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                <div style={{ fontSize: 10.5, color: m.pct == null ? FIRE.textMuted : FIRE.textSecondary, ...FS.num }}>{m.pct == null ? "—" : m.pct}</div>
+                <div style={{ width: "100%", maxWidth: 34, height: m.pct == null ? 4 : Math.max(4, m.pct), borderRadius: "5px 5px 0 0", background: m.pct == null ? FIRE.lineNoir : `linear-gradient(180deg, ${pctColor(m.pct)}, ${pctColor(m.pct)}CC)`, opacity: m.partial ? 0.65 : 1 }} />
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, lineHeight: "15px", height: 15, color: FIRE.textMuted }}>{m.label}</div>
+              </div>
+            ))}
+          </div>
+          {trendMonths.truncated && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6 }}>Showing the most recent 12 months of the range.</div>}
+        </div>
+      )}
+      {!detail && rows.length > 0 && (
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", marginTop: 12 }}>
+          <CardHead icon={Users} title="How the crew splits" right={<span>{rows.length} member{rows.length === 1 ? "" : "s"}</span>} />
+          <div style={{ display: "flex", height: 22, borderRadius: 6, overflow: "hidden", background: FIRE.insetNoir }}>
+            {bands.filter(([, n]) => n > 0).map(([l, n, c]) => (
+              <i key={l} title={`${n} ${l}`} style={{ width: `${(n / rows.length) * 100}%`, background: c, display: "flex", alignItems: "center", justifyContent: "center", fontStyle: "normal", fontSize: 11, fontWeight: 700, color: c === "#2A2F38" ? FIRE.textMuted : c === FIRE.redBright ? "#fff" : "#07120b" }}>{n}</i>
+            ))}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 9, fontSize: 11.5, color: FIRE.textSecondary }}>
+            {bands.map(([l, n, c]) => <span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: c }} /><b style={{ color: FIRE.textPrimary }}>{n}</b> {l}</span>)}
+          </div>
+        </div>
+      )}
       {detail ? (
         <div style={{ ...FS.cardNoir, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
