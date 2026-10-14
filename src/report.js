@@ -295,6 +295,32 @@ export function buildReportDoc(data) {
     } else { para("No station hours were recorded during this period.", GRAY); y += 8; }
   }
 
+  // ---------- Funding (PERIOD) — only for a money viewer, and only when every read succeeded ----------
+  // Dollars are printed exactly (no rounding). The all-time figure is labelled all-time so it is never read as
+  // the period's take. `funding` is null when gated off or when a read failed — the section is then absent.
+  const usd = (v) => `$${Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const fd = data.funding;
+  if (fd) {
+    header("Funding");
+    para(`During the period: ${usd(fd.contributions)} in contributions received and ${usd(fd.proceeds)} in proceeds from fundraisers dated in the period.`);
+    para(`${fd.activeCampaigns} active donation campaign${fd.activeCampaigns === 1 ? "" : "s"}; ${usd(fd.allTimeRaised)} raised all-time across them (an all-time figure, not the period's).`, GRAY, 8.6);
+  }
+
+  // ---------- Department Activity (PERIOD) ----------
+  // Each line is present only when its data is; a failed read is omitted, never printed as zero.
+  {
+    const lines = [];
+    const rg = data.rosterGrowth;
+    if (rg) lines.push(`New members: ${rg.n} ${rg.label}${rg.n && rg.names?.length ? ` (${rg.names.join(", ")}${rg.n > rg.names.length ? ", and others" : ""})` : ""}. Counted by join year \u2014 the roster records a year, not a date.`);
+    const bt = data.boardTurnout;
+    if (bt) lines.push(`Board / leadership meetings held: ${bt.meetings}${bt.pct != null ? `; average turnout ${bt.pct}%` : ""}.`);
+    const cc = data.checkCompliance;
+    if (cc) lines.push(`Apparatus checks completed: ${cc.checks} on ${cc.units}${cc.totalUnits != null ? ` of ${cc.totalUnits}` : ""} unit${cc.units === 1 ? "" : "s"}${cc.failed ? ` (${cc.failed} recorded a failure)` : ""}.`);
+    const ca = data.certsApproved;
+    if (ca) lines.push(`Certifications approved: ${ca.count}${ca.count && ca.list?.length ? ` \u2014 ${ca.list.map((c) => `${c.member} (${c.cert})`).join("; ")}${ca.count > ca.list.length ? "; and others" : ""}` : ""}.`);
+    if (lines.length) { header("Department Activity"); bullets(lines); y += 6; }
+  }
+
   // ---------- Recent Training ----------
   header("Recent Training");
   // Optional (off-hours/one-off) sessions are marked so a bare "4 / 25" on a printed
@@ -328,6 +354,14 @@ export function buildReportDoc(data) {
       table(["Apparatus", "Status", "Reason on record"], rigRows,
         { badgeCol: 1, columnStyles: { 0: { fontStyle: "bold" }, 1: { cellWidth: 96 } } });
     } else { para("Every apparatus is in service and passing its last check.", GRAY); y += 8; }
+  }
+
+  // ---------- Equipment Readiness (AS OF TODAY) ----------
+  const eqr = data.equipment;
+  if (eqr) {
+    header("Equipment Readiness");
+    para(`As of ${eqr.asOf}: ${eqr.openIssues} open equipment issue${eqr.openIssues === 1 ? "" : "s"}${eqr.issueKinds?.length ? ` (${eqr.issueKinds.map((k) => `${k.n} ${k.label.toLowerCase()}`).join(", ")})` : ""}; `
+      + `${eqr.agingOut} item${eqr.agingOut === 1 ? "" : "s"} of gear past or within 3 months of service life.`);
   }
 
   // ---------- Recommended Actions ----------

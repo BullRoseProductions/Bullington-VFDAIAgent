@@ -11431,6 +11431,26 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
   // is told — printing zeros would put "0 credited hours" in front of a council because a query failed.
   const shOk = sh.loaded && !sh.err;
   const apOk = ap.loaded && !ap.err;
+  /* NEW FACTS (b4c_reports_chief_noir.html). Each flows to the panel, buildReportData() (PDF) and draft() (AI), and
+     each is OMITTED — never zeroed — when its read fails. DURING: funding, roster growth, board turnout, apparatus-
+     check compliance, certs approved. AS OF TODAY: equipment readiness. */
+  const onMod = (k) => moduleEnabled(k, dept?.disabled_modules);
+  const canSeeMoney = canManage(role) && onMod("funding");   // Board Stats' money gate, exactly
+  const mf = useMoneyFacts(range, canSeeMoney);
+  const fundOk = canSeeMoney && !mf.moneyErr && mf.donations != null && mf.proceeds != null && mf.funds != null && mf.raised != null;
+  const fundAllTime = fundOk ? mf.funds.reduce((t, f) => t + (mf.raised[f.id] || 0), 0) : null;
+  const usdExact = (v) => `$${Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;   // never rounded
+  // Roster growth: `joined` is free text and only a leading 4-digit year is trusted (Board Stats' joinedYear), so the
+  // period is widened to the calendar year(s) it touches and labelled that way.
+  const joinedYear = (m) => { const y = /^(\d{4})/.exec(String(m.joined || "").trim()); return y ? Number(y[1]) : null; };
+  const fyJ = Number(String(range.from || "").slice(0, 4)) || new Date().getFullYear(), tyJ = Number(String(range.to || "").slice(0, 4)) || fyJ;
+  const newJoins = cm.filter((m) => { const y = joinedYear(m); return y != null && y >= fyJ && y <= tyJ; });
+  const joinLabel = fyJ === tyJ ? `joined in ${fyJ}` : `joined ${fyJ}–${tyJ}`;
+  const { avg: boardPct, doneBoard, rows: boardRows } = boardAttendance(members, sessions, null, range);
+  const boardRated = doneBoard.length > 0 && boardRows.some((r) => r.pct != null);   // no board meetings in range -> "—", not 0%
+  const cc = useCheckCompliance(range, onMod("apparatus"));
+  const ca = useCertsApproved(range, members);
+  const eq = useEquipmentReadiness(onMod("equipment"));
   const h1r = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
   // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
   const flaggedCerts = [];
@@ -11470,6 +11490,13 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
   const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
   const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
+  const Unavail = ({ what, retry }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
+      <AlertTriangle size={14} color={FIRE.redText} style={{ flexShrink: 0 }} />
+      <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{what} couldn't be loaded — this section will be left out of the report.</span>
+      <button onClick={retry} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}><RefreshCw size={12} color={FIRE.btnIcon} /> Retry</button>
+    </div>
+  );
   const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
   const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
   const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
@@ -11499,6 +11526,13 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
         attestedHrs: sh.totals.attestedHrs, vTrue: sh.totals.vTrue, oTrue: sh.totals.oTrue,
         rows: sh.rows.slice(0, 10).map((r) => ({ name: r.name, credited: r.total, unverified: r.unverified, shifts: r.n })),
       } : null,
+      // New facts — null when gated off or when the read failed, so the PDF omits the section rather than print zeros.
+      funding: fundOk ? { contributions: mf.donations, proceeds: mf.proceeds, activeCampaigns: mf.funds.length, allTimeRaised: fundAllTime } : null,
+      rosterGrowth: { n: newJoins.length, label: joinLabel, names: newJoins.slice(0, 8).map((m) => m.name) },
+      boardTurnout: { meetings: doneBoard.length, pct: boardRated ? boardPct : null },
+      checkCompliance: cc.ok ? { checks: cc.checks, units: cc.units, failed: cc.failed, totalUnits: apOk ? ap.totals.total : null } : null,
+      certsApproved: ca.ok ? { count: ca.count, list: ca.list.slice(0, 10) } : null,
+      equipment: eq.ok ? { openIssues: eq.openIssues, issueKinds: eq.issueKinds, agingOut: eq.agingOut, asOf: todayLabel } : null,
       readiness: apOk ? {
         ...ap.totals, asOf: todayLabel,
         flaggedRigs: ap.flaggedRigs.map((r) => ({ name: r.name, note: r.note })),
@@ -11535,6 +11569,19 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
         `Share of check-ins location-verified: ${sh.totals.vpct}%`,
         ...(sh.totals.autoClosed ? [`Shifts auto-closed by the system and awaiting an officer's confirmation: ${sh.totals.autoClosed} (their hours are NOT credited until reviewed)`] : []),
       ] : [`Station hours: unavailable — the record could not be read, so no hours figure is provided.`]),
+      ...(canSeeMoney ? (fundOk ? [
+        `Funding — contributions received during the period: ${usdExact(mf.donations)} (exact; do not round)`,
+        `Funding — fundraiser proceeds for fundraisers dated in the period: ${usdExact(mf.proceeds)} (exact; do not round)`,
+        `Funding — active donation campaigns: ${mf.funds.length}; raised all-time across those campaigns: ${usdExact(fundAllTime)} (all-time, NOT a period figure)`,
+      ] : [`Funding: unavailable — the records could not be read, so no funding figures are provided. Do not write a Funding section.`]) : []),
+      `New members (by join YEAR — the roster records a year, not a date): ${newJoins.length} ${joinLabel}${newJoins.length ? ` — ${topN(newJoins, (m) => m.name, 5)}` : ""}`,
+      `Board / leadership meetings held during the period: ${doneBoard.length}${boardRated ? `; average board turnout ${boardPct}%` : "; no board turnout figure (no board meetings with attendance in the period)"}`,
+      ...(onMod("apparatus") ? (cc.ok
+        ? [`Apparatus checks completed during the period: ${cc.checks} on ${cc.units}${apOk ? ` of ${ap.totals.total}` : ""} unit${cc.units === 1 ? "" : "s"}${cc.failed ? ` (${cc.failed} recorded a failure)` : ""}`]
+        : [`Apparatus check compliance: unavailable — not read, so no figure is provided.`]) : []),
+      ...(ca.ok
+        ? [`Certifications approved during the period: ${ca.count}${ca.count ? ` — ${topN(ca.list, (c) => `${c.member}'s ${c.cert}`, 5)}` : ""}`]
+        : [`Certifications approved during the period: unavailable — not read, so no figure is provided.`]),
       ``,
       `=== AS OF TODAY (${todayLabel}) — current status, NOT specific to the period above ===`,
       `Members: ${active} active, ${prob} probationary (${cm.length} total)`,
@@ -11555,9 +11602,12 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
         `Apparatus needing attention: ${topN(ap.flaggedRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
         `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
       ] : [`Apparatus readiness: unavailable — the record could not be read, so no readiness figure is provided.`]),
+      ...(onMod("equipment") ? (eq.ok ? [
+        `Equipment: ${eq.openIssues} open equipment issue${eq.openIssues === 1 ? "" : "s"} reported${eq.issueKinds.length ? ` (${eq.issueKinds.map((k) => `${k.n} ${k.label.toLowerCase()}`).join(", ")})` : ""}; ${eq.agingOut} item${eq.agingOut === 1 ? "" : "s"} of gear past or within 3 months of service life`,
+      ] : [`Equipment readiness: unavailable — not read, so no figure is provided.`]) : []),
     ];
     const summary = lines.join("\n");
-    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's real records for a specific REPORT PERIOD. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nPERIOD vs. CURRENT — the data below is split into two labeled blocks. 'DURING THE REPORT PERIOD' facts describe what happened in the report window: narrate them as the period's activity and STATE THE REPORT PERIOD near the top. 'AS OF TODAY' facts are the department's CURRENT status (certification currency, roster) and are NOT specific to the period: narrate them as today's standing, and NEVER imply the current numbers describe the period — do not say attendance, certification, or roster levels were a certain value 'during the period' unless it is a DURING-THE-PERIOD fact. Keep the two clearly distinct so a reader always knows whether a number covers the period or today.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's real records for a specific REPORT PERIOD. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), Readiness (apparatus readiness, apparatus-check compliance, and equipment), Funding (ONLY when funding facts are listed), and Recommended Next Steps.\n\nPERIOD vs. CURRENT — the data below is split into two labeled blocks. 'DURING THE REPORT PERIOD' facts describe what happened in the report window: narrate them as the period's activity and STATE THE REPORT PERIOD near the top. 'AS OF TODAY' facts are the department's CURRENT status (certification currency, roster) and are NOT specific to the period: narrate them as today's standing, and NEVER imply the current numbers describe the period — do not say attendance, certification, or roster levels were a certain value 'during the period' unless it is a DURING-THE-PERIOD fact. Keep the two clearly distinct so a reader always knows whether a number covers the period or today.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nMONEY — quote every dollar figure EXACTLY as given: never round, estimate, add figures together into a new total, or describe an all-time figure as belonging to the period. If no funding facts are listed, or funding is marked unavailable, write no Funding section at all. New members are counted by join YEAR — say so as labelled (for example 'joined in 2026'), never as an exact period count.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 450 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
   const [saving, setSaving] = useState(false);
@@ -11636,6 +11686,22 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
             {sh.totals.autoClosed > 0 && <Line>⚠ {sh.totals.autoClosed} auto-closed shift{sh.totals.autoClosed > 1 ? "s" : ""} awaiting officer confirmation — not credited</Line>}
           </>
         )}
+        {/* New DURING facts — same truth rule: a failed read is left out (and said so), never a zero. */}
+        {canSeeMoney && (mf.moneyErr ? <Unavail what="Funding" retry={mf.retry} /> : fundOk && (<>
+          <SubHead>Funding — {usdExact(mf.donations)} contributions · {usdExact(mf.proceeds)} fundraiser proceeds</SubHead>
+          <Line>{mf.funds.length} active campaign{mf.funds.length === 1 ? "" : "s"} · {usdExact(fundAllTime)} raised all-time (not a period figure)</Line>
+        </>))}
+        <SubHead>New members — {newJoins.length} {joinLabel}</SubHead>
+        {newJoins.length > 0 && <Line>{newJoins.slice(0, 6).map((m) => m.name).join(" · ")}{newJoins.length > 6 ? ` · +${newJoins.length - 6} more` : ""}</Line>}
+        <Line><span style={{ color: FIRE.textMuted }}>By join year — the roster records a year, not a date.</span></Line>
+        <SubHead>Board meetings — {doneBoard.length} held · {boardRated ? `${boardPct}% turnout` : "—"}</SubHead>
+        {onMod("apparatus") && (cc.err ? <Unavail what="Apparatus check compliance" retry={cc.retry} /> : cc.ok && (
+          <SubHead>Apparatus checks — {cc.checks} completed on {cc.units}{apOk ? ` of ${ap.totals.total}` : ""} unit{cc.units === 1 ? "" : "s"}{cc.failed ? ` · ${cc.failed} with a failure` : ""}</SubHead>
+        ))}
+        {ca.err ? <Unavail what="Approved certifications" retry={ca.retry} /> : ca.ok && (<>
+          <SubHead>Certifications approved — {ca.count}</SubHead>
+          {ca.list.slice(0, 6).map((c, i) => <Line key={i}>{c.member} · {c.cert}</Line>)}
+        </>)}
         <CardHead icon={Clock} title="As of today · current status" style={{ marginTop: 14 }} />
         <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
         {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
@@ -11657,6 +11723,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
               : [...ap.flaggedRigs, ...ap.oosRigs].slice(0, 6).map((r) => <Line key={r.id}>{r.name}{r.note ? ` · ${r.note}` : ""}{r.inService ? "" : " · out of service"}</Line>)}
           </>
         )}
+        {onMod("equipment") && (eq.err ? <Unavail what="Equipment readiness" retry={eq.retry} /> : eq.ok && (<>
+          <SubHead>Equipment — {eq.openIssues} open issue{eq.openIssues === 1 ? "" : "s"} · {eq.agingOut} aging out</SubHead>
+          {eq.issueKinds.length > 0 && <Line>{eq.issueKinds.map((k) => `${k.n} ${k.label.toLowerCase()}`).join(" · ")}</Line>}
+        </>))}
         <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
         {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
       </div>
@@ -11919,33 +11989,8 @@ function BoardStats({ S, role, members, sessions, dept }) {
 
   // Funding — is_canmanage() RLS (Board/DA/Officer). Same reads as the Funding hub and the funds list.
   const canSeeMoney = canManage(role) && on("funding");
-  const [donations, setDonations] = useState(null);     // contributions in the period; null = unknown
-  const [proceeds, setProceeds] = useState(null);       // fundraiser proceeds in the period
-  const [funds, setFunds] = useState(null);             // active donation campaigns
-  const [raised, setRaised] = useState(null);           // campaign_id -> all-time contributions
-  const [moneyErr, setMoneyErr] = useState(false);
-  const loadMoney = () => {
-    if (!canSeeMoney) return;
-    setMoneyErr(false);
-    const fail = () => setMoneyErr(true);
-    supabase.from("donation_activity").select("amount").eq("kind", "contribution")
-      .gte("occurred_on", range.from).lte("occurred_on", range.to)
-      .then(({ data, error }) => { if (error || !data) return fail(); setDonations(data.reduce((t, r) => t + (Number(r.amount) || 0), 0)); });
-    supabase.from("fundraisers").select("proceeds")
-      .gte("target_date", range.from).lte("target_date", range.to)
-      .then(({ data, error }) => { if (error || !data) return fail(); setProceeds(data.reduce((t, r) => t + (Number(r.proceeds) || 0), 0)); });
-    supabase.from("donation_campaigns").select("id, name, status, goal_amount, sort, created_at")
-      .order("sort", { ascending: true }).order("created_at", { ascending: true })
-      .then(({ data, error }) => { if (error || !data) return fail(); setFunds(data.filter((c) => c.status !== "archived")); });
-    supabase.from("donation_activity").select("campaign_id, amount").eq("kind", "contribution").not("campaign_id", "is", null)
-      .then(({ data, error }) => {
-        if (error || !data) return fail();
-        const m = {}; for (const r of data) m[r.campaign_id] = (m[r.campaign_id] || 0) + (Number(r.amount) || 0);
-        setRaised(m);
-      });
-  };
-  useEffect(() => { loadMoney(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [canSeeMoney, range.from, range.to]);
-  useReconnect(() => { if (moneyErr) loadMoney(); });
+  // Same four reads, now shared with the Chief's Report so both quote the same money (useMoneyFacts).
+  const { donations, proceeds, funds, raised, moneyErr, retry: loadMoney } = useMoneyFacts(range, canSeeMoney);
   const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
 
   return (
@@ -12438,6 +12483,102 @@ function ApparatusChecksReport({ S, dept, back }) {
    FAILURE. Never blanks: the last good figures stay, `err` is raised so the caller can OMIT the section
    rather than print zeros, and useReconnect retries. A Chief's Report claiming "0 credited hours"
    because a query failed is far worse than one with no hours section at all. */
+/* ---- Chief's Report facts (b4c_reports_chief_noir.html) ----
+   Shared so the report and Board Stats quote the same numbers by construction. Every hook follows the
+   station-hours pattern: null/unloaded until a read lands, `err` on failure (the caller OMITS the section and
+   says so — never zeros), and a reconnect retry. */
+// FUNDING — BoardStats' loadMoney, lifted verbatim (same four reads, same RLS). `enabled` is the caller's money-viewer
+// gate, the same one Board Stats applies (managers, Funding module on); when false nothing is read.
+function useMoneyFacts(range, enabled) {
+  const [donations, setDonations] = useState(null);     // contributions in the period; null = unknown
+  const [proceeds, setProceeds] = useState(null);       // fundraiser proceeds in the period
+  const [funds, setFunds] = useState(null);             // active donation campaigns
+  const [raised, setRaised] = useState(null);           // campaign_id -> all-time contributions
+  const [moneyErr, setMoneyErr] = useState(false);
+  const loadMoney = () => {
+    if (!enabled) return;
+    setMoneyErr(false);
+    const fail = () => setMoneyErr(true);
+    supabase.from("donation_activity").select("amount").eq("kind", "contribution")
+      .gte("occurred_on", range.from).lte("occurred_on", range.to)
+      .then(({ data, error }) => { if (error || !data) return fail(); setDonations(data.reduce((t, r) => t + (Number(r.amount) || 0), 0)); });
+    supabase.from("fundraisers").select("proceeds")
+      .gte("target_date", range.from).lte("target_date", range.to)
+      .then(({ data, error }) => { if (error || !data) return fail(); setProceeds(data.reduce((t, r) => t + (Number(r.proceeds) || 0), 0)); });
+    supabase.from("donation_campaigns").select("id, name, status, goal_amount, sort, created_at")
+      .order("sort", { ascending: true }).order("created_at", { ascending: true })
+      .then(({ data, error }) => { if (error || !data) return fail(); setFunds(data.filter((c) => c.status !== "archived")); });
+    supabase.from("donation_activity").select("campaign_id, amount").eq("kind", "contribution").not("campaign_id", "is", null)
+      .then(({ data, error }) => {
+        if (error || !data) return fail();
+        const m = {}; for (const r of data) m[r.campaign_id] = (m[r.campaign_id] || 0) + (Number(r.amount) || 0);
+        setRaised(m);
+      });
+  };
+  useEffect(() => { loadMoney(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled, range.from, range.to]);
+  useReconnect(() => { if (moneyErr) loadMoney(); });
+  return { donations, proceeds, funds, raised, moneyErr, retry: loadMoney };
+}
+// APPARATUS-CHECK COMPLIANCE — finalized apparatus_checks performed in the period (the table ApparatusChecksReport
+// reads), with local-midnight bounds and `< the day after` like the fleet report.
+function useCheckCompliance(range, enabled) {
+  const [rows, setRows] = useState(null); const [err, setErr] = useState(false);
+  const load = () => {
+    if (!enabled || !range.from || !range.to) return;
+    setErr(false);
+    const st = new Date(`${range.from}T00:00:00`), en = new Date(`${range.to}T00:00:00`); en.setDate(en.getDate() + 1);
+    supabase.from("apparatus_checks").select("apparatus_id, outcome").eq("state", "finalized")
+      .gte("performed_at", st.toISOString()).lt("performed_at", en.toISOString())
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setRows(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled, range.from, range.to]);
+  useReconnect(() => { if (err) load(); });
+  const ok = enabled && rows != null && !err;
+  return { ok, err: enabled && err, retry: load,
+    checks: ok ? rows.length : null, units: ok ? new Set(rows.map((r) => r.apparatus_id)).size : null,
+    failed: ok ? rows.filter((r) => r.outcome === "fail").length : null };
+}
+// CERTS APPROVED — cert_submissions decided 'approved' in the period. approve_cert_submission stamps reviewed_at,
+// so the period filter is on the real decision time. Dept-scoped by the admin read policy.
+function useCertsApproved(range, members) {
+  const [rows, setRows] = useState(null); const [err, setErr] = useState(false);
+  const load = () => {
+    if (!range.from || !range.to) return;
+    setErr(false);
+    const st = new Date(`${range.from}T00:00:00`), en = new Date(`${range.to}T00:00:00`); en.setDate(en.getDate() + 1);
+    supabase.from("cert_submissions").select("id, name, member_id, reviewed_at").eq("status", "approved")
+      .gte("reviewed_at", st.toISOString()).lt("reviewed_at", en.toISOString()).order("reviewed_at", { ascending: false })
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setRows(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [range.from, range.to]);
+  useReconnect(() => { if (err) load(); });
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const ok = rows != null && !err;
+  return { ok, err, retry: load, count: ok ? rows.length : null,
+    list: ok ? rows.map((r) => ({ member: nameById.get(r.member_id) || "A member", cert: r.name })) : [] };
+}
+// EQUIPMENT READINESS — AS OF TODAY: open equipment_issues by kind (labels per the CHECK constraint) and gear aging
+// out (gearStatus rank <= 1 — the Equipment page's agingN rule, over units of active types).
+function useEquipmentReadiness(enabled) {
+  const [issues, setIssues] = useState(null); const [units, setUnits] = useState(null); const [err, setErr] = useState(false);
+  const load = () => {
+    if (!enabled) return;
+    setErr(false);
+    supabase.from("equipment_issues").select("id, kind").is("resolved_at", null)
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setIssues(data); });
+    supabase.from("equipment").select("id, manufacture_date, equipment_type(service_life_years, active)")
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setUnits(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled]);
+  useReconnect(() => { if (err) load(); });
+  const ok = enabled && issues != null && units != null && !err;
+  const byKind = {};
+  if (ok) for (const i of issues) byKind[i.kind] = (byKind[i.kind] || 0) + 1;
+  return { ok, err: enabled && err, retry: load,
+    openIssues: ok ? issues.length : null,
+    issueKinds: ok ? ISSUE_KINDS.filter(([k]) => byKind[k]).map(([k, label]) => ({ label, n: byKind[k] })) : [],
+    agingOut: ok ? units.filter((u) => u.equipment_type?.active !== false && gearStatus(u.manufacture_date, u.equipment_type?.service_life_years).rank <= 1).length : null };
+}
 function useStationHoursRange(range) {
   const [shifts, setShifts] = useState([]);
   const [iso, setIso] = useState([]);
