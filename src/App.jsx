@@ -3518,7 +3518,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const [dutiesLoaded, setDutiesLoaded] = useState(false);   // "—" until the read lands, never a premature "No duties set"
   const [loadErr, setLoadErr] = useState(false);
   const loadBoard = () => {
-    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
+    supabase.from("duties").select("id, duty, category, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setDuties(data); setDutiesLoaded(true); });   // dept-scoped by RLS
   };
   useEffect(() => { loadBoard(); }, []);
@@ -3634,7 +3634,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [attnOpen, setAttnOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible; default expanded
   const [loadErr, setLoadErr] = useState(false);
   const loadPanels = () => {
-    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
+    supabase.from("duties").select("id, duty, category, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); setDutiesLoaded(true); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); setPendLoaded(true); });   // dept-scoped by RLS
@@ -3651,9 +3651,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0 || insights.apparatusFailures.length > 0;
-  const showDutiesCard = openDuties.length > 0, showCertsCard = (expg + expd) > 0, showPendingCard = pendingCerts.length > 0;
+  const showDutiesCard = false /* the duties entry moved onto the Station duties card */, showCertsCard = (expg + expd) > 0, showPendingCard = pendingCerts.length > 0;
   const attnKnown = dutiesLoaded && pendLoaded && itemsLoaded && !loadErr;
-  const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
+  const attnN = (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
   // ACTION CENTER — the old NEEDS YOUR ATTENTION section in a card beside the stats. A zero count is not something
   // that needs attention, so zero cards stay hidden; "All clear" only once duties, approvals and action items have
   // all LANDED — until then (or if a read failed) a dash, never a claim that it's clear.
@@ -3983,7 +3983,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const loadSnap = () => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
     Promise.all([
-      supabase.from("duties").select("id, done, done_at, recurrence"),
+      supabase.from("duties").select("id, duty, category, done, done_at, recurrence, assigned_to"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("content_calendar").select("id, date, caption"),
       supabase.from("funding_events").select("id, date, title"),
@@ -22918,6 +22918,44 @@ function RosterBreakdown({ members }) {
 // two can never drift: every number is derived HERE, once, from the same honest helpers. The parent passes
 // the duties it already loads (it needs them for its own panels). `go` omitted = read-only: no tile or
 // panel links (the Board strip never had any). extraHero = dashboard-specific trailing tiles.
+/* OPEN DUTIES ON THE DASHBOARD CARD (b4c_dash_stationduties_noir.html) — leadership view, above the kept "X of Y
+   done" line: Assigned · open and Unassigned · crew, each capped with "+N more". Read-only; the rows come from the
+   same duties rows the bar is computed from (assigned_to null = station-wide / crew). Members don't get this card —
+   their dashboard's Assigned duties already shows their own, else the crew's. */
+function DutyOpenList({ duties, members, dept, cap = 3 }) {
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const open = (duties || []).filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
+  const assigned = open.filter((d) => d.assigned_to), crew = open.filter((d) => !d.assigned_to);
+  if (!open.length) return null;
+  const ini = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  const meta = (d, who) => [d.category, who, (d.recurrence || "").toLowerCase()].filter(Boolean).join(" · ");
+  const head = (t, c) => <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: c, margin: "2px 0 6px" }}>{t}</div>;
+  const row = (d, lead) => (
+    <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0" }}>
+      {lead}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.duty || "Duty"}</div>
+        <div style={{ fontSize: 10.5, color: FIRE.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta(d, d.assigned_to ? (nameById.get(d.assigned_to) || "a member") : null)}</div>
+      </div>
+    </div>
+  );
+  const more = (n, what) => n > 0 && <div style={{ fontSize: 11, color: FIRE.textMuted, padding: "2px 0 0" }}>+{n} more {what}</div>;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      {assigned.length > 0 && (<>
+        {head("Assigned · open", FIRE.amberText)}
+        {assigned.slice(0, cap).map((d) => row(d, <span aria-hidden="true" style={{ width: 22, height: 22, borderRadius: "50%", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 9, color: FIRE.textSecondary, flexShrink: 0 }}>{ini(nameById.get(d.assigned_to))}</span>))}
+        {more(assigned.length - cap, "assigned")}
+      </>)}
+      {crew.length > 0 && (<>
+        <div style={{ marginTop: assigned.length ? 9 : 0 }}>{head("Unassigned · crew", FIRE.textMuted)}</div>
+        {crew.slice(0, cap).map((d) => row(d, <span aria-hidden="true" style={{ width: 22, display: "inline-flex", justifyContent: "center", flexShrink: 0 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: dutyCatLook(d.category)[0] }} /></span>))}
+        {more(crew.length - cap, "unassigned")}
+      </>)}
+      <div style={{ height: 1, background: FIRE.lineNoir, margin: "10px 0 2px" }} />
+    </div>
+  );
+}
 function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero, hoursBeforeCerts, overview, actionCenter }) {
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
@@ -23002,6 +23040,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginTop: 8 }}>
           {certsPanel}
           <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
+            {dutiesLoaded && <DutyOpenList duties={dutyList} members={members} dept={dept} />}
             <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
               <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
             </div>
@@ -23033,6 +23072,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
             takes Station hours' old place, last. Board and Officer keep the original order. */}
         {hoursBeforeCerts ? hoursPanel : certsPanel}
         <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
+          {dutiesLoaded && <DutyOpenList duties={dutyList} members={members} dept={dept} />}
           <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
             <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
           </div>
