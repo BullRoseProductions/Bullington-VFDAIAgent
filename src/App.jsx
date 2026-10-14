@@ -216,6 +216,12 @@ const NOIR_HELP = { fontSize: 12.5, lineHeight: 1.55, color: FIRE.textMuted, mar
 const NOIR_AI_BANNER = { ...FS.cardNoir, padding: 22, marginBottom: 22, display: "flex" };
 // SectionBar's label face, for hand-rolled toggles/labels that can't be a SectionBar.
 const NOIR_LABEL = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, margin: 0 };
+// THE AI ACCENT — one blue for every AI-drafted surface (training drill plan, recruitment plan, PR caption), so a
+// leader learns "blue = drafted by the AI, review it" once. Blue is info, never good/warn/bad.
+const NOIR_AI = {
+  blue: "#4F90D6", blueText: "#7FB2E6", glow: "radial-gradient(130% 150% at 90% 0%, rgba(79,144,214,.14), transparent 50%)",
+  chip: { display: "inline-flex", alignItems: "center", gap: 6, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: "#7FB2E6", background: "rgba(79,144,214,.12)", border: "1px solid rgba(79,144,214,.4)", borderRadius: 6, padding: "4px 9px" },
+};
 const NOIR_ERR = { marginTop: 10, fontSize: 12.5, lineHeight: 1.45, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText };
 // The mocks' inset panel (.card2 surface) — sections inside an expanded card sit on this.
 const NOIR_INSET = { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10 };
@@ -5120,7 +5126,7 @@ function serializeDrillPlan(plan, topic) {
    is dropped. Copy uses serializeDrillPlan — the same text Save writes to the session. */
 function DrillPlanPanel({ S, plan, form, loading, onRegenerate, onSave, saveOpen, notify }) {
   const has = (a) => Array.isArray(a) && a.length > 0;
-  const blue = "#4F90D6", blueT = "#7FB2E6";
+  const blue = NOIR_AI.blue, blueT = NOIR_AI.blueText;   // the shared AI accent
   const secHead = (Icon, label) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.textPrimary, marginBottom: 10 }}>
       <Icon size={15} color={FIRE.redBright} />{label}
@@ -5146,8 +5152,8 @@ function DrillPlanPanel({ S, plan, form, loading, onRegenerate, onSave, saveOpen
   const minutes = plan.durationMin || Number(form.time) || null;
   return (
     <div style={{ ...NOIR_MODAL_PANEL, boxShadow: "none" }}>
-      <div style={{ padding: "16px 18px 15px", borderBottom: `1px solid ${FIRE.lineNoir}`, background: "radial-gradient(130% 150% at 90% 0%, rgba(79,144,214,.14), transparent 50%)" }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: blueT, background: "rgba(79,144,214,.12)", border: "1px solid rgba(79,144,214,.4)", borderRadius: 6, padding: "4px 9px" }}><Sparkles size={12} /> AI draft · review before use</span>
+      <div style={{ padding: "16px 18px 15px", borderBottom: `1px solid ${FIRE.lineNoir}`, background: NOIR_AI.glow }}>
+        <span style={NOIR_AI.chip}><Sparkles size={12} /> AI draft · review before use</span>
         <h3 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 23, lineHeight: 1.05, margin: "10px 0 0", color: FIRE.textPrimary }}>{form.topic}</h3>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 11 }}>
           {minutes ? chip(`${minutes} min`) : null}
@@ -5511,7 +5517,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
     <PageShell band watermark="RECRUIT" kicker="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.">
       <NoirSkin>
       <div style={S.phaseRow}>
-        <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent={FIRE.red} />
+        <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent={FIRE.redBright} />
         <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent={FIRE.catBlue} />
         <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent={FIRE.catGreen} />
       </div>
@@ -5535,7 +5541,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
           </button>
           {err && <div style={NOIR_ERR}>{err}</div>}
-          {plan && <RichOutput S={S} text={plan} dark />}
+          {plan && <RecruitmentPlanView S={S} text={plan} />}
           {plan && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Draft title" /></label>
@@ -5597,7 +5603,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
                 </div>
               </>
             ) : (
-              <RichOutput S={S} text={openDraft.current_text ?? openDraft.ai_text} dark />
+              <RecruitmentPlanView S={S} text={openDraft.current_text ?? openDraft.ai_text} />
             )}
           </div>
         </div>
@@ -5606,12 +5612,87 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
     </PageShell>
   );
 }
+/* RECRUITMENT PLAN, RENDERED AS A PLAN (b4c_recruitment_noir.html). The planner's prompt already fixes the text's
+   shape — campaign hashtag up top, WEEK n headers, posts labelled 'Mon, Oct 20 — Post 1', a '🎥/📸 Content idea:'
+   line under each post, and the outreach milestones (open house / business outreach / referral push) woven in.
+   This reads that shape back into cards. It is TOLERANT, not strict: anything it can't place stays as a plain
+   line in its week, and a text with no weeks or no posts falls back to RichOutput exactly as before — so an
+   older or oddly-shaped draft still shows in full. Display only; the saved text is unchanged. */
+const POST_LABEL = /^((?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+[a-z]{3,9}\.?\s+\d{1,2})\s*[—–-]+\s*(post\s*\d+)\s*:?\s*(.*)$/i;
+const MILESTONE = /^(open[\s-]*house|business outreach|referral push|referral drive|outreach milestone|milestone)\b/i;
+function parseRecruitmentPlan(text) {
+  const clean = (l) => l.replace(/\*\*/g, "").replace(/^#{1,6}\s+/, "").replace(/^[-*•]\s+/, "").trim();
+  const lines = String(text || "").replace(/\r/g, "").split("\n").map(clean);
+  const out = { hashtag: null, intro: [], weeks: [] };
+  let wk = null, post = null, mile = null;
+  for (const l of lines) {
+    if (!l || /^(-{3,}|_{3,})$/.test(l)) { mile = null; continue; }
+    const w = l.match(/^week\s*(\d+)\b\s*[:·—–-]?\s*(.*)$/i);
+    if (w) { wk = { n: w[1], sub: w[2].replace(/^\((.*)\)$/, "$1").trim(), items: [] }; out.weeks.push(wk); post = null; mile = null; continue; }
+    if (!wk) {
+      if (!out.hashtag) { const h = l.match(/#[A-Za-z][\w]{2,}/); if (h) { out.hashtag = h[0]; const rest = l.replace(/.*hashtag[^:]*:\s*/i, "").replace(h[0], "").trim(); if (rest && rest.length > 3) out.intro.push(rest); continue; } }
+      out.intro.push(l); continue;
+    }
+    const p = l.match(POST_LABEL);
+    if (p) { post = { label: `${p[1]} — ${p[2].replace(/\s+/, " ")}`, copy: p[3] ? [p[3]] : [], idea: null }; wk.items.push({ kind: "post", post }); mile = null; continue; }
+    if (post && (/^(🎥|📸|📷|🎬|📹)/u.test(l) || /^content idea\b/i.test(l))) { post.idea = l; continue; }
+    const m = l.match(MILESTONE);
+    if (m) { const ci = l.indexOf(":"); mile = { head: ci > 0 ? l.slice(0, ci) : l, body: ci > 0 && l.slice(ci + 1).trim() ? [l.slice(ci + 1).trim()] : [] }; wk.items.push({ kind: "mile", mile }); post = null; continue; }
+    if (mile) { mile.body.push(l); continue; }
+    if (post && !post.idea) { post.copy.push(l); continue; }
+    wk.items.push({ kind: "note", text: l }); post = null;
+  }
+  const posts = out.weeks.reduce((t, w) => t + w.items.filter((i) => i.kind === "post").length, 0);
+  return out.weeks.length && posts ? out : null;
+}
+function RecruitmentPlanView({ S, text }) {
+  const plan = useMemo(() => parseRecruitmentPlan(text), [text]);
+  if (!plan) return <RichOutput S={S} text={text} dark />;
+  return (
+    <div style={{ marginTop: 14, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 13 }}>
+      {(plan.hashtag || plan.intro.length > 0) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {plan.hashtag && <span style={{ ...NOIR_AI.chip, fontSize: 12, letterSpacing: 0, textTransform: "none" }}>{plan.hashtag}</span>}
+          {plan.intro.length > 0 && <span style={{ fontSize: 11, color: FIRE.textMuted, flex: "1 1 200px" }}>{plan.intro.join(" ")}</span>}
+        </div>
+      )}
+      {plan.weeks.map((w, wi) => (
+        <div key={wi}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".08em", color: FIRE.redText, margin: "14px 0 8px", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ flexShrink: 0 }}>Week {w.n}{w.sub ? ` · ${w.sub}` : ""}</span><span style={{ flex: 1, height: 1, background: FIRE.lineNoir }} />
+          </div>
+          {w.items.map((it, i) => it.kind === "post" ? (
+            <div key={i} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 9, padding: "10px 12px", marginBottom: 8 }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, color: FIRE.amberText, letterSpacing: ".03em", marginBottom: 5 }}>{it.post.label}</div>
+              {it.post.copy.length > 0 && <div style={{ fontSize: 12.5, color: FIRE.textPrimary, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{it.post.copy.join("\n")}</div>}
+              {it.post.idea && <div style={{ fontSize: 11.5, color: NOIR_AI.blueText, marginTop: 6, lineHeight: 1.45 }}>{it.post.idea}</div>}
+            </div>
+          ) : it.kind === "mile" ? (
+            <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", background: "#0e1c14", border: "1px solid rgba(47,168,105,.28)", borderRadius: 9, padding: "9px 12px", margin: "8px 0", fontSize: 11.5, color: FIRE.greenText, lineHeight: 1.45 }}>
+              <Megaphone size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span><b style={{ color: "#8fdcb0" }}>{it.mile.head}</b>{it.mile.body.length ? ` — ${it.mile.body.join(" ")}` : ""}</span>
+            </div>
+          ) : (
+            <div key={i} style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.5, margin: "4px 0 8px" }}>{it.text}</div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 function Phase({ S, n, weeks, title, items, accent }) {
   return (
-    <div style={{ ...S.phaseCard, ...FS.cardNoir, borderTop: `3px solid ${accent}` }}>
-      <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={{ ...S.phaseWeeks, color: FIRE.textMuted }}>{weeks}</span></div>
-      <div style={{ ...S.phaseTitle, color: FIRE.textPrimary }}>{title}</div>
-      <ul style={{ ...S.phaseList, color: FIRE.textSecondary }}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
+    <div style={{ ...S.phaseCard, ...FS.cardNoir, borderTop: `3px solid ${accent}`, borderRadius: 12, padding: "13px 14px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1, color: accent }}>{n}</span>
+        <span style={{ fontSize: 10.5, letterSpacing: ".03em", color: FIRE.textMuted }}>{weeks}</span>
+      </div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, margin: "0 0 9px" }}>{title}</div>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>{items.map((i) => (
+        <li key={i} style={{ position: "relative", padding: "4px 0 4px 17px", fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.35 }}>
+          <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 9, width: 6, height: 6, borderRadius: "50%", background: accent, opacity: 0.75 }} />{i}
+        </li>
+      ))}</ul>
     </div>
   );
 }
