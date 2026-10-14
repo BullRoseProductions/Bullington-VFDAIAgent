@@ -11389,7 +11389,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
     </div>
   );
 }
-function RosterReports({ S, role, members, sessions, dept, back, meId, notify }) {
+function RosterReports({ S, role, members, sessions, dept, back, meId, notify, initialReport }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const [presetKey, setPresetKey] = useState("year"); const [range, setRange] = useState(() => presetRange("year"));   // report period; default This Year (prior behavior)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only; members stays full for names/identity
@@ -11575,7 +11575,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   }
   // --- Saved reports (persisted feature="report"; soft-deletable, inherits the Phase 1 failsafe) ---
   const [reports, setReports] = useState([]);
-  const [openReport, setOpenReport] = useState(null);
+  const [openReport, setOpenReport] = useState(initialReport || null);   // the hub can open a saved report directly
   const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
   async function loadReports() {
     const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "report").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
@@ -11729,72 +11729,14 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
 // Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
 function Reports({ S, role, members, sessions, dept, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; "attendance" | "chief"
+  const [openReport, setOpenReport] = useState(null);   // a saved report picked from the hub's peek opens straight into its viewer
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
-  if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
+  if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} initialReport={openReport} back={() => { setOpenReport(null); setView(null); }} />;
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
   if (view === "stationhours") return <StationHoursReport S={S} role={role} dept={dept} notify={notify} back={() => setView(null)} />;   // notify: the needs-review panel writes, so it reports failures the same way every other leadership mutation does. role: the open-shift panel is ADMIN-only, narrower than this screen
   if (view === "capital") return <CapitalPlanReport S={S} dept={dept} back={() => setView(null)} />;
   if (view === "apparatuschecks") return <ApparatusChecksReport S={S} dept={dept} back={() => setView(null)} />;
-  return (
-    <PageShell band watermark="REPORTS" kicker="REPORTS" title="Reporting hub" sub="The records your department gets audited on — attendance, readiness, and board reports — in one place.">
-      <NoirSkin>
-      <div style={S.opGrid}>
-        <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("attendance")}>
-          <CardHead icon={CalendarCheck} title="Yearly Attendance Report" style={{ marginBottom: 0 }} />
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Full-year training attendance per member — the durable record for audits, not the rolling calendar view.</div>
-          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-          </div>
-        </Card>
-        <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("chief")}>
-          <CardHead icon={BarChart3} title="Chief's Report" style={{ marginBottom: 0 }} />
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
-          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-          </div>
-        </Card>
-        <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("actions")}>
-          <CardHead icon={ClipboardCheck} title="Action Items" style={{ marginBottom: 0 }} />
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.</div>
-          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-          </div>
-        </Card>
-        {/* hidden for a department that's switched the Station Hours module off — the report is that module's data */}
-        {moduleEnabled("stationhours", dept?.disabled_modules) && (
-          <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("stationhours")}>
-            <CardHead icon={Clock} title="Station Hours" style={{ marginBottom: 0 }} />
-            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Verified standby and training hours by member — for ISO, LOSAP, and staffing.</div>
-            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-            </div>
-          </Card>
-        )}
-        {/* hidden for a department that's switched the Apparatus module off — the plan is that module's data */}
-        {moduleEnabled("apparatus", dept?.disabled_modules) && (
-          <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("capital")}>
-            <CardHead icon={Truck} title="Capital Replacement Plan" style={{ marginBottom: 0 }} />
-            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>What the fleet cost and when each unit comes due — the forecast a chief hands the selectboard.</div>
-            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-            </div>
-          </Card>
-        )}
-        {/* Same apparatus-module gate as the Capital Plan above: both read the apparatus tables,
-            so a department that switched the module off should not be offered either. */}
-        {moduleEnabled("apparatus", dept?.disabled_modules) && (
-          <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("apparatuschecks")}>
-            <CardHead icon={ClipboardCheck} title="Apparatus Checks" style={{ marginBottom: 0 }} />
-            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Completed truck checks per unit — download any one as the county report.</div>
-            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-            </div>
-          </Card>
-        )}
-      </div>
-      </NoirSkin>
-    </PageShell>
-  );
+  return <ReportsHub S={S} members={members} sessions={sessions} dept={dept} open={(k, report) => { setOpenReport(report || null); setView(k); }} />;
 }
 /* ---------------- Board Stats (read-only) ----------------
    What Board Members and Officers see when they tap Reports. Report GENERATION (the hub, the Chief's
@@ -11811,6 +11753,95 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
 // BoardStats building blocks. MODULE-LEVEL on purpose: defined inside BoardStats they were new component
 // types every render, so React remounted their children on each state change — harmless for flat tiles,
 // but it would re-run every chart's fetch (StationHoursBars is 24 RPCs) whenever any section loaded.
+/* REPORTING HUB (b4c_reports_hub_noir.html): an audit-at-a-glance strip, report cards that each show a headline,
+   and the latest saved Chief's Reports. Every figure reuses an existing derivation so it matches Board Stats and
+   the report it opens: certCoverage + deptAttendance (data the app already holds), useStationHoursRange and
+   useApparatusReadiness (the same hooks Board Stats calls). The one read added here is the saved-report peek —
+   the same ai_outputs feature="report" query RosterReports runs, newest 3. A figure not loaded or failed is "—". */
+function ReportsHub({ S, members, sessions, dept, open }) {
+  const year = useMemo(() => presetRange("year"), []);
+  const cov = certCoverage(members, { includeProbationary: true });
+  const { avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, year);
+  const onSH = moduleEnabled("stationhours", dept?.disabled_modules), onAp = moduleEnabled("apparatus", dept?.disabled_modules);
+  const sh = useStationHoursRange(year);
+  const ap = useApparatusReadiness();
+  const shOk = sh.loaded && !sh.err, apOk = ap.loaded && !ap.err;
+  const [saved, setSaved] = useState(null);
+  useEffect(() => {
+    supabase.from("ai_outputs").select("*").eq("feature", "report").is("deleted_at", null)   // same read as RosterReports; dept-scoped by RLS
+      .then(({ data, error }) => { if (!error && data) setSaved(data.sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))); });
+  }, []);
+  const fmtShort = (ts) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
+  const glance = [
+    ["Cert coverage", cov.pct == null ? "—" : `${cov.pct}%`, cov.total ? `${cov.covered} of ${cov.total} covered` : "no active members", FIRE.greenText],
+    ["Avg attendance", drills.length ? `${avgPart}%` : "—", `${drills.length} drill${drills.length === 1 ? "" : "s"} held`, NOIR_AI.blueText],
+    ...(onSH ? [["Station hrs credited", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : (sh.err ? "unavailable" : "loading"), FIRE.greenText]] : []),
+    ...(onAp ? [["Apparatus ready", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? `${ap.totals.flagged} need attention · ${ap.totals.oos} OOS` : (ap.err ? "unavailable" : "loading"), FIRE.amberText]] : []),
+  ];
+  const card = (key, Icon, acc, title, blurb, pv, pm, badge) => (
+    <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => open(key)}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}22`, color: acc }}><Icon size={16} /></span>
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>{title}</span>
+        {badge && <span style={{ ...NOIR_AI.chip, fontSize: 9, padding: "2px 6px" }}>{badge}</span>}
+      </div>
+      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.45, flex: 1 }}>{blurb}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+        {pv != null && <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: acc, ...FS.num }}>{pv}</span>}
+        {pm && <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{pm}</span>}
+        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 600, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 3 }}>Open <ChevronRight size={14} /></span>
+      </div>
+    </Card>
+  );
+  const last = saved && saved[0];
+  return (
+    <PageShell band watermark="REPORTS" kicker="REPORTS" title="Reporting hub" sub="The records your department gets audited on — attendance, readiness, and board reports — in one place. Each one pulls from your live data.">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 6 }}>
+        <CardHead icon={ShieldAlert} title="Board-ready at a glance" right={<span>This year</span>} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 10 }}>
+          {glance.map(([l, n, x, c]) => (
+            <div key={l} style={{ ...NOIR_INSET, borderTop: `3px solid ${c}`, padding: "11px 13px" }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1, color: c, ...FS.num }}>{n}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textPrimary, marginTop: 5 }}>{l}</div>
+              <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>{x}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "0 2px 14px", lineHeight: 1.45 }}>A summary of the numbers a chief gets asked for — the reports below document each one for the council, the board, and the county.</div>
+      <SectionBar label="Reports — open any to view, draft, or download" style={{ marginTop: 0 }} />
+      <div style={S.opGrid}>
+        {card("attendance", CalendarCheck, NOIR_AI.blue, "Yearly Attendance", "Full-year training attendance per member — the durable record for audits, not the rolling calendar view.", drills.length ? `${avgPart}%` : "—", `avg · ${drills.length} drill${drills.length === 1 ? "" : "s"}`)}
+        {card("chief", BarChart3, FIRE.redBright, "Chief's Report", "The board & city readiness report — the chief's narrative over your locked, period-filtered facts.", last ? fmtShort(last.edited_at || last.created_at) : (saved ? "None yet" : "—"), saved ? `${last ? "last saved · " : ""}${saved.length} saved` : null, "AI-drafted")}
+        {card("actions", ClipboardCheck, FIRE.amberText, "Action Items", "The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.", null, null)}
+        {onSH && card("stationhours", Clock, FIRE.green, "Station Hours", "Credited standby and training hours by member — for ISO, LOSAP, and staffing.", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `credited · ${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : null)}
+        {onAp && card("capital", Truck, "#D8A24A", "Capital Replacement Plan", "What the fleet cost and when each unit comes due — the forecast a chief hands the selectboard.", null, null)}
+        {onAp && card("apparatuschecks", ClipboardCheck, "#6D8CAC", "Apparatus Checks", "Completed truck checks per unit — download any one as the county report.", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? "units ready today" : null)}
+      </div>
+      {saved && saved.length > 0 && (<>
+        <SectionBar icon={FileText} label="Recent saved reports" count={saved.length} />
+        <div style={{ ...FS.cardNoir, padding: "4px 16px" }}>
+          {saved.slice(0, 3).map((d, i, arr) => {
+            const who = (members || []).find((m) => m.id === d.created_by)?.name || "Unknown";
+            return (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 0", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><FileText size={14} color={FIRE.redText} /></span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title || "Chief's Report"}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{who} · {fmtShort(d.edited_at || d.created_at)}</div>
+                </div>
+                <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5 }} onClick={() => open("chief", d)}>Open</button>
+              </div>
+            );
+          })}
+        </div>
+      </>)}
+      </NoirSkin>
+    </PageShell>
+  );
+}
 function StatsSection({ title, note, icon, children }) {
   // Department stats (BoardStats) section: CardHead title + the period note at right.
   return (
