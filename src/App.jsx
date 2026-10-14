@@ -12518,42 +12518,53 @@ function CapitalPlanReport({ S, dept, back }) {
             cost eventually; it does not tell them what to do on Monday. The per-year set-aside
             does — it is the number that goes in a budget line. Above the forecast because it is
             the answer, and the tables below it are the working. */}
-        {groups.length > 0 && (
-          <div style={{ ...FS.cardNoir, padding: "16px 18px", marginBottom: 14 }}>
-            <CardHead icon={DollarSign} title="Recommended set-aside" />
-            <div style={{ fontFamily: DISPLAY_FONT, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, ...FS.num, lineHeight: 1.05 }}>
-              {money(recommendedAnnual)}{recommendedAnnual != null && <span style={{ fontSize: 16, fontWeight: 700, color: FIRE.textSecondary }}> / year</span>}
+        {groups.length > 0 && (() => {
+          /* Gold headline tiles (b4c_reports_capital_noir.html) — grandTotal and recommendedAnnual, both already
+             computed above. The set-aside stays the answer; the total is the scale it answers. */
+          const gold = { ...FS.cardNoir, flex: "1 1 240px", minWidth: 0, padding: "16px 18px", borderTop: "3px solid #D8A24A", background: `radial-gradient(120% 140% at 100% 0%, rgba(216,162,74,.12), transparent 55%), ${FIRE.cardNoir}` };
+          const big = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 32, lineHeight: 1.05, color: "#E6C078", ...FS.num };
+          const lab = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 7 };
+          const costed = planned.filter((r) => r.finalCost != null).length;
+          return (
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={gold}>
+                <div style={lab}>Total fleet replacement</div>
+                <div style={big}>{anyCost ? money(grandTotal) : "—"}</div>
+                <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 6 }}>{costed} unit{costed === 1 ? "" : "s"} with a replacement cost{unplanned.length ? ` · ${unplanned.length} not yet planned` : ""}</div>
+              </div>
+              <div style={gold}>
+                <div style={lab}>Recommended set-aside</div>
+                <div style={big}>{money(recommendedAnnual)}{recommendedAnnual != null && <span style={{ fontSize: 17, color: FIRE.textMuted, fontWeight: 400, fontFamily: "inherit" }}> / yr</span>}</div>
+                <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.45 }}>
+                  {recommendedAnnual == null
+                    ? "No replacement costs recorded yet — add a cost today or an override on the Apparatus page to get this figure."
+                    : "Set this aside each year to fund each unit by its replacement year."}
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
-              {recommendedAnnual == null
-                ? "No replacement costs recorded yet — add a cost today or an override on the Apparatus page to get this figure."
-                : "Set this aside each year to stay on track to fund every planned replacement."}
-            </div>
-          </div>
-        )}
+          );
+        })()}
         {/* forecast */}
         <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
           <CardHead icon={BarChart3} title="Forecast by year" style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
           {groups.length === 0 ? (
             <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No apparatus has a planned replacement year yet. Add one from the Apparatus page.</div>
           ) : (<>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
-              <thead><tr><th style={TH}>Year</th><th style={{ ...TH, textAlign: "right" }}>Units</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th></tr></thead>
-              <tbody>
-                {groups.map((g) => (
-                  <tr key={g.year} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
-                    <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary, ...FS.num }}>{g.year}</td>
-                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{g.rows.length}</td>
-                    <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</td>
-                  </tr>
-                ))}
-                <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
-                  <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Total</td>
-                  <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{planned.length}</td>
-                  <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{money(grandTotal)}</td>
-                </tr>
-              </tbody>
-            </table>
+            {(() => {
+              const max = Math.max(...groups.map((g) => g.subtotal), 1);
+              const short = (n) => n >= 1e6 ? `$${(n / 1e6).toFixed(2).replace(/0$/, "")}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : money(n);
+              return (
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 170, padding: "8px 14px 4px", overflowX: "auto" }}>
+                  {groups.map((g) => (
+                    <div key={g.year} title={`${g.year}: ${money(g.subtotal)} · ${g.rows.length} unit${g.rows.length === 1 ? "" : "s"}`} style={{ flex: "1 0 44px", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
+                      <div style={{ width: "100%", maxWidth: 46, height: `${Math.max(3, (g.subtotal / max) * 100)}%`, background: "linear-gradient(180deg,#E6C078,#D8A24A)", borderRadius: "5px 5px 0 0", opacity: g.subtotal ? 1 : 0.35 }} />
+                      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: FIRE.textSecondary }}>{g.year}</div>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{short(g.subtotal)}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             {!anyCost && <div style={{ fontSize: 11.5, color: FIRE.amberText, padding: "8px 12px 4px" }}>No replacement costs recorded yet — the totals above are $0 until a cost today or an override is filled in on the Apparatus page.</div>}
           </>)}
         </div>
