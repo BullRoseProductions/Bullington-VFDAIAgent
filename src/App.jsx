@@ -18287,7 +18287,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
       <span style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: TONE_BG[tone], color: TONE_C[tone] }}><Icon size={15} /></span>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: small ? 12.5 : 15, lineHeight: 1, color: tone === "muted" ? FIRE.textPrimary : TONE_C[tone], ...FS.num }}>{value}</div>
-        <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+        <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.3 }}>{label}</div>
       </div>
     </div>
   );
@@ -18300,7 +18300,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
           <ClipboardList size={14} color={FIRE.redBright} /> What's going into this agenda
         </div>
         <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 11, lineHeight: 1.45 }}>Pulled live from your department — the AI uses <b style={{ color: FIRE.greenText }}>only these real facts</b>, and won't invent a duty, cert, name, or date.</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))", gap: 9 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: 9 }}>
           {ctxChip(ClipboardCheck, !dutiesLoaded ? "muted" : overdueDuties.length ? "red" : "muted", dutiesLoaded ? overdueDuties.length : "—", `overdue dut${overdueDuties.length === 1 ? "y" : "ies"}${dutiesLoaded ? ` · ${openDuties.length} open` : ""}`)}
           {ctxChip(Award, expiring.length ? "amber" : "muted", certContext ? expiring.length : "—", `cert${expiring.length === 1 ? "" : "s"} expiring${expired.length ? ` · ${expired.length} expired` : ""}`)}
           {ctxChip(FilePlus, !pendLoaded ? "muted" : pendingCerts.length ? "amber" : "muted", pendLoaded ? pendingCerts.length : "—", `cert${pendingCerts.length === 1 ? "" : "s"} pending approval`)}
