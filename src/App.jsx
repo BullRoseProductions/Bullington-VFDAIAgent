@@ -21255,7 +21255,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             <span style={{ width: 34, height: 34, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}21`, color: acc }}><CatIcon size={17} /></span>
             <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flex: 1, minWidth: 0 }}>{cat}</span>
             <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-              <span style={{ width: 70, height: 5, borderRadius: 99, background: FIRE.insetNoir, overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${Math.round((dn / items.length) * 100)}%`, background: dn === items.length ? FIRE.green : acc, borderRadius: 99 }} /></span>
+              <span style={{ width: 70, height: 5, borderRadius: 99, background: FIRE.line2Noir, overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${Math.round((dn / items.length) * 100)}%`, background: dn === items.length ? FIRE.green : acc, borderRadius: 99 }} /></span>
               <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{dn}/{items.length}</span>
             </span>
           </div>
@@ -21371,7 +21371,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             return (
               <div style={{ width: 66, height: 66, flexShrink: 0, position: "relative" }}>
                 <svg width="66" height="66" viewBox="0 0 66 66" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
-                  <circle cx="33" cy="33" r={R} fill="none" stroke={FIRE.insetNoir} strokeWidth="6" />
+                  <circle cx="33" cy="33" r={R} fill="none" stroke={FIRE.line2Noir} strokeWidth="6" />
                   <circle cx="33" cy="33" r={R} fill="none" stroke={FIRE.green} strokeWidth="6" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} />
                 </svg>
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
