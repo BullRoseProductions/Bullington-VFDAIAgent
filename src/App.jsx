@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
-  Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus, Copy,
+  Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus, Copy, UtensilsCrossed,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
   Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
@@ -20812,6 +20812,20 @@ function GraphicStudio({ S, brand }) {
 
 /* ---------------- Station Duties ---------------- */
 const DUTY_CATEGORIES = ["Cleanup", "Station", "Equipment", "Apparatus", "EMS", "Admin"];
+// Station Duties category look (b4c_stationduties_richer_noir.html): a colour + icon per category. Identity only —
+// not a status colour. Categories are free text, so anything unmapped takes a steady colour from the palette by name.
+const DUTY_CAT_LOOK = {
+  cleanup: ["#4F90D6", Sparkles], station: ["#E03A44", Building2], kitchen: ["#CC9E52", UtensilsCrossed],
+  equipment: ["#CC9E52", HardHat], apparatus: ["#E03A44", Truck], ems: ["#2FA869", HeartPulse],
+  admin: ["#8E7CC3", ClipboardList], facility: ["#4F90D6", Wrench], fundraising: ["#CC9E52", DollarSign],
+};
+const DUTY_CAT_PALETTE = ["#4F90D6", "#E03A44", "#CC9E52", "#2FA869", "#8E7CC3"];
+const dutyCatLook = (cat) => {
+  const k = String(cat || "").trim().toLowerCase();
+  if (DUTY_CAT_LOOK[k]) return DUTY_CAT_LOOK[k];
+  const h = [...k].reduce((t, ch) => (t * 31 + ch.charCodeAt(0)) >>> 0, 0);
+  return [DUTY_CAT_PALETTE[h % DUTY_CAT_PALETTE.length], ClipboardCheck];
+};
 const RECUR = ["Weekly", "Monthly", "Quarterly", "One-time"];
 const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /* weekStartOf / monthKey / quarterKey / isDoneThisPeriod now live in shared/duty-period.js, which
@@ -21156,9 +21170,17 @@ function StationDuties({ S, role, members, meId, notify }) {
       const items = dutySet.filter((d) => d.category === cat);
       if (!items.length) return null;
       const dn = items.filter((d) => d.done).length;
+      const [acc, CatIcon] = dutyCatLook(cat);
       return (
-        <div key={cat} style={{ marginBottom: 12 }}>
-          <CardHead icon={ClipboardCheck} title={cat} right={<span style={{ fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{dn}/{items.length}</span>} />
+        <div key={cat} style={{ ...FS.cardNoir, borderLeft: `3px solid ${acc}`, padding: "4px 16px 8px", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 0 10px" }}>
+            <span style={{ width: 34, height: 34, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}21`, color: acc }}><CatIcon size={17} /></span>
+            <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flex: 1, minWidth: 0 }}>{cat}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <span style={{ width: 70, height: 5, borderRadius: 99, background: FIRE.insetNoir, overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${Math.round((dn / items.length) * 100)}%`, background: dn === items.length ? FIRE.green : acc, borderRadius: 99 }} /></span>
+              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{dn}/{items.length}</span>
+            </span>
+          </div>
           {items.map((a) => {
             const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
             return (
@@ -21177,7 +21199,16 @@ function StationDuties({ S, role, members, meId, notify }) {
                 })()}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
-                  {a.done && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
+                  {a.done && (() => {
+                    const who = nameById.get(a.doneBy) || "";
+                    const ini = who.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "✓";
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: FIRE.greenText, marginTop: 3 }}>
+                        <span aria-hidden="true" style={{ width: 17, height: 17, borderRadius: "50%", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 8, color: FIRE.greenText, flexShrink: 0 }}>{ini}</span>
+                        <span>done by {participantNames || "a member"} · {fmtDoneAt(a.doneAt)}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
                 {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
                 {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
@@ -21256,9 +21287,32 @@ function StationDuties({ S, role, members, meId, notify }) {
       {view === "checklist" && (<>
       <Card padding="14px 16px" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          {(() => {
+            /* Week ring — the same done / total the bar beside it always used. */
+            const tot = duties.length, pct = tot ? doneCount / tot : 0, R = 28, C = 2 * Math.PI * R;
+            return (
+              <div style={{ width: 66, height: 66, flexShrink: 0, position: "relative" }}>
+                <svg width="66" height="66" viewBox="0 0 66 66" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
+                  <circle cx="33" cy="33" r={R} fill="none" stroke={FIRE.insetNoir} strokeWidth="6" />
+                  <circle cx="33" cy="33" r={R} fill="none" stroke={FIRE.green} strokeWidth="6" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} />
+                </svg>
+                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{doneCount}/{tot}</div>
+                  <div style={{ fontSize: 9, color: FIRE.textMuted, letterSpacing: ".03em" }}>DONE</div>
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 4, ...FS.num }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: FIRE.textPrimary }}>{doneCount}</b> of {duties.length} done</span></div>
-            <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color={FIRE.green} track={FIRE.track} />
+            {(() => {
+              /* "Who cleared the first one" — the earliest doneAt among this period's done duties (data already loaded). */
+              const first = periodDuties.filter((d) => d.done && d.doneAt).sort((x, y) => String(x.doneAt).localeCompare(String(y.doneAt)))[0];
+              const who = first ? nameById.get(first.doneBy) : null;
+              return (<>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>Week of {fmtWeek(weekLabel)}</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{who ? <><b style={{ color: FIRE.textSecondary }}>{who}</b> cleared the first one · </> : (first ? "First one's cleared · " : "Nothing cleared yet · ")}resets {DOW[weekStartDay]}</div>
+              </>);
+            })()}
           </div>
           {/* Hidden in all-houses mode: it is a read/scan view, and create_duty() cannot take a
               station — a duty added here would land in the STORED house, silently and wrongly.
@@ -21305,11 +21359,12 @@ function StationDuties({ S, role, members, meId, notify }) {
         ))
       ) : renderDutyCategories(periodDuties)}
 
-      <CardHead icon={CheckCircle2} title="Other work logged" style={{ marginTop: 14 }} />
+      <div style={{ ...FS.cardNoir, padding: "13px 16px", marginTop: 4 }}>
+      <CardHead icon={CheckCircle2} title="Other work logged" style={{ marginBottom: 4 }} />
       <p style={NOIR_HELP}>{allMode ? "Work logged across every house. Go to a station to add an entry." : "Did something that isn't on the checklist? Log it here so it's on the record — anyone can add."}</p>
       {/* The log form stamps the STORED station, so in all-houses mode it would file the entry
           under whichever house happened to be active — hide it and label the rows instead. */}
-      <Card padding={16} style={{ marginBottom: 12, display: allMode ? "none" : "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ ...NOIR_INSET, padding: 14, marginBottom: 12, display: allMode ? "none" : "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What got done</span><input style={FS.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
         <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span>
           <select style={FS.input} value={lwhoId} onChange={(e) => setLwhoId(e.target.value)}>
@@ -21323,7 +21378,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input autoFocus style={FS.input} value={lwho} placeholder="e.g. Ladies Auxiliary" onChange={(e) => setLwho(e.target.value)} /></label>
         )}
         <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
-      </Card>
+      </div>
       <div>
         {currentOtherWork.length === 0 && (
           <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>Nothing logged this week yet. Earlier entries are in History.</div>
@@ -21338,6 +21393,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             {canManage && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
+      </div>
       </div>
       </>)}
 
