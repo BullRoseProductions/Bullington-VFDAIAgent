@@ -5524,7 +5524,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
 
       <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...NOIR_LABEL, fontFamily: DISPLAY_FONT, letterSpacing: ".1em", color: NOIR_AI.blueText, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
           <h3 style={NOIR_FEAT_TITLE}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
@@ -6171,10 +6171,11 @@ function Documents({ S, role, notify, uploaderName, members }) {
 const POST_THEMES = [
   // Default (seed) post themes for a department that hasn't saved its own — the noir categorical set. Saved
   // themes keep the colours they were given.
-  { tag: "PEOPLE", c: FIRE.red, t: "Member spotlight — why they serve" },
+  // Colours follow b4c_pr_noir.html: tour/clip blue, member spotlight gold, safety tip green, thank-you red.
+  { tag: "PEOPLE", c: "#D8A24A", t: "Member spotlight — why they serve" },
   { tag: "COMMUNITY", c: FIRE.catGreen, t: "Seasonal safety tip" },
   { tag: "BEHIND SCENES", c: FIRE.catBlue, t: "Training night photo or clip" },
-  { tag: "THE ASK", c: FIRE.catAmber, t: "Thank a supporter / recap the month" },
+  { tag: "THE ASK", c: FIRE.redBright, t: "Thank a supporter / recap the month" },
   { tag: "SAFETY", c: FIRE.catViolet, t: "Quick home-safety reminder" },
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -6207,7 +6208,7 @@ const TIER_STYLES = {
 };
 // compact (dashboard only): shorter cells, 2 chips per day instead of 3, slightly tighter padding. Default off,
 // so the full-page Content / Recruitment / Funding calendars are unchanged.
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted, tiles, belowHeader, card }) {
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted, tiles, belowHeader, card, footer }) {
   const chipCap = compact ? 2 : 3;
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
@@ -6279,6 +6280,7 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
             );
           })}
         </div>
+        {footer}
       </div>
     );
   }
@@ -6484,6 +6486,12 @@ function ContentCalendar({ S, role, notify }) {
         renderChip={(p) => ({ color: p.c, label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
         todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+        footer={categories.length > 0 && (
+          /* Legend: the department's own post types and their colours (saved categories keep theirs). */
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+            {categories.map((c) => <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: FIRE.textSecondary }}><i style={{ width: 8, height: 8, borderRadius: 2, background: c.c, display: "inline-block" }} />{c.tag.charAt(0) + c.tag.slice(1).toLowerCase()}</span>)}
+          </div>
+        )}
         headerExtra={
           <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
         }
@@ -6873,6 +6881,32 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
     </div>
   );
 }
+/* The drafted caption as the PR mock shows it: a card on the shared AI blue edge, the caption in body text, the
+   hashtags pulled onto their own line in the AI blue (inline ones are tinted where they sit), and Copy / Rewrite.
+   Copy takes the caption exactly as drafted; Rewrite runs the same draft() again. */
+function CaptionCard({ text, onRewrite, rewriting, notify }) {
+  const t = String(text || "").trim();
+  const m = t.match(/((?:\s*#[\w]+)+)\s*$/);
+  const body = m ? t.slice(0, m.index).trim() : t;
+  const tags = m ? m[1].trim().split(/\s+/).join(" ") : "";
+  const tint = (str) => str.split(/(#[\w]+)/g).map((p, i) => p.startsWith("#") ? <span key={i} style={{ color: NOIR_AI.blueText, fontWeight: 600 }}>{p}</span> : p);
+  async function copy() {
+    try { await navigator.clipboard.writeText(t); notify?.({ kind: "success", title: "Copied", text: "The caption is on your clipboard." }); }
+    catch { notify?.({ kind: "error", title: "Couldn't copy", text: "Your browser blocked the clipboard — select the text and copy it instead." }); }
+  }
+  return (
+    <div style={{ marginTop: 13, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 12 }}>
+      <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 9, padding: "12px 13px" }}>
+        <p style={{ margin: 0, fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tint(body)}</p>
+        {tags && <div style={{ marginTop: 8, fontSize: 12.5, color: NOIR_AI.blueText, fontWeight: 600 }}>{tags}</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 11 }}>
+          <button onClick={copy} style={{ ...FS.btn, padding: "7px 11px", fontSize: 12 }}><Copy size={13} color={FIRE.btnIcon} /> Copy</button>
+          <button onClick={onRewrite} disabled={rewriting} style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, opacity: rewriting ? 0.6 : 1 }}>{rewriting ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} color={FIRE.btnIcon} />} Rewrite</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function Visibility({ S, brand, role, notify }) {
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
   const [ideasOpen, setIdeasOpen] = useState(false);   // Ideas for Things to Make — collapsed by default
@@ -6901,7 +6935,7 @@ function Visibility({ S, brand, role, notify }) {
 
       <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <CardHead icon={Sparkles} title="AI caption helper" />
+          <div style={{ ...NOIR_AI.chip, background: "none", border: "none", padding: 0, marginBottom: 9 }}><Sparkles size={13} /> AI caption helper</div>
           <h3 style={NOIR_FEAT_TITLE}>Write a post for your station</h3>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What's the post about?</span>
             <input style={FS.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
@@ -6909,7 +6943,7 @@ function Visibility({ S, brand, role, notify }) {
             {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
           </button>
           {err && <div style={NOIR_ERR}>{err}</div>}
-          {post && <RichOutput S={S} text={post} dark />}
+          {post && <CaptionCard text={post} onRewrite={draft} rewriting={loading} notify={notify} />}
         </div>
       </div>
 
