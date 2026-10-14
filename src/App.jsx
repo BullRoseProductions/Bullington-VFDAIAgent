@@ -11843,13 +11843,16 @@ function ReportsHub({ S, members, sessions, dept, open }) {
   }, []);
   const fmtShort = (ts) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
+  // Values follow the colour rule — green good, amber warning, red bad — not a fixed accent per tile.
+  const tone = (p) => p == null ? FIRE.textSecondary : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText;
+  const apTone = !apOk ? FIRE.textSecondary : ap.totals.oos ? FIRE.redText : ap.totals.flagged ? FIRE.amberText : FIRE.greenText;
   const glance = [
-    ["Cert coverage", cov.pct == null ? "—" : `${cov.pct}%`, cov.total ? `${cov.covered} of ${cov.total} covered` : "no active members", FIRE.greenText],
-    ["Avg attendance", drills.length ? `${avgPart}%` : "—", `${drills.length} drill${drills.length === 1 ? "" : "s"} held`, NOIR_AI.blueText],
+    ["Cert coverage", cov.pct == null ? "—" : `${cov.pct}%`, cov.total ? `${cov.covered} of ${cov.total} covered` : "no active members", tone(cov.pct)],
+    ["Avg attendance", drills.length ? `${avgPart}%` : "—", `${drills.length} drill${drills.length === 1 ? "" : "s"} held`, tone(drills.length ? avgPart : null)],
     ...(onSH ? [["Station hrs credited", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : (sh.err ? "unavailable" : "loading"), FIRE.greenText]] : []),
-    ...(onAp ? [["Apparatus ready", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? `${ap.totals.flagged} need attention · ${ap.totals.oos} OOS` : (ap.err ? "unavailable" : "loading"), FIRE.amberText]] : []),
+    ...(onAp ? [["Apparatus ready", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? `${ap.totals.flagged} need attention · ${ap.totals.oos} OOS` : (ap.err ? "unavailable" : "loading"), apTone]] : []),
   ];
-  const card = (key, Icon, acc, title, blurb, pv, pm, badge) => (
+  const card = (key, Icon, acc, title, blurb, pv, pm, badge, pvColor) => (
     <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => open(key)}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ width: 32, height: 32, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}22`, color: acc }}><Icon size={16} /></span>
@@ -11858,7 +11861,7 @@ function ReportsHub({ S, members, sessions, dept, open }) {
       </div>
       <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.45, flex: 1 }}>{blurb}</div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}` }}>
-        {pv != null && <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: acc, ...FS.num }}>{pv}</span>}
+        {pv != null && <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: pvColor || FIRE.textPrimary, ...FS.num }}>{pv}</span>}
         {pm && <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{pm}</span>}
         <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 600, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 3 }}>Open <ChevronRight size={14} /></span>
       </div>
@@ -11883,12 +11886,12 @@ function ReportsHub({ S, members, sessions, dept, open }) {
       <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "0 2px 14px", lineHeight: 1.45 }}>A summary of the numbers a chief gets asked for — the reports below document each one for the council, the board, and the county.</div>
       <SectionBar label="Reports — open any to view, draft, or download" style={{ marginTop: 0 }} />
       <div style={S.opGrid}>
-        {card("attendance", CalendarCheck, NOIR_AI.blue, "Yearly Attendance", "Full-year training attendance per member — the durable record for audits, not the rolling calendar view.", drills.length ? `${avgPart}%` : "—", `avg · ${drills.length} drill${drills.length === 1 ? "" : "s"}`)}
-        {card("chief", BarChart3, FIRE.redBright, "Chief's Report", "The board & city readiness report — the chief's narrative over your locked, period-filtered facts.", last ? fmtShort(last.edited_at || last.created_at) : (saved ? "None yet" : "—"), saved ? `${last ? "last saved · " : ""}${saved.length} saved` : null, "AI-drafted")}
+        {card("attendance", CalendarCheck, NOIR_AI.blue, "Yearly Attendance", "Full-year training attendance per member — the durable record for audits, not the rolling calendar view.", drills.length ? `${avgPart}%` : "—", `avg · ${drills.length} drill${drills.length === 1 ? "" : "s"}`, null, tone(drills.length ? avgPart : null))}
+        {card("chief", BarChart3, FIRE.redBright, "Chief's Report", "The board & city readiness report — the chief's narrative over your locked, period-filtered facts.", last ? fmtShort(last.edited_at || last.created_at) : (saved ? "None yet" : "—"), saved ? `${last ? "last saved · " : ""}${saved.length} saved` : null, "AI-drafted", last ? FIRE.textPrimary : FIRE.textMuted)}
         {card("actions", ClipboardCheck, FIRE.amberText, "Action Items", "The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.", null, null)}
-        {onSH && card("stationhours", Clock, FIRE.green, "Station Hours", "Credited standby and training hours by member — for ISO, LOSAP, and staffing.", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `credited · ${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : null)}
+        {onSH && card("stationhours", Clock, FIRE.green, "Station Hours", "Credited standby and training hours by member — for ISO, LOSAP, and staffing.", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `credited · ${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : null, null, shOk ? FIRE.greenText : FIRE.textSecondary)}
         {onAp && card("capital", Truck, "#D8A24A", "Capital Replacement Plan", "What the fleet cost and when each unit comes due — the forecast a chief hands the selectboard.", null, null)}
-        {onAp && card("apparatuschecks", ClipboardCheck, "#6D8CAC", "Apparatus Checks", "Completed truck checks per unit — download any one as the county report.", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? "units ready today" : null)}
+        {onAp && card("apparatuschecks", ClipboardCheck, "#6D8CAC", "Apparatus Checks", "Completed truck checks per unit — download any one as the county report.", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? "units ready today" : null, null, apTone)}
       </div>
       {saved && saved.length > 0 && (<>
         <SectionBar icon={FileText} label="Recent saved reports" count={saved.length} />
