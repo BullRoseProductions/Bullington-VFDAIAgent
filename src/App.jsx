@@ -15525,6 +15525,10 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
   // items are loaded active=true, so "all active items marked" = every loaded item marked.
   const allMarked = !!items && items.length > 0 && markedCount === items.length;
   const unmarked = (items?.length || 0) - markedCount;
+  // Display only: the split of what's been marked, from the same marks map.
+  const passCount = (items || []).filter((it) => marks[it.id]?.result === "pass").length;
+  const failCount = (items || []).filter((it) => marks[it.id]?.result === "fail").length;
+  const pctMarked = items && items.length ? Math.round((markedCount / items.length) * 100) : 0;
   // Photo view (read-only dots colored by marks; taps → the Pass/Fail panel below).
   const dotsFor = (pid) => (items || []).filter((it) => it.photo_id === pid && it.x_pct != null);
   const checkPhoto = photos.find((p) => p.id === checkPhotoId) || photos[0] || null;
@@ -15579,25 +15583,41 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
           ) : err ? (
             <div style={{ fontSize: 13.5, color: FIRE.redText, lineHeight: 1.5 }}>{err}</div>
           ) : (<>
-            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span>{markedCount} of {(items || []).length} items marked · walk the truck and mark each one.</span>
-              {photos.length > 0 && <button onClick={() => setPhotoOpen(true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}><ImageIcon size={14} color={FIRE.btnIcon} /> Photo view</button>}
+            <div style={{ ...NOIR_INSET, padding: "11px 13px", marginBottom: 12, ...(allMarked ? { borderColor: "rgba(47,168,105,.45)" } : {}) }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: allMarked ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{markedCount}<span style={{ color: FIRE.textMuted, fontSize: 14 }}> / {(items || []).length}</span></span>
+                <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{allMarked ? "All marked — ready to finalize" : "items marked · walk the truck and mark each one"}</span>
+                {photos.length > 0 && <button onClick={() => setPhotoOpen(true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}><ImageIcon size={14} color={FIRE.btnIcon} /> Photo view</button>}
+              </div>
+              <div style={{ height: 6, borderRadius: 999, background: FIRE.card2Noir, overflow: "hidden", marginTop: 8, display: "flex" }} aria-hidden="true">
+                <span style={{ width: `${items && items.length ? (passCount / items.length) * 100 : 0}%`, background: FIRE.green }} />
+                <span style={{ width: `${items && items.length ? (failCount / items.length) * 100 : 0}%`, background: FIRE.redBright }} />
+              </div>
+              <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 11.5, ...FS.num }} aria-label={`${pctMarked}% marked`}>
+                <span style={{ color: FIRE.greenText }}>{passCount} pass</span>
+                <span style={{ color: failCount ? FIRE.redText : FIRE.textMuted }}>{failCount} fail</span>
+                <span style={{ color: unmarked ? FIRE.amberText : FIRE.textMuted }}>{unmarked} unmarked</span>
+              </div>
             </div>
             {groups.map((loc) => (
               <div key={loc} style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "6px 0 3px" }}>{loc}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "6px 0 3px" }}>
+                  <span style={{ flex: 1 }}>{loc}</span>
+                  {(() => { const g = gmap.get(loc); const d = g.filter((it) => marks[it.id]).length; return <span style={{ letterSpacing: 0, textTransform: "none", fontWeight: 600, color: d === g.length ? FIRE.greenText : FIRE.textMuted, ...FS.num }}>{d}/{g.length}</span>; })()}
+                </div>
                 {gmap.get(loc).map((it) => {
                   const mk = marks[it.id];
                   return (
                     <div key={it.id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 999, flexShrink: 0, background: mk ? (mk.result === "fail" ? FIRE.redBright : FIRE.green) : "transparent", border: `1.5px solid ${mk ? (mk.result === "fail" ? FIRE.redBright : FIRE.green) : FIRE.textMuted2}` }} />
                         <button onClick={() => it.description && setExpandedItemId(expandedItemId === it.id ? null : it.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: it.description ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
                           <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
                           {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
                         </button>
                         <div style={{ display: "inline-flex", gap: 6 }}>
-                          <button disabled={savingItemId === it.id} title="Pass" onClick={() => onPass(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : mk?.result === "pass" ? 1 : 0.45 }}><CheckCircle2 size={14} color={FIRE.green} /> Pass</button>
-                          <button disabled={savingItemId === it.id} title="Fail (needs a note)" onClick={() => openFail(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : (mk?.result === "fail" || noteItemId === it.id) ? 1 : 0.45 }}><X size={14} color={FIRE.redBright} /> Fail</button>
+                          <button disabled={savingItemId === it.id} title="Pass" onClick={() => onPass(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : 1, ...(mk?.result === "pass" ? { background: FIRE.green, borderColor: FIRE.green, color: "#fff" } : { color: FIRE.textSecondary }) }}><CheckCircle2 size={14} color={mk?.result === "pass" ? "#fff" : FIRE.green} /> Pass</button>
+                          <button disabled={savingItemId === it.id} title="Fail (needs a note)" onClick={() => openFail(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : 1, ...((mk?.result === "fail" || noteItemId === it.id) ? { background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" } : { color: FIRE.textSecondary }) }}><X size={14} color={(mk?.result === "fail" || noteItemId === it.id) ? "#fff" : FIRE.redBright} /> Fail</button>
                         </div>
                       </div>
                       {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 4px", lineHeight: 1.45 }}>{it.description}</div>}
