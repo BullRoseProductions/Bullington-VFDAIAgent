@@ -1,4 +1,11 @@
 -- =====================================================================
+-- Record: applied by hand 2026-10-14. DO NOT RE-APPLY.
+-- Applied to prod by Ashlea in the Supabase SQL editor. RETEST: 4/5 PASS; the one "fail" was a
+-- placeholder-email account (no JWT email match) failing closed, which is correct, not a defect.
+-- Archived from sql/my_station_shifts_source_DRAFT.sql so it stops surfacing as a pending decision.
+-- Body below is kept unchanged as the record of what ran.
+-- =====================================================================
+-- =====================================================================
 -- my_station_shifts — ADD `source` TO THE OUTPUT. DRAFT — NOT APPLIED. For review.
 --
 -- WHY. The member Station Hours page (b4c_mystationhours_noir.html) tags each recent shift
