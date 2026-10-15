@@ -18236,6 +18236,8 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const certContext = { expired: certRows.filter((r) => r.rank === 0), expiring: certRows.filter((r) => r.rank === 1) };
   const [title, setTitle] = useState("Monthly Business Meeting");
   const [date, setDate] = useState("");
+  const [mtgId, setMtgId] = useState("");   // picked leadership/board session ("" = not on the calendar, typed by hand)
+  const [mtgCtxOpen, setMtgCtxOpen] = useState(false);   // the detail behind the "this meeting's record" chips
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const [extracting, setExtracting] = useState(false);
@@ -18277,11 +18279,39 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const recentResolved = resolvedItems.filter((i) => !isArchived(i));   // within grace — reopenable
   const archivedResolved = resolvedItems.filter(isArchived);            // past grace — read-only, permanent
   const open = openItems.length;
+  /* THE MEETING'S RECORD — from data this screen already holds, no new read: the leadership/board
+     sessions (the `sessions` prop, which carries each session's attached plans), the action items loaded
+     below, and the saved minutes list. "Carried" = open items that were extracted from the most recent
+     minutes saved BEFORE this meeting's date (action_items.source_output_id), i.e. what the last meeting
+     left open. The agenda is what was PLANNED — the prompt is told never to treat it as what happened. */
+  const meetings = (sessions || []).filter(isRestrictedEvent).sort((a, b) => sessSort(b, a));   // newest first
+  const mtg = meetings.find((s) => String(s.id) === String(mtgId)) || null;
+  const mtgAgendas = mtg ? (mtg.plans || []).filter((p) => p.kind === "ai" && (p.ai_text || "").trim()) : [];
+  const mtgFiles = mtg ? (mtg.plans || []).filter((p) => p.kind === "file") : [];
+  const lastMinutes = mtg ? (drafts.filter((d) => new Date(d.created_at) < sessDate(mtg)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null) : null;
+  const carried = lastMinutes ? openItems.filter((i) => i.source_output_id === lastMinutes.id) : [];
+  const otherOpenItems = openItems.filter((i) => !carried.includes(i));
+  function pickMeeting(id) {
+    setMtgId(id); setMtgCtxOpen(false);
+    const s = meetings.find((x) => String(x.id) === String(id));
+    if (s) { setTitle(s.title || "Meeting"); setDate(sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })); }
+  }
   async function draft() {
     if (!notes.trim()) { setErr("Add a few rough notes first and I'll shape them into minutes."); return; }
     setLoading(true); setErr(""); setOut("");
-    const sys = "You turn a volunteer fire department's rough meeting notes into clean, structured DRAFT minutes for the secretary and board to review and approve. Use plain headers: Attendees, Old Business, New Business, Decisions, and Action Items (each action with an owner and a due date if implied). Keep it factual to the notes — never invent attendance, votes, or decisions that aren't there. Under 350 words.";
-    try { const t = await callClaude(sys, `Meeting: ${title}${date ? ` on ${date}` : ""}\nRough notes:\n${notes}`); setOut(t); setSaveTitle(title.trim().slice(0, 60) || `Minutes · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
+    const baseSys = "You turn a volunteer fire department's rough meeting notes into clean, structured DRAFT minutes for the secretary and board to review and approve. Use plain headers: Attendees, Old Business, New Business, Decisions, and Action Items (each action with an owner and a due date if implied). Keep it factual to the notes — never invent attendance, votes, or decisions that aren't there. Under 350 words.";
+    const recordSys = "\n\nA MEETING RECORD from the department's system follows the notes: the agenda attached to this meeting, and the action items open on record. Use the agenda ONLY to order the minutes and to name items the way the agenda named them. An agenda item goes into the minutes ONLY if the rough notes show it was taken up — never record an agenda item as discussed, approved, or decided because it was on the agenda. Open action items on record may be listed under Old Business as carried items that are still open; mark one done, changed, or dropped ONLY if the notes say so.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts in the rough notes and the meeting record. NEVER invent or infer a decision, a vote, a motion, an attendee, a member name, a date, a count, or a dollar figure that is not there. Do not add plausible-sounding business to fill space. If the record says 'none', do not create items for it. Keep names, dates and amounts exactly as written. The harm this prevents is real: approved minutes are the department's official record, and a fabricated decision, vote, name, date, or dollar figure becomes part of it. Under 450 words.";
+    const topN = (arr, fmt, n = 8) => !arr.length ? "none" : arr.slice(0, n).map(fmt).join("; ") + (arr.length > n ? `; …and ${arr.length - n} more` : "");
+    const fmtItem = (i) => `${i.text} — ${i.assigned_to ? (nameById.get(i.assigned_to) || "unassigned") : "unassigned"}${i.due_date ? `, due ${i.due_date}` : ""}`;
+    const record = mtg ? [
+      "",
+      "MEETING RECORD (what was PLANNED and what is OPEN on record — not what happened):",
+      `Attached agenda: ${mtgAgendas.length ? mtgAgendas.map((p) => `"${p.title || "Agenda"}"\n${(p.ai_text || "").slice(0, 4000)}`).join("\n---\n") : "none attached"}`,
+      `Open action items carried from the last minutes${lastMinutes ? ` ("${lastMinutes.title || "Untitled minutes"}")` : ""}: ${topN(carried, fmtItem)}`,
+      `Other open action items on record: ${topN(otherOpenItems, fmtItem)}`,
+    ].join("\n") : "";
+    const sys = mtg ? baseSys.replace(" Under 350 words.", "") + recordSys : baseSys;
+    try { const t = await callClaude(sys, `Meeting: ${title}${date ? ` on ${date}` : ""}\nRough notes:\n${notes}${record}`); setOut(t); setSaveTitle(title.trim().slice(0, 60) || `Minutes · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
     catch { setErr("Couldn't draft the minutes just now. Try again."); } finally { setLoading(false); }
   }
   async function saveDraft() {
@@ -18514,9 +18544,39 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI minutes drafter" />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+            <label style={{ ...S.field, flex: 1, minWidth: 220 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span>
+              <select style={FS.input} value={mtgId} onChange={(e) => pickMeeting(e.target.value)}>
+                <option value="">Not on the calendar — type it below</option>
+                {meetings.map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)} · {s.audience === "board" ? "Board" : "Leadership"}</option>)}
+              </select></label>
             <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
           </div>
+          {!mtg && <label style={{ ...S.field, marginTop: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting name</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>}
+          {mtg && (() => {
+            const chip = (label, tone) => <span style={{ fontSize: 11.5, fontWeight: 600, color: tone || FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" }}>{label}</span>;
+            const itemLine = (i) => <div key={i.id} style={{ fontSize: 12, color: FIRE.textSecondary, padding: "2px 0" }}>• {i.text}<span style={{ color: FIRE.textMuted }}> — {i.assigned_to ? (nameById.get(i.assigned_to) || "Unknown") : "Unassigned"}{i.due_date ? ` · due ${i.due_date}` : ""}</span></div>;
+            return (
+              <div style={{ ...NOIR_INSET, padding: "10px 12px", marginTop: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, flex: 1 }}>Starting from this meeting's record</span>
+                  <button type="button" onClick={() => setMtgCtxOpen((v) => !v)} aria-expanded={mtgCtxOpen} style={{ background: "none", border: "none", cursor: "pointer", color: FIRE.textSecondary, fontSize: 11.5, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 3, padding: 0 }}>{mtgCtxOpen ? "Hide" : "Show"}{mtgCtxOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {mtgAgendas.length ? chip(`Agenda attached · ${mtgAgendas[0].title || "Agenda"}${mtgAgendas.length > 1 ? ` +${mtgAgendas.length - 1}` : ""}`, FIRE.greenText) : chip(mtgFiles.length ? "Agenda attached as a file — not read into the draft" : "No agenda attached", FIRE.textMuted)}
+                  {chip(`${openItems.length} open action item${openItems.length === 1 ? "" : "s"}`)}
+                  {lastMinutes ? chip(`${carried.length} carried from ${lastMinutes.title || "the last minutes"}`, carried.length ? FIRE.amberText : undefined) : chip("No earlier minutes saved", FIRE.textMuted)}
+                </div>
+                {mtgCtxOpen && (
+                  <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                    {carried.length > 0 && <><div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, margin: "2px 0 3px" }}>Carried from the last minutes</div>{carried.map(itemLine)}</>}
+                    {otherOpenItems.length > 0 && <><div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, margin: "8px 0 3px" }}>Other open action items</div>{otherOpenItems.map(itemLine)}</>}
+                    {!openItems.length && <div style={{ fontSize: 12, color: FIRE.textMuted }}>No open action items on record.</div>}
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.4 }}>The draft follows this agenda's order and lists open items as carried — but only what your notes cover goes in as discussed or decided.</div>
+              </div>
+            );
+          })()}
           <label style={{ ...S.field, marginTop: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rough notes</span>
             <textarea style={{ ...FS.input, minHeight: 110, resize: "vertical", lineHeight: 1.5 }} value={notes} placeholder={"Who was there, what came up, what was decided, what people agreed to do…"} onChange={(e) => setNotes(e.target.value)} /></label>
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
