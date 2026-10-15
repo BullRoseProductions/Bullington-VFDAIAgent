@@ -1,0 +1,23 @@
+commit 6d1e3d252d0fcefdff809d8c6e95f50681d26807
+Author: BullRoseProductions <ashlea@bullroseproductions.com>
+Date:   Thu Oct 15 12:16:08 2026 -0500
+
+    B1 follow-up: six radar rollup tiles fit one row (min 128px) — presentation
+    
+    Gate: 1376 -> 1376; reads 280 / 169 unchanged; 0 changed lines reference verified.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 06556ba..df3c539 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -22763,7 +22763,7 @@ function ProgramOverview({ S, role, notify, go }) {
+       sub="Health across all departments — who needs attention, and why. Surfaced from live data, so you can catch problems before anyone reports them.">
+       {/* Noir skin, as on the dashboards: icon tiles, CardHead headers and the gradient card face throughout. */}
+       <NoirSkin>
+-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 12 }}>
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(128px, 100%), 1fr))", gap: 8, marginBottom: 12 }}>
+         <StatTile icon={Building2} value={show(rows ? rows.length : null)} label="Departments" sub={needing == null ? undefined : needing ? `${needing} need${needing === 1 ? "s" : ""} attention` : "all healthy"} tone={problem(needing, "red")} />
+         <StatTile icon={Users} value={show(sum("member_count"))} label="Members" sub="across all depts" />
+         <StatTile icon={Clock} value={show(stuck)} tone={problem(stuck, "red")} label="Open 24h+ shifts" sub={whereSub("open_long_shifts_count", "none open")} />
