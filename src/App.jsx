@@ -18293,7 +18293,12 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const mtg = meetings.find((s) => String(s.id) === String(mtgId)) || null;
   const mtgAgendas = mtg ? (mtg.plans || []).filter((p) => p.kind === "ai" && (p.ai_text || "").trim()) : [];
   const mtgFiles = mtg ? (mtg.plans || []).filter((p) => p.kind === "file") : [];
-  const lastMinutes = mtg ? (drafts.filter((d) => new Date(d.created_at) < sessDate(mtg)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null) : null;
+  // The last minutes of the SAME kind of meeting when there is one (a board meeting carries from the last board
+  // minutes, not last month's business meeting) — title-based, like the saved list, until minutes can be
+  // assigned to a meeting. Falls back to the latest minutes of any kind.
+  const priorMinutes = mtg ? drafts.filter((d) => new Date(d.created_at) < sessDate(mtg)).sort((a, b) => b.created_at.localeCompare(a.created_at)) : [];
+  const sameKind = (d) => (/board/i.test(d.title || "")) === (mtg?.audience === "board");
+  const lastMinutes = priorMinutes.find(sameKind) || priorMinutes[0] || null;
   const carried = lastMinutes ? openItems.filter((i) => i.source_output_id === lastMinutes.id) : [];
   const otherOpenItems = openItems.filter((i) => !carried.includes(i));
   function pickMeeting(id) {

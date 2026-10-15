@@ -1,5 +1,5 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index c772f2e..271420f 100644
+index c772f2e..7bdcbe5 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -18236,6 +18236,8 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
@@ -11,7 +11,7 @@ index c772f2e..271420f 100644
    const [notes, setNotes] = useState("");
    const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
    const [extracting, setExtracting] = useState(false);
-@@ -18277,11 +18279,44 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
+@@ -18277,11 +18279,49 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
    const recentResolved = resolvedItems.filter((i) => !isArchived(i));   // within grace — reopenable
    const archivedResolved = resolvedItems.filter(isArchived);            // past grace — read-only, permanent
    const open = openItems.length;
@@ -29,7 +29,12 @@ index c772f2e..271420f 100644
 +  const mtg = meetings.find((s) => String(s.id) === String(mtgId)) || null;
 +  const mtgAgendas = mtg ? (mtg.plans || []).filter((p) => p.kind === "ai" && (p.ai_text || "").trim()) : [];
 +  const mtgFiles = mtg ? (mtg.plans || []).filter((p) => p.kind === "file") : [];
-+  const lastMinutes = mtg ? (drafts.filter((d) => new Date(d.created_at) < sessDate(mtg)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null) : null;
++  // The last minutes of the SAME kind of meeting when there is one (a board meeting carries from the last board
++  // minutes, not last month's business meeting) — title-based, like the saved list, until minutes can be
++  // assigned to a meeting. Falls back to the latest minutes of any kind.
++  const priorMinutes = mtg ? drafts.filter((d) => new Date(d.created_at) < sessDate(mtg)).sort((a, b) => b.created_at.localeCompare(a.created_at)) : [];
++  const sameKind = (d) => (/board/i.test(d.title || "")) === (mtg?.audience === "board");
++  const lastMinutes = priorMinutes.find(sameKind) || priorMinutes[0] || null;
 +  const carried = lastMinutes ? openItems.filter((i) => i.source_output_id === lastMinutes.id) : [];
 +  const otherOpenItems = openItems.filter((i) => !carried.includes(i));
 +  function pickMeeting(id) {
@@ -58,7 +63,7 @@ index c772f2e..271420f 100644
      catch { setErr("Couldn't draft the minutes just now. Try again."); } finally { setLoading(false); }
    }
    async function saveDraft() {
-@@ -18514,9 +18549,43 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
+@@ -18514,9 +18554,43 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
          <div style={{ flex: 1 }}>
            <CardHead icon={Sparkles} title="AI minutes drafter" />
            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
