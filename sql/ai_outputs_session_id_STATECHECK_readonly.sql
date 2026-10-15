@@ -1,4 +1,4 @@
--- READ-ONLY. What did the failed run of ai_outputs_session_id_DRAFT.sql leave behind? Nothing here writes.
+-- READ-ONLY. What did the failed run of ai_outputs_session_id_2026-10-15.sql leave behind? Nothing here writes.
 -- All false / 0 = nothing applied. Any true / 1 = a partial apply (the fixed migration finishes it safely).
 SELECT
   EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ai_outputs' AND column_name = 'session_id') AS column_exists,

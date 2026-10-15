@@ -1,5 +1,11 @@
 -- =====================================================================
--- ai_outputs.session_id — ASSIGN MINUTES TO A MEETING. DRAFT v2 — NOT APPLIED. For review.
+-- ai_outputs.session_id — ASSIGN MINUTES TO A MEETING.
+-- Record: applied by hand 2026-10-15. DO NOT RE-APPLY (harmless if re-run: idempotent).
+--   v1 ran statement-by-statement in the Supabase editor and committed every object, failing only at the
+--   temp-table post-condition (and before NOTIFY). v2 (this file) was then run over it: state check =
+--   uuid nullable=YES · minutes-only CHECK · guard trigger 1 · anon_can_execute false · 4 ai_outputs policies.
+--   RETEST 2026-10-15 on live: 16 passed, 0 failed, 4 skipped (Granbury, Indian Harbor, Demo: no minutes or no
+--   leadership/board meeting; Lipan: no agenda). Read scope unchanged — no policy statement in either version.
 -- v2 (2026-10-15): one DO block. v1 failed in the Supabase editor (temp table gone between statements).
 -- Test script: sql/ai_outputs_session_id_RETEST.sql (run AFTER this, separately).
 --

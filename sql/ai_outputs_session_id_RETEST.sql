@@ -1,5 +1,8 @@
 -- =====================================================================
--- RETEST for ai_outputs_session_id_DRAFT.sql. READ-ONLY IN EFFECT — run AFTER the migration, separately.
+-- RETEST for ai_outputs_session_id_2026-10-15.sql.
+-- RAN 2026-10-15 on live: 16 passed, 0 failed, 4 skipped. North Hood A-H all PASS; Lipan A-E, G, H PASS (F skipped,
+-- no agenda). INFO I: a non-leader reads every minutes row of their department via RLS (North Hood 15 of 15) —
+-- the existing department-wide read, unchanged by this migration. READ-ONLY IN EFFECT — run AFTER the migration, separately.
 -- One DO block. For each department that has a leader, a live minutes record and a leadership/board
 -- meeting, it signs in as that leader exactly as the app does (JWT email claim + role authenticated) and:
 --   A. assigns its own minutes to its own leadership/board meeting      -> works, session_id set,
