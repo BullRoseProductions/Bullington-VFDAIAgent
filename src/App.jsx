@@ -6201,6 +6201,14 @@ const stableIndex = (id, n) => {
   return sum % n;
 };
 const frColor = (fr) => fr?.color || CATEGORY_COLORS[stableIndex(fr?.id, CATEGORY_COLORS.length)];
+/* PR category colour when a department's saved category has none. Category colours are per-department data:
+   a stored colour always wins and is never remapped. Only a blank one takes the Industrial Noir accent rotation
+   (red, amber, green, blue, steel, gold) by its place in the department's sort order. Display only: the fallback is
+   never written back, so a post added under a colourless category still saves the category's own (blank) colour.
+   "None" is blank OR the column default #54506B (post_categories.color is NOT NULL DEFAULT '#54506B'); the picker
+   never offers that value, so a row carrying it is one nobody coloured. */
+const PR_FALLBACK_COLORS = [FIRE.redBright, FIRE.catAmber, FIRE.catGreen, FIRE.catBlue, "#8C9AAB", "#D8A24A"];
+const prColorSet = (c) => !!c && String(c).toUpperCase() !== "#54506B";
 const TIER_STYLES = {
   bar:  { fontSize: 10.5, fontWeight: 700, padding: "3px 6px", borderRadius: 5 },
   pill: { fontSize: 9.5,  fontWeight: 600, padding: "2px 5px", borderRadius: 999 },
@@ -6349,7 +6357,7 @@ function ContentCalendar({ S, role, notify }) {
   };
   useEffect(() => { loadPosts(); }, []);
   const [categories, setCategories] = useState(
-    POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, t: th.t, isDefault: true, sortOrder: i }))
+    POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, stored: th.c, t: th.t, isDefault: true, sortOrder: i }))
   );
   function loadCategories(isInitial) {
     supabase.from("post_categories")
@@ -6357,7 +6365,7 @@ function ContentCalendar({ S, role, notify }) {
       .order("sort_order", { ascending: true })
       .then(({ data, error }) => {
         if (error || !data || data.length === 0) return;   // keep fallback if empty/error
-        setCategories(data.map((r) => ({ id: r.id, tag: r.label, c: r.color, t: r.default_text || "", isDefault: r.is_default, sortOrder: r.sort_order })));
+        setCategories(data.map((r, i) => ({ id: r.id, tag: r.label, c: prColorSet(r.color) ? r.color : PR_FALLBACK_COLORS[i % PR_FALLBACK_COLORS.length], stored: r.color, t: r.default_text || "", isDefault: r.is_default, sortOrder: r.sort_order })));
         if (isInitial) {                       // only the mount load seeds the form selection;
           const first = data[0];               // refetches after add/delete must NOT clobber an open form
           setFi(first.id);
@@ -6392,7 +6400,7 @@ function ContentCalendar({ S, role, notify }) {
       date: toISO(new Date(cur.y, cur.m, Number(fd))),
       theme: cat.tag,
       caption: ft.trim() || cat.t,
-      color: cat.c,
+      color: cat.stored,   // the saved colour as-is — never the display fallback
     };
     const { error } = await supabase.from("content_calendar").insert(row);
     if (error) { notify({ kind: "error", title: "Couldn't add the post", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
@@ -6483,7 +6491,7 @@ function ContentCalendar({ S, role, notify }) {
       <MonthCalendar
         cur={cur} setCur={setCur} dark tiles card
         items={monthPosts}
-        renderChip={(p) => ({ color: p.c, label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
+        renderChip={(p) => ({ color: prColorSet(p.c) ? p.c : categories.find((c) => c.tag === p.tag)?.c || PR_FALLBACK_COLORS[0], label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
         todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         footer={categories.length > 0 && (
