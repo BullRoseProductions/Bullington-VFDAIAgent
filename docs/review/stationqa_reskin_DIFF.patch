@@ -1,0 +1,119 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index e1e9f97..da6f6de 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -4960,30 +4960,31 @@ function StationQA({ S }) {
+   const [input, setInput] = useState("");
+   const [loading, setLoading] = useState(false);
+   const [err, setErr] = useState("");
+-  const [ground, setGround] = useState({ text: "", has: false, note: "" });   // grounding context, hasGrounding, size-limit note
++  const [ground, setGround] = useState({ text: "", has: false, note: "", names: [], loaded: false });   // grounding context, hasGrounding, size-limit note, included doc names (display only), read finished
+   useEffect(() => {
+     let alive = true;
+     (async () => {
+       const { data: deptId } = await supabase.rpc("my_department_id");
+-      if (!deptId || !alive) return;
++      if (!deptId || !alive) { if (alive) setGround((g) => ({ ...g, loaded: true })); return; }
+       const { data, error } = await supabase.from("documents")
+         .select("name, content_text")
+         .eq("department_id", deptId)
+         .is("deleted_at", null)                 // current versions only —
+         .is("archived_at", null)                // composes with the Failsafe
+         .not("content_text", "is", null);
+-      if (!alive || error || !data || data.length === 0) return;
++      if (!alive) return;
++      if (error || !data || data.length === 0) { setGround((g) => ({ ...g, loaded: true })); return; }
+       const CAP = 300000;                         // ~300k-char (~75k-token) grounding budget; safely within the
+                                                   // model's 200k-token window. Real RAG would retrieve instead
+                                                   // of stuffing everything in.
+-      let text = ""; let included = 0;
++      let text = ""; let included = 0; const names = [];
+       for (const d of data) {
+         const block = `=== ${d.name} ===\n${d.content_text}`;
+         if (text.length + block.length + 2 > CAP) break;   // stop once the next doc would exceed the budget
+         text += (text ? "\n\n" : "") + block;
+-        included++;
++        included++; names.push(d.name);
+       }
+-      setGround({ text, has: included > 0, note: included < data.length ? `${included} of ${data.length} documents included (size limit)` : "" });
++      setGround({ text, has: included > 0, note: included < data.length ? `${included} of ${data.length} documents included (size limit)` : "", names, loaded: true });
+     })();
+     return () => { alive = false; };
+   }, []);
+@@ -5003,28 +5004,59 @@ function StationQA({ S }) {
+   }
+   const submit = () => { const t = input.trim(); if (!t || loading) return; send(t); };
+   return (
+-    <PageShell band watermark="Q&A" kicker={<>STATION Q&amp;A</>} title="Ask the station assistant" sub={<>{ground.has ? "Grounded in your uploaded SOPs — always verify locally." : "General fire & EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally."}{ground.has && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>This assistant reads your department's uploaded SOP text to answer.{ground.note ? ` (${ground.note})` : ""}</div>}</>}>
++    <PageShell band watermark="Q&A" kicker={<>STATION Q&amp;A</>} title="Ask the station assistant" sub="Questions about tactics, procedures and training — answered from your department's SOPs when they cover it.">
+       <NoirSkin>
+-      <Disclaimer S={S} compact dark />
+-      <div style={{ marginTop: 12 }}>
+-        {turns.map((t, i) => (
+-          <div key={i} style={{ marginBottom: 10 }}>
+-            {t.role === "user" ? (
+-              <Card padding="10px 14px" style={{ fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.content}</Card>
+-            ) : (
+-              <Card padding="12px 16px"><RichOutput S={S} text={t.content} dark /></Card>
+-            )}
++      {/* What the assistant is reading — the SAME documents read above; this only reports it. */}
++      <div style={{ ...NOIR_INSET, padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
++        {!ground.loaded
++          ? <><Loader2 size={15} className="spin" color={NOIR_AI.blueText} /><span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>Reading your SOPs…</span></>
++          : ground.has
++            ? <><FileText size={15} color={NOIR_AI.blueText} style={{ flexShrink: 0 }} />
++                <span style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>Reading <b style={{ color: FIRE.textPrimary, ...FS.num }}>{ground.names.length}</b> SOP document{ground.names.length === 1 ? "" : "s"} — answers cite them when they apply.{ground.note ? <span style={{ color: FIRE.amberText }}> {ground.note}.</span> : ""}</span>
++                <span style={NOIR_AI.chip}>SOP-grounded</span></>
++            : <><BookOpen size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
++                <span style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>No SOP text uploaded yet — answers are general fire-service guidance and will say so.</span></>}
++      </div>
++      <div>
++        {turns.map((t, i) => {
++          if (t.role === "user") return (
++            <div key={i} style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
++              <div style={{ maxWidth: "85%", fontSize: 13.5, lineHeight: 1.45, color: FIRE.textPrimary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: "12px 12px 3px 12px", padding: "9px 13px" }}>{t.content}</div>
++            </div>
++          );
++          // Cited vs general — read off the answer itself: it names one of the loaded SOP documents, or it doesn't.
++          const cites = ground.has ? ground.names.filter((n) => n && t.content.toLowerCase().includes(String(n).toLowerCase())) : [];
++          const cited = cites.length > 0;
++          return (
++            <div key={i} style={{ ...FS.cardNoir, padding: "12px 15px", marginBottom: 10, borderLeft: `3px solid ${cited ? NOIR_AI.blue : FIRE.line2Noir}`, ...(cited ? { background: `${NOIR_AI.glow}, ${FS.cardNoir.background}` } : {}) }}>
++              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
++                {cited
++                  ? <><span style={NOIR_AI.chip}><FileText size={11} /> From your SOPs</span>{cites.slice(0, 3).map((n) => <span key={n} style={{ fontSize: 11, color: NOIR_AI.blueText, border: `1px solid rgba(79,144,214,.3)`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}</>
++                  : <span style={{ ...NOIR_AI.chip, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>General guidance</span>}
++              </div>
++              <RichOutput S={S} text={t.content} dark />
++            </div>
++          );
++        })}
++        {turns.length === 0 && !loading && (
++          <div style={{ ...NOIR_INSET, padding: "12px 14px", fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5 }}>
++            Ask anything — for example:
++            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
++              {["What's our RIT procedure?", "Offensive vs defensive attack?", "What goes into a primary search?"].map((q) => (
++                <button key={q} type="button" onClick={() => send(q)} disabled={loading || !ground.loaded} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}>{q}</button>
++              ))}
++            </div>
+           </div>
+-        ))}
+-        {turns.length === 0 && !loading && <div style={{ fontSize: 13, color: FIRE.textMuted, fontStyle: "italic" }}>Ask anything — e.g. &ldquo;What's the difference between an offensive and defensive attack?&rdquo;, &ldquo;How does a RIT work?&rdquo;, &ldquo;What goes into a primary search?&rdquo;</div>}
+-        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Thinking…</div>}
++        )}
++        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> {ground.has ? "Checking your SOPs…" : "Thinking…"}</div>}
+         {err && <div style={NOIR_ERR}>{err}</div>}
+       </div>
+-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+-        <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder="Ask a question…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
+-        <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>Ask</button>
++      <div style={{ marginTop: 12 }}><Disclaimer S={S} compact dark /></div>
++      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, padding: 6, borderRadius: 12, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>
++        <input style={{ ...FS.input, flex: 1, minWidth: 0, border: "none", background: "transparent" }} value={input} placeholder="Ask the station assistant…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} aria-label="Your question" />
++        <button style={{ ...FS.btnPrimary, padding: "9px 14px", opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}><Send size={15} /> Ask</button>
+       </div>
+-      {turns.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Clear</button>}
++      {turns.length > 0 && <button style={{ ...FS.btn, marginTop: 10, padding: "6px 11px", fontSize: 12 }} onClick={reset}><RefreshCw size={13} color={FIRE.btnIcon} /> New conversation</button>}
+       </NoirSkin>
+     </PageShell>
+   );
