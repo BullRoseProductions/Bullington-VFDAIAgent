@@ -1429,16 +1429,18 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
   }
 
   return (
-    <PageShell band kicker="AFTER-CALL CHECKLIST" title="After-Call Checklist"
+    <PageShell band watermark="AFTER" kicker="AFTER-CALL CHECKLIST" title="After-Call Checklist"
       sub="A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.">
       <NoirSkin>
 
       {/* the toggle */}
-      <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 12 }}>
+      <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 12, borderTop: `3px solid ${enabled ? FIRE.greenText : FIRE.amberText}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ width: 38, height: 38, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${FIRE.amberText}22`, border: `1px solid ${FIRE.amberText}44` }}><ClipboardCheck size={19} color={FIRE.amberText} /></span>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>
               {enabled ? "On for your department" : "Off"}
+              <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", borderRadius: 5, padding: "2px 6px", color: enabled ? FIRE.greenText : FIRE.textMuted, border: `1px solid ${enabled ? `${FIRE.greenText}66` : FIRE.line2Noir}` }}>{enabled ? "Live" : "Off by default"}</span>
             </div>
             <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.5 }}>
               {enabled
@@ -1447,9 +1449,12 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
             </div>
           </div>
           {isDA ? (
-            <button disabled={busyToggle} onClick={toggle}
-                    style={{ ...(enabled ? FS.btn : FS.btnPrimary), opacity: busyToggle ? 0.7 : 1 }}>
-              {busyToggle ? <><Loader2 size={15} className="spin" /> Saving…</> : (enabled ? "Turn off" : <><CheckCircle2 size={15} /> Turn on</>)}
+            <button disabled={busyToggle} onClick={toggle} aria-pressed={enabled} aria-label={enabled ? "Turn the After-Call Checklist off" : "Turn the After-Call Checklist on"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: busyToggle ? "default" : "pointer", fontFamily: "inherit", padding: 4, opacity: busyToggle ? 0.7 : 1 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }}>{busyToggle ? "Saving…" : enabled ? "On" : "Off"}</span>
+              <span aria-hidden="true" style={{ width: 46, height: 26, borderRadius: 999, position: "relative", transition: "background .15s", background: enabled ? FIRE.green : FIRE.card2Noir, border: `1px solid ${enabled ? FIRE.green : FIRE.line2Noir}` }}>
+                <span style={{ position: "absolute", top: 2, left: enabled ? 22 : 2, width: 20, height: 20, borderRadius: 999, background: "#fff", transition: "left .15s" }} />
+              </span>
             </button>
           ) : (
             /* Read-only for a leader who can curate the list but not switch the feature on.
@@ -1471,7 +1476,7 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
       {/* the shared list — only once the feature is on */}
       {enabled && (
         <div style={{ ...FS.cardNoir, padding: "8px 0" }}>
-          <CardHead icon={ClipboardCheck} title="The task list" style={{ padding: "10px 14px 2px", marginBottom: 4 }} />
+          <CardHead icon={ClipboardCheck} title="The task list" count={items ? items.length : undefined} style={{ padding: "10px 14px 2px", marginBottom: 4 }} />
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
             One list for the whole department — every rig uses it. Crews tick these off after a call.
           </div>
@@ -1486,8 +1491,9 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
               No tasks yet — add the things crews do after a call.
             </div>
           )}
-          {(items || []).map((it) => (
-            <div key={it.id} style={{ padding: "10px 14px", borderTop: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {(items || []).map((it, idx) => (
+            <div key={it.id} style={{ padding: "10px 14px", borderTop: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, fontWeight: 700, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, ...FS.num }}>{idx + 1}</span>
               {editingId === it.id ? (<>
                 <input style={{ ...FS.input, flex: 1, minWidth: 180 }} value={editBuf} autoFocus
                        onChange={(e) => setEditBuf(e.target.value)}
@@ -1516,7 +1522,7 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
                 <button disabled={busy} style={FS.btn} onClick={() => { setAdding(false); setLabel(""); }}>Cancel</button>
               </div>
             ) : (
-              <button style={FS.btn} onClick={() => setAdding(true)}><Plus size={15} /> Add a task</button>
+              <button style={{ ...FS.btn, width: "100%", justifyContent: "center", borderStyle: "dashed" }} onClick={() => setAdding(true)}><Plus size={15} /> Add a task</button>
             )}
           </div>
         </div>
