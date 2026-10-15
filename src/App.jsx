@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
-import { mergeStationHours } from "../shared/station-hours.js";
+import { mergeStationHours, rollupStationHours } from "../shared/station-hours.js";
 import { todayISOIn } from "../shared/zoned-time.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
@@ -12875,6 +12875,7 @@ const RANGES = {
 // summary are guaranteed to be the same rows. Still no coordinates anywhere — a shift carries only
 // verified true/false, and no distance is ever computed or shown.
 function StationHoursReport({ S, role, dept, notify, back }) {
+  const [openDay, setOpenDay] = useState(null);   // day-of-month opened in the Month-at-a-glance detail (null = closed)
   const [rangeKey, setRangeKey] = useState("month");
   const [shifts, setShifts] = useState([]);
   const [onNow, setOnNow] = useState([]);
@@ -13452,9 +13453,73 @@ function StationHoursReport({ S, role, dept, notify, back }) {
               {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} style={{ textAlign: "center", fontSize: 9.5, fontWeight: 600, color: FIRE.textMuted }}>{d}</div>)}
               {Array.from({ length: lead }, (_, i) => <div key={`b${i}`} />)}
               {Array.from({ length: dim }, (_, i) => i + 1).map((d) => (
-                <div key={d} title={`${new Date(y, mo, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: ${perDay[d]} shift${perDay[d] === 1 ? "" : "s"}`} style={{ aspectRatio: "1 / .8", borderRadius: 6, background: shade(perDay[d]), border: `1px solid ${FIRE.lineNoir}`, fontSize: 10, fontWeight: 600, color: perDay[d] ? "#fff" : FIRE.textMuted, padding: "3px 5px" }}>{d}</div>
+                perDay[d] > 0 ? (
+                  <button key={d} type="button" onClick={() => setOpenDay(openDay === d ? null : d)} aria-pressed={openDay === d} title={`${new Date(y, mo, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: ${perDay[d]} shift${perDay[d] === 1 ? "" : "s"} — tap for detail`} style={{ aspectRatio: "1 / .8", borderRadius: 6, background: shade(perDay[d]), border: `1px solid ${openDay === d ? "#fff" : FIRE.lineNoir}`, boxShadow: openDay === d ? `0 0 0 2px ${FIRE.redBright}` : "none", fontSize: 10, fontWeight: 600, color: "#fff", padding: "3px 5px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", display: "block", width: "100%" }}>{d}</button>
+                ) : (
+                  <div key={d} title={`${new Date(y, mo, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: 0 shifts`} style={{ aspectRatio: "1 / .8", borderRadius: 6, background: shade(0), border: `1px solid ${FIRE.lineNoir}`, fontSize: 10, fontWeight: 600, color: FIRE.textMuted, padding: "3px 5px" }}>{d}</div>
+                )
               ))}
             </div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8 }}>Tap any day with shifts to see who was on station.</div>
+        {openDay && perDay[openDay] > 0 && (() => {
+          /* DAY DETAIL — the day's shift rows from the SAME `shifts` the figures above use (no new read). Every
+             number and badge comes from the shared rollupStationHours rule — run over the day for the tiles and
+             over each shift alone for its badge — so there is no second crediting rule to drift. Credited and
+             not-credited stay side by side, never summed together. */
+          const dayShifts = shifts.filter((x) => { const t = new Date(x.checked_in_at); return !isNaN(t) && t.getFullYear() === y && t.getMonth() === mo && t.getDate() === openDay; })
+            .sort((p, q) => String(p.checked_in_at).localeCompare(String(q.checked_in_at)));
+          const day = rollupStationHours(dayShifts).totals;
+          const onStation = dayShifts.reduce((t, x) => t + (Number(x.hours) || 0), 0);
+          // The rollup files every hour in exactly one bucket (standby, training, or not credited), so the
+          // not-credited hours are the day's recorded hours minus the credited ones.
+          const credited = day.standby + day.training, notCredited = Math.max(0, onStation - credited), officerN = day.oTrue;
+          const memberN = new Set(dayShifts.map((x) => x.member_id)).size;
+          const badgeOf = (x) => {
+            const r = rollupStationHours([x]).totals;
+            if (r.autoClosed) return ["Not credited · auto-closed", FIRE.amberText];   // the rule's first branch
+            if (r.vTrue) return ["Verified", FIRE.greenText];
+            if (r.oTrue) return ["Officer", "#7FB2E6"];
+            return ["Not credited", FIRE.amberText];
+          };
+          const tile = (label, v, c) => (
+            <div style={{ ...NOIR_INSET, padding: "10px 12px", minWidth: 0 }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1, color: c || FIRE.textPrimary, ...FS.num }}>{v}</div>
+              <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 4 }}>{label}</div>
+            </div>
+          );
+          return (
+            <div style={{ ...NOIR_INSET, padding: "13px 14px", marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>{new Date(y, mo, openDay).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{dayShifts.length} shift{dayShifts.length === 1 ? "" : "s"} · {memberN} member{memberN === 1 ? "" : "s"}</div>
+                </div>
+                <button onClick={() => setOpenDay(null)} aria-label="Close day detail" title="Close" style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}><X size={14} color={FIRE.textSecondary} /></button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(130px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
+                {tile("On station (all recorded)", `${h1(onStation)} h`)}
+                {tile("Credited (Verified + Officer) · sum of shifts", `${h1(credited)} h`, FIRE.greenText)}
+                {tile("Officer check-ins", String(officerN), "#7FB2E6")}
+                {tile("Recorded — not credited", `${h1(notCredited)} h`, notCredited ? FIRE.amberText : undefined)}
+              </div>
+              <div style={{ fontSize: 10.5, color: FIRE.textMuted, margin: "-2px 0 8px", lineHeight: 1.4 }}>Sums of this day's shifts. A drill during a standby shift counts once in the period figures above, which stay the credited record.</div>
+              {dayShifts.map((x, i) => {
+                const [bl, bc] = badgeOf(x);
+                const outNextDay = x.checked_out_at && new Date(x.checked_in_at).toDateString() !== new Date(x.checked_out_at).toDateString();
+                return (
+                  <div key={`${x.member_id}-${x.checked_in_at}-${i}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none", flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{x.member_name || "A member"}</div>
+                      <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{fmtHm(x.checked_in_at)} – {x.checked_out_at ? `${outNextDay ? `${fmtDate(x.checked_out_at)} · ` : ""}${fmtHm(x.checked_out_at)}` : "open"} · {x.kind === "training" ? "training" : "standby"}</div>
+                    </div>
+                    <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1(x.hours)} h</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".04em", color: bc, background: `${bc}1A`, border: `1px solid ${bc}55`, borderRadius: 5, padding: "2px 7px" }}>{bl}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
           </Card>
         );
       })()}
