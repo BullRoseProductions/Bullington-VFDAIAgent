@@ -1,0 +1,91 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index d1166ce..1e661e6 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -11437,6 +11437,13 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+   const onMod = (k) => moduleEnabled(k, dept?.disabled_modules);
+   const canSeeMoney = canManage(role) && onMod("funding");   // Board Stats' money gate, exactly
+   const mf = useMoneyFacts(range, canSeeMoney);
++  // Per-report chooser (default ON): a money viewer can leave funding out of THIS report. It governs the OUTPUTS —
++  // draft lines, buildReportData() / PDF, and so the saved copy — while the on-screen card stays under canSeeMoney.
++  const [includeFunding, setIncludeFunding] = useState(true);
++  const fundingInReport = canSeeMoney && includeFunding;
++  // The saved copy is the AI draft, so it must match the toggle: remember the setting each draft was made under and
++  // block Save (with a "redraft" note) if it has changed since. The PDF reads the toggle live, so it never mismatches.
++  const [draftedWithFunding, setDraftedWithFunding] = useState(null);
+   const fundOk = canSeeMoney && !mf.moneyErr && mf.donations != null && mf.proceeds != null && mf.funds != null && mf.raised != null;
+   const fundAllTime = fundOk ? mf.funds.reduce((t, f) => t + (mf.raised[f.id] || 0), 0) : null;
+   const usdExact = (v) => `$${Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;   // never rounded
+@@ -11527,7 +11534,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+         rows: sh.rows.slice(0, 10).map((r) => ({ name: r.name, credited: r.total, unverified: r.unverified, shifts: r.n })),
+       } : null,
+       // New facts — null when gated off or when the read failed, so the PDF omits the section rather than print zeros.
+-      funding: fundOk ? { contributions: mf.donations, proceeds: mf.proceeds, activeCampaigns: mf.funds.length, allTimeRaised: fundAllTime } : null,
++      funding: fundingInReport && fundOk ? { contributions: mf.donations, proceeds: mf.proceeds, activeCampaigns: mf.funds.length, allTimeRaised: fundAllTime } : null,
+       rosterGrowth: { n: newJoins.length, label: joinLabel, names: newJoins.slice(0, 8).map((m) => m.name) },
+       boardTurnout: { meetings: doneBoard.length, pct: boardRated ? boardPct : null },
+       checkCompliance: cc.ok ? { checks: cc.checks, units: cc.units, failed: cc.failed, totalUnits: apOk ? ap.totals.total : null } : null,
+@@ -11541,7 +11548,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+     };
+   }
+   async function draft() {
+-    setLoading(true); setErr(""); setOut("");
++    setLoading(true); setErr(""); setOut(""); setDraftedWithFunding(fundingInReport);
+     const topN = (arr, fmt, n = 3) => {
+       if (!arr.length) return "none";
+       const shown = arr.slice(0, n).map(fmt).join("; ");
+@@ -11569,7 +11576,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+         `Share of check-ins location-verified: ${sh.totals.vpct}%`,
+         ...(sh.totals.autoClosed ? [`Shifts auto-closed by the system and awaiting an officer's confirmation: ${sh.totals.autoClosed} (their hours are NOT credited until reviewed)`] : []),
+       ] : [`Station hours: unavailable — the record could not be read, so no hours figure is provided.`]),
+-      ...(canSeeMoney ? (fundOk ? [
++      ...(fundingInReport ? (fundOk ? [
+         `Funding — contributions received during the period: ${usdExact(mf.donations)} (exact; do not round)`,
+         `Funding — fundraiser proceeds for fundraisers dated in the period: ${usdExact(mf.proceeds)} (exact; do not round)`,
+         `Funding — active donation campaigns: ${mf.funds.length}; raised all-time across those campaigns: ${usdExact(fundAllTime)} (all-time, NOT a period figure)`,
+@@ -11612,7 +11619,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+   }
+   const [saving, setSaving] = useState(false);
+   async function saveReport() {
+-    if (!out) return;
++    if (!out || draftedWithFunding !== fundingInReport) return;   // never save a draft made under the other funding setting
+     setSaving(true);
+     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
+@@ -11688,7 +11695,18 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+         )}
+         {/* New DURING facts — same truth rule: a failed read is left out (and said so), never a zero. */}
+         {canSeeMoney && (mf.moneyErr ? <Unavail what="Funding" retry={mf.retry} /> : fundOk && (<>
+-          <SubHead>Funding — {usdExact(mf.donations)} contributions · {usdExact(mf.proceeds)} fundraiser proceeds</SubHead>
++          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
++            <div style={{ flex: 1, minWidth: 0 }}><SubHead>Funding — {usdExact(mf.donations)} contributions · {usdExact(mf.proceeds)} fundraiser proceeds</SubHead></div>
++            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, fontWeight: 600, color: FIRE.textSecondary, cursor: "pointer" }}>
++              <button type="button" role="switch" aria-checked={includeFunding} onClick={() => setIncludeFunding((v) => !v)}
++                style={{ width: 36, height: 20, borderRadius: 10, padding: 0, position: "relative", cursor: "pointer", flexShrink: 0,
++                  border: `1px solid ${includeFunding ? "rgba(47,168,105,.5)" : FIRE.line2Noir}`, background: includeFunding ? "rgba(47,168,105,.22)" : FIRE.insetNoir }}>
++                <span aria-hidden="true" style={{ position: "absolute", top: 2, left: includeFunding ? 18 : 2, width: 14, height: 14, borderRadius: 7, background: includeFunding ? FIRE.greenText : FIRE.textMuted, transition: "left .15s" }} />
++              </button>
++              Include in report
++            </label>
++          </div>
++          <Line><span style={{ color: FIRE.textMuted }}>{includeFunding ? "Off leaves all funding out of the draft, the PDF, and the saved copy." : "Left out — funding won't appear in the draft, the PDF, or the saved copy."}</span></Line>
+           <Line>{mf.funds.length} active campaign{mf.funds.length === 1 ? "" : "s"} · {usdExact(fundAllTime)} raised all-time (not a period figure)</Line>
+         </>))}
+         <SubHead>New members — {newJoins.length} {joinLabel}</SubHead>
+@@ -11745,11 +11763,15 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+               <Download size={16} /> Download PDF
+             </button>
+             {isDeptAdmin(role) && out && (
+-              <button style={{ ...FS.btn, opacity: saving ? 0.7 : 1 }} onClick={saveReport} disabled={saving}>
++              <button style={{ ...FS.btn, opacity: (saving || draftedWithFunding !== fundingInReport) ? 0.6 : 1 }} onClick={saveReport} disabled={saving || draftedWithFunding !== fundingInReport}
++                title={draftedWithFunding !== fundingInReport ? "Funding was switched since this draft — draft it again before saving" : undefined}>
+                 {saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save report</>}
+               </button>
+             )}
+           </div>
++          {out && draftedWithFunding !== fundingInReport && (
++            <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 8, lineHeight: 1.45 }}>Funding was {fundingInReport ? "switched on" : "left out"} after this draft — draft the report again so the saved copy matches.</div>
++          )}
+           {err && <div style={NOIR_ERR}>{err}</div>}
+           {out && (
+             <div style={{ marginTop: 12 }}>
