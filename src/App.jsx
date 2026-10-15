@@ -4192,7 +4192,10 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       <NoirSkin>
       <CardHead icon={HeartPulse} title="Department health" />
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} />
-      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 8, marginBottom: 4, maxWidth: 360 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginTop: 8, marginBottom: 4, alignItems: "start" }}>
+        <NextTrainingCard sessions={sessions} members={members} meId={meId} notify={notify} go={go} />
+        <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
+      </div>
       <ActionItemsCard meId={meId} go={go} style={{ marginTop: 8, marginBottom: 8 }} />
       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
           their own certs, hours and drills, and had no route to them from this dashboard before.
