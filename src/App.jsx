@@ -11643,7 +11643,7 @@ function ChiefNoteSection({ text, style }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <MessageSquare size={15} color={FIRE.textSecondary} />
         <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>From the Chief</span>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "2px 8px" }}>Chief's own words · not from department records</span>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "2px 8px" }}>Chief's own words &amp; figures · not from B4C records</span>
       </div>
       <div style={{ fontSize: 14, color: FIRE.textPrimary, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</div>
     </div>
@@ -12043,6 +12043,9 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
                 <button title="Clear" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => { setOut(""); setErr(""); }}><X size={14} color={FIRE.deleteRed} /></button>
               </div>
               <RichOutput S={S} text={out} dark />
+              {/* The chief's own section, right after the AI narrative — one report, but outside the AI block and never
+                  styled as a figure. Same component the saved report and the input card use. */}
+              <ChiefNoteSection text={chiefNote} />
             </div>
           )}
         </div>
@@ -12053,11 +12056,11 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
       {isDeptAdmin(role) && (
         <div style={{ ...FS.cardNoir, padding: "16px 18px", marginBottom: 16 }}>
           <CardHead icon={MessageSquare} title="From the Chief" />
-          <label style={{ ...S.field, marginTop: 2 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From the Chief — your own words (optional)</span>
+          <label style={{ ...S.field, marginTop: 2 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From the Chief — your own words &amp; outside numbers (optional)</span>
             <textarea style={{ ...FS.input, minHeight: 96, resize: "vertical", lineHeight: 1.55 }} value={chiefNote} onChange={(e) => setChiefNote(e.target.value)}
-              placeholder="A note to the council or board in your own voice — thanks, context, what's next…" /></label>
-          <p style={{ ...NOIR_HELP, marginBottom: 0 }}>Added to the report as written, in your own voice — separate from the figures above. It isn't checked against your records and the AI never sees it.</p>
-          <ChiefNoteSection text={chiefNote} />
+              placeholder="Notable calls, thank-yous, what's ahead — and any outside figures, e.g. “142 calls this quarter per ESO”…" /></label>
+          <p style={{ ...NOIR_HELP, marginBottom: 0 }}>Added to the report as written, in your own voice — notable calls, thank-yous, and any outside figures (e.g. ESO). Shown as your own section, separate from the figures B4C pulls from your records. The AI never sees it.</p>
+          {!out && <ChiefNoteSection text={chiefNote} />}   {/* with a draft, it previews under the draft instead — once */}
         </div>
       )}
 
