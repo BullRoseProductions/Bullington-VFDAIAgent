@@ -1,0 +1,27 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index e102114..6dcc67a 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -4703,6 +4703,9 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
+   const nextEvent = upcomingAll.find((e) => isLeader(me?.access) || !(e.type === "Training" && isRestrictedEvent(e))) || null;
+   const nextSession = nextEvent?.type === "Training" ? sess.find((x) => String(x.id) === String(nextEvent.id)) : null;
+   const nextPlans = nextSession?.plans || [];
++  // REGISTER on the Next event card — the member's own plan only, and only when the next event IS a training
++  // (recruitment / social / funding events get no control). Same reviewed read + RPC as every Register control.
++  const nextReg = useSessionRegistrations(nextSession ? [nextSession.id] : [], notify);
+   return (
+     /* 1 — the standard page frame with the Noir hero band: dept crest (logo_url when set, monogram otherwise),
+        greeting and sub-line, pillars + daily quote on the right — same as the other dashboards. */
+@@ -4749,6 +4752,12 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
+                   <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div>
+                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nextEvent.title || "—"}</div>
+                   <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}<EventAudienceTag audience={nextEvent.audience} /></div>
++                  {nextSession && !nextSession.done && rollFor(nextSession, me) && (
++                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
++                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Register</span>
++                      <RegisterControl compact value={nextReg.mine(nextSession.id, meId)} busy={nextReg.busyId === nextSession.id || nextReg.rows === null} onPick={(k) => nextReg.setMine(nextSession.id, k)} />
++                    </div>
++                  )}
+                 </>
+               ) : (
+                 <EmptyState icon={null} text="Nothing scheduled" style={{ marginTop: 10 }} />
