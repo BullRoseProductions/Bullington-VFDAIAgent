@@ -18248,6 +18248,8 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const [showDone, setShowDone] = useState(false);   // Completed section — collapsed by default
   const [minGroupOpen, setMinGroupOpen] = useState({});   // saved-minutes groups the user opened/closed ("year-Type" -> bool); default = this year open
   const [showEarlierMinutes, setShowEarlierMinutes] = useState(false);   // earlier years of saved minutes — collapsed by default
+  const [assignFor, setAssignFor] = useState(null);   // the saved minutes row whose meeting is being set (null = picker closed)
+  const [assigning, setAssigning] = useState(false);
   const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items + save minutes → CANMANAGE (is_canmanage(): Board/DA/Officer)
   const canManageOps = hasAny(role, CANMANAGE_OPS_ROLES);   // file UPLOAD to station-documents is ops-only (DA/Officer) per station_docs_insert_leadership RLS; Board can still paste
   // Import minutes written OUTSIDE B4C (Firefly/Word/typed elsewhere). Stored source='imported' — never as AI-drafted.
@@ -18296,9 +18298,16 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   // The last minutes of the SAME kind of meeting when there is one (a board meeting carries from the last board
   // minutes, not last month's business meeting) — title-based, like the saved list, until minutes can be
   // assigned to a meeting. Falls back to the latest minutes of any kind.
-  const priorMinutes = mtg ? drafts.filter((d) => new Date(d.created_at) < sessDate(mtg)).sort((a, b) => b.created_at.localeCompare(a.created_at)) : [];
+  // Best: the minutes ASSIGNED to the most recent earlier meeting of the same audience (ai_outputs.session_id).
+  // Otherwise the title-based guess below, for minutes nobody has assigned yet.
+  const sessionById = new Map((sessions || []).map((x) => [String(x.id), x]));
+  const assignedPrior = mtg ? drafts
+    .map((d) => ({ d, s: d.session_id ? sessionById.get(String(d.session_id)) : null }))
+    .filter(({ s }) => s && s.audience === mtg.audience && sessDate(s) < sessDate(mtg))
+    .sort((a, b) => sessSort(b.s, a.s))[0]?.d || null : null;
+  const priorMinutes = mtg ? drafts.filter((d) => new Date(d.created_at) < sessDate(mtg) && String(d.session_id || "") !== String(mtg.id)).sort((a, b) => b.created_at.localeCompare(a.created_at)) : [];
   const sameKind = (d) => (/board/i.test(d.title || "")) === (mtg?.audience === "board");
-  const lastMinutes = priorMinutes.find(sameKind) || priorMinutes[0] || null;
+  const lastMinutes = assignedPrior || priorMinutes.find(sameKind) || priorMinutes[0] || null;
   const carried = lastMinutes ? openItems.filter((i) => i.source_output_id === lastMinutes.id) : [];
   const otherOpenItems = openItems.filter((i) => !carried.includes(i));
   function pickMeeting(id) {
@@ -18329,10 +18338,11 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     setSaving(true);
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
-    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "minutes", title: saveTitle.trim(), ai_text: out, created_by: meId });
+    // A meeting picked in the drafter is saved as the minutes' meeting (session_id); the DB guard re-checks it.
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "minutes", title: saveTitle.trim(), ai_text: out, created_by: meId, session_id: mtg ? mtg.id : null });
     setSaving(false);
     if (error) { notify({ kind: "error", title: "Couldn't save the minutes", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    notify({ kind: "success", text: "Minutes saved." });
+    notify({ kind: "success", text: mtg ? `Minutes saved to ${mtg.title}.` : "Minutes saved." });
     loadDrafts();
   }
   // Save minutes brought in from OUTSIDE B4C. Paste path: text straight in (any minutes manager, Board incl.).
@@ -18367,6 +18377,20 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     if (error) { notify({ kind: "error", title: "Couldn't save the imported minutes", text: "Something went wrong. Please try again.", details: error.message }); return; }
     notify({ kind: "success", text: "Imported minutes saved." });
     setImpTitle(""); setImpText(""); setImpFile(null);
+    loadDrafts();
+  }
+  /* Assign (or clear, sessionId null) the meeting a saved minutes record belongs to. One RPC that sets
+     session_id only — no text change, no "edited by" stamp. Leaders in their own department; the meeting must
+     be a leadership/board session of the same department (enforced in the DB, not just here). Organisation
+     only: who can read the minutes does not change. */
+  async function assignMinutes(d, sessionId) {
+    setAssigning(true);
+    const { error } = await supabase.rpc("assign_minutes_to_session", { p_output_id: d.id, p_session_id: sessionId });
+    setAssigning(false);
+    if (error) { notify({ kind: "error", title: sessionId ? "Couldn't assign the minutes" : "Couldn't remove the meeting", text: "Please try again.", details: error.message }); return; }
+    const s = sessionId ? meetings.find((x) => String(x.id) === String(sessionId)) : null;
+    notify({ kind: "success", text: s ? `Assigned to ${s.title} · ${fmtSess(s)}.` : "Removed from its meeting." });
+    setAssignFor(null);
     loadDrafts();
   }
   async function downloadOriginal(d) {
@@ -18719,7 +18743,10 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
            heuristic on free text until a minutes record can be assigned to a meeting, whose audience is the
            reliable source. YEAR is the year it was saved (created_at). This year's groups open; earlier years
            sit under one collapsed "Earlier" disclosure. */
-        const typeOf = (d) => /board/i.test(d.title || "") ? "Board" : /business/i.test(d.title || "") ? "Business" : "Other";
+        // An ASSIGNED meeting wins: board audience -> Board, leadership -> Business. Unassigned rows fall back to the title.
+        const mtgOf = (d) => d.session_id ? sessionById.get(String(d.session_id)) || null : null;
+        const typeOf = (d) => { const m = mtgOf(d); if (m) return m.audience === "board" ? "Board" : "Business";
+          return /board/i.test(d.title || "") ? "Board" : /business/i.test(d.title || "") ? "Business" : "Other"; };
         const accent = { Board: FIRE.redBright, Business: "#8C9AAB", Other: FIRE.line2Noir };
         const yearOf = (d) => new Date(d.created_at).getFullYear();
         const thisYear = new Date().getFullYear();
@@ -18733,7 +18760,19 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{d.title || "Untitled minutes"}{d.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
+                {(() => {
+                  const m = mtgOf(d);
+                  if (m || d.session_id) {
+                    const label = m ? `${m.title} · ${fmtSess(m)}` : "Assigned meeting";
+                    const chipStyle = { display: "inline-flex", alignItems: "center", gap: 5, marginTop: 5, fontSize: 11, fontWeight: 600, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 9px", fontFamily: "inherit" };
+                    return canManage
+                      ? <button type="button" onClick={() => setAssignFor(d)} title="Change the meeting" style={{ ...chipStyle, cursor: "pointer" }}><Calendar size={12} color={FIRE.btnIcon} />{label}</button>
+                      : <span style={chipStyle}><Calendar size={12} color={FIRE.btnIcon} />{label}</span>;
+                  }
+                  return null;
+                })()}
               </div>
+              {canManage && !d.session_id && <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => setAssignFor(d)}><Calendar size={13} color={FIRE.btnIcon} /> Assign to meeting</button>}
               <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
               {isDeptAdmin(role) && <button title="Delete" disabled={deletingId === d.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => softDelete(d)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
@@ -18781,6 +18820,42 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
           )}
         </>);
       })()}
+      {assignFor && (
+        <div onClick={() => !assigning && setAssignFor(null)} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "min(480px, 100%)" }}>
+            <NoirModalHead icon={Calendar} title={assignFor.title || "Untitled minutes"} sub="Assign to meeting" onClose={() => !assigning && setAssignFor(null)} />
+            <div style={{ padding: "6px 14px 14px" }}>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "4px 4px 8px", lineHeight: 1.45 }}>Links these minutes to the leadership or board meeting they record. Who can read them doesn't change.</div>
+              {meetings.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: 8 }}>No leadership or board meetings on the calendar yet.</div>
+                : [["Held", heldMeetings], ["Upcoming", upcomingMeetings]].map(([label, list]) => list.length > 0 && (
+                  <div key={label}>
+                    <SectionBar label={label} count={list.length} style={{ margin: "10px 4px 4px" }} />
+                    {list.map((x) => {
+                      const on = String(assignFor.session_id || "") === String(x.id);
+                      return (
+                        <button key={x.id} type="button" disabled={assigning || on} onClick={() => assignMinutes(assignFor, x.id)}
+                          style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", marginBottom: 4, borderRadius: 9, cursor: on ? "default" : "pointer", fontFamily: "inherit", textAlign: "left",
+                                   background: on ? FIRE.card2Noir : "transparent", border: `1px solid ${on ? FIRE.greenText : FIRE.lineNoir}`, color: FIRE.textPrimary, opacity: assigning && !on ? 0.6 : 1 }}>
+                          <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: x.audience === "board" ? FIRE.redBright : "#8C9AAB" }} />
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{x.title}</span>
+                            <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>{fmtSess(x)} · {x.audience === "board" ? "Board" : "Leadership"}</span>
+                          </span>
+                          {on && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.greenText }}>Assigned</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              {assignFor.session_id && (
+                <button type="button" disabled={assigning} onClick={() => assignMinutes(assignFor, null)} style={{ ...FS.btn, marginTop: 10, width: "100%", justifyContent: "center" }}>
+                  {assigning ? <><Loader2 size={14} className="spin" /> Saving…</> : "Remove from its meeting"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {openDraft && (
         <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px", background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}` }}>
