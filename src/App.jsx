@@ -19941,6 +19941,21 @@ function CountsAttendanceCheckbox({ checked, onChange, fieldStyle, labelStyle })
     </label>
   );
 }
+// "This is a meeting" (training_sessions.is_meeting). Only offered on EVERYONE sessions — leadership and board
+// sessions are meetings already. It only lets minutes be assigned to the session (Meetings page); it changes
+// nothing about who attends, who's expected or who's counted (the audience still decides all of that).
+function MeetingCheckbox({ checked, onChange, fieldStyle, labelStyle }) {
+  return (
+    <label style={{ ...fieldStyle, minWidth: 220, cursor: "pointer" }}>
+      <span style={labelStyle}>Meeting</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
+        <span style={{ fontSize: 12.5, color: "#C7CDD6" }}>This is a meeting</span>
+      </span>
+      <span style={{ fontSize: 10.5, color: "#8A929E", lineHeight: 1.3, maxWidth: 210 }}>Lets its minutes be assigned to it. Doesn't change who attends or who's counted.</span>
+    </label>
+  );
+}
 // Attach a saved agenda (ai_outputs feature='agenda') to a leadership event as a SNAPSHOT
 // session_plans ai-row → surfaces via the existing "View plan" / openSessionPlans path (zero new view code).
 function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) {
@@ -20224,9 +20239,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const sDurMin = () => { const n = Number(sDur); return sDur === "" || !Number.isFinite(n) || n <= 0 ? null : Math.round(n); };
   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
-  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true });
+  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true, isMeeting: false });
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
+  const [sMeeting, setSMeeting] = useState(false);   // create-session "This is a meeting" (is_meeting); default OFF, feeds addSession + scheduleRecurring
   const [sCounts, setSCounts] = useState(true);   // create-session "counts toward attendance rate"; default ON, feeds addSession + scheduleRecurring
   const [sOffsite, setSOffsite] = useState(false);   // off-site flag; feeds BOTH addSession + scheduleRecurring
   const [sOffLabel, setSOffLabel] = useState("");
@@ -20312,6 +20328,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       done: false,
       audience: sAudience,
       counts_toward_attendance: sCounts,
+      is_meeting: sAudience === "everyone" && sMeeting,   // only an everyone session carries the flag (leadership/board are meetings already)
       is_offsite: sOffsite,
       location_label: sOffsite ? (sOffLabel.trim() || null) : null,   // coordinates come later, at open-sign-in
     });
@@ -20356,7 +20373,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
-    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, duration_min: sDurMin(), done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, duration_min: sDurMin(), done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_meeting: sAudience === "everyone" && sMeeting, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem && dates.length) await supabase.from("training_plans").update({ starts_on: dates[0] }).eq("id", pItem.id);
@@ -20466,7 +20483,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   function startEditSession(s) {
     setEditingSessionId(s.id);
-    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), durationMin: s.durationMin ?? "", planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isOffsite: !!s.isOffsite, offLabel: s.locLabel || "" });
+    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), durationMin: s.durationMin ?? "", planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isMeeting: !!s.isMeeting, isOffsite: !!s.isOffsite, offLabel: s.locLabel || "" });
   }
   async function saveEditSession(id) {
     if (!sessEdit.date) { notify({ kind: "error", title: "Pick a date", text: "Choose a date for this training." }); return; }
@@ -20482,6 +20499,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           // drill, and it is what stops attendance hours being invented for a drill nobody timed.
           duration_min: sessEdit.durationMin === "" || sessEdit.durationMin == null ? null : Number(sessEdit.durationMin),
           plan_id: sessEdit.planId || null, audience: sessEdit.audience, counts_toward_attendance: sessEdit.countsAttendance,
+          is_meeting: sessEdit.audience === "everyone" && !!sessEdit.isMeeting,
         is_offsite: !!sessEdit.isOffsite,
         ...(sessEdit.isOffsite
           ? { location_label: (sessEdit.offLabel || "").trim() || null }
@@ -20777,7 +20795,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 {nextSession && nextPlans.length > 0 && <button style={thbtn} onClick={() => openSessionPlans(nextSession)}><FileText size={14} color={FIRE.textMuted} /> View plan</button>}
                 {nextSession && !nextSession.done && isDeptAdmin(role) && <button style={thbtn} onClick={() => setNotifyFor(nextSession)}><Megaphone size={14} color={FIRE.textMuted} /> Notify crew</button>}
                 {canPlanAI && <button style={thbtn} onClick={() => setDraftOpen((v) => !v)}><Sparkles size={14} color={FIRE.redText} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
-                {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
+                {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
               </div>
             </div>
             <div className="tr-hero-r" style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "center", gap: 20, paddingLeft: 24, borderLeft: `1px solid ${FIRE.lineNoir}` }}>
@@ -20927,7 +20945,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       <div style={{ ...Lcard, marginBottom: 12 }}>
           <MonthCalendar
             cur={cur} setCur={setCur} dark tiles
-            headerExtra={canManage && !showSess ? <button style={{ ...Lbtn, padding: "6px 11px", fontSize: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); }}><Plus size={14} color={LbtnIcon} /> Schedule a session</button> : null}
+            headerExtra={canManage && !showSess ? <button style={{ ...Lbtn, padding: "6px 11px", fontSize: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); }}><Plus size={14} color={LbtnIcon} /> Schedule a session</button> : null}
             belowHeader={canManage && showSess ? (
         <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           {!repeat && <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>}
@@ -20947,6 +20965,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               })}
             </div></label>
           <CountsAttendanceCheckbox checked={sCounts} onChange={setSCounts} fieldStyle={Lfield} labelStyle={LfieldLabel} />
+          {sAudience === "everyone" && <MeetingCheckbox checked={sMeeting} onChange={setSMeeting} fieldStyle={Lfield} labelStyle={LfieldLabel} />}
           <OffsiteCheckbox checked={sOffsite} onChange={setSOffsite} label={sOffLabel} onLabelChange={setSOffLabel} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
             <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? FIRE.name : FIRE.textMuted2 }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
@@ -21058,6 +21077,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           })}
                         </div></label>
                       <CountsAttendanceCheckbox checked={sessEdit.countsAttendance} onChange={(v) => setSessEdit((b) => ({ ...b, countsAttendance: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />
+                      {sessEdit.audience === "everyone" && <MeetingCheckbox checked={!!sessEdit.isMeeting} onChange={(v) => setSessEdit((b) => ({ ...b, isMeeting: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />}
                       <OffsiteCheckbox checked={!!sessEdit.isOffsite} onChange={(v) => setSessEdit((b) => ({ ...b, isOffsite: v }))} label={sessEdit.offLabel} onLabelChange={(v) => setSessEdit((b) => ({ ...b, offLabel: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
                       <button style={LprimaryBtn} onClick={() => saveEditSession(s.id)}><CheckCircle2 size={15} /> Save</button>
                       <button style={Lbtn} onClick={() => setEditingSessionId(null)}>Cancel</button>
