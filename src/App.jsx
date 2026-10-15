@@ -11614,8 +11614,31 @@ function RosterAttendance({ S, members, sessions, plan }) {
     </div>
   );
 }
+/* "FROM THE CHIEF" — the chief's own words, human-authored, verbatim. It is NEVER sent to the AI, never grounded,
+   never rewritten, and never shown as one of the report's figures. Saved reports keep it in the same ai_outputs row (no schema):
+   the AI draft, then CHIEF_NOTE_MARKER, then the note exactly as typed. Reading splits on the marker, so a report
+   saved before this existed (no marker) reads exactly as it always did. */
+const CHIEF_NOTE_MARKER = "\n\n<<<B4C:FROM-THE-CHIEF>>>\n";
+const splitChiefNote = (text) => {
+  const t = String(text || ""); const i = t.indexOf(CHIEF_NOTE_MARKER);
+  return i < 0 ? { body: t, chief: "" } : { body: t.slice(0, i), chief: t.slice(i + CHIEF_NOTE_MARKER.length) };
+};
+function ChiefNoteSection({ text, style }) {
+  if (!String(text || "").trim()) return null;
+  return (
+    <div style={{ marginTop: 14, padding: "14px 16px", borderRadius: 12, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderLeft: `4px solid ${FIRE.textSecondary}`, ...style }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <MessageSquare size={15} color={FIRE.textSecondary} />
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>From the Chief</span>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "2px 8px" }}>Chief's own words · not from department records</span>
+      </div>
+      <div style={{ fontSize: 14, color: FIRE.textPrimary, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</div>
+    </div>
+  );
+}
 function RosterReports({ S, role, members, sessions, dept, back, meId, notify, initialReport }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [chiefNote, setChiefNote] = useState("");   // "From the Chief" — the chief's own words; never sent to the AI
   const [presetKey, setPresetKey] = useState("year"); const [range, setRange] = useState(() => presetRange("year"));   // report period; default This Year (prior behavior)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only; members stays full for names/identity
   const active = cm.filter((m) => m.status === "Active").length;
@@ -11765,6 +11788,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
       checkCompliance: cc.ok ? { checks: cc.checks, units: cc.units, failed: cc.failed, totalUnits: apOk ? ap.totals.total : null } : null,
       certsApproved: ca.ok ? { count: ca.count, list: ca.list.slice(0, 10) } : null,
       equipment: eq.ok ? { openIssues: eq.openIssues, issueKinds: eq.issueKinds, agingOut: eq.agingOut, asOf: todayLabel } : null,
+      chiefNote: chiefNote.trim() ? chiefNote : "",   // the chief's own words, verbatim — its own PDF section, never a figure
       readiness: apOk ? {
         ...ap.totals, asOf: todayLabel,
         flaggedRigs: ap.flaggedRigs.map((r) => ({ name: r.name, note: r.note })),
@@ -11849,7 +11873,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const title = `Chief's Report — ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "report", title, ai_text: out, created_by: meId });   // feature MUST be "report" → DA/PA-only INSERT branch
+    const saved = chiefNote.trim() ? `${out}${CHIEF_NOTE_MARKER}${chiefNote}` : out;   // AI draft, then the chief's own words after the marker (verbatim)
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "report", title, ai_text: saved, created_by: meId });   // feature MUST be "report" → DA/PA-only INSERT branch
     setSaving(false);
     if (error) { notify({ kind: "error", title: "Couldn't save the report", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     notify({ kind: "success", text: "Report saved." });
@@ -12010,6 +12035,19 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
         </div>
       </div>
 
+      {/* FROM THE CHIEF — the chief's own words, outside the AI card and apart from the report's figures. Not sent to the AI.
+          Authoring is leaders-only, the same isDeptAdmin gate as Save. */}
+      {isDeptAdmin(role) && (
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", marginBottom: 16 }}>
+          <CardHead icon={MessageSquare} title="From the Chief" />
+          <label style={{ ...S.field, marginTop: 2 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From the Chief — your own words (optional)</span>
+            <textarea style={{ ...FS.input, minHeight: 96, resize: "vertical", lineHeight: 1.55 }} value={chiefNote} onChange={(e) => setChiefNote(e.target.value)}
+              placeholder="A note to the council or board in your own voice — thanks, context, what's next…" /></label>
+          <p style={{ ...NOIR_HELP, marginBottom: 0 }}>Added to the report as written, in your own voice — separate from the figures above. It isn't checked against your records and the AI never sees it.</p>
+          <ChiefNoteSection text={chiefNote} />
+        </div>
+      )}
+
       {/* SAVED REPORTS — persisted Chief's Reports (feature="report"); Open to view, DA/PA soft-delete. Mirrors the Minutes saved-drafts list. */}
       <SectionBar icon={FileText} label="Saved reports" count={reports.length} style={{ marginTop: 22 }} />
       <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 8 }}>
@@ -12033,7 +12071,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
         <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%" }}>
             <NoirModalHead icon={BarChart3} title={openReport.title || "Chief's Report"} sub="Saved report" onClose={() => setOpenReport(null)} />
-            <div style={{ padding: "14px 18px 18px" }}><RichOutput S={S} text={openReport.current_text ?? openReport.ai_text} dark /></div>
+            {(() => { const { body, chief } = splitChiefNote(openReport.current_text ?? openReport.ai_text);
+              return <div style={{ padding: "14px 18px 18px" }}><RichOutput S={S} text={body} dark /><ChiefNoteSection text={chief} /></div>; })()}
           </div>
         </div>
       )}

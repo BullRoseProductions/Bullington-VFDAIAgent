@@ -364,6 +364,24 @@ export function buildReportDoc(data) {
       + `${eqr.agingOut} item${eqr.agingOut === 1 ? "" : "s"} of gear past or within 3 months of service life.`);
   }
 
+  // ---------- From the Chief — the chief's own words, verbatim; NOT a figure, NOT drawn from records ----------
+  const chief = String(data.chiefNote || "");
+  if (chief.trim()) {
+    header("From the Chief");
+    doc.setFont("helvetica", "italic"); doc.setFontSize(7.6); doc.setTextColor(...GRAY);
+    ensure(12); doc.text("In the chief\u2019s own words \u2014 a personal statement, not a figure from department records.", M, y + 8); y += 14;
+    const lines = [];
+    chief.replace(/\r\n?/g, "\n").split("\n").forEach((ln) => { if (!ln.trim()) lines.push(""); else doc.splitTextToSize(ln, CW - 22).forEach((w) => lines.push(w)); });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.6);
+    lines.forEach((ln) => {
+      ensure(14);
+      doc.setFillColor(...LINE); doc.rect(M, y, 3, 14, "F");   // a plain rule down the left edge — the chief's voice, set apart
+      doc.setTextColor(...SLATE); if (ln) doc.text(ln, M + 14, y + 10);
+      y += 14;
+    });
+    y += 8;
+  }
+
   // ---------- Recommended Actions ----------
   const actions = [];
   data.flaggedCerts.filter((f) => f.status === "Lapsed").slice(0, 3).forEach((f) =>
@@ -383,7 +401,8 @@ export function buildReportDoc(data) {
   const prov = doc.splitTextToSize(
     "How this report was produced. Drafted automatically from the department\u2019s roster, training, and certification "
     + "records, then reviewed and approved by a qualified officer before release \u2014 the platform\u2019s "
-    + "standing rule: the system drafts, a human approves, then it publishes.", CW - 24);
+    + "standing rule: the system drafts, a human approves, then it publishes."
+    + (chief.trim() ? " The \u201cFrom the Chief\u201d section is the chief\u2019s own statement, included as written; it is not drawn from department records." : ""), CW - 24);
   /* Panel sized FROM the text, matching the Capital Plan. +1 line because the approval rule below
      is drawn INSIDE this panel, after the loop — sizing on prov.length alone would print it on the
      grey edge. This note had 4pt of headroom against its old fixed 46pt: one more sentence and the
