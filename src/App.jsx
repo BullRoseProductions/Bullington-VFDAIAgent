@@ -609,6 +609,19 @@ function ResourceActions({ r, compact }) {
     </div>
   );
 }
+/* A resource's brand mark. An uploaded image wins when the row carries one (resources has no image column today —
+   adding one is a schema change, not part of this reskin); otherwise a monogram tile. NATIONAL organisations get a
+   NEUTRAL steel mark — never their real logo (trademark: no national-org logos without usage rights). Crisis lines
+   get the life-buoy; local rows the station red; businesses amber. */
+function ResourceMark({ r, size = 34 }) {
+  const initials = String(r?.name || "?").replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+  const tone = r?.is_crisis ? FIRE.redText : r?.is_national ? "#8C9AAB" : r?.is_business ? FIRE.amberText : FIRE.redBright;
+  const box = { width: size, height: size, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                background: `${tone}1F`, border: `1px solid ${tone}55` };
+  if (r?.logo_url) return <span style={box}><img src={r.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /></span>;
+  if (r?.is_crisis) return <span style={box}><LifeBuoy size={Math.round(size * 0.5)} color={tone} /></span>;
+  return <span style={{ ...box, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: Math.round(size * 0.38), letterSpacing: ".02em", color: tone }} aria-hidden="true">{initials}</span>;
+}
 const YS_BLANK_FORM = { name: "", category: "", description: "", phone: "", text_number: "", website: "", email: "", address: "", is_wellness: false };
 const SPONSOR_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#111", background: FIRE.amberText, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 // COMPACT CARD SIZING — the ONE source of truth for every Your Six card (crisis / health / business /
@@ -741,10 +754,10 @@ function YourSix({ S, role, meId, members, notify }) {
     const sponsorTag = r.is_business && r.is_national;
     const hasTag = localTag || sponsorTag || r.is_wellness;
     return (
-      <div key={r.id} style={{ ...FS.cardNoir, ...YS_CARD, marginBottom: 0, display: "flex", flexDirection: "column", ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-          {r.is_crisis && <LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0, marginTop: 2 }} />}
-          <span style={{ ...YS_CARD_NAME, flex: 1, minWidth: 0, lineHeight: 1.25 }}>{r.name}</span>
+      <div key={r.id} style={{ ...FS.cardNoir, ...YS_CARD, marginBottom: 0, display: "flex", flexDirection: "column", ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}), ...(editMode && !r.is_national ? { borderStyle: "dashed" } : {}) }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+          <ResourceMark r={r} />
+          <span style={{ ...YS_CARD_NAME, flex: 1, minWidth: 0, lineHeight: 1.25, alignSelf: "center" }}>{r.name}</span>
           {editMode && canManage && (r.is_national
             ? <span title={r.is_business ? "Platform sponsor — locked" : "Verified national resource — locked"} style={{ flexShrink: 0, display: "inline-flex", marginTop: 2 }}><Lock size={13} color={FIRE.textMuted2} /></span>
             : <span style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
@@ -779,7 +792,7 @@ function YourSix({ S, role, meId, members, notify }) {
     return cats.map((cat) => ({ cat, items: byCat.get(cat).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name)) }));
   }, [resources]);
   return (
-    <PageShell band kicker="YOUR SIX" title={<>Support &amp; resources</>}
+    <PageShell band watermark="SIX" kicker="YOUR SIX" title={<>Support &amp; resources</>}
       sub="Help is here when you need it — for you, or someone on your crew. Every line below is real and answered."
       actions={canManage && resources && (
           <button onClick={toggleEditMode} style={{ ...FS.btn, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
@@ -856,6 +869,12 @@ function YourSix({ S, role, meId, members, notify }) {
             <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, marginBottom: 10 }}>These are your crew's real people — a chaplain, a peer supporter, an officer — who members can reach when they're struggling. They appear first in the “Reach out” flow, so a member always reaches a person before a hotline.</div>
             <button style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddWellness}><Plus size={14} color={FIRE.btnIcon} /> Add a wellness contact</button>
           </Card>
+        )}
+        {editMode && (   /* edit mode only ever turns on from the leaders-only Edit button */
+          <div style={{ ...NOIR_INSET, padding: "9px 12px", marginBottom: 12, display: "flex", alignItems: "center", gap: 9, borderColor: `${FIRE.amberText}55` }}>
+            <Pencil size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.4 }}>Editing — your station's own entries (dashed) can be changed. National lines and platform sponsors are locked.</span>
+          </div>
         )}
         {/* Edit mode: panel-level Add (resources). */}
         {canManage && editMode && (adding && formKind === "resource" ? formCard(addResource, "Add resource") : (
