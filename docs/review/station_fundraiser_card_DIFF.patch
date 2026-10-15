@@ -1,0 +1,105 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 94d093b..e102114 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -3678,6 +3678,67 @@ function NextTrainingCard({ sessions, members, meId, notify, go, style }) {
+     </Card>
+   );
+ }
++/* STATION FUNDRAISER CARD — what the whole department sees when a leader shares a fundraiser. ONE read:
++   get_station_fundraisers() (department-scoped, SECURITY DEFINER), which returns only {id, name, target_date,
++   tasks_done, tasks_total, next_steps} for shared, upcoming, not-finished fundraisers — never goal, proceeds,
++   donors, sponsors, owners, or un-ticked steps. Members have no read on any funding table; this card can't show
++   money because the read can't return it. Renders nothing when nothing is shared (or the read fails). Several
++   shared → the soonest (the read orders by date). */
++function StationFundraiserCard({ style }) {
++  const [rows, setRows] = useState(null);
++  useEffect(() => {
++    let off = false;
++    supabase.rpc("get_station_fundraisers").then(({ data, error }) => { if (!off && !error && Array.isArray(data)) setRows(data); });   // failed read: keep last-known (nothing on first load)
++    return () => { off = true; };
++  }, []);
++  const f = rows && rows[0];
++  if (!f) return null;
++  const today = new Date(); today.setHours(0, 0, 0, 0);
++  const [yy, mm, dd] = String(f.target_date).split("-").map(Number);
++  const day = new Date(yy, (mm || 1) - 1, dd || 1);
++  const days = Math.round((day - today) / 86400000);
++  const countdown = days <= 0 ? "Today" : days === 1 ? "Tomorrow" : `${days} days to go`;
++  const total = Number(f.tasks_total) || 0, done = Number(f.tasks_done) || 0;
++  const pct = total ? Math.round((done / total) * 100) : 0;
++  const steps = Array.isArray(f.next_steps) ? f.next_steps : [];
++  const fmtDue = (iso) => { if (!iso) return null; const [a, b, c] = String(iso).split("-").map(Number); return new Date(a, (b || 1) - 1, c || 1).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
++  return (
++    <div style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, background: `radial-gradient(130% 160% at 92% 0%, rgba(214,169,94,.16), transparent 50%), ${FS.cardNoir.background}`, marginBottom: 10, ...style }}>
++      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", padding: "14px 16px", alignItems: "center" }}>
++        <div style={{ minWidth: 120, textAlign: "center", padding: "8px 12px", borderRadius: 12, background: "rgba(214,169,94,.1)", border: "1px solid rgba(214,169,94,.35)" }}>
++          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: days > 1 ? 30 : 24, lineHeight: 1, color: FIRE.amberText, ...FS.num }}>{days > 1 ? days : countdown}</div>
++          {days > 1 && <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.textMuted, marginTop: 4 }}>days to go</div>}
++        </div>
++        <div style={{ flex: 1, minWidth: 200 }}>
++          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.amberText }}>Station fundraiser</div>
++          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary, lineHeight: 1.15, marginTop: 2 }}>{f.name}</div>
++          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3 }}>{day.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
++          <div style={{ marginTop: 9 }}>
++            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: FIRE.textMuted, marginBottom: 4, ...FS.num }}>
++              <span>Planning progress</span><span>{total ? `${done} of ${total} tasks · ${pct}%` : "No tasks yet"}</span>
++            </div>
++            <div style={{ height: 7, borderRadius: 999, background: FIRE.card2Noir, overflow: "hidden" }} aria-hidden="true">
++              <div style={{ width: `${pct}%`, height: "100%", background: pct >= 100 ? FIRE.green : FIRE.amberText }} />
++            </div>
++          </div>
++        </div>
++      </div>
++      {steps.length > 0 && (
++        <div style={{ padding: "10px 16px 4px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
++          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 6 }}>Up next</div>
++          {steps.map((st, i) => (
++            <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "4px 0", fontSize: 13, color: FIRE.textPrimary }}>
++              <span style={{ width: 6, height: 6, borderRadius: 999, background: FIRE.amberText, flexShrink: 0, transform: "translateY(-2px)" }} />
++              <span style={{ flex: 1, minWidth: 0 }}>{st.text}</span>
++              {st.due_date && <span style={{ fontSize: 11.5, color: FIRE.textMuted, flexShrink: 0, ...FS.num }}>by {fmtDue(st.due_date)}</span>}
++            </div>
++          ))}
++        </div>
++      )}
++      <div style={{ padding: "8px 16px 11px", fontSize: 11, color: FIRE.textMuted }}>Shared by your officers · no dollar amounts or donor info shown.</div>
++    </div>
++  );
++}
+ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
+   const me = members.find((m) => m.id === meId) || null;
+   // Health numbers are derived inside DeptHealthCharts — the SAME component the DA dashboard renders.
+@@ -3727,6 +3788,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept })
+         {/* Action items — mine + unassigned, never anyone else's (shared ActionItemsCard, same as every dashboard) */}
+         <ActionItemsCard meId={meId} go={go} />
+       </div>
++      <StationFundraiserCard style={{ marginTop: -4, marginBottom: 14 }} />
+ 
+       {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
+           unlike things (a 0% cert, a 42% attendance, a "no duties" n/a) into one figure nobody could act on. */}
+@@ -3897,6 +3959,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
+         <NextTrainingCard sessions={sessions} members={members} meId={meId} notify={notify} go={go} />
+         <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
+       </div>
++      <StationFundraiserCard style={{ marginTop: 8 }} />
+       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
+         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
+         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
+@@ -4199,6 +4262,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
+         <NextTrainingCard sessions={sessions} members={members} meId={meId} notify={notify} go={go} />
+         <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
+       </div>
++      <StationFundraiserCard style={{ marginTop: 8 }} />
+       <ActionItemsCard meId={meId} go={go} style={{ marginTop: 8, marginBottom: 8 }} />
+       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
+           their own certs, hours and drills, and had no route to them from this dashboard before.
+@@ -4649,6 +4713,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
+       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
+           (it renders nothing once complete); only its place in the order changed. */}
+       <OnboardingCard S={S} me={me} go={go} dept={dept} />
++      {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
++      <StationFundraiserCard />
+       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
+       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, marginBottom: 8 }}>
+         {/* attendance ring (per-CALENDAR-MONTH rate) + supporting stats; muted "No drills yet" state, not a red 0% */}
