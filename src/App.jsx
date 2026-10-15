@@ -7398,6 +7398,8 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
   const [pcOpen, setPcOpen] = useState(false);      // inline "record proceeds"
   const [pcInput, setPcInput] = useState("");
   const [pcBusy, setPcBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);   // "Share with the station" switch in flight
+  const [tickBusy, setTickBusy] = useState(null);      // which step's "Show the station" tick is in flight
   const DOC_TYPES = [
     { v: "cta",    label: "Community call-to-action", sys: CTA_SYS,    hint: "Short and warm — for social or a flyer." },
     { v: "letter", label: "Donation-request letter",  sys: LETTER_SYS, hint: "For a local business or community member." },
@@ -7473,6 +7475,25 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
   const st = frStatusMeta(fundraiser.status);
   const when = frWhen(fundraiser.target_date, todayISO);
   const spList = sponsors || [];
+
+  /* STATION FUNDRAISER — what the whole department may see. Two flags, each written ONLY through its reviewed
+     SECURITY DEFINER function (department-scoped leaders; the DB re-checks): the fundraiser's share switch, and a
+     per-step tick. The station card then reads get_station_fundraisers() — counts + ticked open steps, never money. */
+  async function setShared(v) {
+    setShareBusy(true);
+    const { error } = await supabase.rpc("set_fundraiser_shared", { p_fundraiser_id: fundraiser.id, p_shared: v });
+    setShareBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't change that", text: /leaders|department/i.test(error.message || "") ? error.message : "Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: v ? "Shared with the station — members now see the countdown and progress." : "No longer shared with the station." });
+    onFundraiserChanged?.();
+  }
+  async function setStepVisible(it, v) {
+    setTickBusy(it.id);
+    const { error } = await supabase.rpc("set_fundraiser_step_visible", { p_item_id: it.id, p_visible: v });
+    setTickBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't change that", text: /leaders|planning step/i.test(error.message || "") ? error.message : "Please try again.", details: error.message }); return; }
+    load();
+  }
 
   async function addTask() {
     const text = tf.text.trim();
@@ -7831,6 +7852,11 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {it.status === "open" ? (<>
+            <button type="button" aria-pressed={!!it.station_visible} disabled={tickBusy === it.id} onClick={() => setStepVisible(it, !it.station_visible)}
+              title={it.station_visible ? "The station sees this step on the fundraiser card — tap to hide it" : "Show this step to the whole station on the fundraiser card"}
+              style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5, opacity: tickBusy === it.id ? 0.6 : 1, ...(it.station_visible ? { color: FIRE.blueText, borderColor: "rgba(91,155,213,.5)", background: "rgba(91,155,213,.1)" } : {}) }}>
+              {it.station_visible ? <CheckCircle2 size={12} /> : <Users size={12} />} {it.station_visible ? "Station sees this" : "Show the station"}
+            </button>
             <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => completeItem(it)}><CheckCircle2 size={12} /> Done</button>
             <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => cancelItem(it)}>Not needed</button>
           </>) : (
@@ -7878,6 +7904,40 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
         {stat("Jobs", `${doneCount}/${counted.length}`, counted.length ? "done" : "nothing added yet", counted.length && doneCount === counted.length ? FIRE.greenText : FIRE.textSecondary)}
         {fundraiser.target_date && stat("When", when || "—", fundraiser.target_date, FIRE.textSecondary)}
       </div>
+
+      {/* SHARE WITH THE STATION — the whole department sees a countdown, planning progress and the ticked steps; never
+          dollar amounts or donors (the station reads through get_station_fundraisers, which can't return them). */}
+      {(() => {
+        const on = !!fundraiser.shared_with_station;
+        const ticked = open.filter((i) => i.station_visible).length;
+        const why = !fundraiser.target_date ? "Set a target date — the station card counts down to it, so it won't show without one."
+          : fundraiser.target_date < todayISO ? "The date has passed, so the station card is no longer shown."
+          : (fundraiser.status === "done" || fundraiser.status === "archived") ? "This fundraiser is finished, so the station card isn't shown."
+          : null;
+        return (
+          <div style={{ ...NOIR_INSET, padding: "12px 14px", marginBottom: 16, borderColor: on ? "rgba(91,155,213,.45)" : FIRE.lineNoir }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <Users size={17} color={on ? FIRE.blueText : FIRE.textMuted} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>Share with the station</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, lineHeight: 1.45, marginTop: 2 }}>The whole station will see a countdown, planning progress, and the steps you tick below — never dollar amounts or donors.</div>
+              </div>
+              <button type="button" disabled={shareBusy} onClick={() => setShared(!on)} aria-pressed={on} aria-label={on ? "Stop sharing with the station" : "Share with the station"}
+                style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: shareBusy ? "default" : "pointer", fontFamily: "inherit", padding: 4, opacity: shareBusy ? 0.7 : 1 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }}>{shareBusy ? "Saving…" : on ? "Shared" : "Not shared"}</span>
+                <span aria-hidden="true" style={{ width: 46, height: 26, borderRadius: 999, position: "relative", background: on ? FIRE.blueText : FIRE.card2Noir, border: `1px solid ${on ? FIRE.blueText : FIRE.line2Noir}` }}>
+                  <span style={{ position: "absolute", top: 2, left: on ? 22 : 2, width: 20, height: 20, borderRadius: 999, background: "#fff", transition: "left .15s" }} />
+                </span>
+              </button>
+            </div>
+            {on && (
+              <div style={{ fontSize: 12, color: why ? FIRE.amberText : FIRE.textSecondary, marginTop: 8, lineHeight: 1.45 }}>
+                {why || `${ticked} step${ticked === 1 ? "" : "s"} shown to the station · tick "Show the station" on an open job below to add one.`}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* THE PROMPT IS THE POINT. A finished fundraiser with no number recorded is the single most
           common way this data goes missing — the night ends, everyone goes home, and nobody comes
@@ -8246,7 +8306,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
   // Dept-scoped AND leadership-gated by RLS — no client-side filter, which is how the two drift.
   function load() {
     supabase.from("fundraisers")
-      .select("id, name, description, target_date, goal_amount, status, point_person_id, campaign_id, proceeds, sort, color")
+      .select("id, name, description, target_date, goal_amount, status, point_person_id, campaign_id, proceeds, sort, color, shared_with_station")
       .then(({ data, error }) => {
         // A failed read is not an empty department: keep the last-known list rather than telling a
         // department it runs no fundraisers because the network dropped.
