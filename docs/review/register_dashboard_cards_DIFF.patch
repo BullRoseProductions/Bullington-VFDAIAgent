@@ -1,0 +1,71 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 8529673..50dc36b 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -3218,6 +3218,8 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
+   }
+   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+   const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
++  // REGISTER on the card — the member's own plan only (no count). Read skipped when the card isn't shown.
++  const reg = useSessionRegistrations(showUpcomingTraining ? upcoming.map((s) => s.id) : [], notify);
+   return (
+     <>
+       {noir
+@@ -3343,13 +3345,20 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
+           {noir ? <CardHead icon={CalendarCheck} title="Upcoming training" style={{ marginBottom: 0 }} /> : <div style={FS.kicker}>UPCOMING TRAINING</div>}
+           <div style={{ marginTop: 10 }}>
+             {upcoming.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>) : upcoming.map((s) => (
+-              <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
++              <div key={s.id} style={{ ...FS.row, padding: "9px 0", flexWrap: "wrap", rowGap: 6 }}>
+                 <CalendarCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                 <div style={{ flex: 1, minWidth: 0 }}>
+                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
+                   <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
+                 </div>
+                 {s.plan && <button onClick={() => openSessionPlans(s)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
++                {/* REGISTER — only on a session this member is eligible for (the same audience rule the server enforces) */}
++                {rollFor(s, me) && (
++                  <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingLeft: 25 }}>
++                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Plan</span>
++                    <RegisterControl compact value={reg.mine(s.id, meId)} busy={reg.busyId === s.id || reg.rows === null} onPick={(k) => reg.setMine(s.id, k)} />
++                  </div>
++                )}
+               </div>
+             ))}
+           </div>
+@@ -3740,6 +3749,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
+   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
+   const todayISO = toISODate(new Date());
+   const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
++  const nextReg = useSessionRegistrations(nextEvent ? [nextEvent.id] : [], notify);   // REGISTER — leaders' heads-up on the next session (plans, not attendance)
+   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+   const [duties, setDuties] = useState([]);
+   const [dutiesLoaded, setDutiesLoaded] = useState(false);   // until the read lands, duty completion is "—", not "No duties set"
+@@ -3831,7 +3841,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
+         <HeroAside>
+           <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
+-            {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
++            {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div>{nextReg.rows && nextReg.rows.length > 0 && <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><PlanSummary compact regs={nextReg.forSession(nextEvent.id)} /></div>}</>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
+             <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
+           </button>
+         </HeroAside>
+@@ -4087,6 +4097,9 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
+   // Health numbers are derived inside DeptHealthCharts — the same component the DA and Board dashboards render.
+   const todayISO = toISODate(new Date());
+   const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
++  const nextReg = useSessionRegistrations(nextSession ? [nextSession.id] : [], notify);   // REGISTER — leaders' heads-up on the next session (plans, not attendance)
++  const planSnap = (() => { const r = nextSession ? nextReg.forSession(nextSession.id) : []; if (!r.length) return "";
++    const n = (k) => r.filter((x) => x.status === k).length; return ` · plans: ${n("coming")} coming, ${n("maybe")} maybe, ${n("not_coming")} not coming`; })();
+   const [duties, setDuties] = useState([]);
+   const [dutiesLoaded, setDutiesLoaded] = useState(false);   // a failed/pending read is "—", never "No duties set"
+   const [recruitNext, setRecruitNext] = useState(null);
+@@ -4125,7 +4138,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
+   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
+   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
+   const cards = [
+-    { key: "training",  title: "Training",         Icon: GraduationCap, accent: FIRE.catBlue, snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}` : null, nav: "training" },
++    { key: "training",  title: "Training",         Icon: GraduationCap, accent: FIRE.catBlue, snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}${planSnap}` : null, nav: "training" },
+     { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: FIRE.catGreen, snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
+     { key: "pr",        title: "Public Relations", Icon: Calendar,      accent: FIRE.catViolet, snap: prNext ? `${fmtISO(prNext.date)} · ${prNext.caption}` : null, nav: "visibility" },
+     { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: FIRE.catAmber, snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
