@@ -22763,7 +22763,7 @@ function ProgramOverview({ S, role, notify, go }) {
       sub="Health across all departments — who needs attention, and why. Surfaced from live data, so you can catch problems before anyone reports them.">
       {/* Noir skin, as on the dashboards: icon tiles, CardHead headers and the gradient card face throughout. */}
       <NoirSkin>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(128px, 100%), 1fr))", gap: 8, marginBottom: 12 }}>
         <StatTile icon={Building2} value={show(rows ? rows.length : null)} label="Departments" sub={needing == null ? undefined : needing ? `${needing} need${needing === 1 ? "s" : ""} attention` : "all healthy"} tone={problem(needing, "red")} />
         <StatTile icon={Users} value={show(sum("member_count"))} label="Members" sub="across all depts" />
         <StatTile icon={Clock} value={show(stuck)} tone={problem(stuck, "red")} label="Open 24h+ shifts" sub={whereSub("open_long_shifts_count", "none open")} />
