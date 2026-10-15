@@ -9,6 +9,7 @@ import {
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
@@ -1530,77 +1531,123 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   const isDA = isDeptAdmin(role);
   const back = () => setView(null);
   const backBtn = <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Settings &amp; Support</button>;
-  const doc = (title, body) => <PageShell band above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title={title}><NoirSkin><Card padding={18} style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>{body}</Card></NoirSkin></PageShell>;
-  // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
+  const LEGAL = [
+    { label: "Terms of Service", href: "https://b4thecall.com/legal/terms", Icon: FileText },
+    { label: "Privacy Policy", href: "https://b4thecall.com/legal/privacy", Icon: ShieldAlert },
+    { label: "How we use AI", href: "https://b4thecall.com/legal/responsible-ai", Icon: Sparkles },
+    { label: "Trust Center", href: "https://b4thecall.com/legal", Icon: Globe },
+  ];
+  const buildId = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
+  const chip = (Icon, acc, size = 34) => <span style={{ width: size, height: size, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}22`, border: `1px solid ${acc}44`, color: acc }}><Icon size={Math.round(size * 0.5)} /></span>;
+  const legalRows = (
+    <Card padding="4px 14px" style={{ marginTop: 8 }}>
+      <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
+      {LEGAL.map(({ label, href, Icon }, i, arr) => (
+        <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="b4c-legal-link"
+           style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 2px", textDecoration: "none", borderBottom: i < arr.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
+          {chip(Icon, "#8C9AAB", 28)}
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{label}</span>
+          <ExternalLink size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+        </a>
+      ))}
+    </Card>
+  );
+  // sub-screens (BrandKit / DeptSettings / the pickers bring their own page shell → just prepend a back button)
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
-  if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} extra={<Card padding={18} style={{ marginTop: 12 }}><CardHead icon={Mail} title="Contact support" /><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 2 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></Card>} /></div>;
+  if (view === "support") return (
+    <PageShell band above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Support &amp; Contact</>} sub="Questions, a bug, or an idea — a real person reads every message.">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, padding: "16px 18px", borderTop: `3px solid ${FIRE.blueText}`, display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {chip(Mail, FIRE.blueText, 40)}
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Contact support</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 3 }}>Email us and we'll get back to you. Include your department and what you were doing — a screenshot helps.</div>
+          <a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 10 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a>
+        </div>
+      </div>
+      <SectionBar icon={Send} label="Request custom training" style={{ margin: "20px 0 8px" }} />
+      <RequestForm S={S} requests={requests} setRequests={setRequests} embedded />
+      <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ margin: "20px 0 0" }} />
+      {legalRows}
+      </NoirSkin>
+    </PageShell>
+  );
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
-  if (view === "about") return doc("About", <>Before the Call<br />© 2026 Big Bull Technologies, LLC. All rights reserved.</>);
+  if (view === "about") return (
+    <PageShell band above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title="About">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, padding: "20px 18px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+        <img src="/b4c-logo.png" alt="B4C" style={{ height: 52, width: "auto" }} draggable={false} />
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary }}>Before the Call</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>Training, readiness and records for volunteer fire departments.</div>
+        </div>
+      </div>
+      <div style={{ ...NOIR_INSET, padding: "4px 14px", marginTop: 12 }}>
+        {[["Build", buildId], ["Department", dept?.name || "—"], ["Support", SUPPORT_EMAIL]].map(([k, v], i, arr) => (
+          <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: i < arr.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none", fontSize: 13 }}>
+            <span style={{ color: FIRE.textMuted }}>{k}</span><span style={{ color: FIRE.textPrimary, ...FS.num, textAlign: "right", minWidth: 0, overflowWrap: "anywhere" }}>{v}</span>
+          </div>
+        ))}
+      </div>
+      <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ margin: "20px 0 0" }} />
+      {legalRows}
+      <div style={{ marginTop: 16, fontSize: 12, color: FIRE.textMuted, textAlign: "center" }}>© 2026 Big Bull Technologies, LLC. All rights reserved.</div>
+      </NoirSkin>
+    </PageShell>
+  );
   if (view === "geofence") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<GeofenceConsentFlow meId={meId} notify={notify} onBack={back} /></div>;
   /* GATED HERE TOO, not only on the card. A card that is not rendered is not a permission — the
      view key survives in state, so the route needs the same test the card does or a stale key
      would walk somebody straight past it. */
   if (view === "aftercall" && canManage(role)) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<AfterCallSettings S={S} role={role} dept={dept} setDept={setDept} notify={notify} /></div>;
-  const card = (key, Icon, title, desc) => (
-    <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView(key)}>
-      <CardHead icon={Icon} title={title} style={{ marginBottom: 0 }} />
-      <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{desc}</div>
-      <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-        <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
+  const card = (key, Icon, acc, title, desc, badge) => (
+    <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => setView(key)}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {chip(Icon, acc)}
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flex: 1, minWidth: 0 }}>{title}</span>
+        {badge}
       </div>
+      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.45, flex: 1 }}>{desc}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, color: acc }}>Open <ChevronRight size={14} /></div>
     </Card>
   );
-  return (<PageShell band kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Settings &amp; Support</>} sub="Your department settings, brand, and help — all in one place.">
+  const offBadge = (txt) => <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 5, padding: "2px 6px" }}>{txt}</span>;
+  return (<PageShell band kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Settings &amp; Support</>} sub="Your department settings, brand, and help — all in one place."
+    bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 40, top: "50%", transform: "translateY(-50%)", color: FIRE.textPrimary, opacity: 0.06, pointerEvents: "none" }}><SettingsIcon size={150} strokeWidth={1.25} /></div>}>
     <NoirSkin>
-    <div style={S.opGrid}>
-      {card("person", HeartHandshake, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
-      {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
-      {card("brand", Palette, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(250px, 100%), 1fr))", gap: 12 }}>
+      {card("person", HeartHandshake, FIRE.greenText, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
+      {isDA && card("dept", Building2, "#8C9AAB", "Department Settings", "Your department's name, station number, and details.")}
+      {card("brand", Palette, FIRE.redBright, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
       {/* DOUBLE-GATED, and invisible today on both counts: VITE_GEOFENCE_ENABLED is unset, and
           no department has opted in (0 of 2). The client flag is the kill switch for a feature
           that has never run on a real device; the department flag is the consent boundary — a
           department that hasn't agreed to locate its members must not be offered the option,
           because offering it is already a suggestion that it's expected. Both must be on. */}
       {geofenceConsentAvailable() && dept?.geofence_enabled &&
-        card("geofence", MapPin, "Automatic station presence", "Record arrivals and departures at your department's approved locations — read what's collected before you decide.")}
+        card("geofence", MapPin, FIRE.blueText, "Automatic station presence", "Record arrivals and departures at your department's approved locations — read what's collected before you decide.")}
       {/* Shown to the people who manage the list — Board | DA | Officer, matching the is_canmanage()
           gate on the aftercall_items policies, so the card never leads to a screen whose writes the
           server would refuse. The card appears whether the feature is on or off: while it is off,
           this screen is the only place to find out it exists at all. The description states the
           default so nobody reads an empty department as a broken one. */}
-      {canManage(role) && card("aftercall", ClipboardCheck, "After-Call Checklist",
+      {canManage(role) && card("aftercall", ClipboardCheck, FIRE.amberText, "After-Call Checklist",
         dept?.aftercall_enabled
           ? "The shared list of tasks crews complete after a call — add, rename or remove tasks."
-          : "A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.")}
-      {card("support", Mail, "Support & Contact", "Get help, send feedback, or request custom training.")}
-      {card("about", Award, "About", "App info and copyright.")}
+          : "A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.",
+        dept?.aftercall_enabled ? null : offBadge("Off"))}
+      {card("support", Mail, NOIR_AI.blue, "Support & Contact", "Get help, send feedback, or request custom training.")}
+      {card("about", Award, "#8C9AAB", "About", "App info, build and copyright.")}
     </div>
     {/* Legal & Trust — external links to the public documentation center. No role gate: every member sees these. */}
-    <div style={{ marginTop: 18 }}>
-      <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
-      <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ marginTop: 0 }} />
-      <Card padding="4px 14px" style={{ marginTop: 8 }}>
-        {[
-          { label: "Terms of Service", href: "https://b4thecall.com/legal/terms", Icon: FileText },
-          { label: "Privacy Policy", href: "https://b4thecall.com/legal/privacy", Icon: ShieldAlert },
-          { label: "How we use AI", href: "https://b4thecall.com/legal/responsible-ai", Icon: Sparkles },
-          { label: "Trust Center", href: "https://b4thecall.com/legal", Icon: Globe },
-        ].map(({ label, href, Icon }, i, arr) => (
-          <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="b4c-legal-link"
-             style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 2px", textDecoration: "none",
-                      borderBottom: i < arr.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
-            <Icon size={16} color={FIRE.red} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{label}</span>
-            <ExternalLink size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
-          </a>
-        ))}
-      </Card>
-    </div>
+    <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ margin: "20px 0 0" }} />
+    {legalRows}
     {/* Build id — matches the deployed commit's short hash + /version.json. Lets anyone confirm a
         phone actually picked up a new deploy (vs. running a stale cached bundle). Tap to force a fresh reload. */}
     <div onClick={() => location.reload()} title="Tap to reload the latest version" style={{ marginTop: 18, textAlign: "center", fontSize: 11, color: FIRE.textMuted2, letterSpacing: ".03em", cursor: "pointer", ...FS.num }}>
-      Build {typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev"}
+      Build {buildId}
     </div>
     </NoirSkin>
   </PageShell>);
@@ -22392,16 +22439,15 @@ function StationDuties({ S, role, members, meId, notify }) {
 }
 
 /* ---------------- Request ---------------- */
-function RequestForm({ S, requests, setRequests, extra }) {   // extra: the Support screen's contact card, rendered inside the Noir skin
+function RequestForm({ S, requests, setRequests, extra, embedded }) {   // extra: a card rendered inside the Noir skin; embedded: the Support screen hosts it (no page shell of its own)
   const [topic, setTopic] = useState(""); const [notes, setNotes] = useState(""); const [done, setDone] = useState(false);
   function submit() {
     if (!topic.trim()) return;
     setRequests([{ topic, notes, when: "Just now" }, ...requests]); setTopic(""); setNotes(""); setDone(true); setTimeout(() => setDone(false), 2500);
   }
-  return (
-    <PageShell band kicker="CUSTOM TRAINING" title="Request a custom packet" sub="Tell us what your crew needs. We build it into the next monthly drop.">
-      <NoirSkin>
-      <div style={{ ...FS.cardNoir, padding: 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 620 }}>
+  const body = (<>
+      {embedded && <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px" }}>Tell us what your crew needs. We build it into the next monthly drop.</div>}
+      <div style={{ ...FS.cardNoir, padding: embedded ? 18 : 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 620 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Topic or scenario</span><input style={FS.input} placeholder="e.g. Rural water shuttle with one tender" value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Anything specific to your department?</span><textarea style={{ ...FS.input, minHeight: 88, resize: "vertical" }} placeholder="Apparatus, member count, local hazards, constraints…" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
         <button style={FS.btnPrimary} onClick={submit}><Send size={16} /> Submit request</button>
@@ -22413,7 +22459,11 @@ function RequestForm({ S, requests, setRequests, extra }) {   // extra: the Supp
         </div>
       )}
       {extra}
-      </NoirSkin>
+  </>);
+  if (embedded) return body;
+  return (
+    <PageShell band kicker="CUSTOM TRAINING" title="Request a custom packet" sub="Tell us what your crew needs. We build it into the next monthly drop.">
+      <NoirSkin>{body}</NoirSkin>
     </PageShell>
   );
 }
