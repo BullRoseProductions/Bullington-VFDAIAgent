@@ -20350,6 +20350,77 @@ function NotifyCrewModal({ session, onClose, notify }) {
     document.body
   );
 }
+/* ---------------- Register — a PLAN to attend, not attendance ----------------
+   A member's heads-up for whoever runs a session: Coming / Maybe / Not coming. It lives in its own table
+   (session_registrations) and is NEVER read by, or written from, anything attendance — not the roll, check-in,
+   finalize, the attendance rate, countsTowardRate, rollFor's expected roster. Attendance is still earned at the
+   session. Reads: the one query below (RLS returns a member only their own row, a leader their department's).
+   Write: set_my_session_registration (self-only, department-scoped, audience-eligible, refused once finalized). */
+const REG_OPTIONS = [["coming", "Coming"], ["maybe", "Maybe"], ["not_coming", "Not coming"]];
+const REG_TONE = { coming: FIRE.greenText, maybe: FIRE.amberText, not_coming: "#8C9AAB" };
+function useSessionRegistrations(sessionIds, notify) {
+  const key = [...new Set((sessionIds || []).filter(Boolean).map(String))].sort().join(",");
+  const [rows, setRows] = useState(null);   // null = not loaded
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState(false);
+  function load() {
+    if (!key) { setRows([]); return; }
+    supabase.from("session_registrations").select("session_id, member_id, status").in("session_id", key.split(","))
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setErr(false); setRows(data); });   // a failed read keeps last-known
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
+  async function setMine(sessionId, status) {
+    setBusyId(sessionId);
+    const { error } = await supabase.rpc("set_my_session_registration", { p_session_id: sessionId, p_status: status });
+    setBusyId(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't save your plan", text: /closed|eligible|department/i.test(error.message || "") ? error.message : "Please try again.", details: error.message }); return; }
+    load();
+  }
+  const mine = (sid, meId) => (rows || []).find((r) => String(r.session_id) === String(sid) && r.member_id === meId)?.status || null;
+  const forSession = (sid) => (rows || []).filter((r) => String(r.session_id) === String(sid));
+  return { rows, err, busyId, setMine, mine, forSession };
+}
+// The member's three-way control. Shows their own pick only — never a count.
+function RegisterControl({ value, busy, onPick, compact }) {
+  return (
+    <div role="group" aria-label="Your plan for this session" style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+      {REG_OPTIONS.map(([k, l]) => {
+        const on = value === k, c = REG_TONE[k];
+        return (
+          <button key={k} type="button" disabled={busy} aria-pressed={on} onClick={() => !on && onPick(k)}
+            style={{ fontFamily: "inherit", fontSize: compact ? 11 : 12, fontWeight: 600, padding: compact ? "4px 9px" : "6px 11px", borderRadius: 999, cursor: busy || on ? "default" : "pointer",
+                     color: on ? c : FIRE.textSecondary, background: on ? `${c}1F` : "transparent", border: `1px solid ${on ? `${c}88` : FIRE.line2Noir}`, opacity: busy ? 0.6 : 1 }}>
+            {on && <CheckCircle2 size={compact ? 11 : 12} style={{ verticalAlign: -2, marginRight: 4 }} />}{l}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+// Leaders only: "Coming 8 · Maybe 2 · Not coming 1", and (with nameById) the names grouped by status.
+function PlanSummary({ regs, nameById, compact }) {
+  const by = { coming: [], maybe: [], not_coming: [] };
+  (regs || []).forEach((r) => { if (by[r.status]) by[r.status].push(r); });
+  const total = (regs || []).length;
+  return (
+    <div>
+      <div style={{ display: "flex", gap: compact ? 8 : 10, flexWrap: "wrap", alignItems: "center", fontSize: compact ? 11.5 : 12.5 }}>
+        {total === 0 ? <span style={{ color: FIRE.textMuted }}>No plans yet</span> : REG_OPTIONS.map(([k, l]) => (
+          <span key={k} style={{ color: REG_TONE[k], fontWeight: 600, ...FS.num }}>{l} {by[k].length}</span>
+        ))}
+      </div>
+      {nameById && total > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+          {REG_OPTIONS.filter(([k]) => by[k].length).map(([k, l]) => (
+            <div key={k} style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.45 }}>
+              <span style={{ color: REG_TONE[k], fontWeight: 700 }}>{l}:</span> {by[k].map((r) => nameById.get(r.member_id) || "A member").join(", ")}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
@@ -20362,6 +20433,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [showAllMissed, setShowAllMissed] = useState(false);   // member view: catch-up list condensed to 3 until expanded
   const [upOpen, setUpOpen] = useState(null);                  // member view: "Up next" row whose Details are open
+  const [plansOpen, setPlansOpen] = useState(null);            // leader view: session whose Register plans (names) are open — "hero" for the Next training card
   const [addingPlan, setAddingPlan] = useState(false);
   const [editPlanMode, setEditPlanMode] = useState(false);   // false = clean text; true = reveal Add + per-plan Edit/Remove. Schedule stays at rest (ops).
   function togglePlanEdit() { setEditPlanMode((v) => { if (v) { setEditingPlanId(null); setAddingPlan(false); } return !v; }); }
@@ -20825,6 +20897,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
 
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
+  // REGISTER (plans, not attendance) — one read for the upcoming sessions + this month's open ones. Top level so
+  // the hook order never changes with the member/leader branch. Nothing below feeds it into any attendance figure.
+  const regToday = new Date(); regToday.setHours(0, 0, 0, 0);
+  const reg = useSessionRegistrations([...sessions.filter((s) => !s.done && sessDate(s) >= regToday).sort(sessSort).slice(0, 40), ...monthSessions.filter((s) => !s.done)].map((s) => s.id), notify);
+  const regNameById = new Map((members || []).map((m) => [m.id, m.name]));
 
   // ============================ MEMBER VIEW (presentational reskin) ============================
   // Reuses existing reads only (sessions/plan/members/monthSessions, dueInfo helpers). No queries,
@@ -20912,9 +20989,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                         <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...num }}>{dowTime(s)}</div>
                         <span style={{ display: "inline-block", marginTop: 5, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", borderRadius: 4, padding: "2px 7px", background: `${col}29`, color: col }}>{s.audience === "board" ? "Board only" : s.audience === "leadership" ? "Leadership only" : (cat?.name || "One-off")}</span>
                       </div>
-                      {/* No RSVP feature exists — Details expands what we know about the session. */}
+                      {/* Details expands what we know about the session (unchanged). Register — the plan — sits below. */}
                       <button onClick={() => setUpOpen(open ? null : s.id)} aria-expanded={open} style={{ ...cubtn, padding: "5px 10px", alignSelf: "center" }}>{open ? "Close" : "Details"}</button>
                     </div>
+                    {/* REGISTER — the member's own plan (never a count). A heads-up, not attendance. */}
+                    <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px dashed ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Register</span>
+                      <RegisterControl compact value={reg.mine(s.id, meId)} busy={reg.busyId === s.id || reg.rows === null} onPick={(k) => reg.setMine(s.id, k)} />
+                    </div>
+                    {i === 0 && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 6, lineHeight: 1.4 }}>Give whoever's running this training a heads-up if you're planning to come. This is a plan, not attendance — you'll still check in when you're there.</div>}
                     {open && (
                       <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}`, fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.55 }}>
                         <div>{sessDate(s).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}</div>
@@ -21075,6 +21158,13 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 {nextSession ? `Next training · ${daysToNext <= 0 ? "today" : daysToNext === 1 ? "tomorrow" : `in ${daysToNext} days`}` : "Next training"}
               </span>
               <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1.04, margin: "11px 0 9px", color: FIRE.textPrimary }}>{nextSession ? nextSession.title : "Nothing scheduled yet"}</div>
+              {nextSession && !nextSession.done && (
+                /* REGISTER — leaders' heads-up only: plans, not attendance (the roll is still taken at the session). */
+                <div style={{ marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "6px 11px", borderRadius: 9, background: "rgba(0,0,0,.22)", border: `1px dashed ${FIRE.line2Noir}` }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted }}>Plans so far</span>
+                  <PlanSummary compact regs={reg.forSession(nextSession.id)} />
+                </div>
+              )}
               {nextSession && (
                 <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", gap: 16, flexWrap: "wrap" }}>
                   <span><b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{sessDate(nextSession).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</b>{nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""}</span>
@@ -21087,8 +21177,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 {nextSession && nextPlans.length > 0 && <button style={thbtn} onClick={() => openSessionPlans(nextSession)}><FileText size={14} color={FIRE.textMuted} /> View plan</button>}
                 {nextSession && !nextSession.done && isDeptAdmin(role) && <button style={thbtn} onClick={() => setNotifyFor(nextSession)}><Megaphone size={14} color={FIRE.textMuted} /> Notify crew</button>}
                 {canPlanAI && <button style={thbtn} onClick={() => setDraftOpen((v) => !v)}><Sparkles size={14} color={FIRE.redText} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
+                {nextSession && !nextSession.done && <button style={thbtn} aria-expanded={plansOpen === "hero"} onClick={() => setPlansOpen(plansOpen === "hero" ? null : "hero")}><Users size={14} color={FIRE.textMuted} /> {plansOpen === "hero" ? "Hide plans" : "Who's planning to come"}</button>}
                 {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
               </div>
+              {nextSession && !nextSession.done && plansOpen === "hero" && (
+                <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(0,0,0,.25)", border: `1px solid ${FIRE.lineNoir}`, maxWidth: 560 }}>
+                  <PlanSummary regs={reg.forSession(nextSession.id)} nameById={regNameById} />
+                  <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 7 }}>A heads-up, not attendance — take the roll at the session as usual.</div>
+                </div>
+              )}
             </div>
             <div className="tr-hero-r" style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "center", gap: 20, paddingLeft: 24, borderLeft: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ position: "relative", width: 116, height: 116 }} title="Average attendance over the last 8 completed training sessions">
@@ -21331,6 +21428,10 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
                     <div style={{ ...FS.rowActions, gap: 6 }}>
                       <button style={Sbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
+                      {/* REGISTER — plans (not attendance), leaders' heads-up; separate from the roll above */}
+                      {!s.done && (() => { const n = reg.forSession(s.id).filter((r) => r.status === "coming").length; return (
+                        <button style={{ ...Sbtn, borderStyle: "dashed" }} aria-expanded={plansOpen === s.id} onClick={() => setPlansOpen(plansOpen === s.id ? null : s.id)}><CalendarCheck size={14} color={LbtnIcon} /> Plans{n ? ` · ${n} coming` : ""}</button>
+                      ); })()}
                       {s.plans.length > 0 && <button style={Sbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
                       {canRunSignin && !s.done && <button style={{ ...Sbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : FIRE.redText} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                       {canManage && (
@@ -21352,6 +21453,12 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                     </div>
                   </div>
+                  {!s.done && plansOpen === s.id && (
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, borderStyle: "dashed" }}>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans — a heads-up, not attendance</div>
+                      <PlanSummary regs={reg.forSession(s.id)} nameById={regNameById} />
+                    </div>
+                  )}
                   {editingSessionId === s.id && (
                     <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                       <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title</span><input style={Linput} value={sessEdit.title} onChange={(e) => setSessEdit((b) => ({ ...b, title: e.target.value }))} /></label>
