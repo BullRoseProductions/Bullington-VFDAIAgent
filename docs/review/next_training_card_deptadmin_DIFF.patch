@@ -1,0 +1,16 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index fd22a0d..2c4439f 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -3893,7 +3893,10 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
+       <NoirSkin>
+       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} overview actionCenter={actionCenter}
+         extraHero={<StatTile icon={ClipboardList} value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
+-      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 8, maxWidth: 360 }} />
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginTop: 8, alignItems: "start" }}>
++        <NextTrainingCard sessions={sessions} members={members} meId={meId} notify={notify} go={go} />
++        <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
++      </div>
+       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
+         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
+         <div style={{ flex: "2 1 340px", minWidth: 0 }}>

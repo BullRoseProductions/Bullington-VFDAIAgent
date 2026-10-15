@@ -1,0 +1,156 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index da6f6de..f244931 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -4872,76 +4872,114 @@ function StudySession({ S }) {
+     } finally { setLoading(false); }
+   }
+   const visible = turns.filter((t) => !t.hidden);
++  /* Presentation only. Verdict colours follow the house rule (green good, amber partial, red wrong); the verdict
++     itself is still the one parsed above from the [CORRECT]/[INCORRECT]/[PARTIAL] marker — nothing re-scores. */
++  const VERDICT_TONE = { CORRECT: [FIRE.greenText, "Correct"], INCORRECT: [FIRE.redText, "Incorrect"], PARTIAL: [FIRE.amberText, "Partly right"], UNSCORED: [FIRE.textMuted, "Not scored"] };
++  const verdictOf = (t) => { if (t.display == null) return null;   // only a scored answer carries `display`
++    const mk = String(t.content).match(VERDICT_RE); return mk ? mk[1].toUpperCase() : "UNSCORED"; };
++  const qual = isDeptQual(cert);
++  const answerBar = (value, onChange, onGo, placeholder, label) => (
++    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 6, borderRadius: 12, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>
++      <input style={{ ...FS.input, flex: 1, minWidth: 0, border: "none", background: "transparent" }} value={value} placeholder={placeholder} aria-label={placeholder} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onGo()} disabled={loading} />
++      <button style={{ ...FS.btnPrimary, padding: "9px 14px", opacity: loading || !value.trim() ? 0.6 : 1 }} onClick={onGo} disabled={loading || !value.trim()}><Send size={15} /> {label}</button>
++    </div>
++  );
+   return (
+     <PageShell band watermark="STUDY" kicker="STUDY SESSION" title="Study for your certification" sub="Pick a track, then quiz yourself or ask a question. An AI study partner — always verify against official standards.">
+       <NoirSkin>
+-      <Card padding={16} style={{ marginBottom: 12, display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+-        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
+-          <select style={{ ...FS.input, maxWidth: 320 }} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
++      <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12, display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
++        <label style={{ ...S.field, flex: 1, minWidth: 220, marginBottom: 0 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
++          <select style={FS.input} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
+             {Object.entries(CERT_TRACKS).map(([cat, certs]) => (
+               <optgroup key={cat} label={cat}>
+                 {certs.map((c) => <option key={c} value={c}>{c}</option>)}
+               </optgroup>
+             ))}
+           </select></label>
+-        <NoirSeg options={[["quiz", isDeptQual(cert) ? "Skill check" : "Quiz me"], ["explain", "Explain"]]} value={mode} onChange={(k) => { setMode(k); reset(); }} style={{ marginBottom: 12 }} />
+-      </Card>
++        <div>
++          <div style={{ ...S.fieldLabel, color: FIRE.textSecondary, marginBottom: 6 }}>Mode</div>
++          <NoirSeg options={[["quiz", qual ? "Skill check" : "Quiz me"], ["explain", "Explain"]]} value={mode} onChange={(k) => { setMode(k); reset(); }} />
++        </div>
++        {qual && <span style={{ ...NOIR_AI.chip, color: FIRE.amberText, background: "rgba(214,169,94,.1)", border: "1px solid rgba(214,169,94,.35)", marginBottom: 8 }}>Department qualification · hands-on sign-off</span>}
++      </div>
+       <Disclaimer S={S} compact dark />
++
+       {structuredQuiz && quizN > 0 && !quizDone && (
+-        <SectionLabel style={{ marginTop: 12, color: FIRE.textSecondary }}>Question {Math.min(results.length + (pendingQ ? 1 : 0), quizN)} of {quizN} · Score {score}/{results.length}</SectionLabel>
++        <div style={{ ...NOIR_INSET, padding: "10px 13px", marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
++          <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, ...FS.num }}>Question {Math.min(results.length + (pendingQ ? 1 : 0), quizN)} of {quizN}</span>
++          <span style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1, minWidth: 120 }} aria-label={`${results.length} of ${quizN} answered`}>
++            {Array.from({ length: quizN }, (_, i) => { const r = results[i]; const c = r ? VERDICT_TONE[r.verdict][0] : null;
++              return <span key={i} title={r ? VERDICT_TONE[r.verdict][1] : "Not answered yet"} style={{ width: 10, height: 10, borderRadius: 999, background: c || "transparent", border: `1px solid ${c || FIRE.line2Noir}` }} />; })}
++          </span>
++          <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...FS.num }}>Score <b style={{ color: FIRE.textPrimary }}>{score}</b>/{results.length}</span>
++        </div>
+       )}
++
+       <div style={{ marginTop: 12 }}>
+-        {visible.map((t, i) => (
+-          <div key={i} style={{ marginBottom: 10 }}>
+-            {t.role === "user" ? (
+-              <Card padding="10px 14px" style={{ fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.display ?? t.content}</Card>
+-            ) : (
+-              <Card padding="12px 16px"><RichOutput S={S} text={t.display ?? t.content} dark /></Card>
+-            )}
+-          </div>
+-        ))}
++        {visible.map((t, i) => {
++          if (t.role === "user") return (
++            <div key={i} style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
++              <div style={{ maxWidth: "85%", fontSize: 13.5, lineHeight: 1.45, color: FIRE.textPrimary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: "12px 12px 3px 12px", padding: "9px 13px" }}>{t.display ?? t.content}</div>
++            </div>
++          );
++          const v = verdictOf(t); const [vc, vl] = v ? VERDICT_TONE[v] : [null, null];
++          return (
++            <div key={i} style={{ ...FS.cardNoir, padding: "12px 15px", marginBottom: 10, borderLeft: `3px solid ${vc || NOIR_AI.blue}` }}>
++              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
++                {v ? <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: vc, border: `1px solid ${vc}66`, background: `${vc}14`, borderRadius: 6, padding: "3px 8px" }}>{vl}</span>
++                   : <span style={NOIR_AI.chip}><Sparkles size={11} /> Tutor</span>}
++              </div>
++              <RichOutput S={S} text={t.display ?? t.content} dark />
++            </div>
++          );
++        })}
+         {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Tutor is thinking…</div>}
+         {err && <div style={NOIR_ERR}>{err}</div>}
+       </div>
++
+       <div style={{ marginTop: 12 }}>
+         {structuredQuiz ? (
+           quizN === 0 ? (
+-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+-              <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length:</span>
++            <div style={{ ...NOIR_INSET, padding: "12px 14px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
++              <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length</span>
+               <NoirSeg options={[[5, "5"], [10, "10"], [20, "20"]]} value={quizLen} onChange={setQuizLen} />
++              <span style={{ fontSize: 12, color: FIRE.textMuted, flex: 1, minWidth: 140 }}>One {cert} question at a time, scored as you go.</span>
+               <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={() => startStructuredQuiz(quizLen)} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
+             </div>
+           ) : quizDone ? (
+-            <Card padding="16px 18px">
+-              <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 22, fontWeight: 700, color: FIRE.textPrimary }}>You got {score} of {quizN}</div>
+-              {unscored.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{unscored.length} question{unscored.length === 1 ? "" : "s"} couldn't be auto-scored.</div>}
++            <div style={{ ...FS.cardNoir, padding: "16px 18px" }}>
++              {(() => { const pct = quizN ? Math.round((score / quizN) * 100) : 0; const tone = pct >= 80 ? FIRE.greenText : pct >= 60 ? FIRE.amberText : FIRE.redText;
++                return (
++                  <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
++                    <div style={{ fontFamily: DISPLAY_FONT, fontSize: 30, fontWeight: 700, color: tone, ...FS.num }}>{score}<span style={{ fontSize: 18, color: FIRE.textMuted }}> / {quizN}</span></div>
++                    <div style={{ fontSize: 13, color: FIRE.textSecondary }}>{pct}% on {cert}</div>
++                  </div>
++                ); })()}
++              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
++                {results.map((r, i) => <span key={i} title={VERDICT_TONE[r.verdict][1]} style={{ width: 10, height: 10, borderRadius: 999, background: VERDICT_TONE[r.verdict][0] }} />)}
++              </div>
++              {unscored.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>{unscored.length} question{unscored.length === 1 ? "" : "s"} couldn't be auto-scored.</div>}
+               {missed.length > 0 ? (<>
+-                <SectionLabel style={{ marginTop: 12, marginBottom: 6 }}>Review these</SectionLabel>
+-                <ul style={{ margin: 0, paddingLeft: 18 }}>
+-                  {missed.map((m, i) => <li key={i} style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 4, lineHeight: 1.4 }}>{m.q}</li>)}
+-                </ul>
+-              </>) : <div style={{ fontSize: 13, color: FIRE.greenText, marginTop: 8 }}>Perfect run — nothing to review. 🎉</div>}
++                <SectionBar label="Review these" count={missed.length} style={{ margin: "14px 0 6px" }} />
++                {missed.map((m, i) => (
++                  <div key={i} style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, padding: "7px 0 7px 10px", borderLeft: `2px solid ${m.verdict === "PARTIAL" ? FIRE.amberText : FIRE.redText}`, marginBottom: 6 }}><RichOutput S={S} text={m.q} dark /></div>
++                ))}
++              </>) : <div style={{ fontSize: 13, color: FIRE.greenText, marginTop: 10 }}>Perfect run — nothing to review.</div>}
+               <button style={{ ...FS.btnPrimary, marginTop: 14 }} onClick={reset}><BookOpen size={16} /> Start another quiz</button>
+-            </Card>
+-          ) : pendingQ ? (
+-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+-              <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder="Type your answer…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitAnswer()} disabled={loading} />
+-              <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submitAnswer} disabled={loading || !input.trim()}>Submit answer</button>
+             </div>
++          ) : pendingQ ? (
++            answerBar(input, setInput, submitAnswer, "Type your answer…", "Submit")
+           ) : (
+-            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={nextQuestion} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Loading…</> : "Next question →"}</button>
++            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={nextQuestion} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Loading…</> : <>Next question <ChevronRight size={15} /></>}</button>
+           )
+         ) : (
+           <>
+             {mode === "quiz" && visible.length === 0 ? (
+-              <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
++              <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> {qual ? "Start skill check" : "Start quiz"}</>}</button>
+             ) : (
+-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+-                <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder={mode === "quiz" ? (isDeptQual(cert) ? "Describe how you'd do it…" : "Type your answer…") : `Ask a ${cert} question…`} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
+-                <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>{mode === "quiz" ? "Submit answer" : "Ask"}</button>
+-              </div>
++              answerBar(input, setInput, submit, mode === "quiz" ? (qual ? "Describe how you'd do it…" : "Type your answer…") : `Ask a ${cert} question…`, mode === "quiz" ? "Submit" : "Ask")
+             )}
+-            {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Start over</button>}
++            {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10, padding: "6px 11px", fontSize: 12 }} onClick={reset}><RefreshCw size={13} color={FIRE.btnIcon} /> Start over</button>}
+           </>
+         )}
+       </div>

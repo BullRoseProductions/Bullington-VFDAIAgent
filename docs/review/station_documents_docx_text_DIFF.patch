@@ -1,0 +1,95 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index e2c186e..880dc28 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -5945,6 +5945,17 @@ async function extractMinutesFileText(file) {
+   if (name.endsWith(".docx")) return await extractDocxText(file);
+   throw new Error("Unsupported file type. Upload a .docx, .pdf, or .txt file.");
+ }
++/* Station Documents → text for AI grounding (Station Q&A reads documents.content_text). PDFs through pdf.js, Word
++   (.docx) through mammoth — the same two readers Minutes import uses. Anything else (an image, a legacy .doc, a
++   spreadsheet) returns "" and lands on the no-text advisory. Throws on an unreadable file; both callers treat a
++   throw as "no text" and still save the document. */
++async function extractDocumentText(file) {
++  const name = (file?.name || "").toLowerCase(), type = file?.type || "";
++  if (type === "application/pdf" || name.endsWith(".pdf")) return await extractPdfText(file);
++  if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || name.endsWith(".docx")) return await extractDocxText(file);
++  return "";
++}
++const DOC_NO_TEXT_ADVICE = "PDFs and Word docs with real text work; a scanned or photographed document is just an image and would need to be re-saved with selectable text.";
+ const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
+ // One PDF page rendered to a canvas at the container width (x devicePixelRatio for crispness).
+ function PdfPage({ pdf, pageNum, width }) {
+@@ -6094,7 +6105,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+     const failed = [];
+     let lastErr = "";
+     const added = [];
+-    const noText = [];   // saved OK but yielded no extractable text (scan / non-PDF) — advisory, NOT a failure
++    const noText = [];   // saved OK but yielded no extractable text (scan / image / unsupported format) — advisory, NOT a failure
+     for (let i = 0; i < files.length; i++) {
+       const file = files[i];
+       // collision-proof path: {deptId}/{timestamp}-{index}-{filename}
+@@ -6104,17 +6115,12 @@ function Documents({ S, role, notify, uploaderName, members }) {
+       if (upErr) { failed.push(file.name); lastErr = upErr.message; continue; }
+       // 2) extract text for AI grounding — best-effort; NEVER blocks the upload (row still saves with content_text null).
+       let content_text = null;
+-      const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+-      if (!isPdf) {
+-        noText.push(file.name);                                          // gate 1: not a PDF (DOCX, image, etc.)
+-      } else {
+-        try {
+-          const text = await extractPdfText(file);
+-          if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // gate 3: has a real text layer
+-          else noText.push(file.name);                                  // empty/near-empty → likely a scanned image PDF
+-        } catch {
+-          noText.push(file.name);                                       // gate 2: getDocument threw — unreadable / not a real PDF
+-        }
++      try {
++        const text = await extractDocumentText(file);                    // PDF or Word (.docx); anything else → ""
++        if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // has real text (the same ≥25-char gate)
++        else noText.push(file.name);                                    // empty/near-empty → a scan/image, or a format we don't read
++      } catch {
++        noText.push(file.name);                                         // the reader threw — unreadable file; the document still saves
+       }
+       // 3) write the metadata row (content_text = extracted text, or null on any extraction failure)
+       const row = { department_id: deptId, name: file.name, type: uploadType, storage_path: path, uploaded_by: uploaderName, content_text };
+@@ -6129,7 +6135,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+     if (added.length) setDocs((d) => [...added, ...d]);
+     await loadDocs();   // non-destructive: a flaky read leaves the optimistic rows in place
+     // advisory (not an error): files that saved but couldn't be read for AI grounding — appended to the summary
+-    const aiNote = noText.length ? ` Couldn't read text from ${noText.join(", ")} — they may be scans or unsupported formats; they won't be included in the AI assistant until re-uploaded as text PDFs.` : "";
++    const aiNote = noText.length ? ` We couldn't pull text from ${noText.join(", ")}, so the assistant won't be able to read ${noText.length === 1 ? "it" : "them"}. ${DOC_NO_TEXT_ADVICE}` : "";
+     if (failed.length === 0) {
+       notify({ kind: "success", title: "Documents uploaded", text: `${okCount} document${okCount === 1 ? "" : "s"} uploaded.${aiNote}` });
+     } else if (okCount > 0) {
+@@ -6200,16 +6206,11 @@ function Documents({ S, role, notify, uploaderName, members }) {
+        concerned — the worst shape of bug, because nothing on screen said so. */
+     let content_text = null;
+     let noText = false;
+-    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+-    if (!isPdf) {
+-      noText = true;                                             // gate 1: not a PDF — no text layer we read
+-    } else {
+-      try {
+-        const text = await extractPdfText(file);
+-        if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // gate 3: has a real text layer
+-        else noText = true;                                      // empty/near-empty → likely a scanned image PDF
+-      } catch { noText = true; }                                 // gate 2: getDocument threw — unreadable / not a real PDF
+-    }
++    try {
++      const text = await extractDocumentText(file);              // PDF or Word (.docx); anything else → ""
++      if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // has real text (the same ≥25-char gate)
++      else noText = true;                                        // a scan/image, or a format we don't read
++    } catch { noText = true; }                                   // the reader threw — unreadable; the version still saves
+     const row = { department_id: deptId, name: oldRow.name, type: oldRow.type, storage_path: path, uploaded_by: uploaderName, content_text };   // inherit name/type from the original
+     const { data: newRow, error: insErr } = await supabase.from("documents").insert(row).select().single();
+     if (insErr || !newRow) { notify({ kind: "error", title: "Couldn't save the new version", text: "Please try again.", details: insErr?.message }); return; }
+@@ -6222,7 +6223,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+        "warning" kind would render green with a checkmark, which is the wrong signal for "the
+        assistant cannot read this". uploadFiles solves it exactly this way with its aiNote. */
+     const aiNote = noText
+-      ? " The assistant can't read the new file, though — it looks like a scan or has no text layer, so it won't be included in Station Q&A. Upload a text-based PDF (exported from Word) or have it OCR'd."
++      ? ` We couldn't pull text from the new file, so the assistant won't be able to read it. ${DOC_NO_TEXT_ADVICE}`
+       : "";
+     notify({ kind: "success", title: "New version saved", text: `"${oldRow.name}" was updated — the previous version is kept in history.${aiNote}` });
+     setHistoryFor(null);   // the chain changed; collapse any open history

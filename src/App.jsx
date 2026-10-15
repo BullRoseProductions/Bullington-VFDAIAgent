@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
-  Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus,
+  Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus, Copy, UtensilsCrossed,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
   Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
@@ -8,11 +8,12 @@ import {
   FolderOpen, Upload, FilePlus, PartyPopper,
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
-  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight,
+  Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
-import { mergeStationHours } from "../shared/station-hours.js";
+import { mergeStationHours, rollupStationHours } from "../shared/station-hours.js";
 import { todayISOIn } from "../shared/zoned-time.js";
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
@@ -27,6 +28,7 @@ import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseCl
 import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
+import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -44,14 +46,15 @@ const APP = "Before the Call";
 /* ---------------- Fire-luxury shared style recipes (reference FIRE tokens; reused across reskinned pages) ---------------- */
 const FS = {
   kicker: { fontSize: 10, textTransform: "uppercase", letterSpacing: ".18em", color: FIRE.red, fontWeight: 700, margin: 0 },
-  card: { background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
+  card: { background: FIRE.card, border: `1px solid ${FIRE.lineNoir}`, borderRadius: FIRE.cardRadius, boxShadow: FIRE.cardShadow },
   // Industrial Noir card (DA dashboard): gradient face, 1px hairline, 12px radius, soft drop shadow.
   cardNoir: { background: FIRE.cardNoir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 12, boxShadow: FIRE.cardShadowNoir },
   num: { fontFeatureSettings: '"tnum"', letterSpacing: "-0.01em" },
-  btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
+  btn: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 0, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 9, color: FIRE.btnText, cursor: "pointer", fontFamily: "inherit" },
   btnPrimary: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: FIRE.red, color: FIRE.white, border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
-  input: { border: `0.5px solid ${FIRE.inputBorder}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: FIRE.card, color: FIRE.textPrimary, colorScheme: "dark", width: "100%" },
-  row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `0.5px solid ${FIRE.hairline}` },
+  // Noir form field (the mocks' .field / .sel / .ta): card2 face, 1px line2 border, 10px radius. One token, every form.
+  input: { border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: "10px 12px", fontSize: 14.5, fontFamily: "inherit", background: FIRE.card2Noir, color: FIRE.textPrimary, colorScheme: "dark", width: "100%" },
+  row: { display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 4px", borderBottom: `1px solid ${FIRE.lineNoir}` },
   // RESPONSIVE CONVENTION (fluid, no JS breakpoint — reflows by available width):
   //  - A list row = FS.row (wraps) + FS.rowTitle on the label + FS.rowActions on the button cluster.
   //    rowTitle holds a readable min so it never squishes to a sliver; rowActions wraps the buttons
@@ -90,7 +93,9 @@ function useFitHeight(on) {
 // The page frame: red kicker + Oswald title (+ optional lead mark, sub-line, right-aligned actions), then the
 // content. fitToScreen pins the header and scrolls the content region internally — the no-scroll guardrail.
 // `above` renders before the header (a "Back to …" link on a drill-down page).
-function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, bandImage, bandMark, children }) {
+// `watermark`: the page's large ghosted word in the band (FLEET, GEAR, TRAIN…) — one standard size/placement, from
+// the mocks' .pagehdr .emb. `bandMark` still overrides it for a custom mark (the member file's initials).
+function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band, bandImage, bandMark, watermark, children }) {
   const [bodyRef, top] = useFitHeight(!!fitToScreen);
   // Below the content region sit the shell's own bottom padding (22px) and the app frame's content padding
   // (S.content: 26px + the safe area). Subtract both, or the outer page keeps a 26px scroll of its own.
@@ -108,7 +113,7 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
           {/* Photo slot: `bandImage` (a URL) renders behind the glows at heroPhotoOpacity; absent → nothing. */}
           {bandImage && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${bandImage})`, backgroundSize: "cover", backgroundPosition: "center", opacity: FIRE.heroPhotoOpacity, pointerEvents: "none" }} />}
           {/* Faded brand mark — the same logo file as the sidebar, behind the glows; hidden on phone (.noir-emblem). */}
-          {bandMark ?? <img src="/b4c-logo.png" alt="" aria-hidden="true" className="noir-emblem" draggable={false} style={{ position: "absolute", right: 140, top: "50%", transform: "translateY(-50%)", height: 96, width: "auto", opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />}
+          {bandMark ?? (watermark ? <div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 96, lineHeight: 1, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none", whiteSpace: "nowrap" }}>{watermark}</div> : null) ?? <img src="/b4c-logo.png" alt="" aria-hidden="true" className="noir-emblem" draggable={false} style={{ position: "absolute", right: 140, top: "50%", transform: "translateY(-50%)", height: 96, width: "auto", opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />}
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroGlowNoir, pointerEvents: "none" }} />
           <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: FIRE.heroShadeNoir, pointerEvents: "none" }} />
           <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
@@ -142,7 +147,7 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
 // The department crest PageShell takes as `lead`: logo when set, monogram otherwise.
 function DeptCrest({ dept }) {
   return (
-    <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+    <div style={{ width: 52, height: 52, borderRadius: 12, background: FIRE.card, border: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
       {dept?.logo_url ? <img src={dept.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, letterSpacing: ".02em", color: FIRE.redBright }}>{deptMonogram(dept?.name)}</span>}
     </div>
   );
@@ -167,6 +172,79 @@ function CardHead({ icon: Icon, title, count, right, as: Tag = "div", style, ...
     </Tag>
   );
 }
+// Noir section label bar (the mocks' .slbar / .fsec .sl): small uppercase muted label with a red icon, an optional
+// count and a right-hand slot. With onToggle it is the collapse control (chevron at the end) — the right slot sits
+// OUTSIDE the toggle button so it can hold its own buttons.
+function SectionBar({ icon: Icon, label, count, right, open, onToggle, style }) {
+  const labelEl = (<>
+    {Icon && <Icon size={13} color={FIRE.redBright} style={{ flexShrink: 0 }} />}
+    <span>{label}</span>
+    {count != null && <span style={{ color: FIRE.textSecondary, fontWeight: 600 }}>· {count}</span>}
+  </>);
+  const txt = { display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase" };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, margin: "18px 0 10px", minWidth: 0, ...style }}>
+      {onToggle
+        ? <button type="button" onClick={onToggle} aria-expanded={!!open} style={{ ...txt, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+            {labelEl}{open ? <ChevronUp size={14} color={FIRE.textMuted} style={{ marginLeft: 2 }} /> : <ChevronDown size={14} color={FIRE.textMuted} style={{ marginLeft: 2 }} />}
+          </button>
+        : <div style={{ ...txt, flex: 1, minWidth: 0 }}>{labelEl}</div>}
+      {right != null && <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11, color: FIRE.textSecondary, flexShrink: 0 }}>{right}</span>}
+    </div>
+  );
+}
+// Noir modal shell (the Issue / Add-units modals' look): gradient panel + a header with the red glow, icon tile,
+// Oswald title, optional sub-line, right-hand actions and a close button. Reused by the viewers and other modals.
+const NOIR_MODAL_PANEL = { background: "linear-gradient(180deg, #0E1218, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,.6)" };
+function NoirModalHead({ icon: Icon, title, sub, right, onClose }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "14px 18px", borderBottom: `1px solid ${FIRE.lineNoir}`, background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)", flexWrap: "wrap", textAlign: "left" }}>
+      {Icon && <span style={{ width: 36, height: 36, borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon size={18} color={FIRE.redText} /></span>}
+      <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, lineHeight: 1.15, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+        {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
+      </div>
+      {right && <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>{right}</div>}
+      {onClose && <button onClick={onClose} aria-label="Close" title="Close (Esc)" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0, flexShrink: 0 }}><X size={14} color={FIRE.textSecondary} /></button>}
+    </div>
+  );
+}
+// Noir replacements for the pre-Noir text styles (S.featTitle / S.helpP / S.errBox) on the remaining pages.
+const NOIR_FEAT_TITLE = { fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, margin: "0 0 4px", lineHeight: 1.3 };
+const NOIR_HELP = { fontSize: 12.5, lineHeight: 1.55, color: FIRE.textMuted, margin: "0 0 10px" };
+// The AI call-to-action banner on Noir. Replaces { ...S.aiBanner, ...FS.cardNoir }: S.aiBanner's 4px purple-grey
+// left edge survived that spread (React keeps the borderLeft longhand after the border shorthand).
+const NOIR_AI_BANNER = { ...FS.cardNoir, padding: 22, marginBottom: 22, display: "flex" };
+// SectionBar's label face, for hand-rolled toggles/labels that can't be a SectionBar.
+const NOIR_LABEL = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, margin: 0 };
+// THE AI ACCENT — one blue for every AI-drafted surface (training drill plan, recruitment plan, PR caption), so a
+// leader learns "blue = drafted by the AI, review it" once. Blue is info, never good/warn/bad.
+const NOIR_AI = {
+  blue: "#4F90D6", blueText: "#7FB2E6", glow: "radial-gradient(130% 150% at 90% 0%, rgba(79,144,214,.14), transparent 50%)",
+  chip: { display: "inline-flex", alignItems: "center", gap: 6, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: "#7FB2E6", background: "rgba(79,144,214,.12)", border: "1px solid rgba(79,144,214,.4)", borderRadius: 6, padding: "4px 9px" },
+};
+const NOIR_ERR = { marginTop: 10, fontSize: 12.5, lineHeight: 1.45, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText };
+// The mocks' inset panel (.card2 surface) — sections inside an expanded card sit on this.
+const NOIR_INSET = { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10 };
+// The mocks' .ck ring: "pass" = green ring + check, "fail" = red ring + X, "todo" = neutral ring (an item to check,
+// not a result — a template item must never wear a green check it hasn't earned).
+function CheckMark({ state = "pass", size = 18 }) {
+  const ring = state === "pass" ? { background: "rgba(47,168,105,.16)", border: "1px solid rgba(47,168,105,.5)" }
+    : state === "fail" ? { background: "rgba(200,50,58,.16)", border: "1px solid rgba(200,50,58,.5)" }
+    : { background: "transparent", border: `1px solid ${FIRE.line2Noir}` };
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, ...ring }}>
+      {state === "pass" ? <Check size={Math.round(size * 0.6)} color={FIRE.greenText} strokeWidth={3} />
+        : state === "fail" ? <X size={Math.round(size * 0.6)} color={FIRE.redBright} strokeWidth={3} />
+        : <span style={{ width: 5, height: 5, borderRadius: "50%", background: FIRE.textMuted2 }} />}
+    </span>
+  );
+}
+// The mocks' .h2res result pill: pass = green, fail = red (a failed check is bad, not a warning).
+function ResultBadge({ pass, children }) {
+  const c = pass ? FIRE.greenText : FIRE.redText;
+  return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "3px 11px", flexShrink: 0, color: c, background: pass ? "rgba(47,168,105,.10)" : "rgba(200,50,58,.10)", border: `1px solid ${pass ? "rgba(47,168,105,.4)" : "rgba(200,50,58,.4)"}`, ...FS.num }}>{children}</span>;
+}
 // Noir inset sub-panel (the mock's .minichart): a key swatch + Oswald title, an optional open chevron, the chart,
 // and a small caption under it.
 function MiniChart({ title, swatch, caption, onOpen, children }) {
@@ -183,8 +261,25 @@ function MiniChart({ title, swatch, caption, onOpen, children }) {
   );
 }
 // Red uppercase tracked label. `as="button"` for a collapsible section header.
+// The mocks' .segctl as one component: a dark track, compact segments, the active one solid red.
+// options = [[value, label], …]. Same pattern the inline segmented controls on Reports/Meetings/Training use.
+function NoirSeg({ options, value, onChange, style }) {
+  return (
+    <div style={{ display: "inline-flex", flexWrap: "wrap", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, ...style }}>
+      {options.map(([v, l]) => {
+        const on = value === v;
+        return <button key={String(v)} type="button" onClick={() => onChange(v)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: on ? FIRE.redBright : "transparent", color: on ? "#fff" : FIRE.textSecondary }}>{l}</button>;
+      })}
+    </div>
+  );
+}
 function SectionLabel({ as: Tag = "div", style, children, ...rest }) {
-  return <Tag style={{ ...FS.kicker, ...style }} {...rest}>{children}</Tag>;
+  // Inside <NoirSkin>: the SectionBar label face (muted caps, .08em) instead of the red pre-Noir kicker.
+  // Callers' own overrides (colour, case, margins) still win. Outside NoirSkin unchanged.
+  const base = React.useContext(NoirCtx)
+    ? { fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700, margin: 0 }
+    : FS.kicker;
+  return <Tag style={{ ...base, ...style }} {...rest}>{children}</Tag>;
 }
 // The card surface. `as="button"` for a whole-card link; `style` for an accent edge or layout.
 function Card({ as: Tag = "div", padding = "14px 16px", style, children, ...rest }) {
@@ -268,8 +363,8 @@ class ErrorBoundary extends React.Component {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div style={{ ...FS.card, padding: "22px 24px", borderLeft: `3px solid ${FIRE.red}`, maxWidth: 620 }}>
-        <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary, marginBottom: 8 }}>Something went wrong on this page.</div>
+      <div style={{ ...FS.cardNoir, padding: "22px 24px", maxWidth: 620 }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontSize: 20, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 8 }}>Something went wrong on this page.</div>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.55, marginBottom: 16 }}>
           This section hit an unexpected error. Your data is safe. Try reloading, or pick another section from the menu.
         </div>
@@ -313,7 +408,7 @@ const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
   : true;
 // Provenance pill for minutes that a human brought in (ai_outputs.source='imported') — so a human-authored
 // document is NEVER shown as if Claude drafted it. Shown wherever imported minutes appear.
-const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
+const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
 
 const TRACKS = {
   Fire:        { label: "Fire",        accent: FIRE.red,       Icon: Flame },        // Industrial Noir categorical set
@@ -449,16 +544,14 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
     setSaveState("ok"); setTimeout(() => setSaveState(""), 2500);
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
+    <PageShell band kicker="DEPARTMENT SETTINGS" title="Department details"
+      sub="Your department's name, station number, and city — shown on the crest and in reports.">
+      <NoirSkin>
       {/* Stations sit above the department profile because adding one is the thing that makes a
-          department multi-station at all — without it the picker can never appear. */}
+          department multi-station at all — without it the picker can never appear. (The page
+          header now sits in the band above both.) */}
       <StationsAdmin S={S} setDept={setDept} />
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>DEPARTMENT SETTINGS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Department details</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Your department's name, station number, and city — shown on the crest and in reports.</div>
-      </div>
-      <div style={{ ...FS.card, padding: 18, display: "flex", flexDirection: "column", gap: 12, maxWidth: 460 }}>
+      <div style={{ ...FS.cardNoir, padding: 18, display: "flex", flexDirection: "column", gap: 12, maxWidth: 460 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station number</span><input style={FS.input} value={form.station} placeholder="e.g. Station 20" onChange={(e) => set("station", e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>City</span><input style={FS.input} value={form.city} onChange={(e) => set("city", e.target.value)} /></label>
@@ -467,8 +560,8 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
             READ-ONLY pointer rather than deleted: a DA who knows where this lived would otherwise
             conclude the setting was lost. Two independently writable fields over the same fact is
             what D2a's resync existed to clean up — do not reintroduce one. */}
-        <div style={{ borderTop: `0.5px solid ${FIRE.hairline}`, margin: "6px 0 2px" }} />
-        <div style={FS.kicker}>STATION LOCATION</div>
+        <div style={{ borderTop: `1px solid ${FIRE.lineNoir}`, margin: "6px 0 2px" }} />
+        <SectionBar icon={MapPin} label="Station location" style={{ margin: "0" }} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "-4px 0 4px", lineHeight: 1.45 }}>
           Each house now carries its own location, set under <b style={{ color: FIRE.textSecondary }}>Stations</b> at the top of this page.
           {dept?.station_lat != null && dept?.station_lng != null
@@ -481,27 +574,28 @@ function DeptSettings({ S, dept, setDept, setBrand }) {
           {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
         </div>
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 /* ---------------- Your Six — membership support & crisis resources (6a: read-only member page) ---------------- */
 const RESOURCE_CATEGORY_ORDER = ["Crisis lines", "Mental health & support", "Physical health", "Line-of-duty & family"];
-const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.btnBg, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const LOCAL_TAG  = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.greenText, background: FIRE.card2Noir, border: `1px solid ${FIRE.greenText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const CRISIS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#fff", background: FIRE.redBright, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
-const WELLNESS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.amberText, background: FIRE.btnBg, border: `1px solid ${FIRE.amberText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+const WELLNESS_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: FIRE.amberText, background: FIRE.card2Noir, border: `1px solid ${FIRE.amberText}55`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 const telDigits = (p) => String(p || "").replace(/[^\d+]/g, "");   // tel:/sms: want digits (keep a leading +)
 // Only the contact methods a resource actually has, as tappable actions (real dial/text/compose on a phone).
 function ResourceActions({ r, compact }) {
   // Labeled buttons (full-width contexts: the Reach-out modal). Icon-only (compact) for grid tiles.
   const labelBtn = (href, Icon, label) => (
     <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
-       style={{ ...YS_ACTION_BTN, background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }}>
+       style={{ ...YS_ACTION_BTN, background: FIRE.card2Noir, color: FIRE.btnText, border: `1px solid ${FIRE.line2Noir}` }}>
       <Icon size={14} color={FIRE.btnIcon} /> {label}
     </a>
   );
   const iconBtn = (href, Icon, label) => (
     <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer" title={label} aria-label={label}
-       style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 36, borderRadius: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, textDecoration: "none" }}>
+       style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 36, borderRadius: 8, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, textDecoration: "none" }}>
       <Icon size={16} color={FIRE.btnIcon} />
     </a>
   );
@@ -516,6 +610,19 @@ function ResourceActions({ r, compact }) {
     </div>
   );
 }
+/* A resource's brand mark. An uploaded image wins when the row carries one (resources has no image column today —
+   adding one is a schema change, not part of this reskin); otherwise a monogram tile. NATIONAL organisations get a
+   NEUTRAL steel mark — never their real logo (trademark: no national-org logos without usage rights). Crisis lines
+   get the life-buoy; local rows the station red; businesses amber. */
+function ResourceMark({ r, size = 34 }) {
+  const initials = String(r?.name || "?").replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+  const tone = r?.is_crisis ? FIRE.redText : r?.is_national ? "#8C9AAB" : r?.is_business ? FIRE.amberText : FIRE.redBright;
+  const box = { width: size, height: size, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                background: `${tone}1F`, border: `1px solid ${tone}55` };
+  if (r?.logo_url) return <span style={box}><img src={r.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /></span>;
+  if (r?.is_crisis) return <span style={box}><LifeBuoy size={Math.round(size * 0.5)} color={tone} /></span>;
+  return <span style={{ ...box, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: Math.round(size * 0.38), letterSpacing: ".02em", color: tone }} aria-hidden="true">{initials}</span>;
+}
 const YS_BLANK_FORM = { name: "", category: "", description: "", phone: "", text_number: "", website: "", email: "", address: "", is_wellness: false };
 const SPONSOR_TAG = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#111", background: FIRE.amberText, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
 // COMPACT CARD SIZING — the ONE source of truth for every Your Six card (crisis / health / business /
@@ -525,7 +632,7 @@ const YS_CARD_NAME  = { fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }
 const YS_ACTION_BTN = { display: "inline-flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, textDecoration: "none", fontFamily: "inherit" };   // ~34px tall, tappable
 // Deck/grid layout: cards tile side-by-side within each section (~2-up on a phone, more on desktop).
 const YS_GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 };
-const YS_TILE_EDIT_BTN = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 24, borderRadius: 6, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, cursor: "pointer", padding: 0 };
+const YS_TILE_EDIT_BTN = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 24, borderRadius: 6, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, cursor: "pointer", padding: 0 };
 // One "Directions" link, no chooser: open the device's likely default — Apple Maps on iOS/iPadOS,
 // Google Maps on Android/desktop. Address is URL-encoded so spaces/commas survive (space->%20, comma->%2C).
 const mapsHref = (addr) => {
@@ -613,7 +720,7 @@ function YourSix({ S, role, meId, members, notify }) {
   const formCard = (onSave, saveLabel) => {
     const isBiz = formKind === "business";
     return (
-    <Card padding={12} style={{ background: FIRE.btnBg, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+    <Card padding={12} style={{ background: FIRE.card2Noir, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input style={FS.input} value={form.name} placeholder={isBiz ? "e.g. Miller's Hardware" : "e.g. Chaplain Dave, or Peer support"} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
         {!isBiz && <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><input style={FS.input} list="ys-cats" value={form.category} placeholder="e.g. Department wellness" onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} /><datalist id="ys-cats">{allCategories.map((c) => <option key={c} value={c} />)}</datalist></label>}
@@ -648,10 +755,10 @@ function YourSix({ S, role, meId, members, notify }) {
     const sponsorTag = r.is_business && r.is_national;
     const hasTag = localTag || sponsorTag || r.is_wellness;
     return (
-      <div key={r.id} style={{ ...FS.cardNoir, ...YS_CARD, marginBottom: 0, display: "flex", flexDirection: "column", ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}) }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-          {r.is_crisis && <LifeBuoy size={13} color={FIRE.redText} style={{ flexShrink: 0, marginTop: 2 }} />}
-          <span style={{ ...YS_CARD_NAME, flex: 1, minWidth: 0, lineHeight: 1.25 }}>{r.name}</span>
+      <div key={r.id} style={{ ...FS.cardNoir, ...YS_CARD, marginBottom: 0, display: "flex", flexDirection: "column", ...(r.is_crisis ? { borderLeft: `3px solid ${FIRE.redText}` } : {}), ...(editMode && !r.is_national ? { borderStyle: "dashed" } : {}) }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+          <ResourceMark r={r} />
+          <span style={{ ...YS_CARD_NAME, flex: 1, minWidth: 0, lineHeight: 1.25, alignSelf: "center" }}>{r.name}</span>
           {editMode && canManage && (r.is_national
             ? <span title={r.is_business ? "Platform sponsor — locked" : "Verified national resource — locked"} style={{ flexShrink: 0, display: "inline-flex", marginTop: 2 }}><Lock size={13} color={FIRE.textMuted2} /></span>
             : <span style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
@@ -686,10 +793,10 @@ function YourSix({ S, role, meId, members, notify }) {
     return cats.map((cat) => ({ cat, items: byCat.get(cat).sort((a, b) => (a.is_national ? 1 : 0) - (b.is_national ? 1 : 0) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name)) }));
   }, [resources]);
   return (
-    <PageShell kicker="YOUR SIX" title={<>Support &amp; resources</>}
+    <PageShell band watermark="SIX" kicker="YOUR SIX" title={<>Support &amp; resources</>}
       sub="Help is here when you need it — for you, or someone on your crew. Every line below is real and answered."
       actions={canManage && resources && (
-          <button onClick={toggleEditMode} style={{ ...FS.btn, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
             {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit resources</>}
           </button>
         )}>
@@ -707,8 +814,8 @@ function YourSix({ S, role, meId, members, notify }) {
           <ChevronRight size={18} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
         </button>
         {reachOpen && createPortal(
-          <div onClick={() => setReachOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 120, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 460, width: "100%", padding: "18px 18px calc(18px + env(safe-area-inset-bottom))" }}>
+          <div onClick={() => setReachOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 120, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}`, maxWidth: 460, width: "100%", padding: "18px 18px calc(18px + env(safe-area-inset-bottom))" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <HeartHandshake size={20} color={FIRE.greenText} />
                 <div style={{ flex: 1, fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 20, fontWeight: 700, color: FIRE.textPrimary }}>Reach out</div>
@@ -732,7 +839,7 @@ function YourSix({ S, role, meId, members, notify }) {
                     {r.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 2, lineHeight: 1.4 }}>{r.description}</div>}
                     <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
                       <a href={`tel:${telDigits(r.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call</a>
-                      {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={{ ...YS_ACTION_BTN, background: FIRE.btnBg, color: FIRE.btnText, border: `0.5px solid ${FIRE.btnBorder}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
+                      {r.text_number && <a href={`sms:${telDigits(r.text_number)}`} style={{ ...YS_ACTION_BTN, background: FIRE.card2Noir, color: FIRE.btnText, border: `1px solid ${FIRE.line2Noir}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
                     </div>
                   </div>
                 ))}
@@ -763,6 +870,12 @@ function YourSix({ S, role, meId, members, notify }) {
             <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, marginBottom: 10 }}>These are your crew's real people — a chaplain, a peer supporter, an officer — who members can reach when they're struggling. They appear first in the “Reach out” flow, so a member always reaches a person before a hotline.</div>
             <button style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={beginAddWellness}><Plus size={14} color={FIRE.btnIcon} /> Add a wellness contact</button>
           </Card>
+        )}
+        {editMode && (   /* edit mode only ever turns on from the leaders-only Edit button */
+          <div style={{ ...NOIR_INSET, padding: "9px 12px", marginBottom: 12, display: "flex", alignItems: "center", gap: 9, borderColor: `${FIRE.amberText}55` }}>
+            <Pencil size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.4 }}>Editing — your station's own entries (dashed) can be changed. National lines and platform sponsors are locked.</span>
+          </div>
         )}
         {/* Edit mode: panel-level Add (resources). */}
         {canManage && editMode && (adding && formKind === "resource" ? formCard(addResource, "Add resource") : (
@@ -815,28 +928,72 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
     setCurrent(target);
     notify({ kind: "success", text: target ? "Your person is set." : "Cleared your person." });
   }
+  const [picking, setPicking] = useState(false);   // the crew list is open (always open when nobody is chosen)
+  const [q, setQ] = useState("");
+  const shown = options.filter((m) => !q.trim() || (m.name || "").toLowerCase().includes(q.trim().toLowerCase()));
+  const initials = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  const avatar = (m, size = 40, tone = FIRE.greenText) => (
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: 999, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: Math.round(size * 0.36), color: tone, background: `${tone}1A`, border: `1px solid ${tone}55` }}>{initials(m?.name)}</span>
+  );
+  const listOpen = current === null || picking;
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>YOUR PERSON</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Who's your person?</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Optional. Pick someone on your crew you'd want to hear from in a hard moment — they'll be the first tap in “Reach out” on Your Six. This is private to you; only you can see or change it.</div>
+    <PageShell band watermark="PERSON" kicker="YOUR PERSON" title="Who's your person?"
+      sub="Optional. Someone on your crew you'd want to hear from in a hard moment — they become the first tap in “Reach out” on Your Six.">
+      <NoirSkin>
+      <div style={{ ...NOIR_INSET, padding: "10px 13px", marginBottom: 12, display: "flex", alignItems: "center", gap: 9 }}>
+        <Lock size={14} color={FIRE.greenText} style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.4 }}><b style={{ color: FIRE.textPrimary }}>Private to you.</b> Only you can see or change this.</span>
       </div>
-      <div style={{ ...FS.card, ...YS_CARD }}>
-        {current === undefined ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
-        ) : (<>
-          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Your person</span>
-            <select style={FS.input} value={current || ""} disabled={saving} onChange={(e) => choose(e.target.value)}>
-              <option value="">— None —</option>
-              {options.map((m) => <option key={m.id} value={m.id} disabled={!m.phone}>{m.name}{m.phone ? "" : " (no number on file)"}</option>)}
-            </select>
-          </label>
-          {person && <div style={{ marginTop: 12, fontSize: 13, color: FIRE.textSecondary }}>Currently: <b style={{ color: FIRE.textPrimary }}>{person.name}</b>{person.phone ? ` · ${person.phone}` : ""}</div>}
-          {person && !person.phone && <div style={{ marginTop: 6, fontSize: 12.5, color: FIRE.amberText }}>This person has no number on file, so “Reach out” can't call them yet — pick someone with a number, or ask an officer to add theirs.</div>}
-        </>)}
-      </div>
-    </div>
+      {current === undefined ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+      ) : (<>
+        {person && (
+          <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12, borderLeft: `3px solid ${FIRE.greenText}` }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 8 }}>Your person</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              {avatar(person, 46)}
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: FIRE.textPrimary }}>{person.name}</div>
+                <div style={{ fontSize: 12.5, color: FIRE.textMuted, ...FS.num }}>{person.phone || "No number on file"}</div>
+              </div>
+              {person.phone && <a href={`tel:${telDigits(person.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call</a>}
+              {person.phone && <a href={`sms:${telDigits(person.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.card2Noir, color: FIRE.btnText, border: `1px solid ${FIRE.line2Noir}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
+              <button type="button" disabled={saving} onClick={() => setPicking((v) => !v)} style={{ ...YS_ACTION_BTN, background: "transparent", color: FIRE.textSecondary, border: `1px solid ${FIRE.line2Noir}`, cursor: "pointer" }}>{picking ? "Keep" : "Change"}</button>
+            </div>
+            {!person.phone && <div style={{ marginTop: 10, fontSize: 12.5, color: FIRE.amberText }}>This person has no number on file, so “Reach out” can't call them yet — pick someone with a number, or ask an officer to add theirs.</div>}
+          </div>
+        )}
+        {current && !person && (
+          <div style={{ ...NOIR_INSET, padding: "10px 13px", marginBottom: 12, fontSize: 12.5, color: FIRE.amberText }}>The person you picked is no longer on the active roster. Choose someone else, or clear it.</div>
+        )}
+        {listOpen && (
+          <div style={{ ...FS.cardNoir, padding: "12px 14px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flex: 1 }}>Pick from your crew</span>
+              {options.length > 8 && <input style={{ ...FS.input, maxWidth: 220, padding: "7px 10px", fontSize: 13 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find someone…" aria-label="Find someone on your crew" />}
+            </div>
+            {shown.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>{options.length ? "No one matches that." : "No one else on the roster yet."}</div>}
+            {shown.map((m) => {
+              const on = m.id === current;
+              return (
+                <button key={m.id} type="button" disabled={saving || !m.phone || on} onClick={() => { setPicking(false); choose(m.id); }}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "9px 6px", background: on ? FIRE.card2Noir : "transparent", border: "none", borderBottom: `1px solid ${FIRE.lineNoir}`, cursor: !m.phone || on ? "default" : "pointer", fontFamily: "inherit", textAlign: "left", opacity: m.phone ? 1 : 0.5 }}>
+                  {avatar(m, 32, m.phone ? FIRE.textSecondary : FIRE.textMuted)}
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</span>
+                    {!m.phone && <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>No number on file</span>}
+                  </span>
+                  {on ? <CheckCircle2 size={16} color={FIRE.greenText} /> : m.phone ? <ChevronRight size={15} color={FIRE.btnIcon} /> : null}
+                </button>
+              );
+            })}
+            {current && <button type="button" disabled={saving} onClick={() => { setPicking(false); choose(""); }} style={{ ...FS.btn, marginTop: 10, padding: "6px 11px", fontSize: 12 }}>Clear — no person</button>}
+          </div>
+        )}
+        {saving && <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.textMuted, marginTop: 8 }}><Loader2 size={13} className="spin" /> Saving…</div>}
+      </>)}
+      </NoirSkin>
+    </PageShell>
   );
 }
 /* ── Automatic station presence: the prominent disclosure ────────────────────────────────
@@ -962,15 +1119,15 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEs
           A policy link that keyboard users can't see themselves land on is the wrong one to
           leave inaccessible. */}
       <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
-      <div style={FS.kicker}>LOCATION</div>
+      <div style={NOIR_LABEL}>LOCATION</div>
       <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 12px", letterSpacing: "-0.01em" }}>
         {GEOFENCE_DISCLOSURE.title}
       </h1>
 
       {GEOFENCE_COPY_IS_DRAFT && (
-        <div style={{ ...FS.card, padding: 14, marginBottom: 14, borderLeft: `4px solid ${FIRE.red}` }}>
+        <div style={{ ...FS.cardNoir, padding: 14, marginBottom: 14, background: "rgba(214,169,94,.08)", border: "1px solid rgba(214,169,94,.32)" }}>
           <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
-            <AlertTriangle size={16} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+            <AlertTriangle size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
             <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
               <strong style={{ color: FIRE.textPrimary }}>Awaiting legal sign-off on this screen.</strong> The wording matches
               APP-002, but the assembled screen hasn't been cleared yet — it must not go in front of members or the app stores
@@ -980,11 +1137,11 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEs
         </div>
       )}
 
-      <div style={{ ...FS.card, padding: 18 }}>
+      <div style={{ ...FS.cardNoir, padding: 18 }}>
         {/* Paragraph 1 carries "even when the app is closed or not in use" — the statement the
             store looks for and the one a member most needs to actually read. Set apart so it
             cannot be skimmed past in a wall of text. The words are untouched. */}
-        <div style={{ background: FIRE.track, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 10, padding: "13px 14px", margin: "0 0 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ ...NOIR_INSET, padding: "13px 14px", margin: "0 0 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
           <MapPin size={17} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.55 }}>
             {GEOFENCE_DISCLOSURE.lead}
@@ -1010,10 +1167,10 @@ function GeofenceDisclosure({ meId, notify, onBack, onDecision, onWithdraw, onEs
       {/* Answered already → show what they chose and let them change it. An agreement you
           cannot walk back is not consent, so "turn it off" is always on screen. */}
       {consent ? (
-        <div style={{ ...FS.card, padding: 16, marginTop: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: 16, marginTop: 12 }}>
           <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
             {consent === "granted"
-              ? <CheckCircle2 size={17} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              ? <CheckCircle2 size={17} color={FIRE.greenText} style={{ flexShrink: 0, marginTop: 1 }} />
               : <Clock size={17} color={FIRE.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>
@@ -1263,7 +1420,7 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
      department can still see the task existed; deleting it would remove the only evidence outside
      those snapshots. The confirm says what actually happens, because "remove" reads like erasure. */
   async function retire(it) {
-    if (!window.confirm(`Remove “${it.label}” from the list?\n\nCrews will stop seeing it. Checklists already logged keep it exactly as it was.`)) return;
+    if (!(await noirConfirm({ title: `Remove “${it.label}”?`, body: "Crews will stop seeing it. Checklists already logged keep it exactly as it was.", confirmLabel: "Remove", danger: true }))) return;
     setBusy(true);
     const { data, error } = await supabase.from("aftercall_items").update({ active: false }).eq("id", it.id).select();
     setBusy(false);
@@ -1272,23 +1429,18 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
   }
 
   return (
-    <div style={{ padding: "4px 2px 0" }}>
-      <div style={{ marginBottom: 14 }}>
-        <div style={FS.kicker}>AFTER-CALL CHECKLIST</div>
-        {/* The literal, not the DISPLAY const — that one is scoped inside another component far
-            below and is not in scope here. Same face every other settings screen sets. */}
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 28, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>After-Call Checklist</h1>
-        <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
-          A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.
-        </div>
-      </div>
+    <PageShell band watermark="AFTER" kicker="AFTER-CALL CHECKLIST" title="After-Call Checklist"
+      sub="A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.">
+      <NoirSkin>
 
       {/* the toggle */}
-      <div style={{ ...FS.card, padding: 18, marginBottom: 12 }}>
+      <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 12, borderTop: `3px solid ${enabled ? FIRE.greenText : FIRE.amberText}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ width: 38, height: 38, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${FIRE.amberText}22`, border: `1px solid ${FIRE.amberText}44` }}><ClipboardCheck size={19} color={FIRE.amberText} /></span>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>
               {enabled ? "On for your department" : "Off"}
+              <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", borderRadius: 5, padding: "2px 6px", color: enabled ? FIRE.greenText : FIRE.textMuted, border: `1px solid ${enabled ? `${FIRE.greenText}66` : FIRE.line2Noir}` }}>{enabled ? "Live" : "Off by default"}</span>
             </div>
             <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 3, lineHeight: 1.5 }}>
               {enabled
@@ -1297,9 +1449,12 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
             </div>
           </div>
           {isDA ? (
-            <button disabled={busyToggle} onClick={toggle}
-                    style={{ ...(enabled ? FS.btn : FS.btnPrimary), opacity: busyToggle ? 0.7 : 1 }}>
-              {busyToggle ? <><Loader2 size={15} className="spin" /> Saving…</> : (enabled ? "Turn off" : <><CheckCircle2 size={15} /> Turn on</>)}
+            <button disabled={busyToggle} onClick={toggle} aria-pressed={enabled} aria-label={enabled ? "Turn the After-Call Checklist off" : "Turn the After-Call Checklist on"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: busyToggle ? "default" : "pointer", fontFamily: "inherit", padding: 4, opacity: busyToggle ? 0.7 : 1 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }}>{busyToggle ? "Saving…" : enabled ? "On" : "Off"}</span>
+              <span aria-hidden="true" style={{ width: 46, height: 26, borderRadius: 999, position: "relative", transition: "background .15s", background: enabled ? FIRE.green : FIRE.card2Noir, border: `1px solid ${enabled ? FIRE.green : FIRE.line2Noir}` }}>
+                <span style={{ position: "absolute", top: 2, left: enabled ? 22 : 2, width: 20, height: 20, borderRadius: 999, background: "#fff", transition: "left .15s" }} />
+              </span>
             </button>
           ) : (
             /* Read-only for a leader who can curate the list but not switch the feature on.
@@ -1320,13 +1475,13 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
 
       {/* the shared list — only once the feature is on */}
       {enabled && (
-        <div style={{ ...FS.card, padding: "8px 0" }}>
-          <div style={{ ...FS.kicker, padding: "10px 14px 4px" }}>THE TASK LIST</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0" }}>
+          <CardHead icon={ClipboardCheck} title="The task list" count={items ? items.length : undefined} style={{ padding: "10px 14px 2px", marginBottom: 4 }} />
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
             One list for the whole department — every rig uses it. Crews tick these off after a call.
           </div>
           {loadErr && (
-            <div style={{ fontSize: 12.5, color: FIRE.redText, padding: "0 14px 10px", lineHeight: 1.5 }}>
+            <div style={{ ...NOIR_ERR, margin: "0 14px 10px" }}>
               Couldn&rsquo;t load the list: {loadErr}
             </div>
           )}
@@ -1336,8 +1491,9 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
               No tasks yet — add the things crews do after a call.
             </div>
           )}
-          {(items || []).map((it) => (
-            <div key={it.id} style={{ padding: "10px 14px", borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {(items || []).map((it, idx) => (
+            <div key={it.id} style={{ padding: "10px 14px", borderTop: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, fontWeight: 700, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, ...FS.num }}>{idx + 1}</span>
               {editingId === it.id ? (<>
                 <input style={{ ...FS.input, flex: 1, minWidth: 180 }} value={editBuf} autoFocus
                        onChange={(e) => setEditBuf(e.target.value)}
@@ -1353,7 +1509,7 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
               </>)}
             </div>
           ))}
-          <div style={{ padding: "10px 14px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+          <div style={{ padding: "10px 14px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
             {adding ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <input style={{ ...FS.input, flex: 1, minWidth: 180 }} value={label} autoFocus
@@ -1366,12 +1522,13 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
                 <button disabled={busy} style={FS.btn} onClick={() => { setAdding(false); setLabel(""); }}>Cancel</button>
               </div>
             ) : (
-              <button style={FS.btn} onClick={() => setAdding(true)}><Plus size={15} /> Add a task</button>
+              <button style={{ ...FS.btn, width: "100%", justifyContent: "center", borderStyle: "dashed" }} onClick={() => setAdding(true)}><Plus size={15} /> Add a task</button>
             )}
           </div>
         </div>
       )}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -1380,80 +1537,125 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   const isDA = isDeptAdmin(role);
   const back = () => setView(null);
   const backBtn = <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Settings &amp; Support</button>;
-  const doc = (title, body) => <PageShell above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title={title}><Card padding={18} style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>{body}</Card></PageShell>;
-  // sub-screens (BrandKit/RequestForm bring their own page shell → just prepend a back button)
+  const LEGAL = [
+    { label: "Terms of Service", href: "https://b4thecall.com/legal/terms", Icon: FileText },
+    { label: "Privacy Policy", href: "https://b4thecall.com/legal/privacy", Icon: ShieldAlert },
+    { label: "How we use AI", href: "https://b4thecall.com/legal/responsible-ai", Icon: Sparkles },
+    { label: "Trust Center", href: "https://b4thecall.com/legal", Icon: Globe },
+  ];
+  const buildId = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
+  const chip = (Icon, acc, size = 34) => <span style={{ width: size, height: size, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}22`, border: `1px solid ${acc}44`, color: acc }}><Icon size={Math.round(size * 0.5)} /></span>;
+  const legalRows = (
+    <Card padding="4px 14px" style={{ marginTop: 8 }}>
+      <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
+      {LEGAL.map(({ label, href, Icon }, i, arr) => (
+        <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="b4c-legal-link"
+           style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 2px", textDecoration: "none", borderBottom: i < arr.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
+          {chip(Icon, "#8C9AAB", 28)}
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{label}</span>
+          <ExternalLink size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+        </a>
+      ))}
+    </Card>
+  );
+  // sub-screens (BrandKit / DeptSettings / the pickers bring their own page shell → just prepend a back button)
   if (view === "brand") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<BrandKit S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} /></div>;
-  if (view === "support") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<RequestForm S={S} requests={requests} setRequests={setRequests} /><Card padding={18} style={{ marginTop: 12 }}><SectionLabel>CONTACT SUPPORT</SectionLabel><p style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 6 }}>Questions, a bug, or feedback? Email us and we'll get back to you.</p><a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 4 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a></Card></div>;
+  if (view === "support") return (
+    <PageShell band above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Support &amp; Contact</>} sub="Questions, a bug, or an idea — a real person reads every message.">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, padding: "16px 18px", borderTop: `3px solid ${FIRE.blueText}`, display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {chip(Mail, FIRE.blueText, 40)}
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Contact support</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 3 }}>Email us and we'll get back to you. Include your department and what you were doing — a screenshot helps.</div>
+          <a href={`mailto:${SUPPORT_EMAIL}`} style={{ ...FS.btnPrimary, textDecoration: "none", display: "inline-flex", marginTop: 10 }}><Mail size={16} /> Email {SUPPORT_EMAIL}</a>
+        </div>
+      </div>
+      <SectionBar icon={Send} label="Request custom training" style={{ margin: "20px 0 8px" }} />
+      <RequestForm S={S} requests={requests} setRequests={setRequests} embedded />
+      <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ margin: "20px 0 0" }} />
+      {legalRows}
+      </NoirSkin>
+    </PageShell>
+  );
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
-  if (view === "about") return doc("About", <>Before the Call<br />© 2026 Big Bull Technologies, LLC. All rights reserved.</>);
+  if (view === "about") return (
+    <PageShell band above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title="About">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, padding: "20px 18px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+        <img src="/b4c-logo.png" alt="B4C" style={{ height: 52, width: "auto" }} draggable={false} />
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary }}>Before the Call</div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>Training, readiness and records for volunteer fire departments.</div>
+        </div>
+      </div>
+      <div style={{ ...NOIR_INSET, padding: "4px 14px", marginTop: 12 }}>
+        {[["Build", buildId], ["Department", dept?.name || "—"], ["Support", SUPPORT_EMAIL]].map(([k, v], i, arr) => (
+          <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: i < arr.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none", fontSize: 13 }}>
+            <span style={{ color: FIRE.textMuted }}>{k}</span><span style={{ color: FIRE.textPrimary, ...FS.num, textAlign: "right", minWidth: 0, overflowWrap: "anywhere" }}>{v}</span>
+          </div>
+        ))}
+      </div>
+      <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ margin: "20px 0 0" }} />
+      {legalRows}
+      <div style={{ marginTop: 16, fontSize: 12, color: FIRE.textMuted, textAlign: "center" }}>© 2026 Big Bull Technologies, LLC. All rights reserved.</div>
+      </NoirSkin>
+    </PageShell>
+  );
   if (view === "geofence") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<GeofenceConsentFlow meId={meId} notify={notify} onBack={back} /></div>;
   /* GATED HERE TOO, not only on the card. A card that is not rendered is not a permission — the
      view key survives in state, so the route needs the same test the card does or a stale key
      would walk somebody straight past it. */
   if (view === "aftercall" && canManage(role)) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<AfterCallSettings S={S} role={role} dept={dept} setDept={setDept} notify={notify} /></div>;
-  const card = (key, Icon, title, desc) => (
-    <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView(key)}>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-        <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-        <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
+  const card = (key, Icon, acc, title, desc, badge) => (
+    <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => setView(key)}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {chip(Icon, acc)}
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flex: 1, minWidth: 0 }}>{title}</span>
+        {badge}
       </div>
-      <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{desc}</div>
-      <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-        <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-      </div>
+      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.45, flex: 1 }}>{desc}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, color: acc }}>Open <ChevronRight size={14} /></div>
     </Card>
   );
-  return (<PageShell kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Settings &amp; Support</>} sub="Your department settings, brand, and help — all in one place.">
-    <div style={S.opGrid}>
-      {card("person", HeartHandshake, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
-      {isDA && card("dept", Building2, "Department Settings", "Your department's name, station number, and details.")}
-      {card("brand", Palette, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
+  const offBadge = (txt) => <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 5, padding: "2px 6px" }}>{txt}</span>;
+  return (<PageShell band kicker={<>SETTINGS &amp; SUPPORT</>} title={<>Settings &amp; Support</>} sub="Your department settings, brand, and help — all in one place."
+    bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 40, top: "50%", transform: "translateY(-50%)", color: FIRE.textPrimary, opacity: 0.06, pointerEvents: "none" }}><SettingsIcon size={150} strokeWidth={1.25} /></div>}>
+    <NoirSkin>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(250px, 100%), 1fr))", gap: 12 }}>
+      {card("person", HeartHandshake, FIRE.greenText, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
+      {isDA && card("dept", Building2, "#8C9AAB", "Department Settings", "Your department's name, station number, and details.")}
+      {card("brand", Palette, FIRE.redBright, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
       {/* DOUBLE-GATED, and invisible today on both counts: VITE_GEOFENCE_ENABLED is unset, and
           no department has opted in (0 of 2). The client flag is the kill switch for a feature
           that has never run on a real device; the department flag is the consent boundary — a
           department that hasn't agreed to locate its members must not be offered the option,
           because offering it is already a suggestion that it's expected. Both must be on. */}
       {geofenceConsentAvailable() && dept?.geofence_enabled &&
-        card("geofence", MapPin, "Automatic station presence", "Record arrivals and departures at your department's approved locations — read what's collected before you decide.")}
+        card("geofence", MapPin, FIRE.blueText, "Automatic station presence", "Record arrivals and departures at your department's approved locations — read what's collected before you decide.")}
       {/* Shown to the people who manage the list — Board | DA | Officer, matching the is_canmanage()
           gate on the aftercall_items policies, so the card never leads to a screen whose writes the
           server would refuse. The card appears whether the feature is on or off: while it is off,
           this screen is the only place to find out it exists at all. The description states the
           default so nobody reads an empty department as a broken one. */}
-      {canManage(role) && card("aftercall", ClipboardCheck, "After-Call Checklist",
+      {canManage(role) && card("aftercall", ClipboardCheck, FIRE.amberText, "After-Call Checklist",
         dept?.aftercall_enabled
           ? "The shared list of tasks crews complete after a call — add, rename or remove tasks."
-          : "A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.")}
-      {card("support", Mail, "Support & Contact", "Get help, send feedback, or request custom training.")}
-      {card("about", Award, "About", "App info and copyright.")}
+          : "A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.",
+        dept?.aftercall_enabled ? null : offBadge("Off"))}
+      {card("support", Mail, NOIR_AI.blue, "Support & Contact", "Get help, send feedback, or request custom training.")}
+      {card("about", Award, "#8C9AAB", "About", "App info, build and copyright.")}
     </div>
     {/* Legal & Trust — external links to the public documentation center. No role gate: every member sees these. */}
-    <div style={{ marginTop: 18 }}>
-      <style>{`.b4c-legal-link:focus-visible{outline:2px solid ${FIRE.blueText};outline-offset:2px;border-radius:6px}`}</style>
-      <SectionLabel>LEGAL &amp; TRUST</SectionLabel>
-      <Card padding="4px 14px" style={{ marginTop: 8 }}>
-        {[
-          { label: "Terms of Service", href: "https://b4thecall.com/legal/terms", Icon: FileText },
-          { label: "Privacy Policy", href: "https://b4thecall.com/legal/privacy", Icon: ShieldAlert },
-          { label: "How we use AI", href: "https://b4thecall.com/legal/responsible-ai", Icon: Sparkles },
-          { label: "Trust Center", href: "https://b4thecall.com/legal", Icon: Globe },
-        ].map(({ label, href, Icon }, i, arr) => (
-          <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="b4c-legal-link"
-             style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 2px", textDecoration: "none",
-                      borderBottom: i < arr.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
-            <Icon size={16} color={FIRE.red} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{label}</span>
-            <ExternalLink size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
-          </a>
-        ))}
-      </Card>
-    </div>
+    <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ margin: "20px 0 0" }} />
+    {legalRows}
     {/* Build id — matches the deployed commit's short hash + /version.json. Lets anyone confirm a
         phone actually picked up a new deploy (vs. running a stale cached bundle). Tap to force a fresh reload. */}
     <div onClick={() => location.reload()} title="Tap to reload the latest version" style={{ marginTop: 18, textAlign: "center", fontSize: 11, color: FIRE.textMuted2, letterSpacing: ".03em", cursor: "pointer", ...FS.num }}>
-      Build {typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev"}
+      Build {buildId}
     </div>
+    </NoirSkin>
   </PageShell>);
 }
 const NAV = [
@@ -1553,7 +1755,10 @@ function StationsAdmin({ S, setDept }) {
 
      NOTE the shape difference this introduces: my_stations() returns `station_id`, the table
      returns `id`. Every reference below uses r.id. */
+  const [loadErr, setLoadErr] = useState(false);   // the LIST read failed (kept apart from form errors in `err`)
   const load = async () => {
+    setLoadErr(false);
+    try {
     // Belt-and-braces only: the SELECT policy already scopes this to my_department_id(). So a
     // failure to resolve the id does NOT block the list — RLS is the boundary either way, and
     // refusing to render over a redundant filter would break never-blank-on-error for nothing.
@@ -1562,10 +1767,19 @@ function StationsAdmin({ S, setDept }) {
     if (deptId) q = q.eq("department_id", deptId);
     const { data, error } = await q.order("is_default", { ascending: false }).order("name");
     // A failed read keeps the last-known list rather than claiming the department has none.
-    if (error) { setErr(error.message || "Please try again."); return; }
-    setErr(""); setRows(Array.isArray(data) ? data : []);
+    if (error) { setLoadErr(true); return; }
+    setRows(Array.isArray(data) ? data : []);
+    } catch { setLoadErr(true); }   // a thrown fetch (offline, dead keep-alive) must not leave "Loading…" up forever
   };
   useEffect(() => { load(); }, []);
+  useReconnect(() => { if (loadErr) load(); });
+  // A read that never settles (stalled connection) is treated as failed after 15 s, so the card offers
+  // Try again instead of spinning. A late success still lands and replaces it.
+  useEffect(() => {
+    if (rows !== null) return;
+    const t = setTimeout(() => setLoadErr(true), 15000);
+    return () => clearTimeout(t);
+  }, [rows]);
   async function saveEdit(id, isDefault) {
     const name = ef.name.trim();
     if (!name) { setErr("Give the station a name."); return; }
@@ -1645,14 +1859,16 @@ function StationsAdmin({ S, setDept }) {
   }
   const list = rows || [];
   return (
-    <div style={{ ...FS.card, padding: 18, marginBottom: 14, maxWidth: 460 }}>
-      <div style={FS.kicker}>STATIONS</div>
-      <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 10px", lineHeight: 1.5 }}>
+    <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 14, maxWidth: 460 }}>
+      <CardHead icon={Building2} title="Stations" />
+      <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px", lineHeight: 1.5 }}>
         The houses in this department. Apparatus, gear and duties belong to one of them.
       </div>
-      {rows === null && !err && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
+      {loadErr && rows === null && <ReadRetry what="the stations" onRetry={load} />}
+      {loadErr && rows !== null && <ReadRetry what="the latest stations — showing the last list loaded" onRetry={load} />}
+      {rows === null && !loadErr && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
       {list.map((r) => (
-        <div key={r.id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+        <div key={r.id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           {editId === r.id ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0 6px" }}>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
@@ -1665,8 +1881,8 @@ function StationsAdmin({ S, setDept }) {
                    This is what makes automatic arrival possible for THIS house. Before D2a only the
                    default house had coordinates, copied from the department; every other house had
                    none, so there was nothing for a fence to be built from. */}
-              <div style={{ height: 1, background: FIRE.hairline, margin: "2px 0" }} />
-              <div style={FS.kicker}>LOCATION</div>
+              <div style={{ height: 1, background: FIRE.lineNoir, margin: "2px 0" }} />
+              <SectionBar icon={MapPin} label="Location" style={{ margin: "2px 0 0" }} />
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 122 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Latitude</span>
                   <input style={FS.input} value={ef.lat} placeholder="e.g. 32.540300" onChange={(e) => setEf((x) => ({ ...x, lat: e.target.value }))} /></label>
@@ -1721,7 +1937,7 @@ function StationsAdmin({ S, setDept }) {
           )}
         </div>
       ))}
-      {err && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+      {err && <div style={NOIR_ERR}>{err}</div>}
       {!adding ? (
         <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => { setAdding(true); setErr(""); }}><Plus size={15} /> Add a station</button>
       ) : (
@@ -2189,7 +2405,7 @@ export default function App() {
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label, is_meeting"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -2223,7 +2439,7 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, isMeeting: !!r.is_meeting, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
           // off-site location: null lat/lng = at the station (every existing drill, and the default)
           isOffsite: !!r.is_offsite, locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
@@ -2748,18 +2964,18 @@ export default function App() {
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
-          {screen === "packet" && packet && <Packet S={S} packet={packet} back={() => setScreen("library")} />}
+          {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
           {/* Signers (Board/DA/Officer) and list editors (DA/PA) get the officer screen; everyone else sees their own checklist, read-only. */}
           {screen === "onboarding" && ((canManage(role) || isDeptAdmin(role))
-            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} />
+            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} />
             : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} />)}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
           {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
@@ -3002,11 +3218,15 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
   }
   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
   const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
+  // REGISTER on the card — the member's own plan only (no count). Read skipped when the card isn't shown.
+  const reg = useSessionRegistrations(showUpcomingTraining ? upcoming.map((s) => s.id) : [], notify);
   return (
     <>
       {noir
         ? <CardHead icon={LayoutDashboard} title="Your personal view" style={{ marginTop: 14 }} />
         : <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 18 }}>YOUR PERSONAL VIEW</div>}
+      {/* A failed duties read kept [] and looked like "nothing assigned" — say so instead. */}
+      {(loadErr || crewErr) && <OfflineNotice onRetry={() => { if (loadErr) loadMine(); if (crewErr) loadCrew(); }} what="your duties" />}
       {/* Open loops first — it self-hides when there are none, so it costs nothing on a clean record. */}
       <NeedsAttention S={S} me={me} meId={meId} sessions={sessions} go={go} />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: noir ? 8 : 12, marginBottom: noir ? 8 : 14 }}>
@@ -3066,7 +3286,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
                 );
               })}
               {mineDone.length > 0 && (
-                <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                <div style={{ marginTop: mineOpen.length ? 8 : 0, paddingTop: mineOpen.length ? 8 : 0, borderTop: mineOpen.length ? `1px solid ${FIRE.lineNoir}` : "none" }}>
                   {mineDone.map((d) => {
                     const dl = d.done_at ? new Date(d.done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
                     return (
@@ -3099,8 +3319,8 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
                 (a lead-time nudge for something with no period is always too late) does not apply
                 to showing them. */}
             {mineOpen.length === 0 && crewOpen.length > 0 && (
-              <div style={{ marginTop: (mineOpen.length + mineDone.length) > 0 ? 10 : 12, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                <div style={{ ...FS.kicker, marginBottom: 8 }}>STATION DUTIES STILL OPEN</div>
+              <div style={{ marginTop: (mineOpen.length + mineDone.length) > 0 ? 10 : 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                <div style={{ ...NOIR_LABEL, marginBottom: 8 }}>STATION DUTIES STILL OPEN</div>
                 {crewShown.map((d) => (
                   <div key={d.id} style={{ ...FS.row, padding: "8px 0" }}>
                     <ClipboardList size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -3125,13 +3345,20 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
           {noir ? <CardHead icon={CalendarCheck} title="Upcoming training" style={{ marginBottom: 0 }} /> : <div style={FS.kicker}>UPCOMING TRAINING</div>}
           <div style={{ marginTop: 10 }}>
             {upcoming.length === 0 ? (<div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing scheduled yet.</div>) : upcoming.map((s) => (
-              <div key={s.id} style={{ ...FS.row, padding: "9px 0" }}>
+              <div key={s.id} style={{ ...FS.row, padding: "9px 0", flexWrap: "wrap", rowGap: 6 }}>
                 <CalendarCheck size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{s.title}</div>
                   <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{fmtSess(s)}</div>
                 </div>
                 {s.plan && <button onClick={() => openSessionPlans(s)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }}>Open plan</button>}
+                {/* REGISTER — only on a session this member is eligible for (the same audience rule the server enforces) */}
+                {rollFor(s, me) && (
+                  <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingLeft: 25 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Plan</span>
+                    <RegisterControl compact value={reg.mine(s.id, meId)} busy={reg.busyId === s.id || reg.rows === null} onPick={(k) => reg.setMine(s.id, k)} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -3270,8 +3497,8 @@ function Announcements({ role, members, meId, notify, style }) {
   const birthdays = celebs.map((c) => ({ id: c.member_id, name: c.member.name, md: parseMD(c.birthday) })).filter((x) => x.md && x.md.m === curMonth).sort((a, b) => a.md.d - b.md.d);   // this month, by day
   const anniversaries = celebs.map((c) => { const md = parseMD(c.joined_date); return md ? { id: c.member_id, name: c.member.name, md, years: curYear - md.y } : null; }).filter((x) => x && x.md.m === curMonth && x.years >= 1).sort((a, b) => a.md.d - b.md.d);   // this month, real anniversaries (>=1 yr)
   return (
-    <div style={{ ...FS.card, padding: 18, ...style }}>
-      <div style={FS.kicker}>FEED</div>
+    <div style={{ ...FS.cardNoir, padding: 18, ...style }}>
+      <CardHead icon={Megaphone} title="Feed" style={{ marginBottom: 0 }} />
 
       {/* Announcements — featured at the top of the feed; bounded so a long feed scrolls internally (~6 rows) instead of growing the page */}
       <div style={{ marginTop: 10, maxHeight: 372, overflowY: "auto" }}>
@@ -3280,7 +3507,7 @@ function Announcements({ role, members, meId, notify, style }) {
         ) : items.length === 0 ? (
           <div style={{ fontSize: 13, color: FIRE.textMuted }}>No announcements yet.</div>
         ) : items.map((it) => (
-          <div key={it.id} style={{ padding: "10px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={it.id} style={{ padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
               {it.title && <span style={{ fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{it.title}</span>}
               {it.audience === "leadership" && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.amberText, border: `0.5px solid ${FIRE.amberText}55`, borderRadius: 5, padding: "1px 5px" }}>Leadership</span>}
@@ -3331,12 +3558,12 @@ function Announcements({ role, members, meId, notify, style }) {
 
       {/* Compose — posters only (ANNOUNCE_ROLES = DA/PA/TO); the DB enforces the real gate */}
       {canPost && (composing ? (
-        <div style={{ marginTop: 12, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 12 }}>
+        <div style={{ marginTop: 12, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 12 }}>
           <input style={{ ...FS.input, marginBottom: 8 }} placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
           <textarea style={{ ...FS.input, minHeight: 60, resize: "vertical", marginBottom: 8 }} placeholder="Write an announcement…" value={body} onChange={(e) => setBody(e.target.value)} />
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
             {[["everyone", "Everyone"], ["leadership", "Leadership"]].map(([v, l]) => (
-              <button key={v} onClick={() => setAudience(v)} style={{ ...FS.btn, flex: 1, justifyContent: "center", ...(audience === v ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{l}</button>
+              <button key={v} onClick={() => setAudience(v)} style={{ ...FS.btn, flex: 1, justifyContent: "center", ...(audience === v ? { borderColor: FIRE.redBright, color: FIRE.textPrimary, background: "rgba(200,50,58,.12)" } : {}) }}>{l}</button>
             ))}
           </div>
           {/* min=today so a past date cannot be picked by accident. TODAY IS VALID — the policy
@@ -3344,7 +3571,7 @@ function Announcements({ role, members, meId, notify, style }) {
               guard: the browser lets a typed date through, and the only thing that matters is
               that a past date simply means "already expired", which is a recoverable state an
               admin can see and clear, not a corruption. */}
-          <label style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted2, marginBottom: 4 }}>Show until (optional)</label>
+          <label style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, marginBottom: 6 }}>Show until (optional)</label>
           <input type="date" min={todayLocal} value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)}
                  style={{ ...FS.input, marginBottom: 4, colorScheme: "dark" }} />
           <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 10 }}>Leave blank to run until you remove it.</div>
@@ -3359,8 +3586,8 @@ function Announcements({ role, members, meId, notify, style }) {
       ))}
 
       {/* Birthdays & anniversaries THIS MONTH — from the dept-scoped celebrations view (all members can see) */}
-      <div style={{ marginTop: 14, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>🎂 Birthdays &amp; anniversaries</div>
+      <div style={{ marginTop: 14, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 10 }}>
+        <SectionBar label="🎂 Birthdays & anniversaries" style={{ margin: "0 0 8px" }} />
         {birthdays.length === 0 && anniversaries.length === 0 ? (
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, fontStyle: "italic" }}>No birthdays or anniversaries this month.</div>
         ) : (
@@ -3411,6 +3638,107 @@ function NextLeadershipEventTile({ S, sessions, role, notify, style }) {
     </Card>
   );
 }
+/* NEXT TRAINING — the leader dashboards' training card (Board, Officer, Dept Admin). The soonest upcoming TRAINING:
+   not finalized, and not governance — leadership/board sessions are already on the next-board-meeting/leadership
+   card beside this, and a session flagged as a business meeting is a meeting, not training. Those are excluded
+   explicitly here (the Minutes-only isMeeting helper is deliberately not reused). Every remaining session is an
+   everyone-audience one, so any leader is eligible to set their own plan (the RPC re-checks).
+   REGISTER ONLY — a plan, not attendance: the leader's own Coming / Maybe / Not coming, and who else is planning
+   to come. Nothing here reads or writes the roll, check-in, finalize, or any attendance figure. */
+function NextTrainingCard({ sessions, members, meId, notify, go, style }) {
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const next = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0 && !isRestrictedEvent(s) && !s.isMeeting).sort(sessSort)[0] || null;
+  const reg = useSessionRegistrations(next ? [next.id] : [], notify);
+  const [showNames, setShowNames] = useState(false);
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const regs = next ? reg.forSession(next.id) : [];
+  return (
+    <Card style={{ display: "flex", flexDirection: "column", gap: 9, ...style }}>
+      <CardHead icon={GraduationCap} title="Next training" style={{ marginBottom: 0 }} />
+      {!next ? <EmptyState icon={null} text="No training scheduled." /> : (<>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.3 }}>{next.title}</div>
+          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3, ...FS.num }}>{sessDate(next).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}{next.startTime ? ` · ${fmtTime(next.startTime)}` : ""}{next.isOffsite ? ` · off-site${next.locLabel ? ` (${next.locLabel})` : ""}` : ""}</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Your plan</span>
+          <RegisterControl compact value={reg.mine(next.id, meId)} busy={reg.busyId === next.id || reg.rows === null} onPick={(k) => reg.setMine(next.id, k)} />
+        </div>
+        <div style={{ padding: "7px 10px", borderRadius: 9, background: FIRE.insetNoir, border: `1px dashed ${FIRE.line2Noir}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Plans so far</span>
+            <PlanSummary compact regs={regs} />
+            {regs.length > 0 && <button type="button" onClick={() => setShowNames((v) => !v)} aria-expanded={showNames} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: FIRE.textSecondary, fontSize: 11.5, fontFamily: "inherit", padding: 0 }}>{showNames ? "Hide" : "Who"}</button>}
+          </div>
+          {showNames && <div style={{ marginTop: 6 }}><PlanSummary regs={regs} nameById={nameById} /></div>}
+        </div>
+        <div style={{ fontSize: 10.5, color: FIRE.textMuted }}>A heads-up, not attendance — the roll is still taken at the session.</div>
+      </>)}
+      {go && <button style={{ ...FS.btn, alignSelf: "flex-start", padding: "6px 11px", fontSize: 12 }} onClick={() => go("training")}>View Training <ChevronRight size={13} color={FIRE.btnIcon} /></button>}
+    </Card>
+  );
+}
+/* STATION FUNDRAISER CARD — what the whole department sees when a leader shares a fundraiser. ONE read:
+   get_station_fundraisers() (department-scoped, SECURITY DEFINER), which returns only {id, name, target_date,
+   tasks_done, tasks_total, next_steps} for shared, upcoming, not-finished fundraisers — never goal, proceeds,
+   donors, sponsors, owners, or un-ticked steps. Members have no read on any funding table; this card can't show
+   money because the read can't return it. Renders nothing when nothing is shared (or the read fails). Several
+   shared → the soonest (the read orders by date). */
+function StationFundraiserCard({ style }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let off = false;
+    supabase.rpc("get_station_fundraisers").then(({ data, error }) => { if (!off && !error && Array.isArray(data)) setRows(data); });   // failed read: keep last-known (nothing on first load)
+    return () => { off = true; };
+  }, []);
+  const f = rows && rows[0];
+  if (!f) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const [yy, mm, dd] = String(f.target_date).split("-").map(Number);
+  const day = new Date(yy, (mm || 1) - 1, dd || 1);
+  const days = Math.round((day - today) / 86400000);
+  const countdown = days <= 0 ? "Today" : days === 1 ? "Tomorrow" : `${days} days to go`;
+  const total = Number(f.tasks_total) || 0, done = Number(f.tasks_done) || 0;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const steps = Array.isArray(f.next_steps) ? f.next_steps : [];
+  const fmtDue = (iso) => { if (!iso) return null; const [a, b, c] = String(iso).split("-").map(Number); return new Date(a, (b || 1) - 1, c || 1).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  return (
+    <div style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, background: `radial-gradient(130% 160% at 92% 0%, rgba(214,169,94,.16), transparent 50%), ${FS.cardNoir.background}`, marginBottom: 10, ...style }}>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", padding: "14px 16px", alignItems: "center" }}>
+        <div style={{ minWidth: 120, textAlign: "center", padding: "8px 12px", borderRadius: 12, background: "rgba(214,169,94,.1)", border: "1px solid rgba(214,169,94,.35)" }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: days > 1 ? 30 : 24, lineHeight: 1, color: FIRE.amberText, ...FS.num }}>{days > 1 ? days : countdown}</div>
+          {days > 1 && <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.textMuted, marginTop: 4 }}>days to go</div>}
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.amberText }}>Station fundraiser</div>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: FIRE.textPrimary, lineHeight: 1.15, marginTop: 2 }}>{f.name}</div>
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3 }}>{day.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+          <div style={{ marginTop: 9 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: FIRE.textMuted, marginBottom: 4, ...FS.num }}>
+              <span>Planning progress</span><span>{total ? `${done} of ${total} tasks · ${pct}%` : "No tasks yet"}</span>
+            </div>
+            <div style={{ height: 7, borderRadius: 999, background: FIRE.card2Noir, overflow: "hidden" }} aria-hidden="true">
+              <div style={{ width: `${pct}%`, height: "100%", background: pct >= 100 ? FIRE.green : FIRE.amberText }} />
+            </div>
+          </div>
+        </div>
+      </div>
+      {steps.length > 0 && (
+        <div style={{ padding: "10px 16px 4px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 6 }}>Up next</div>
+          {steps.map((st, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "4px 0", fontSize: 13, color: FIRE.textPrimary }}>
+              <span style={{ width: 6, height: 6, borderRadius: 999, background: FIRE.amberText, flexShrink: 0, transform: "translateY(-2px)" }} />
+              <span style={{ flex: 1, minWidth: 0 }}>{st.text}</span>
+              {st.due_date && <span style={{ fontSize: 11.5, color: FIRE.textMuted, flexShrink: 0, ...FS.num }}>by {fmtDue(st.due_date)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ padding: "8px 16px 11px", fontSize: 11, color: FIRE.textMuted }}>Shared by your officers · no dollar amounts or donor info shown.</div>
+    </div>
+  );
+}
 function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   // Health numbers are derived inside DeptHealthCharts — the SAME component the DA dashboard renders.
@@ -3418,7 +3746,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const [dutiesLoaded, setDutiesLoaded] = useState(false);   // "—" until the read lands, never a premature "No duties set"
   const [loadErr, setLoadErr] = useState(false);
   const loadBoard = () => {
-    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
+    supabase.from("duties").select("id, duty, category, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setLoadErr(false); setDuties(data); setDutiesLoaded(true); });   // dept-scoped by RLS
   };
   useEffect(() => { loadBoard(); }, []);
@@ -3434,7 +3762,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
   const govDate = (r) => r ? new Date(r.edited_at || r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
   const minutesAuthor = minutesRow ? (members.find((m) => m.id === minutesRow.created_by)?.name || "Unknown") : null;
   return (
-    <PageShell band kicker={dept?.name ? `BOARD · ${dept.name}` : "BOARD"} title={dashboardGreeting(me)} sub="Department oversight at a glance." actions={<HeroAside />}>
+    <PageShell band kicker={dept?.name ? `BOARD · ${dept.name}` : "BOARD"} title={dashboardGreeting(me)} sub="Department oversight at a glance." actions={<HeroAside />}
+      above={loadErr ? <OfflineNotice onRetry={loadBoard} what="the board view" /> : null}>
       {/* Noir skin, as on the DA dashboard: CardHead headers + the gradient card face down through the Chief's Report. */}
       <NoirSkin>
 
@@ -3443,6 +3772,8 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8, marginBottom: 14 }}>
         {/* Next leadership event — soonest future audience='leadership' session (Piece 4; repointed from the old agenda-draft NEXT MEETING) */}
         <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
+        {/* Next training — governance AND training together (Board had no training surface); their own plan + who's coming */}
+        <NextTrainingCard sessions={sessions} members={members} meId={meId} notify={notify} go={go} />
         {/* Recent minutes — newest minutes draft */}
         <Card style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <CardHead icon={FileText} title="Recent minutes" style={{ marginBottom: 0 }} />
@@ -3457,6 +3788,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
         {/* Action items — mine + unassigned, never anyone else's (shared ActionItemsCard, same as every dashboard) */}
         <ActionItemsCard meId={meId} go={go} />
       </div>
+      <StationFundraiserCard style={{ marginTop: -4, marginBottom: 14 }} />
 
       {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
           unlike things (a 0% cert, a 42% attendance, a "no duties" n/a) into one figure nobody could act on. */}
@@ -3474,7 +3806,6 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
         </div>
         <button style={{ ...FS.btn, flexShrink: 0 }} onClick={() => go("reports")}>{isDeptAdmin(role) ? "Open report" : "View stats"} <ChevronRight size={14} color={FIRE.btnIcon} /></button>
       </Card>
-      </NoirSkin>
 
       {/* FEED + CALENDAR — read-only feed (Board not in ANNOUNCE_ROLES) beside the shared station calendar; mirrors DeptAdminDashboard */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
@@ -3483,6 +3814,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -3521,6 +3853,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const todayISO = toISODate(new Date());
   const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  const nextReg = useSessionRegistrations(nextEvent ? [nextEvent.id] : [], notify);   // REGISTER — leaders' heads-up on the next session (plans, not attendance)
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [duties, setDuties] = useState([]);
   const [dutiesLoaded, setDutiesLoaded] = useState(false);   // until the read lands, duty completion is "—", not "No duties set"
@@ -3533,7 +3866,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const [attnOpen, setAttnOpen] = useState(true);   // NEEDS YOUR ATTENTION collapsible; default expanded
   const [loadErr, setLoadErr] = useState(false);
   const loadPanels = () => {
-    supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
+    supabase.from("duties").select("id, duty, category, due_date, done, done_at, recurrence, assigned_to")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); setDutiesLoaded(true); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
       .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); setPendLoaded(true); });   // dept-scoped by RLS
@@ -3550,9 +3883,9 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const hasInsights = insights.attendanceGaps.length > 0 || insights.overdueItems.length > 0 || insights.apparatusFailures.length > 0;
-  const showDutiesCard = openDuties.length > 0, showCertsCard = (expg + expd) > 0, showPendingCard = pendingCerts.length > 0;
+  const showDutiesCard = false /* the duties entry moved onto the Station duties card */, showCertsCard = (expg + expd) > 0, showPendingCard = pendingCerts.length > 0;
   const attnKnown = dutiesLoaded && pendLoaded && itemsLoaded && !loadErr;
-  const attnN = (openDuties.length ? 1 : 0) + (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
+  const attnN = (flagged.length ? 1 : 0) + (pendingCerts.length ? 1 : 0) + insights.attendanceGaps.length + insights.overdueItems.length + insights.apparatusFailures.length;   // 3 count-card categories (non-zero) + per-person insight cards + apparatus failures
   // ACTION CENTER — the old NEEDS YOUR ATTENTION section in a card beside the stats. A zero count is not something
   // that needs attention, so zero cards stay hidden; "All clear" only once duties, approvals and action items have
   // all LANDED — until then (or if a read failed) a dash, never a claim that it's clear.
@@ -3608,11 +3941,11 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
     </Card>
   );
   return (
-    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
+    <PageShell band above={loadErr ? <OfflineNotice onRetry={() => { setLoadErr(false); loadPanels(); }} what="the command view" /> : null} lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `COMMAND · ${dept.name}` : "COMMAND"} title={dashboardGreeting(me)} actions={
         <HeroAside>
           <button onClick={() => go("training")} style={{ textAlign: "right", minWidth: 130, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>NEXT DEPT EVENT</div>
-            {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div></>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
+            {nextEvent ? (<><div style={{ fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, marginTop: 3, ...FS.num }}>{sessDate(nextEvent).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div><div style={{ fontSize: 12, color: FIRE.textMuted }}>{nextEvent.title}</div>{nextReg.rows && nextReg.rows.length > 0 && <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><PlanSummary compact regs={nextReg.forSession(nextEvent.id)} /></div>}</>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 4 }}>Nothing scheduled</div>}
             <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.btnIcon, marginTop: 5, display: "inline-flex", alignItems: "center", gap: 3 }}>View Training <ChevronRight size={12} /></div>
           </button>
         </HeroAside>
@@ -3622,18 +3955,19 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       <NoirSkin>
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} overview actionCenter={actionCenter}
         extraHero={<StatTile icon={ClipboardList} value={String(openActions)} label="Open action items" onClick={() => go("minutes", "action-items")} />} />
-      </NoirSkin>
-      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 8, maxWidth: 360 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginTop: 8, alignItems: "start" }}>
+        <NextTrainingCard sessions={sessions} members={members} meId={meId} notify={notify} go={go} />
+        <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
+      </div>
+      <StationFundraiserCard style={{ marginTop: 8 }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <NoirSkin>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
       <ActionItemsCard meId={meId} go={go} style={{ marginBottom: 8 }} />
-      </NoirSkin>
       <CardHead icon={Wand2} title="Quick actions" style={{ marginTop: 14 }} />
       <div style={S.quickGrid}>
         {["reports", "roster", "duties", "minutes", "documents"].map((k) => {
@@ -3651,6 +3985,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
           );
         })}
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -3727,7 +4062,7 @@ function useInsightDrafts() {
   function closeDraft() { setDraftFor(null); setDraftText(""); setDraftErr(""); setCopied(false); }
   async function copyDraft() { try { await navigator.clipboard.writeText(draftText); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setDraftErr("Couldn't copy — select the text and copy manually."); } }
   const draftBox = (key, sys, ctx) => (
-    <div style={{ marginTop: 6, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+    <div style={{ marginTop: 6, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 8 }}>
       {draftLoading ? (
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Drafting…</div>
       ) : draftErr ? (
@@ -3870,6 +4205,9 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   // Health numbers are derived inside DeptHealthCharts — the same component the DA and Board dashboards render.
   const todayISO = toISODate(new Date());
   const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  const nextReg = useSessionRegistrations(nextSession ? [nextSession.id] : [], notify);   // REGISTER — leaders' heads-up on the next session (plans, not attendance)
+  const planSnap = (() => { const r = nextSession ? nextReg.forSession(nextSession.id) : []; if (!r.length) return "";
+    const n = (k) => r.filter((x) => x.status === k).length; return ` · plans: ${n("coming")} coming, ${n("maybe")} maybe, ${n("not_coming")} not coming`; })();
   const [duties, setDuties] = useState([]);
   const [dutiesLoaded, setDutiesLoaded] = useState(false);   // a failed/pending read is "—", never "No duties set"
   const [recruitNext, setRecruitNext] = useState(null);
@@ -3878,41 +4216,53 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const [raised, setRaised] = useState(0);
   const [openItems, setOpenItems] = useState([]);   // open action_items → overdue insight (fed to computeInsights)
   const { failures: openFailures, reloadFailures } = useApparatusFailures();   // open apparatus failures → escalation cards
-  useEffect(() => {
+  /* A failed read is not "nothing coming up": each piece now updates only when ITS read succeeded (last-known
+     otherwise), and any failure raises snapErr -> the OfflineNotice + reconnect retry. */
+  const [snapErr, setSnapErr] = useState(false);
+  const loadSnap = () => {
     const firstUpcoming = (rows, key) => (rows || []).filter((r) => r[key] && r[key] >= todayISO).sort((a, b) => a[key].localeCompare(b[key]))[0] || null;
     Promise.all([
-      supabase.from("duties").select("id, done, done_at, recurrence"),
+      supabase.from("duties").select("id, duty, category, done, done_at, recurrence, assigned_to"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("content_calendar").select("id, date, caption"),
       supabase.from("funding_events").select("id, date, title"),
       supabase.from("fundraiser_log").select("amount"),
       supabase.from("action_items").select("*").eq("status", "open"),   // for the overdue-assignment insight
     ]).then(([du, rc, cc, fe, fl, ai]) => {
-      if (!du.error && du.data) { setDuties(du.data); setDutiesLoaded(true); }
-      setRecruitNext(firstUpcoming(rc.data, "date"));
-      setPrNext(firstUpcoming(cc.data, "date"));
-      setFundNext(firstUpcoming(fe.data, "date"));
-      setRaised((fl.data || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
-      setOpenItems(ai.data || []);
+      const ok = (r) => !r.error && Array.isArray(r.data);
+      if (ok(du)) { setDuties(du.data); setDutiesLoaded(true); }
+      if (ok(rc)) setRecruitNext(firstUpcoming(rc.data, "date"));
+      if (ok(cc)) setPrNext(firstUpcoming(cc.data, "date"));
+      if (ok(fe)) setFundNext(firstUpcoming(fe.data, "date"));
+      if (ok(fl)) setRaised(fl.data.reduce((s, r) => s + (Number(r.amount) || 0), 0));
+      if (ok(ai)) setOpenItems(ai.data);
+      setSnapErr(![du, rc, cc, fe, fl, ai].every(ok));
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSnap(); }, []);
+  useReconnect(() => { if (snapErr) loadSnap(); });
   const fmtISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   // --- Layer 2 insights (computation only; AI actions are Stage 2 stubs) ---
   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
   const cards = [
-    { key: "training",  title: "Training",         Icon: GraduationCap, accent: FIRE.catBlue, snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}` : null, nav: "training" },
+    { key: "training",  title: "Training",         Icon: GraduationCap, accent: FIRE.catBlue, snap: nextSession ? `${sessDate(nextSession).toLocaleDateString("en-US", { month: "short", day: "numeric" })}${nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""} · ${nextSession.title}${planSnap}` : null, nav: "training" },
     { key: "recruit",   title: "Recruitment",      Icon: Megaphone,     accent: FIRE.catGreen, snap: recruitNext ? `${fmtISO(recruitNext.date)} · ${recruitNext.title}` : null, nav: "recruit" },
     { key: "pr",        title: "Public Relations", Icon: Calendar,      accent: FIRE.catViolet, snap: prNext ? `${fmtISO(prNext.date)} · ${prNext.caption}` : null, nav: "visibility" },
     { key: "funding",   title: "Fundraising",      Icon: DollarSign,    accent: FIRE.catAmber, snap: fundNext ? `${fmtISO(fundNext.date)} · ${fundNext.title}` : null, extra: raised > 0 ? `$${raised.toLocaleString()} raised` : null, nav: "funding" },
   ];
   return (
-    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"} title={dashboardGreeting(me)} actions={<HeroAside />}>
+    <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `OFFICER · ${dept.name}` : "OFFICER"} title={dashboardGreeting(me)} actions={<HeroAside />}
+      above={snapErr ? <OfflineNotice onRetry={loadSnap} what="part of the dashboard" /> : null}>
       {/* Noir skin, as on the DA dashboard: CardHead headers + the gradient card face on everything inside. */}
       <NoirSkin>
       <CardHead icon={HeartPulse} title="Department health" />
       <DeptHealthCharts members={members} sessions={sessions} dept={dept} duties={duties} dutiesLoaded={dutiesLoaded} go={go} />
-      <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} style={{ marginTop: 8, marginBottom: 4, maxWidth: 360 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginTop: 8, marginBottom: 4, alignItems: "start" }}>
+        <NextTrainingCard sessions={sessions} members={members} meId={meId} notify={notify} go={go} />
+        <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
+      </div>
+      <StationFundraiserCard style={{ marginTop: 8 }} />
       <ActionItemsCard meId={meId} go={go} style={{ marginTop: 8, marginBottom: 8 }} />
       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
           their own certs, hours and drills, and had no route to them from this dashboard before.
@@ -3931,14 +4281,12 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
           </Card>
         ))}
       </div>
-      </NoirSkin>
       <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} />
         <div className="dash-cal" style={{ minWidth: 0 }}>
           <DashboardCalendar S={S} notify={notify} withImportanceMode />
         </div>
       </div>
-      <NoirSkin>
       <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
       </NoirSkin>
     </PageShell>
@@ -3987,7 +4335,7 @@ function ActionItemsCard({ meId, go, style }) {
           const yours = it.assigned_to === meId;
           const due = fmtDue(it.due_date);
           return (
-            <div key={it.id} style={{ padding: "4px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={it.id} style={{ padding: "4px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary, lineHeight: 1.35 }}>{it.text}</div>
                 <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", padding: "1px 5px", borderRadius: 5, color: yours ? FIRE.greenText : FIRE.textMuted2, border: `0.5px solid ${yours ? FIRE.greenText + "55" : FIRE.hairline}` }}>{yours ? "Yours" : "Unassigned"}</span>
@@ -4012,6 +4360,17 @@ function Dashboard({ S, role, members, library, openPacket, go, meId, sessions, 
 
 /* Shared offline/failed-load state. Replaces the silent blank: says what happened, that data is safe,
    and that it will recover on its own — plus a manual Retry for the impatient. */
+// Inline sibling of OfflineNotice for a lazily-opened section: one line + Try again, in place of a list
+// whose read failed (so a failure never renders as "none recorded").
+function ReadRetry({ what, onRetry }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textSecondary, padding: "8px 0" }}>
+      <AlertTriangle size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 150 }}>Couldn't load {what}. Nothing has been lost.</span>
+      <button onClick={onRetry} style={{ ...FS.btn, padding: "4px 10px", fontSize: 11.5 }}><RefreshCw size={12} color={FIRE.btnIcon} /> Try again</button>
+    </div>
+  );
+}
 function OfflineNotice({ onRetry, what }) {
   return (
     <div style={{ margin: "10px 0", padding: "11px 13px", background: "rgba(214,169,94,.10)", border: `1px solid ${FIRE.amberText}55`, borderRadius: 10 }}>
@@ -4056,7 +4415,7 @@ function QuickAccess({ S, role, go, isEqMgr, disabledModules }) {
     .filter((n) => moduleEnabled(n.key, disabledModules));                                                                // and the same module gate — no tile for a module the department turned off
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>EXPLORE THE PLATFORM</div>
+      <CardHead icon={LayoutDashboard} title="Explore the platform" />
       <div style={S.quickGrid}>
         {items.map((n) => {
           const q = QUICK[n.key] || {};
@@ -4217,14 +4576,14 @@ function StationClockCard({ S, dept, go }) {
     return `${h}:${p(m)}:${p(sec)}`;
   })();
   return (
-    <div style={{ ...face, padding: noir ? "12px 14px" : "14px 16px", borderTop: `3px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
+    <div style={{ ...face, padding: noir ? "12px 14px" : "14px 16px", borderTop: `3px solid ${onClock ? FIRE.green : FIRE.line2Noir}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {noir ? <CardHead icon={Clock} title="Station hours" style={{ marginBottom: 0, width: "auto" }} /> : (<>
         <Clock size={14} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
         <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".14em", color: FIRE.textMuted2, fontWeight: 700 }}>STATION HOURS</div></>)}
         {/* on/off state pill — the dot pulses while on duty */}
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: ".1em",
-                       color: onClock ? FIRE.greenText : FIRE.textMuted, border: `0.5px solid ${onClock ? FIRE.green : FIRE.btnBorder}` }}>
+                       color: onClock ? FIRE.greenText : FIRE.textMuted, border: `0.5px solid ${onClock ? FIRE.green : FIRE.line2Noir}` }}>
           <HealthDot tone={onClock ? "green" : "muted"} size={7} className={onClock ? "duty-pulse" : undefined} />
           {onClock ? "ON DUTY" : "OFF DUTY"}
         </span>
@@ -4260,7 +4619,7 @@ function StationClockCard({ S, dept, go }) {
               member on a manual row still has to clock out themselves even with the fence
               running, and telling them otherwise would cost them the end of their shift. */}
           {autoPresence && open.source === "gps_geofence" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(255,255,255,.06)", border: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "7px 9px", borderRadius: 9, background: "rgba(255,255,255,.06)", border: `1px solid ${FIRE.lineNoir}` }}>
               <MapPin size={12} color={FIRE.textSecondary} style={{ flexShrink: 0 }} />
               <span style={{ fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.4 }}>Started automatically — this closes when you leave the station.</span>
             </div>
@@ -4315,7 +4674,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
   const [upcomingAll, setUpcomingAll] = useState([]);   // all sorted upcoming across the 4 calendar sources; nextEvent derived at render (audience-aware)
   const [prepOpen, setPrepOpen] = useState(false);   // Get-prepared file-list toggle (multiple/AI)
   const { openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);   // openSessionPlans left to PersonalView, which owns UPCOMING TRAINING
-  useEffect(() => {
+  const [snapErr, setSnapErr] = useState(false);   // a failed read is not "no upcoming events"
+  const loadUpcoming = () => {
     const todayIso = toISO(today);
     Promise.all([
       supabase.from("training_sessions").select("id, title, date, start_time, audience"),
@@ -4323,6 +4683,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       supabase.from("recruitment_events").select("title, date"),
       supabase.from("content_calendar").select("caption, date"),
     ]).then(([tr, fu, rc, so]) => {
+      if (![tr, fu, rc, so].every((r) => !r.error && Array.isArray(r.data))) { setSnapErr(true); return; }   // keep last-known
+      setSnapErr(false);
       const rows = [
         ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, startTime: r.start_time || null, type: "Training", audience: r.audience || "everyone" })),
         ...(fu.data || []).map((r) => ({ title: r.title, date: r.date, type: "Fundraiser" })),
@@ -4332,22 +4694,30 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || String(a.startTime || "").localeCompare(String(b.startTime || "")));   // date, then start time (unset first)
       setUpcomingAll(rows);                                             // store all upcoming; select at render (leadership-aware)
     });
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, []);
+  };
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  useEffect(() => { loadUpcoming(); }, []);
+  useReconnect(() => { if (snapErr) loadUpcoming(); });
   // Get prepared: a Training next-event's attachments come from the already-loaded sessions prop (s.plans[] from slice 1) — no extra query.
   // NEXT EVENT: a non-leader's next event skips leadership training (still shown on the calendar). Leader sees it. Scored off actual roles (me.access), not "View as".
   const nextEvent = upcomingAll.find((e) => isLeader(me?.access) || !(e.type === "Training" && isRestrictedEvent(e))) || null;
   const nextSession = nextEvent?.type === "Training" ? sess.find((x) => String(x.id) === String(nextEvent.id)) : null;
   const nextPlans = nextSession?.plans || [];
+  // REGISTER on the Next event card — the member's own plan only, and only when the next event IS a training
+  // (recruitment / social / funding events get no control). Same reviewed read + RPC as every Register control.
+  const nextReg = useSessionRegistrations(nextSession ? [nextSession.id] : [], notify);
   return (
     /* 1 — the standard page frame with the Noir hero band: dept crest (logo_url when set, monogram otherwise),
        greeting and sub-line, pillars + daily quote on the right — same as the other dashboards. */
     <PageShell band lead={<DeptCrest dept={dept} />} kicker={dept?.name ? `MY STATION · ${dept.name}` : "MY STATION"} title={dashboardGreeting(me)}
-      sub="Here's exactly where you stand — and what's coming up for you." actions={<HeroAside />}>
+      sub="Here's exactly where you stand — and what's coming up for you." actions={<HeroAside />}
+      above={snapErr ? <OfflineNotice onRetry={loadUpcoming} what="what's coming up" /> : null}>
       <NoirSkin>
       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
           (it renders nothing once complete); only its place in the order changed. */}
       <OnboardingCard S={S} me={me} go={go} dept={dept} />
+      {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
+      <StationFundraiserCard />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, marginBottom: 8 }}>
         {/* attendance ring (per-CALENDAR-MONTH rate) + supporting stats; muted "No drills yet" state, not a red 0% */}
@@ -4382,6 +4752,12 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
                   <div style={{ fontSize: 26, fontWeight: 700, color: FIRE.textPrimary, marginTop: 6, ...FS.num }}>{new Date(nextEvent.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{nextEvent.startTime ? ` · ${fmtTime(nextEvent.startTime)}` : ""}</div>
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nextEvent.title || "—"}</div>
                   <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", marginTop: 5, color: ({ Training: FIRE.redBright, Fundraiser: FIRE.amberText, Recruitment: FIRE.greenText, Social: FIRE.textSecondary }[nextEvent.type] || FIRE.textSecondary) }}>{nextEvent.type}<EventAudienceTag audience={nextEvent.audience} /></div>
+                  {nextSession && !nextSession.done && rollFor(nextSession, me) && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Register</span>
+                      <RegisterControl compact value={nextReg.mine(nextSession.id, meId)} busy={nextReg.busyId === nextSession.id || nextReg.rows === null} onPick={(k) => nextReg.setMine(nextSession.id, k)} />
+                    </div>
+                  )}
                 </>
               ) : (
                 <EmptyState icon={null} text="Nothing scheduled" style={{ marginTop: 10 }} />
@@ -4397,7 +4773,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
             )}
           </div>
           {prepOpen && nextPlans.length > 0 && (
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${FIRE.lineNoir}` }}>
               {nextPlans.map((p) => (
                 <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
                   <FileText size={13} color={p.kind === "ai" ? FIRE.amberText : FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -4435,7 +4811,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           is now the single source of truth, rendered identically for members, Dept Admins and
           Officers. It renders its own "YOUR PERSONAL VIEW" kicker and module gate. */}
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showClockCard={false} />
-      </NoirSkin>
       {/* 5 — announcements feed + station calendar, two-column (matches DeptAdmin: feed narrower & bounded/internal-scroll, calendar wider; wraps on narrow) */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
@@ -4452,7 +4827,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
           {NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)))   // same equipment-manager exception as the sidebar
             .filter((n) => moduleEnabled(n.key, dept?.disabled_modules)).map((n) => (                                 // and the same module gate (dept is already a prop here)
-            <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
+            <button key={n.key} onClick={() => go(n.key)} style={{ ...FS.row, padding: "10px 12px", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
               <n.Icon size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: FIRE.btnText }}>{n.label}</span>
               <ChevronRight size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
@@ -4460,6 +4835,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
           ))}
         </div>
       </div>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -4480,7 +4856,7 @@ function Library({ S, library, openPacket }) {
   const tint = (hex, a) => `${hex}${a}`;
   return (
     <PageShell band kicker="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight."
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>LIB</div>}>
+      watermark="LIB">
       <NoirSkin>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 14px" }}>
         <Search size={18} color={FIRE.btnIcon} />
@@ -4490,7 +4866,7 @@ function Library({ S, library, openPacket }) {
       <div style={{ ...S.chipRow, marginBottom: 12 }}>
         {[["All", "All", null], ...Object.keys(TRACKS).map((k) => [k, TRACKS[k].label, TRACKS[k].accent])].map(([k, label, accent]) => {
           const on = track === k;
-          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? tint(accent || FIRE.redBright, "26") : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `1px solid ${on ? (accent || FIRE.redBright) : FIRE.btnBorder}` }}>{label}</button>;
+          return <button key={k} onClick={() => setTrack(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "5px 13px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? tint(accent || FIRE.redBright, "26") : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `1px solid ${on ? (accent || FIRE.redBright) : FIRE.line2Noir}` }}>{label}</button>;
         })}
       </div>
       {results.length === 0 ? (
@@ -4548,8 +4924,32 @@ function RunCard({ S, p, onClick }) {
 }
 
 /* ---------------- Packet ---------------- */
-function Packet({ S, packet, back }) {
+function Packet({ S, packet, dept, notify, back }) {
   const T = TRACKS[packet.track];
+  /* "Download packet (PDF)" had no handler — a dead button. It now goes through printDocument, the one
+     print/share path (web: print view → Save as PDF; iOS app: a real PDF to the share sheet), built from the
+     same packet fields the screen renders, in the same order. Nothing is fetched or written. */
+  const [printing, setPrinting] = useState(false);
+  async function downloadPacket() {
+    const list = (items) => ({ type: "list", ordered: false, items: (items || []).map(String) });
+    const blocks = [
+      { type: "p", text: [packet.code, packet.time, packet.level].filter(Boolean).join(" · ") },
+      { type: "h2", text: "Objective" }, { type: "p", text: packet.objective || "" },
+      { type: "h2", text: "Required equipment" }, list(packet.equipment),
+      { type: "h2", text: "Instructor guide" }, { type: "p", text: packet.instructorGuide || "" },
+      { type: "h2", text: "Step-by-step lesson plan" }, { type: "list", ordered: true, items: (packet.steps || []).map((st) => `${st.t} (${st.m} min) — ${st.d}`) },
+      { type: "h2", text: "Scenario / drill setup" }, { type: "p", text: packet.scenario || "" },
+      { type: "h2", text: "Safety considerations" }, list(packet.safety),
+      { type: "h2", text: "Discussion questions" }, list(packet.discussion),
+      { type: "h2", text: "Evaluation checklist" }, list(packet.evaluation),
+      { type: "h2", text: "Debrief questions" }, list(packet.debrief),
+    ];
+    setPrinting(true);
+    try {
+      const n = printFailureNotice(await printDocument(packet.title || "Training packet", blocks, dept));
+      if (n) notify?.(n);
+    } finally { setPrinting(false); }
+  }
   // Industrial Noir: the light baseStyles text colours are overridden onto the FIRE palette here, and every block
   // is a Noir card. Content, order and controls are exactly as before.
   const body = { ...S.body, color: FIRE.textSecondary }, list = { ...S.list, color: FIRE.textSecondary };
@@ -4562,7 +4962,7 @@ function Packet({ S, packet, back }) {
           <div style={S.metaRow}><span style={{ ...S.runCode, color: T.accent }}>{packet.code}</span><TrackPill S={S} track={packet.track} /></div>
           <h1 style={{ ...S.packetTitle, color: FIRE.textPrimary }}>{packet.title}</h1>
           <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} dark /><Meta Icon={Users} text={packet.level} dark /></div>
-          <button style={FS.btnPrimary}><Download size={16} /> Download packet (PDF)</button>
+          <button style={{ ...FS.btnPrimary, opacity: printing ? 0.7 : 1 }} onClick={downloadPacket} disabled={printing}>{printing ? <><Loader2 size={16} className="spin" /> Preparing…</> : <><Download size={16} /> Download packet (PDF)</>}</button>
         </div>
       </div>
       <Disclaimer S={S} dark />
@@ -4726,84 +5126,114 @@ function StudySession({ S }) {
     } finally { setLoading(false); }
   }
   const visible = turns.filter((t) => !t.hidden);
+  /* Presentation only. Verdict colours follow the house rule (green good, amber partial, red wrong); the verdict
+     itself is still the one parsed above from the [CORRECT]/[INCORRECT]/[PARTIAL] marker — nothing re-scores. */
+  const VERDICT_TONE = { CORRECT: [FIRE.greenText, "Correct"], INCORRECT: [FIRE.redText, "Incorrect"], PARTIAL: [FIRE.amberText, "Partly right"], UNSCORED: [FIRE.textMuted, "Not scored"] };
+  const verdictOf = (t) => { if (t.display == null) return null;   // only a scored answer carries `display`
+    const mk = String(t.content).match(VERDICT_RE); return mk ? mk[1].toUpperCase() : "UNSCORED"; };
+  const qual = isDeptQual(cert);
+  const answerBar = (value, onChange, onGo, placeholder, label) => (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 6, borderRadius: 12, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>
+      <input style={{ ...FS.input, flex: 1, minWidth: 0, border: "none", background: "transparent" }} value={value} placeholder={placeholder} aria-label={placeholder} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onGo()} disabled={loading} />
+      <button style={{ ...FS.btnPrimary, padding: "9px 14px", opacity: loading || !value.trim() ? 0.6 : 1 }} onClick={onGo} disabled={loading || !value.trim()}><Send size={15} /> {label}</button>
+    </div>
+  );
   return (
-    <PageShell kicker="STUDY SESSION" title="Study for your certification" sub="Pick a track, then quiz yourself or ask a question. An AI study partner — always verify against official standards.">
+    <PageShell band watermark="STUDY" kicker="STUDY SESSION" title="Study for your certification" sub="Pick a track, then quiz yourself or ask a question. An AI study partner — always verify against official standards.">
       <NoirSkin>
-      <Card padding={16} style={{ marginBottom: 12, display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
-          <select style={{ ...FS.input, maxWidth: 320 }} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
+      <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12, display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <label style={{ ...S.field, flex: 1, minWidth: 220, marginBottom: 0 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
+          <select style={FS.input} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
             {Object.entries(CERT_TRACKS).map(([cat, certs]) => (
               <optgroup key={cat} label={cat}>
                 {certs.map((c) => <option key={c} value={c}>{c}</option>)}
               </optgroup>
             ))}
           </select></label>
-        <div style={S.segRow}>
-          {[["quiz", isDeptQual(cert) ? "Skill check" : "Quiz me"], ["explain", "Explain"]].map(([k, l]) => (
-            <button key={k} onClick={() => { setMode(k); reset(); }} style={{ ...S.segBtn, background: mode === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: mode === k ? FIRE.redBright : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
-          ))}
+        <div>
+          <div style={{ ...S.fieldLabel, color: FIRE.textSecondary, marginBottom: 6 }}>Mode</div>
+          <NoirSeg options={[["quiz", qual ? "Skill check" : "Quiz me"], ["explain", "Explain"]]} value={mode} onChange={(k) => { setMode(k); reset(); }} />
         </div>
-      </Card>
-      <Disclaimer S={S} compact dark />
-      {structuredQuiz && quizN > 0 && !quizDone && (
-        <SectionLabel style={{ marginTop: 12, color: FIRE.textSecondary }}>Question {Math.min(results.length + (pendingQ ? 1 : 0), quizN)} of {quizN} · Score {score}/{results.length}</SectionLabel>
-      )}
-      <div style={{ marginTop: 12 }}>
-        {visible.map((t, i) => (
-          <div key={i} style={{ marginBottom: 10 }}>
-            {t.role === "user" ? (
-              <Card padding="10px 14px" style={{ fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.display ?? t.content}</Card>
-            ) : (
-              <Card padding="12px 16px"><RichOutput S={S} text={t.display ?? t.content} dark /></Card>
-            )}
-          </div>
-        ))}
-        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Tutor is thinking…</div>}
-        {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+        {qual && <span style={{ ...NOIR_AI.chip, color: FIRE.amberText, background: "rgba(214,169,94,.1)", border: "1px solid rgba(214,169,94,.35)", marginBottom: 8 }}>Department qualification · hands-on sign-off</span>}
       </div>
+      <Disclaimer S={S} compact dark />
+
+      {structuredQuiz && quizN > 0 && !quizDone && (
+        <div style={{ ...NOIR_INSET, padding: "10px 13px", marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, ...FS.num }}>Question {Math.min(results.length + (pendingQ ? 1 : 0), quizN)} of {quizN}</span>
+          <span style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1, minWidth: 120 }} aria-label={`${results.length} of ${quizN} answered`}>
+            {Array.from({ length: quizN }, (_, i) => { const r = results[i]; const c = r ? VERDICT_TONE[r.verdict][0] : null;
+              return <span key={i} title={r ? VERDICT_TONE[r.verdict][1] : "Not answered yet"} style={{ width: 10, height: 10, borderRadius: 999, background: c || "transparent", border: `1px solid ${c || FIRE.line2Noir}` }} />; })}
+          </span>
+          <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...FS.num }}>Score <b style={{ color: FIRE.textPrimary }}>{score}</b>/{results.length}</span>
+        </div>
+      )}
+
+      <div style={{ marginTop: 12 }}>
+        {visible.map((t, i) => {
+          if (t.role === "user") return (
+            <div key={i} style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+              <div style={{ maxWidth: "85%", fontSize: 13.5, lineHeight: 1.45, color: FIRE.textPrimary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: "12px 12px 3px 12px", padding: "9px 13px" }}>{t.display ?? t.content}</div>
+            </div>
+          );
+          const v = verdictOf(t); const [vc, vl] = v ? VERDICT_TONE[v] : [null, null];
+          return (
+            <div key={i} style={{ ...FS.cardNoir, padding: "12px 15px", marginBottom: 10, borderLeft: `3px solid ${vc || NOIR_AI.blue}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                {v ? <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: vc, border: `1px solid ${vc}66`, background: `${vc}14`, borderRadius: 6, padding: "3px 8px" }}>{vl}</span>
+                   : <span style={NOIR_AI.chip}><Sparkles size={11} /> Tutor</span>}
+              </div>
+              <RichOutput S={S} text={t.display ?? t.content} dark />
+            </div>
+          );
+        })}
+        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Tutor is thinking…</div>}
+        {err && <div style={NOIR_ERR}>{err}</div>}
+      </div>
+
       <div style={{ marginTop: 12 }}>
         {structuredQuiz ? (
           quizN === 0 ? (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length:</span>
-              <div style={S.segRow}>
-                {[5, 10, 20].map((n) => (
-                  <button key={n} onClick={() => setQuizLen(n)} style={{ ...S.segBtn, background: quizLen === n ? "rgba(224,58,68,.16)" : "transparent", borderColor: quizLen === n ? FIRE.redBright : FIRE.btnBorder, color: quizLen === n ? FIRE.textPrimary : FIRE.navLabel }}>{n}</button>
-                ))}
-              </div>
+            <div style={{ ...NOIR_INSET, padding: "12px 14px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, color: FIRE.textSecondary }}>Quiz length</span>
+              <NoirSeg options={[[5, "5"], [10, "10"], [20, "20"]]} value={quizLen} onChange={setQuizLen} />
+              <span style={{ fontSize: 12, color: FIRE.textMuted, flex: 1, minWidth: 140 }}>One {cert} question at a time, scored as you go.</span>
               <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={() => startStructuredQuiz(quizLen)} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
             </div>
           ) : quizDone ? (
-            <Card padding="16px 18px">
-              <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 22, fontWeight: 700, color: FIRE.textPrimary }}>You got {score} of {quizN}</div>
-              {unscored.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{unscored.length} question{unscored.length === 1 ? "" : "s"} couldn't be auto-scored.</div>}
+            <div style={{ ...FS.cardNoir, padding: "16px 18px" }}>
+              {(() => { const pct = quizN ? Math.round((score / quizN) * 100) : 0; const tone = pct >= 80 ? FIRE.greenText : pct >= 60 ? FIRE.amberText : FIRE.redText;
+                return (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontFamily: DISPLAY_FONT, fontSize: 30, fontWeight: 700, color: tone, ...FS.num }}>{score}<span style={{ fontSize: 18, color: FIRE.textMuted }}> / {quizN}</span></div>
+                    <div style={{ fontSize: 13, color: FIRE.textSecondary }}>{pct}% on {cert}</div>
+                  </div>
+                ); })()}
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
+                {results.map((r, i) => <span key={i} title={VERDICT_TONE[r.verdict][1]} style={{ width: 10, height: 10, borderRadius: 999, background: VERDICT_TONE[r.verdict][0] }} />)}
+              </div>
+              {unscored.length > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>{unscored.length} question{unscored.length === 1 ? "" : "s"} couldn't be auto-scored.</div>}
               {missed.length > 0 ? (<>
-                <SectionLabel style={{ marginTop: 12, marginBottom: 6 }}>Review these</SectionLabel>
-                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                  {missed.map((m, i) => <li key={i} style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 4, lineHeight: 1.4 }}>{m.q}</li>)}
-                </ul>
-              </>) : <div style={{ fontSize: 13, color: FIRE.greenText, marginTop: 8 }}>Perfect run — nothing to review. 🎉</div>}
+                <SectionBar label="Review these" count={missed.length} style={{ margin: "14px 0 6px" }} />
+                {missed.map((m, i) => (
+                  <div key={i} style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.45, padding: "7px 0 7px 10px", borderLeft: `2px solid ${m.verdict === "PARTIAL" ? FIRE.amberText : FIRE.redText}`, marginBottom: 6 }}><RichOutput S={S} text={m.q} dark /></div>
+                ))}
+              </>) : <div style={{ fontSize: 13, color: FIRE.greenText, marginTop: 10 }}>Perfect run — nothing to review.</div>}
               <button style={{ ...FS.btnPrimary, marginTop: 14 }} onClick={reset}><BookOpen size={16} /> Start another quiz</button>
-            </Card>
-          ) : pendingQ ? (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder="Type your answer…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitAnswer()} disabled={loading} />
-              <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submitAnswer} disabled={loading || !input.trim()}>Submit answer</button>
             </div>
+          ) : pendingQ ? (
+            answerBar(input, setInput, submitAnswer, "Type your answer…", "Submit")
           ) : (
-            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={nextQuestion} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Loading…</> : "Next question →"}</button>
+            <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={nextQuestion} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Loading…</> : <>Next question <ChevronRight size={15} /></>}</button>
           )
         ) : (
           <>
             {mode === "quiz" && visible.length === 0 ? (
-              <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> Start quiz</>}</button>
+              <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={startQuiz} disabled={loading}>{loading ? <><Loader2 size={16} className="spin" /> Starting…</> : <><BookOpen size={16} /> {qual ? "Start skill check" : "Start quiz"}</>}</button>
             ) : (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder={mode === "quiz" ? (isDeptQual(cert) ? "Describe how you'd do it…" : "Type your answer…") : `Ask a ${cert} question…`} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
-                <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>{mode === "quiz" ? "Submit answer" : "Ask"}</button>
-              </div>
+              answerBar(input, setInput, submit, mode === "quiz" ? (qual ? "Describe how you'd do it…" : "Type your answer…") : `Ask a ${cert} question…`, mode === "quiz" ? "Submit" : "Ask")
             )}
-            {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Start over</button>}
+            {visible.length > 0 && <button style={{ ...FS.btn, marginTop: 10, padding: "6px 11px", fontSize: 12 }} onClick={reset}><RefreshCw size={13} color={FIRE.btnIcon} /> Start over</button>}
           </>
         )}
       </div>
@@ -4822,30 +5252,31 @@ function StationQA({ S }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [ground, setGround] = useState({ text: "", has: false, note: "" });   // grounding context, hasGrounding, size-limit note
+  const [ground, setGround] = useState({ text: "", has: false, note: "", names: [], loaded: false });   // grounding context, hasGrounding, size-limit note, included doc names (display only), read finished
   useEffect(() => {
     let alive = true;
     (async () => {
       const { data: deptId } = await supabase.rpc("my_department_id");
-      if (!deptId || !alive) return;
+      if (!deptId || !alive) { if (alive) setGround((g) => ({ ...g, loaded: true })); return; }
       const { data, error } = await supabase.from("documents")
         .select("name, content_text")
         .eq("department_id", deptId)
         .is("deleted_at", null)                 // current versions only —
         .is("archived_at", null)                // composes with the Failsafe
         .not("content_text", "is", null);
-      if (!alive || error || !data || data.length === 0) return;
+      if (!alive) return;
+      if (error || !data || data.length === 0) { setGround((g) => ({ ...g, loaded: true })); return; }
       const CAP = 300000;                         // ~300k-char (~75k-token) grounding budget; safely within the
                                                   // model's 200k-token window. Real RAG would retrieve instead
                                                   // of stuffing everything in.
-      let text = ""; let included = 0;
+      let text = ""; let included = 0; const names = [];
       for (const d of data) {
         const block = `=== ${d.name} ===\n${d.content_text}`;
         if (text.length + block.length + 2 > CAP) break;   // stop once the next doc would exceed the budget
         text += (text ? "\n\n" : "") + block;
-        included++;
+        included++; names.push(d.name);
       }
-      setGround({ text, has: included > 0, note: included < data.length ? `${included} of ${data.length} documents included (size limit)` : "" });
+      setGround({ text, has: included > 0, note: included < data.length ? `${included} of ${data.length} documents included (size limit)` : "", names, loaded: true });
     })();
     return () => { alive = false; };
   }, []);
@@ -4865,28 +5296,59 @@ function StationQA({ S }) {
   }
   const submit = () => { const t = input.trim(); if (!t || loading) return; send(t); };
   return (
-    <PageShell kicker={<>STATION Q&amp;A</>} title="Ask the station assistant" sub={<>{ground.has ? "Grounded in your uploaded SOPs — always verify locally." : "General fire & EMS questions — tactics, terminology, procedures, training. It doesn't know your department's specific SOPs, so always verify locally."}{ground.has && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>This assistant reads your department's uploaded SOP text to answer.{ground.note ? ` (${ground.note})` : ""}</div>}</>}>
+    <PageShell band watermark="Q&A" kicker={<>STATION Q&amp;A</>} title="Ask the station assistant" sub="Questions about tactics, procedures and training — answered from your department's SOPs when they cover it.">
       <NoirSkin>
-      <Disclaimer S={S} compact dark />
-      <div style={{ marginTop: 12 }}>
-        {turns.map((t, i) => (
-          <div key={i} style={{ marginBottom: 10 }}>
-            {t.role === "user" ? (
-              <Card padding="10px 14px" style={{ fontSize: 13.5, color: FIRE.textPrimary }}><span style={{ color: FIRE.textMuted, fontWeight: 700 }}>You: </span>{t.content}</Card>
-            ) : (
-              <Card padding="12px 16px"><RichOutput S={S} text={t.content} dark /></Card>
-            )}
+      {/* What the assistant is reading — the SAME documents read above; this only reports it. */}
+      <div style={{ ...NOIR_INSET, padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        {!ground.loaded
+          ? <><Loader2 size={15} className="spin" color={NOIR_AI.blueText} /><span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>Reading your SOPs…</span></>
+          : ground.has
+            ? <><FileText size={15} color={NOIR_AI.blueText} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>Reading <b style={{ color: FIRE.textPrimary, ...FS.num }}>{ground.names.length}</b> SOP document{ground.names.length === 1 ? "" : "s"} — answers cite them when they apply.{ground.note ? <span style={{ color: FIRE.amberText }}> {ground.note}.</span> : ""}</span>
+                <span style={NOIR_AI.chip}>SOP-grounded</span></>
+            : <><BookOpen size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>No SOP text uploaded yet — answers are general fire-service guidance and will say so.</span></>}
+      </div>
+      <div>
+        {turns.map((t, i) => {
+          if (t.role === "user") return (
+            <div key={i} style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+              <div style={{ maxWidth: "85%", fontSize: 13.5, lineHeight: 1.45, color: FIRE.textPrimary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: "12px 12px 3px 12px", padding: "9px 13px" }}>{t.content}</div>
+            </div>
+          );
+          // Cited vs general — read off the answer itself: it names one of the loaded SOP documents, or it doesn't.
+          const cites = ground.has ? ground.names.filter((n) => n && t.content.toLowerCase().includes(String(n).toLowerCase())) : [];
+          const cited = cites.length > 0;
+          return (
+            <div key={i} style={{ ...FS.cardNoir, padding: "12px 15px", marginBottom: 10, borderLeft: `3px solid ${cited ? NOIR_AI.blue : FIRE.line2Noir}`, ...(cited ? { background: `${NOIR_AI.glow}, ${FS.cardNoir.background}` } : {}) }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                {cited
+                  ? <><span style={NOIR_AI.chip}><FileText size={11} /> From your SOPs</span>{cites.slice(0, 3).map((n) => <span key={n} style={{ fontSize: 11, color: NOIR_AI.blueText, border: `1px solid rgba(79,144,214,.3)`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}</>
+                  : <span style={{ ...NOIR_AI.chip, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>General guidance</span>}
+              </div>
+              <RichOutput S={S} text={t.content} dark />
+            </div>
+          );
+        })}
+        {turns.length === 0 && !loading && (
+          <div style={{ ...NOIR_INSET, padding: "12px 14px", fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5 }}>
+            Ask anything — for example:
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {["What's our RIT procedure?", "Offensive vs defensive attack?", "What goes into a primary search?"].map((q) => (
+                <button key={q} type="button" onClick={() => send(q)} disabled={loading || !ground.loaded} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}>{q}</button>
+              ))}
+            </div>
           </div>
-        ))}
-        {turns.length === 0 && !loading && <div style={{ fontSize: 13, color: FIRE.textMuted, fontStyle: "italic" }}>Ask anything — e.g. &ldquo;What's the difference between an offensive and defensive attack?&rdquo;, &ldquo;How does a RIT work?&rdquo;, &ldquo;What goes into a primary search?&rdquo;</div>}
-        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> Thinking…</div>}
-        {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 8 }}>{err}</div>}
+        )}
+        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> {ground.has ? "Checking your SOPs…" : "Thinking…"}</div>}
+        {err && <div style={NOIR_ERR}>{err}</div>}
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-        <input style={{ ...FS.input, flex: 1, minWidth: 200 }} value={input} placeholder="Ask a question…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} />
-        <button style={{ ...FS.btnPrimary, opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}>Ask</button>
+      <div style={{ marginTop: 12 }}><Disclaimer S={S} compact dark /></div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, padding: 6, borderRadius: 12, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>
+        <input style={{ ...FS.input, flex: 1, minWidth: 0, border: "none", background: "transparent" }} value={input} placeholder="Ask the station assistant…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} aria-label="Your question" />
+        <button style={{ ...FS.btnPrimary, padding: "9px 14px", opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}><Send size={15} /> Ask</button>
       </div>
-      {turns.length > 0 && <button style={{ ...FS.btn, marginTop: 10 }} onClick={reset}>Clear</button>}
+      {turns.length > 0 && <button style={{ ...FS.btn, marginTop: 10, padding: "6px 11px", fontSize: 12 }} onClick={reset}><RefreshCw size={13} color={FIRE.btnIcon} /> New conversation</button>}
       </NoirSkin>
     </PageShell>
   );
@@ -4908,7 +5370,7 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
     setSent(true);
   }
   if (sent) return (
-    <div style={{ ...S.fbDone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
+    <div style={{ ...S.fbDone, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.green}`, color: FIRE.textSecondary }}>
       <CheckCircle2 size={18} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />
       <div><strong>Logged — thank you.</strong> Critiques like this are exactly what sharpen the next plan. Your team reviews them and tunes the system from them.</div>
     </div>
@@ -4918,13 +5380,13 @@ function PlanFeedback({ S, plan, topic, addFeedback }) {
       <div style={{ ...S.fbHead, color: FIRE.textPrimary }}><MessageSquare size={15} color={FIRE.btnIcon} /> Help it get better</div>
       <div style={S.fbRow}>
         <span style={{ ...S.fbLabel, color: FIRE.textSecondary }}>Was this useful?</span>
-        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "up" ? { border: `0.5px solid ${FIRE.green}`, color: FIRE.greenText } : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
-        <button style={{ ...S.fbThumb, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.btnText, ...(rating === "down" ? { border: `0.5px solid ${FIRE.redBright}`, color: FIRE.redText } : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
+        <button style={{ ...S.fbThumb, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.btnText, ...(rating === "up" ? { border: `0.5px solid ${FIRE.green}`, color: FIRE.greenText } : {}) }} onClick={() => setRating("up")}><ThumbsUp size={15} /> Yes</button>
+        <button style={{ ...S.fbThumb, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.btnText, ...(rating === "down" ? { border: `0.5px solid ${FIRE.redBright}`, color: FIRE.redText } : {}) }} onClick={() => setRating("down")}><ThumbsDown size={15} /> Not quite</button>
       </div>
       <div style={{ ...S.fbLabel2, color: FIRE.textMuted }}>What was off? (tap any)</div>
       <div style={S.chipRow}>
         {CRITIQUE_TAGS.map((t) => (
-          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, color: FIRE.navLabel, ...(tags.includes(t) ? { border: `0.5px solid ${FIRE.red}`, color: FIRE.textPrimary } : {}) }}>{t}</button>
+          <button key={t} onClick={() => toggleTag(t)} style={{ ...S.fbTag, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.navLabel, ...(tags.includes(t) ? { border: `0.5px solid ${FIRE.red}`, color: FIRE.textPrimary } : {}) }}>{t}</button>
         ))}
       </div>
       {!editing ? (
@@ -4972,6 +5434,7 @@ function serializeDrillPlan(plan, topic) {
   if (plan.summary) L.push("", plan.summary);
   if (plan.durationMin) L.push("", `Duration: ${plan.durationMin} minutes`);
   const sec = (title, items) => { if (Array.isArray(items) && items.length) L.push("", `## ${title}`, ...items.map((i) => `- ${i}`)); };
+  sec("Objectives", plan.objectives);   // newer plans only — absent on older ones, and sec() skips an empty field
   sec("Safety notes", plan.safetyNotes);
   sec("Equipment", plan.equipment);
   if (Array.isArray(plan.steps) && plan.steps.length) { L.push("", ...stepLines()); }
@@ -4980,11 +5443,114 @@ function serializeDrillPlan(plan, topic) {
   sec("Evaluation checklist", plan.evaluationChecklist);
   return L.join("\n");
 }
+/* The drafted drill plan as the mock lays it out (b4c_training_aidraft_noir.html): AI-draft badge (blue = info),
+   meta chips, amber review banner, objectives, a time-blocked session flow, equipment + safety cards, and a
+   footer — Save to a session / Regenerate / Copy. Every block renders only when the plan carries that field;
+   talking points, debrief and evaluation (not in the mock) follow as compact lists so nothing the AI returned
+   is dropped. Copy uses serializeDrillPlan — the same text Save writes to the session. */
+function DrillPlanPanel({ S, plan, form, loading, onRegenerate, onSave, saveOpen, notify }) {
+  const has = (a) => Array.isArray(a) && a.length > 0;
+  const blue = NOIR_AI.blue, blueT = NOIR_AI.blueText;   // the shared AI accent
+  const secHead = (Icon, label) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.textPrimary, marginBottom: 10 }}>
+      <Icon size={15} color={FIRE.redBright} />{label}
+    </div>
+  );
+  const chip = (text) => <span style={{ fontSize: 11, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 6, padding: "4px 9px" }}>{text}</span>;
+  const mini = (Icon, title, color, items, bullet) => (
+    <div style={{ ...NOIR_INSET, padding: "12px 13px", flex: "1 1 220px", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color, marginBottom: 9 }}><Icon size={13} />{title}</div>
+      {items.map((t, i) => (
+        <div key={i} style={{ display: "flex", gap: 8, fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.4, padding: "3px 0" }}>
+          <span style={{ flexShrink: 0, width: 7, color, fontWeight: 700, fontSize: 11 }}>{bullet === "!" ? "!" : <span style={{ display: "inline-block", width: 5, height: 5, borderRadius: 1, background: blue, marginBottom: 1 }} />}</span>
+          <span style={{ flex: 1, minWidth: 0 }}>{t}</span>
+        </div>
+      ))}
+    </div>
+  );
+  async function copy() {
+    try { await navigator.clipboard.writeText(serializeDrillPlan(plan, form.topic)); notify?.({ kind: "success", title: "Copied", text: "The full plan is on your clipboard." }); }
+    catch { notify?.({ kind: "error", title: "Couldn't copy", text: "Your browser blocked the clipboard — save it to a session instead." }); }
+  }
+  const objectives = has(plan.objectives) ? plan.objectives : null;
+  const minutes = plan.durationMin || Number(form.time) || null;
+  return (
+    <div style={{ ...NOIR_MODAL_PANEL, boxShadow: "none" }}>
+      <div style={{ padding: "16px 18px 15px", borderBottom: `1px solid ${FIRE.lineNoir}`, background: NOIR_AI.glow }}>
+        <span style={NOIR_AI.chip}><Sparkles size={12} /> AI draft · review before use</span>
+        <h3 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 23, lineHeight: 1.05, margin: "10px 0 0", color: FIRE.textPrimary }}>{form.topic}</h3>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 11 }}>
+          {minutes ? chip(`${minutes} min`) : null}
+          {form.size ? chip(`${form.size} members`) : null}
+          {form.level ? chip(form.level) : null}
+          {form.apparatus ? chip(form.apparatus) : null}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "15px 18px 0", background: "#1c1509", border: "1px solid rgba(204,158,82,.32)", borderRadius: 10, padding: "11px 13px", fontSize: 11.5, color: FIRE.amberText, lineHeight: 1.5 }}>
+        <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span><b style={{ color: "#f0d49a" }}>A starting point, not a lesson plan.</b> A training officer should review and adapt this before running it — then save it to a session to credit hours.</span>
+      </div>
+      <div style={{ padding: "16px 18px 6px", display: "flex", flexDirection: "column", gap: 18 }}>
+        {(objectives || plan.summary) && (
+          <div>
+            {secHead(CheckCircle2, "Objectives")}
+            {objectives ? objectives.map((o, i) => (
+              <div key={i} style={{ position: "relative", padding: "5px 0 5px 22px", fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.45 }}>
+                <span style={{ position: "absolute", left: 3, top: 11, width: 6, height: 6, borderRadius: "50%", background: FIRE.redBright }} />{o}
+              </div>
+            )) : <p style={{ margin: 0, fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{plan.summary}</p>}
+          </div>
+        )}
+        {has(plan.steps) && (
+          <div>
+            {secHead(Clock, "Session flow")}
+            <div style={{ position: "relative", paddingLeft: 20 }}>
+              <span style={{ position: "absolute", left: 5, top: 6, bottom: 10, width: 2, background: FIRE.line2Noir }} />
+              {plan.steps.map((st, i) => {
+                const acts = has(st.actions) ? st.actions : (st.detail ? [st.detail] : []);
+                return (
+                  <div key={i} style={{ position: "relative", paddingBottom: i === plan.steps.length - 1 ? 0 : 14 }}>
+                    <span style={{ position: "absolute", left: -20, top: 3, width: 12, height: 12, borderRadius: "50%", background: FIRE.card2Noir, border: `2px solid ${FIRE.redBright}`, boxSizing: "border-box" }} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                      {st.minutes ? <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, color: FIRE.greenText, background: "#0e1c14", border: "1px solid rgba(47,168,105,.3)", borderRadius: 5, padding: "2px 7px", flexShrink: 0 }}>{st.minutes} min</span> : null}
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>{st.title}</span>
+                    </div>
+                    {acts.length > 0 && <p style={{ margin: "5px 0 0", fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.5 }}>{acts.join(" · ")}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {(has(plan.equipment) || has(plan.safetyNotes)) && (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {has(plan.equipment) && mini(Wrench, "Equipment needed", blueT, plan.equipment, "sq")}
+            {has(plan.safetyNotes) && mini(ShieldAlert, "Safety watch-outs", FIRE.amberText, plan.safetyNotes, "!")}
+          </div>
+        )}
+        {(has(plan.talkingPoints) || has(plan.debriefQuestions) || has(plan.evaluationChecklist)) && (
+          <div style={{ marginTop: -6 }}>
+            <AIList S={S} dark Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
+            <AIList S={S} dark Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
+            <AIList S={S} dark Icon={CheckCircle2} title="You're done when" items={plan.evaluationChecklist} />
+          </div>
+        )}
+        <Disclaimer S={S} compact dark />
+      </div>
+      <div style={{ display: "flex", gap: 10, padding: "14px 18px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, flexWrap: "wrap" }}>
+        <button onClick={onSave} aria-expanded={saveOpen} style={{ ...FS.btnPrimary, flex: "1 1 180px", justifyContent: "center", borderRadius: 10, padding: "11px 15px" }}><FileText size={14} /> Save to a session</button>
+        <button onClick={onRegenerate} disabled={loading} style={{ ...FS.btn, borderRadius: 10, padding: "11px 15px", opacity: loading ? 0.6 : 1 }}>{loading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} color={FIRE.btnIcon} />} Regenerate</button>
+        <button onClick={copy} style={{ ...FS.btn, borderRadius: 10, padding: "11px 15px" }}><Copy size={14} color={FIRE.btnIcon} /> Copy</button>
+      </div>
+    </div>
+  );
+}
 function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories }) {
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
-  const [view, setView] = useState("full");   // 'full' | 'quick' — preview toggle; resets to full on each generate
+  const [view, setView] = useState("full");
+  const [saveOpen, setSaveOpen] = useState(false);   // the Save-to-a-session footer button opens the existing save + schedule row   // 'full' | 'quick' — preview toggle; resets to full on each generate
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)
   const [newDate, setNewDate] = useState(""); const [newTime, setNewTime] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
@@ -4994,7 +5560,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
   const up = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   async function generate() {
     setLoading(true); setErr(""); setPlan(null); setView("full");
-    const sys = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"minutes\":number,\"actions\":string[]}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Each step's \"actions\" are short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences. 3-6 actions per step. Realistic for the stated staffing and apparatus.";
+    const sys = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"objectives\":string[],\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"minutes\":number,\"actions\":string[]}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Each step's \"actions\" are short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences. 3-6 actions per step. Realistic for the stated staffing and apparatus.";
     const user = `${dept?.name ? `Department: ${dept.name}\n` : ""}Department size: ${form.size} members\nApparatus/equipment: ${form.apparatus}\nTopic: ${form.topic}\nSkill level: ${form.level}\nTime: ${form.time} minutes\nRecent history: ${form.history}`;
     try {
       let t = (await callClaude(sys, user)).replace(/```json|```/g, "").trim();
@@ -5038,7 +5604,7 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
       <CardHead icon={Sparkles} title="AI drill planner" style={{ marginBottom: 4 }} />
       <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>Describe your crew and constraints — you'll get a structured drill plan to adapt, then save it to a session.</div>
       <div style={S.aiGrid}>
-        <div style={{ ...S.aiForm, ...FS.cardNoir }}>
+        <div style={{ ...S.aiForm, ...NOIR_INSET, padding: 14 }}>
           <AIField S={S} dark label="Department size (members)" value={form.size} onChange={(v) => up("size", v)} />
           <AIField S={S} dark label="Available apparatus / equipment" value={form.apparatus} onChange={(v) => up("apparatus", v)} />
           <AIField S={S} dark label="Training topic" value={form.topic} onChange={(v) => up("topic", v)} />
@@ -5050,53 +5616,16 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
           <button style={{ ...FS.btnPrimary, width: "100%", justifyContent: "center", opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate drill plan</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
         </div>
-        <div style={{ ...S.aiResult, ...FS.cardNoir }}>
+        <div style={{ ...S.aiResult, ...NOIR_INSET, padding: 14 }}>
           {!plan && !loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Sparkles size={28} color={FIRE.textMuted2} /><p>Your drafted plan appears here. It's a starting point — a real training officer should review and adapt it before use.</p></div>}
           {loading && <div style={{ ...S.aiPlaceholder, color: FIRE.textMuted }}><Loader2 size={28} className="spin" color={FIRE.textMuted2} /><p>Drafting a plan for {form.size} members, {form.time} minutes…</p></div>}
           {plan && (
             <div>
-              <Disclaimer S={S} compact dark />
-              <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>{form.topic}</h3>
-              <div style={{ display: "flex", gap: 8, margin: "6px 0 12px" }}>
-                {["full", "quick"].map((k) => (
-                  <button key={k} onClick={() => setView(k)} style={{ ...FS.btn, ...(view === k ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{k === "quick" ? "Quick run sheet" : "Full plan"}</button>
-                ))}
-              </div>
-              {view === "quick" ? (
-                <>
-                  {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
-                  {Array.isArray(plan.steps) && (
-                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Run it</div>
-                      <div style={S.steps}>{plan.steps.map((s, i) => (
-                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
-                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div>{Array.isArray(s.actions) && s.actions.length ? <ul style={{ ...S.list, color: FIRE.textSecondary, marginTop: 4 }}>{s.actions.map((a, j) => <li key={j}>{a}</li>)}</ul> : (s.detail ? <div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div> : null)}</div></div>
-                      ))}</div></div>
-                  )}
-                  <AIList S={S} dark Icon={ShieldAlert} title="Safety first" items={plan.safetyNotes} warn />
-                  <AIList S={S} dark Icon={CheckCircle2} title="You're done when" items={plan.evaluationChecklist} />
-                </>
-              ) : (
-                <>
-                  <p style={{ ...S.body, color: FIRE.textSecondary }}>{plan.summary}</p>
-                  {plan.durationMin ? <div style={S.metaRow}><Meta Icon={Clock} dark text={`${plan.durationMin} min`} /></div> : null}
-                  <AIList S={S} dark Icon={ShieldAlert} title="Safety notes" items={plan.safetyNotes} warn />
-                  <AIList S={S} dark Icon={Wrench} title="Equipment" items={plan.equipment} />
-                  {Array.isArray(plan.steps) && (
-                    <div style={{ marginTop: 16 }}><div style={{ ...S.aiListHead, color: FIRE.textPrimary }}><FileText size={16} /> Drill steps</div>
-                      <div style={S.steps}>{plan.steps.map((s, i) => (
-                        <div key={i} style={S.step}><span style={{ ...S.stepNum, color: FIRE.red, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}` }}>{String(i + 1).padStart(2, "0")}</span>
-                          <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.title} {s.minutes ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.minutes} min</span> : null}</div>{Array.isArray(s.actions) && s.actions.length ? <ul style={{ ...S.list, color: FIRE.textSecondary, marginTop: 4 }}>{s.actions.map((a, j) => <li key={j}>{a}</li>)}</ul> : (s.detail ? <div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.detail}</div> : null)}</div></div>
-                      ))}</div></div>
-                  )}
-                  <AIList S={S} dark Icon={Megaphone} title="Instructor talking points" items={plan.talkingPoints} />
-                  <AIList S={S} dark Icon={ClipboardList} title="Debrief questions" items={plan.debriefQuestions} />
-                  <AIList S={S} dark Icon={CheckCircle2} title="Evaluation checklist" items={plan.evaluationChecklist} />
-                </>
-              )}
-              <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <DrillPlanPanel S={S} plan={plan} form={form} loading={loading} onRegenerate={generate} onSave={() => setSaveOpen((v) => !v)} saveOpen={saveOpen} notify={notify} />
+              {saveOpen && (<div style={{ ...NOIR_INSET, padding: "4px 14px 14px", marginTop: 10 }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
                 <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save to session</span>
                   <select style={FS.input} value={saveSession} onChange={(e) => setSaveSession(e.target.value)}>
                     <option value="">Choose a session…</option>
@@ -5106,16 +5635,16 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
               </div>
               {canManage && (
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
-                  <div style={{ width: "100%", fontSize: 11, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>— or schedule on a new date —</div>
+                  <SectionBar icon={Calendar} label="Or schedule on a new date" style={{ width: "100%", margin: "4px 0 0" }} />
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input type="date" style={FS.input} value={newDate} onChange={(e) => setNewDate(e.target.value)} /></label>
                   <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Start time (optional)</span><input type="time" style={FS.input} value={newTime} onChange={(e) => setNewTime(e.target.value)} /></label>
                   <label style={{ ...S.field, minWidth: 150, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={form.topic} /></label>
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={newCat} onChange={(e) => setNewCat(e.target.value)}><option value="">One-off (no category)</option>{(categories || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
                   <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Audience</span>
-                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, background: FIRE.insetNoir }}>
                       {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                         const on = newAudience === val;
-                        return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : "#F0F2F5") : "#9AA1AC" }}>{lbl}</button>;
+                        return <button key={val} type="button" onClick={() => setNewAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.lineNoir}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.textPrimary) : FIRE.textSecondary }}>{lbl}</button>;
                       })}
                     </div></label>
                   <CountsAttendanceCheckbox checked={newCounts} onChange={setNewCounts} fieldStyle={S.field} labelStyle={{ ...S.fieldLabel, color: FIRE.textSecondary }} />
@@ -5123,6 +5652,8 @@ function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, 
                   <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={scheduleOnDate} disabled={!newDate || saving}>{saving ? <><Loader2 size={16} className="spin" /> Scheduling…</> : <><Plus size={16} /> Schedule on date</>}</button>
                 </div>
               )}
+              </div>)}
+              <PlanFeedback key={genId} S={S} plan={plan} topic={form.topic} addFeedback={addFeedback} />
             </div>
           )}
         </div>
@@ -5137,7 +5668,7 @@ function AIList({ S, Icon, title, items, warn, dark }) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ ...S.aiListHead, color: warn ? (dark ? FIRE.redText : "#8A1620") : (dark ? FIRE.textPrimary : "#191C20") }}><Icon size={16} /> {title}</div>
+      <div style={{ ...S.aiListHead, color: warn ? (dark ? FIRE.redText : "#8A1620") : (dark ? FIRE.textPrimary : "#191C20"), ...(dark ? { fontFamily: DISPLAY_FONT, letterSpacing: ".02em" } : null) }}><Icon size={16} color={dark ? (warn ? FIRE.redText : FIRE.redBright) : undefined} /> {title}</div>
       <ul style={dark ? { ...S.list, color: FIRE.textSecondary } : S.list}>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
     </div>
   );
@@ -5210,15 +5741,16 @@ function RichOutput({ S, text, dark }) {
   const sections = parseSections(text);
   // additive: default (dark falsy) uses the exact same S.rich* objects → byte-identical light path. Parse/RichText untouched.
   const wrap  = S.richWrap;   // layout-only (flex/gap/marginTop) — same for both themes
-  const card  = dark ? { ...FS.card, padding: "15px 17px" } : S.richCard;
-  const title = dark ? { ...S.richTitle, color: FIRE.textPrimary, borderBottom: `1px solid ${FIRE.hairline}` } : S.richTitle;
+  // dark = the Noir AI answer: each section on the inset surface, its title an Oswald head with the short red rule.
+  const card  = dark ? { ...NOIR_INSET, padding: "14px 16px" } : S.richCard;
+  const title = dark ? { ...S.richTitle, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14.5, letterSpacing: ".02em", color: FIRE.textPrimary, borderBottom: "none", paddingBottom: 5, marginBottom: 10, position: "relative", display: "inline-block" } : S.richTitle;
   const para  = dark ? { ...S.richP, color: FIRE.textSecondary } : S.richP;
   const list  = dark ? { ...S.richList, color: FIRE.textSecondary } : S.richList;
   return (
     <div style={wrap}>
       {sections.map((sec, i) => (
         <div key={i} style={card}>
-          {sec.title && <div style={title}>{sec.title}</div>}
+          {sec.title && <div style={title}>{sec.title}{dark && <span aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: 20, height: 2, borderRadius: 2, background: FIRE.redBright }} />}</div>}
           {sec.blocks.map((b, j) => {
             if (b.para != null) return <p key={j} style={para}><RichText text={b.para} /></p>;
             const Tag = b.ordered ? "ol" : "ul";
@@ -5306,19 +5838,19 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
     setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
   }
   return (
-    <PageShell kicker="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.">
+    <PageShell band watermark="RECRUIT" kicker="RECRUITMENT" title="Build a recruitment plan — not just a post" sub="A 90-day framework, an AI that drafts your whole plan, and ideas well beyond social media.">
       <NoirSkin>
       <div style={S.phaseRow}>
-        <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent={FIRE.red} />
+        <Phase S={S} n="01" weeks="Weeks 1–4" title="Foundation" items={["Assign a recruitment lead", "Define who you're looking for", "Stand up a simple interest form", "Set a 90-day target"]} accent={FIRE.redBright} />
         <Phase S={S} n="02" weeks="Weeks 5–8" title="Outreach" items={["Member referral drive", "Employer + school outreach", "Show up at a community event", "Pick an open-house date"]} accent={FIRE.catBlue} />
         <Phase S={S} n="03" weeks="Weeks 9–12" title="Convert" items={["Host the open house", "Follow up within 48 hours", "Move them through onboarding", "Assign a buddy / mentor"]} accent={FIRE.catGreen} />
       </div>
 
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...NOIR_LABEL, fontFamily: DISPLAY_FONT, letterSpacing: ".1em", color: NOIR_AI.blueText, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><Sparkles size={13} style={{ verticalAlign: "-2px" }} />AI RECRUITMENT PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a recruitment plan for your department</h3>
+          <h3 style={NOIR_FEAT_TITLE}>Draft a recruitment plan for your department</h3>
           <div style={S.twoColForm}>
             <AIField S={S} dark label="Your town" value={town} onChange={setTown} />
             <AIField S={S} dark label="Department size" value={size} onChange={setSize} />
@@ -5332,8 +5864,8 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
-          {plan && <RichOutput S={S} text={plan} dark />}
+          {err && <div style={NOIR_ERR}>{err}</div>}
+          {plan && <RecruitmentPlanView S={S} text={plan} />}
           {plan && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Draft title" /></label>
@@ -5344,7 +5876,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
         </div>
       </div>
 
-      <button onClick={() => setWaysOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: waysOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA<span style={{ marginLeft: "auto", display: "inline-flex" }}>{waysOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+      <button onClick={() => setWaysOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: waysOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>WAYS TO RECRUIT BEYOND SOCIAL MEDIA<span style={{ marginLeft: "auto", display: "inline-flex" }}>{waysOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
       {waysOpen && <IdeaGrid S={S} dark items={[
         { h: "Current-member referrals", p: "Your people's networks convert best. Give them a one-line script to forward." },
         { h: "Local employers", p: "Release-time or support partnerships — many owners want the community goodwill." },
@@ -5366,7 +5898,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled draft"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -5377,8 +5909,8 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
         })}
       </Card>
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}`, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <CardHead icon={FileText} title={openDraft.title || "Draft"} style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
@@ -5395,7 +5927,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
                 </div>
               </>
             ) : (
-              <RichOutput S={S} text={openDraft.current_text ?? openDraft.ai_text} dark />
+              <RecruitmentPlanView S={S} text={openDraft.current_text ?? openDraft.ai_text} />
             )}
           </div>
         </div>
@@ -5404,12 +5936,87 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
     </PageShell>
   );
 }
+/* RECRUITMENT PLAN, RENDERED AS A PLAN (b4c_recruitment_noir.html). The planner's prompt already fixes the text's
+   shape — campaign hashtag up top, WEEK n headers, posts labelled 'Mon, Oct 20 — Post 1', a '🎥/📸 Content idea:'
+   line under each post, and the outreach milestones (open house / business outreach / referral push) woven in.
+   This reads that shape back into cards. It is TOLERANT, not strict: anything it can't place stays as a plain
+   line in its week, and a text with no weeks or no posts falls back to RichOutput exactly as before — so an
+   older or oddly-shaped draft still shows in full. Display only; the saved text is unchanged. */
+const POST_LABEL = /^((?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+[a-z]{3,9}\.?\s+\d{1,2})\s*[—–-]+\s*(post\s*\d+)\s*:?\s*(.*)$/i;
+const MILESTONE = /^(open[\s-]*house|business outreach|referral push|referral drive|outreach milestone|milestone)\b/i;
+function parseRecruitmentPlan(text) {
+  const clean = (l) => l.replace(/\*\*/g, "").replace(/^#{1,6}\s+/, "").replace(/^[-*•]\s+/, "").trim();
+  const lines = String(text || "").replace(/\r/g, "").split("\n").map(clean);
+  const out = { hashtag: null, intro: [], weeks: [] };
+  let wk = null, post = null, mile = null;
+  for (const l of lines) {
+    if (!l || /^(-{3,}|_{3,})$/.test(l)) { mile = null; continue; }
+    const w = l.match(/^week\s*(\d+)\b\s*[:·—–-]?\s*(.*)$/i);
+    if (w) { wk = { n: w[1], sub: w[2].replace(/^\((.*)\)$/, "$1").trim(), items: [] }; out.weeks.push(wk); post = null; mile = null; continue; }
+    if (!wk) {
+      if (!out.hashtag) { const h = l.match(/#[A-Za-z][\w]{2,}/); if (h) { out.hashtag = h[0]; const rest = l.replace(/.*hashtag[^:]*:\s*/i, "").replace(h[0], "").trim(); if (rest && rest.length > 3) out.intro.push(rest); continue; } }
+      out.intro.push(l); continue;
+    }
+    const p = l.match(POST_LABEL);
+    if (p) { post = { label: `${p[1]} — ${p[2].replace(/\s+/, " ")}`, copy: p[3] ? [p[3]] : [], idea: null }; wk.items.push({ kind: "post", post }); mile = null; continue; }
+    if (post && (/^(🎥|📸|📷|🎬|📹)/u.test(l) || /^content idea\b/i.test(l))) { post.idea = l; continue; }
+    const m = l.match(MILESTONE);
+    if (m) { const ci = l.indexOf(":"); mile = { head: ci > 0 ? l.slice(0, ci) : l, body: ci > 0 && l.slice(ci + 1).trim() ? [l.slice(ci + 1).trim()] : [] }; wk.items.push({ kind: "mile", mile }); post = null; continue; }
+    if (mile) { mile.body.push(l); continue; }
+    if (post && !post.idea) { post.copy.push(l); continue; }
+    wk.items.push({ kind: "note", text: l }); post = null;
+  }
+  const posts = out.weeks.reduce((t, w) => t + w.items.filter((i) => i.kind === "post").length, 0);
+  return out.weeks.length && posts ? out : null;
+}
+function RecruitmentPlanView({ S, text }) {
+  const plan = useMemo(() => parseRecruitmentPlan(text), [text]);
+  if (!plan) return <RichOutput S={S} text={text} dark />;
+  return (
+    <div style={{ marginTop: 14, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 13 }}>
+      {(plan.hashtag || plan.intro.length > 0) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {plan.hashtag && <span style={{ ...NOIR_AI.chip, fontSize: 12, letterSpacing: 0, textTransform: "none" }}>{plan.hashtag}</span>}
+          {plan.intro.length > 0 && <span style={{ fontSize: 11, color: FIRE.textMuted, flex: "1 1 200px" }}>{plan.intro.join(" ")}</span>}
+        </div>
+      )}
+      {plan.weeks.map((w, wi) => (
+        <div key={wi}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".08em", color: FIRE.redText, margin: "14px 0 8px", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ flexShrink: 0 }}>Week {w.n}{w.sub ? ` · ${w.sub}` : ""}</span><span style={{ flex: 1, height: 1, background: FIRE.lineNoir }} />
+          </div>
+          {w.items.map((it, i) => it.kind === "post" ? (
+            <div key={i} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 9, padding: "10px 12px", marginBottom: 8 }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, color: FIRE.amberText, letterSpacing: ".03em", marginBottom: 5 }}>{it.post.label}</div>
+              {it.post.copy.length > 0 && <div style={{ fontSize: 12.5, color: FIRE.textPrimary, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{it.post.copy.join("\n")}</div>}
+              {it.post.idea && <div style={{ fontSize: 11.5, color: NOIR_AI.blueText, marginTop: 6, lineHeight: 1.45 }}>{it.post.idea}</div>}
+            </div>
+          ) : it.kind === "mile" ? (
+            <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", background: "#0e1c14", border: "1px solid rgba(47,168,105,.28)", borderRadius: 9, padding: "9px 12px", margin: "8px 0", fontSize: 11.5, color: FIRE.greenText, lineHeight: 1.45 }}>
+              <Megaphone size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span><b style={{ color: "#8fdcb0" }}>{it.mile.head}</b>{it.mile.body.length ? ` — ${it.mile.body.join(" ")}` : ""}</span>
+            </div>
+          ) : (
+            <div key={i} style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.5, margin: "4px 0 8px" }}>{it.text}</div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 function Phase({ S, n, weeks, title, items, accent }) {
   return (
-    <div style={{ ...S.phaseCard, ...FS.cardNoir, borderTop: `3px solid ${accent}` }}>
-      <div style={S.phaseTop}><span style={{ ...S.phaseNum, color: accent }}>{n}</span><span style={{ ...S.phaseWeeks, color: FIRE.textMuted }}>{weeks}</span></div>
-      <div style={{ ...S.phaseTitle, color: FIRE.textPrimary }}>{title}</div>
-      <ul style={{ ...S.phaseList, color: FIRE.textSecondary }}>{items.map((i) => <li key={i}>{i}</li>)}</ul>
+    <div style={{ ...S.phaseCard, ...FS.cardNoir, borderTop: `3px solid ${accent}`, borderRadius: 12, padding: "13px 14px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1, color: accent }}>{n}</span>
+        <span style={{ fontSize: 10.5, letterSpacing: ".03em", color: FIRE.textMuted }}>{weeks}</span>
+      </div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, margin: "0 0 9px" }}>{title}</div>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>{items.map((i) => (
+        <li key={i} style={{ position: "relative", padding: "4px 0 4px 17px", fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.35 }}>
+          <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 9, width: 6, height: 6, borderRadius: "50%", background: accent, opacity: 0.75 }} />{i}
+        </li>
+      ))}</ul>
     </div>
   );
 }
@@ -5461,6 +6068,17 @@ async function extractMinutesFileText(file) {
   if (name.endsWith(".docx")) return await extractDocxText(file);
   throw new Error("Unsupported file type. Upload a .docx, .pdf, or .txt file.");
 }
+/* Station Documents → text for AI grounding (Station Q&A reads documents.content_text). PDFs through pdf.js, Word
+   (.docx) through mammoth — the same two readers Minutes import uses. Anything else (an image, a legacy .doc, a
+   spreadsheet) returns "" and lands on the no-text advisory. Throws on an unreadable file; both callers treat a
+   throw as "no text" and still save the document. */
+async function extractDocumentText(file) {
+  const name = (file?.name || "").toLowerCase(), type = file?.type || "";
+  if (type === "application/pdf" || name.endsWith(".pdf")) return await extractPdfText(file);
+  if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || name.endsWith(".docx")) return await extractDocxText(file);
+  return "";
+}
+const DOC_NO_TEXT_ADVICE = "PDFs and Word docs with real text work; a scanned or photographed document is just an image and would need to be re-saved with selectable text.";
 const DOC_TYPES = ["SOP / SOG", "Policy", "Handbook", "Forms", "Agreement", "Reference", "Other"];
 // One PDF page rendered to a canvas at the container width (x devicePixelRatio for crispness).
 function PdfPage({ pdf, pageNum, width }) {
@@ -5522,9 +6140,9 @@ function DocViewer({ url, name, onClose }) {
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 130, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxWidth: 820, width: "100%", margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: FIRE.card, borderBottom: `0.5px solid ${FIRE.hairline}`, flexShrink: 0 }}>
-          <FileText size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: `radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.14), transparent 46%), ${FIRE.card2Noir}`, borderBottom: `1px solid ${FIRE.lineNoir}`, flexShrink: 0 }}>
+          <span style={{ width: 30, height: 30, borderRadius: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><FileText size={15} color={FIRE.redText} /></span>
+          <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY_FONT, fontSize: 15, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
           <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...FS.btn, padding: "6px 10px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0 }}><Download size={14} color={FIRE.btnIcon} /> Download</a>
           <button onClick={onClose} title="Close (Esc)" style={{ ...FS.btn, padding: "6px 8px", flexShrink: 0 }}><X size={16} color={FIRE.btnIcon} /></button>
         </div>
@@ -5539,7 +6157,7 @@ function DocViewer({ url, name, onClose }) {
           {status === "ready" && kind === "pdf" && pdf && w > 0 && Array.from({ length: numPages }).map((_, i) => <PdfPage key={i} pdf={pdf} pageNum={i + 1} width={w} />)}
           {status === "ready" && kind === "docx" && (<>
             <style>{`.docx-view img{max-width:100%;height:auto} .docx-view table{border-collapse:collapse;width:100%;margin:8px 0} .docx-view td,.docx-view th{border:1px solid rgba(255,255,255,.16);padding:6px 8px;text-align:left} .docx-view a{color:${FIRE.blueText}} .docx-view h1,.docx-view h2,.docx-view h3{color:#fff;margin:12px 0 6px} .docx-view p{margin:0 0 8px} .docx-view ul,.docx-view ol{margin:0 0 8px;padding-left:22px}`}</style>
-            <div className="docx-view" style={{ ...FS.card, padding: "16px 18px", fontSize: 14, lineHeight: 1.6, color: FIRE.textPrimary, wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: html }} />
+            <div className="docx-view" style={{ ...NOIR_INSET, padding: "16px 18px", fontSize: 14, lineHeight: 1.6, color: FIRE.textPrimary, wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: html }} />
           </>)}
           {status === "ready" && kind === "image" && <img src={url} alt={name} style={{ display: "block", maxWidth: "100%", margin: "0 auto", borderRadius: 8 }} />}
         </div>
@@ -5610,7 +6228,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
     const failed = [];
     let lastErr = "";
     const added = [];
-    const noText = [];   // saved OK but yielded no extractable text (scan / non-PDF) — advisory, NOT a failure
+    const noText = [];   // saved OK but yielded no extractable text (scan / image / unsupported format) — advisory, NOT a failure
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       // collision-proof path: {deptId}/{timestamp}-{index}-{filename}
@@ -5620,17 +6238,12 @@ function Documents({ S, role, notify, uploaderName, members }) {
       if (upErr) { failed.push(file.name); lastErr = upErr.message; continue; }
       // 2) extract text for AI grounding — best-effort; NEVER blocks the upload (row still saves with content_text null).
       let content_text = null;
-      const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-      if (!isPdf) {
-        noText.push(file.name);                                          // gate 1: not a PDF (DOCX, image, etc.)
-      } else {
-        try {
-          const text = await extractPdfText(file);
-          if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // gate 3: has a real text layer
-          else noText.push(file.name);                                  // empty/near-empty → likely a scanned image PDF
-        } catch {
-          noText.push(file.name);                                       // gate 2: getDocument threw — unreadable / not a real PDF
-        }
+      try {
+        const text = await extractDocumentText(file);                    // PDF or Word (.docx); anything else → ""
+        if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // has real text (the same ≥25-char gate)
+        else noText.push(file.name);                                    // empty/near-empty → a scan/image, or a format we don't read
+      } catch {
+        noText.push(file.name);                                         // the reader threw — unreadable file; the document still saves
       }
       // 3) write the metadata row (content_text = extracted text, or null on any extraction failure)
       const row = { department_id: deptId, name: file.name, type: uploadType, storage_path: path, uploaded_by: uploaderName, content_text };
@@ -5645,7 +6258,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
     if (added.length) setDocs((d) => [...added, ...d]);
     await loadDocs();   // non-destructive: a flaky read leaves the optimistic rows in place
     // advisory (not an error): files that saved but couldn't be read for AI grounding — appended to the summary
-    const aiNote = noText.length ? ` Couldn't read text from ${noText.join(", ")} — they may be scans or unsupported formats; they won't be included in the AI assistant until re-uploaded as text PDFs.` : "";
+    const aiNote = noText.length ? ` We couldn't pull text from ${noText.join(", ")}, so the assistant won't be able to read ${noText.length === 1 ? "it" : "them"}. ${DOC_NO_TEXT_ADVICE}` : "";
     if (failed.length === 0) {
       notify({ kind: "success", title: "Documents uploaded", text: `${okCount} document${okCount === 1 ? "" : "s"} uploaded.${aiNote}` });
     } else if (okCount > 0) {
@@ -5674,7 +6287,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
   // Soft-delete: move to trash (DA/PA, server-stamped). File STAYS in Storage so it can be restored.
   async function deleteDoc(item) {
     if (!item?.id) return;
-    if (!window.confirm(`Move "${item.name}" to the trash? An admin can restore it.`)) return;
+    if (!(await noirConfirm({ title: "Move to the trash?", body: `“${item.name}” moves to the trash. An admin can restore it.`, confirmLabel: "Move to trash", danger: true }))) return;
     const { error } = await supabase.rpc("soft_delete_document", { p_id: item.id });
     if (error) { notify({ kind: "error", title: "Couldn't move to trash", text: "Please try again.", details: error.message }); return; }
     notify({ kind: "success", title: "Moved to trash", text: `"${item.name}" was moved to the trash.` });
@@ -5716,16 +6329,11 @@ function Documents({ S, role, notify, uploaderName, members }) {
        concerned — the worst shape of bug, because nothing on screen said so. */
     let content_text = null;
     let noText = false;
-    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-    if (!isPdf) {
-      noText = true;                                             // gate 1: not a PDF — no text layer we read
-    } else {
-      try {
-        const text = await extractPdfText(file);
-        if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // gate 3: has a real text layer
-        else noText = true;                                      // empty/near-empty → likely a scanned image PDF
-      } catch { noText = true; }                                 // gate 2: getDocument threw — unreadable / not a real PDF
-    }
+    try {
+      const text = await extractDocumentText(file);              // PDF or Word (.docx); anything else → ""
+      if (text.replace(/\s/g, "").length >= 25) content_text = text.trim();   // has real text (the same ≥25-char gate)
+      else noText = true;                                        // a scan/image, or a format we don't read
+    } catch { noText = true; }                                   // the reader threw — unreadable; the version still saves
     const row = { department_id: deptId, name: oldRow.name, type: oldRow.type, storage_path: path, uploaded_by: uploaderName, content_text };   // inherit name/type from the original
     const { data: newRow, error: insErr } = await supabase.from("documents").insert(row).select().single();
     if (insErr || !newRow) { notify({ kind: "error", title: "Couldn't save the new version", text: "Please try again.", details: insErr?.message }); return; }
@@ -5738,7 +6346,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
        "warning" kind would render green with a checkmark, which is the wrong signal for "the
        assistant cannot read this". uploadFiles solves it exactly this way with its aiNote. */
     const aiNote = noText
-      ? " The assistant can't read the new file, though — it looks like a scan or has no text layer, so it won't be included in Station Q&A. Upload a text-based PDF (exported from Word) or have it OCR'd."
+      ? ` We couldn't pull text from the new file, so the assistant won't be able to read it. ${DOC_NO_TEXT_ADVICE}`
       : "";
     notify({ kind: "success", title: "New version saved", text: `"${oldRow.name}" was updated — the previous version is kept in history.${aiNote}` });
     setHistoryFor(null);   // the chain changed; collapse any open history
@@ -5773,7 +6381,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
     catch { setErr("Couldn't draft that just now. Try again in a moment."); } finally { setLoading(false); }
   }
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
+    <PageShell band watermark="DOCS" above={loadErr && <OfflineNotice onRetry={loadDocs} what="documents" />}
       kicker="STATION DOCUMENTS" title="Your SOPs and guidelines, in one place"
       sub={leader ? "Upload what you've got — and draft what you don't. Everything stays yours." : "Your station's current SOPs, guidelines, and handbook — always available to you."}>
       <NoirSkin>
@@ -5784,7 +6392,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
           <select style={{ ...FS.input, maxWidth: 240 }} value={uploadType} onChange={(e) => setUploadType(e.target.value)}>
             {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select></label>
-        <label style={{ ...S.docDrop, background: FIRE.btnBg, border: `2px dashed ${FIRE.btnBorder}` }}
+        <label style={{ ...S.docDrop, background: FIRE.card2Noir, border: `2px dashed ${FIRE.line2Noir}` }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); uploadFiles(Array.from(e.dataTransfer.files || [])); }}>
           <Upload size={22} color={FIRE.btnIcon} />
@@ -5795,7 +6403,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
 
         <CardHead as="button" onClick={() => setDraftOpen((v) => !v)} icon={FilePlus} title="Draft a new document" right={draftOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />} style={{ marginTop: 14, marginBottom: draftOpen ? 8 : 0, cursor: "pointer" }} />
         {draftOpen && (<>
-        <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 14 }}>
+        <Card padding="16px 18px" style={{ display: "flex", marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Document type</span>
               <select style={{ ...FS.input, maxWidth: 240 }} value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -5806,7 +6414,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
             <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><FilePlus size={16} /> Draft document</>}
             </button>
-            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {err && <div style={NOIR_ERR}>{err}</div>}
             {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact dark /><RichOutput S={S} text={out} dark /></div>}
           </div>
         </Card>
@@ -5826,7 +6434,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
         <Card padding="2px 14px">
           {docs.map((d) => (
             <div key={d.id}>
-              <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
                 <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span></div>
                 {/* ONE flex group: inline on desktop, drops below the title as a unit on a phone (no overlap) */}
@@ -5843,7 +6451,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
                   {historyLoading ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>
                    : history.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>No previous versions — this is the original.</div>
                    : history.map((v) => (
-                     <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                     <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                        <FileText size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
                        <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: FIRE.textSecondary }}>Uploaded {v.created_at ? new Date(v.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}{v.uploaded_by ? ` · ${v.uploaded_by}` : ""}</div>
                        <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }} onClick={() => openDoc(v)}><Download size={13} /> View</button>
@@ -5863,7 +6471,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
             trashLoading ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Loading…</Card>
             : trashed.length === 0 ? <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>Trash is empty.</Card>
             : <Card padding="2px 14px">{trashed.map((d) => (
-              <div key={d.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={d.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <Trash2 size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
                 <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
                   <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span>
@@ -5888,10 +6496,11 @@ function Documents({ S, role, notify, uploaderName, members }) {
 const POST_THEMES = [
   // Default (seed) post themes for a department that hasn't saved its own — the noir categorical set. Saved
   // themes keep the colours they were given.
-  { tag: "PEOPLE", c: FIRE.red, t: "Member spotlight — why they serve" },
+  // Colours follow b4c_pr_noir.html: tour/clip blue, member spotlight gold, safety tip green, thank-you red.
+  { tag: "PEOPLE", c: "#D8A24A", t: "Member spotlight — why they serve" },
   { tag: "COMMUNITY", c: FIRE.catGreen, t: "Seasonal safety tip" },
   { tag: "BEHIND SCENES", c: FIRE.catBlue, t: "Training night photo or clip" },
-  { tag: "THE ASK", c: FIRE.catAmber, t: "Thank a supporter / recap the month" },
+  { tag: "THE ASK", c: FIRE.redBright, t: "Thank a supporter / recap the month" },
   { tag: "SAFETY", c: FIRE.catViolet, t: "Quick home-safety reminder" },
 ];
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -5917,6 +6526,14 @@ const stableIndex = (id, n) => {
   return sum % n;
 };
 const frColor = (fr) => fr?.color || CATEGORY_COLORS[stableIndex(fr?.id, CATEGORY_COLORS.length)];
+/* PR category colour when a department's saved category has none. Category colours are per-department data:
+   a stored colour always wins and is never remapped. Only a blank one takes the Industrial Noir accent rotation
+   (red, amber, green, blue, steel, gold) by its place in the department's sort order. Display only: the fallback is
+   never written back, so a post added under a colourless category still saves the category's own (blank) colour.
+   "None" is blank OR the column default #54506B (post_categories.color is NOT NULL DEFAULT '#54506B'); the picker
+   never offers that value, so a row carrying it is one nobody coloured. */
+const PR_FALLBACK_COLORS = [FIRE.redBright, FIRE.catAmber, FIRE.catGreen, FIRE.catBlue, "#8C9AAB", "#D8A24A"];
+const prColorSet = (c) => !!c && String(c).toUpperCase() !== "#54506B";
 const TIER_STYLES = {
   bar:  { fontSize: 10.5, fontWeight: 700, padding: "3px 6px", borderRadius: 5 },
   pill: { fontSize: 9.5,  fontWeight: 600, padding: "2px 5px", borderRadius: 999 },
@@ -5924,7 +6541,7 @@ const TIER_STYLES = {
 };
 // compact (dashboard only): shorter cells, 2 chips per day instead of 3, slightly tighter padding. Default off,
 // so the full-page Content / Recruitment / Funding calendars are unchanged.
-function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted }) {
+function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra, monthLabel, overflowIndicator, dark, compact, tinted, tiles, belowHeader, card, footer }) {
   const chipCap = compact ? 2 : 3;
   const today = new Date();
   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
@@ -5935,13 +6552,16 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
   for (let d = 1; d <= dim; d++) cells.push(d);
+  // tiles: neighbouring-month day numbers fill the blanks (the mock's .cell.mut) — display only, no items on them.
+  const prevDim = new Date(cur.y, cur.m, 0).getDate();
+  if (tiles) while (cells.length % 7) cells.push(null);
 
   const st = {
     wrap: dark ? { ...FS.card, overflow: "hidden", marginBottom: 10 } : { border: "1px solid #E7E5EE", borderRadius: 12, overflow: "hidden", background: "#fff", marginBottom: 10 },
     bar: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}` },
     mlabel: { fontWeight: 700, fontSize: 15, color: dark ? FIRE.textPrimary : "#211C2B" },
-    nav: { border: `${dark ? "0.5px" : "1px"} solid ${dark ? FIRE.btnBorder : "#E0DEE8"}`, background: dark ? FIRE.btnBg : "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: dark ? FIRE.btnIcon : "#54506B", display: "inline-flex", alignItems: "center" },
-    dow: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", background: dark ? FIRE.btnBg : "#F7F6FA" },
+    nav: { border: `${dark ? "0.5px" : "1px"} solid ${dark ? FIRE.line2Noir : "#E0DEE8"}`, background: dark ? FIRE.card2Noir : "#fff", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: dark ? FIRE.btnIcon : "#54506B", display: "inline-flex", alignItems: "center" },
+    dow: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", background: dark ? FIRE.card2Noir : "#F7F6FA" },
     dowc: { padding: "7px 0", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: dark ? FIRE.textMuted : "#8A8696", letterSpacing: 0.4 },
     grid: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))" },
     cell: { minHeight: compact ? 52 : 74, minWidth: 0, borderTop: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, borderLeft: `1px solid ${dark ? FIRE.hairline : "#EFEEF3"}`, padding: compact ? 4 : 5, display: "flex", flexDirection: "column", gap: compact ? 2 : 3 },
@@ -5950,6 +6570,53 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
     chip: { fontSize: 9.5, color: "#fff", borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   };
 
+  if (tiles) {
+    /* The training mock's calendar (.calhead + .cal): red icon, Oswald month, small ‹ › buttons, extra pushed right;
+       day tiles on card2 with a hairline border, today outlined red with a red disc. Sits inside the caller's card,
+       or brings its own Noir card with `card` (the dashboard / Recruitment / PR / Funding calendars). */
+    const navb = { width: 26, height: 26, borderRadius: 7, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 };
+    return (
+      <div style={card ? { ...FS.cardNoir, padding: 14, marginBottom: 10 } : undefined}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <Calendar size={16} color={FIRE.redBright} style={{ flexShrink: 0 }} />
+          <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, letterSpacing: ".02em" }}>{monthLabel}</span>
+          <button style={navb} onClick={() => shift(-1)} title="Previous month" aria-label="Previous month"><ChevronLeft size={14} /></button>
+          <button style={navb} onClick={() => shift(1)} title="Next month" aria-label="Next month"><ChevronRight size={14} /></button>
+          {headerExtra && <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }}>{headerExtra}</span>}
+        </div>
+        {belowHeader}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4, marginBottom: 4 }}>
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={{ textAlign: "center", fontSize: 9, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted }}>{d.toUpperCase()}</div>)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4 }}>
+          {cells.map((d, i) => {
+            const mutNum = d == null ? (i < firstDow ? prevDim - firstDow + 1 + i : i - firstDow - dim + 1) : null;
+            const dayItems = d == null ? [] : items.filter((it) => it.d === d);
+            const now = d != null && isToday(d);
+            return (
+              <div key={i} style={{ minHeight: compact ? 50 : 66, minWidth: 0, borderRadius: 7, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.card2Noir, padding: "5px 6px", display: "flex", flexDirection: "column", gap: 3, opacity: d == null ? 0.3 : 1, ...(now ? { outline: "1.5px solid rgba(224,58,68,.7)", outlineOffset: -1 } : null) }}>
+                <span style={now ? { background: todayColor || FIRE.redBright, color: "#fff", borderRadius: 999, width: 17, height: 17, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 } : { fontSize: 10.5, fontWeight: 600, color: FIRE.textMuted }}>{d ?? mutNum}</span>
+                {dayItems.slice(0, chipCap).map((it) => {
+                  const c = renderChip(it);
+                  const isDot = c.tier === "dot";   // importance tiers (dashboard "All" filter): bar > pill > dot
+                  return (
+                    <div key={it.id} title={c.title} onClick={c.onClick}
+                      style={{ fontSize: 9, fontWeight: 600, borderRadius: 5, padding: "2px 5px", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: c.dashed ? "transparent" : `${c.color}2E`, color: FIRE.textPrimary, border: `1px ${c.dashed ? "dashed" : "solid"} ${c.color}8C`,
+                        ...(c.tier ? TIER_STYLES[c.tier] : null), ...(isDot ? { background: "transparent", border: "none", color: FIRE.textSecondary } : null), ...(c.onClick ? { cursor: "pointer" } : {}) }}>
+                      {isDot && <span style={{ width: 6, height: 6, borderRadius: 999, background: c.color, flexShrink: 0, display: "inline-block" }} />}
+                      {c.label}
+                    </div>
+                  );
+                })}
+                {overflowIndicator && dayItems.length > chipCap && <div style={{ fontSize: 9, color: FIRE.textMuted, fontWeight: 600, paddingLeft: 2 }}>+{dayItems.length - chipCap} more</div>}
+              </div>
+            );
+          })}
+        </div>
+        {footer}
+      </div>
+    );
+  }
   return (
     <div style={st.wrap}>
       <div style={st.bar}>
@@ -5963,7 +6630,7 @@ function MonthCalendar({ cur, setCur, items, renderChip, todayColor, headerExtra
         {cells.map((d, i) => {
           const dayItems = d == null ? [] : items.filter((it) => it.d === d);
           return (
-            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? (dark ? FIRE.btnBg : "#FBFAFC") : (dark ? "transparent" : "#fff") }}>
+            <div key={i} style={{ ...st.cell, ...(i % 7 === 0 ? { borderLeft: "none" } : {}), background: d == null ? (dark ? FIRE.card2Noir : "#FBFAFC") : (dark ? "transparent" : "#fff") }}>
               {d != null && (<>
                 <span style={isToday(d) ? st.dtoday : st.dnum}>{d}</span>
                 {dayItems.slice(0, chipCap).map((it) => {
@@ -6015,7 +6682,7 @@ function ContentCalendar({ S, role, notify }) {
   };
   useEffect(() => { loadPosts(); }, []);
   const [categories, setCategories] = useState(
-    POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, t: th.t, isDefault: true, sortOrder: i }))
+    POST_THEMES.map((th, i) => ({ id: `seed-${i}`, tag: th.tag, c: th.c, stored: th.c, t: th.t, isDefault: true, sortOrder: i }))
   );
   function loadCategories(isInitial) {
     supabase.from("post_categories")
@@ -6023,7 +6690,7 @@ function ContentCalendar({ S, role, notify }) {
       .order("sort_order", { ascending: true })
       .then(({ data, error }) => {
         if (error || !data || data.length === 0) return;   // keep fallback if empty/error
-        setCategories(data.map((r) => ({ id: r.id, tag: r.label, c: r.color, t: r.default_text || "", isDefault: r.is_default, sortOrder: r.sort_order })));
+        setCategories(data.map((r, i) => ({ id: r.id, tag: r.label, c: prColorSet(r.color) ? r.color : PR_FALLBACK_COLORS[i % PR_FALLBACK_COLORS.length], stored: r.color, t: r.default_text || "", isDefault: r.is_default, sortOrder: r.sort_order })));
         if (isInitial) {                       // only the mount load seeds the form selection;
           const first = data[0];               // refetches after add/delete must NOT clobber an open form
           setFi(first.id);
@@ -6058,7 +6725,7 @@ function ContentCalendar({ S, role, notify }) {
       date: toISO(new Date(cur.y, cur.m, Number(fd))),
       theme: cat.tag,
       caption: ft.trim() || cat.t,
-      color: cat.c,
+      color: cat.stored,   // the saved colour as-is — never the display fallback
     };
     const { error } = await supabase.from("content_calendar").insert(row);
     if (error) { notify({ kind: "error", title: "Couldn't add the post", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
@@ -6095,7 +6762,7 @@ function ContentCalendar({ S, role, notify }) {
         {categories.map((cat) => (
           <span key={cat.id} style={{ position: "relative", display: "inline-flex" }}>
             <button onClick={() => quickAdd(cat.id)}
-              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              style={{ border: `1.5px solid ${cat.c}`, color: cat.c, background: FIRE.card2Noir, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <Plus size={13} /> {cat.tag}
             </button>
             {canEditCategories && !cat.isDefault && canDeleteShared && (
@@ -6108,7 +6775,7 @@ function ContentCalendar({ S, role, notify }) {
         ))}
         {canEditCategories && (
           <button onClick={() => setShowCat((v) => !v)}
-            style={{ border: `1.5px dashed ${FIRE.btnBorder}`, color: FIRE.navLabel, background: FIRE.btnBg, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            style={{ border: `1.5px dashed ${FIRE.line2Noir}`, color: FIRE.navLabel, background: FIRE.card2Noir, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <Plus size={13} /> New
           </button>
         )}
@@ -6122,7 +6789,7 @@ function ContentCalendar({ S, role, notify }) {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setCatColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: catColor === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
               ))}
             </div>
           </div>
@@ -6147,13 +6814,19 @@ function ContentCalendar({ S, role, notify }) {
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur} dark
+        cur={cur} setCur={setCur} dark tiles card
         items={monthPosts}
-        renderChip={(p) => ({ color: p.c, label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
+        renderChip={(p) => ({ color: prColorSet(p.c) ? p.c : categories.find((c) => c.tag === p.tag)?.c || PR_FALLBACK_COLORS[0], label: p.t, title: canDeleteShared ? `${p.tag} — ${p.t} (tap to remove)` : `${p.tag} — ${p.t}`, onClick: canDeleteShared ? () => remove(p.id, p.t) : undefined })}
         todayColor={FIRE.red}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+        footer={categories.length > 0 && (
+          /* Legend: the department's own post types and their colours (saved categories keep theirs). */
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+            {categories.map((c) => <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: FIRE.textSecondary }}><i style={{ width: 8, height: 8, borderRadius: 2, background: c.c, display: "inline-block" }} />{c.tag.charAt(0) + c.tag.slice(1).toLowerCase()}</span>)}
+          </div>
+        )}
         headerExtra={
-          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
+          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); const cat = categories[0]; setFi(cat ? cat.id : null); setFt(cat ? cat.t : ""); setShow(true); }}><Plus size={14} /> Add a post</button>
         }
       />
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
@@ -6228,7 +6901,7 @@ function RecruitmentCalendar({ S, role, notify }) {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
               ))}
             </div>
           </div>
@@ -6238,13 +6911,13 @@ function RecruitmentCalendar({ S, role, notify }) {
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur} dark
+        cur={cur} setCur={setCur} dark tiles card
         items={monthItems}
         renderChip={(it) => ({ color: it.c, label: it.title, title: (canEdit && canDeleteShared) ? `${it.title} (tap to remove)` : it.title, onClick: (canEdit && canDeleteShared) ? () => removeEvent(it.id, it.title) : undefined })}
         todayColor={FIRE.catGreen}
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
@@ -6349,7 +7022,7 @@ function FundingCalendar({ S, role, notify }) {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
               {CATEGORY_COLORS.map((col) => (
                 <button key={col} title={col} onClick={() => setColor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
               ))}
             </div>
           </div>
@@ -6359,7 +7032,7 @@ function FundingCalendar({ S, role, notify }) {
       )}
 
       <MonthCalendar
-        cur={cur} setCur={setCur} dark
+        cur={cur} setCur={setCur} dark tiles card
         items={monthItems}
         /* The fundraiser goes in the TOOLTIP, never the label: a month cell is a few characters
            wide, and appending an event name would push the thing you are actually looking for out
@@ -6374,7 +7047,7 @@ function FundingCalendar({ S, role, notify }) {
         todayColor="#9A6B12"
         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
         headerExtra={canEdit ? (
-          <button style={{ border: `0.5px solid ${FIRE.btnBorder}`, background: FIRE.btnBg, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); setShow(true); }}><Plus size={14} /> Add an event</button>
+          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); setShow(true); }}><Plus size={14} /> Add an event</button>
         ) : null}
       />
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
@@ -6452,16 +7125,16 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
     <div>
       {loadErr && <OfflineNotice onRetry={loadAll} what="the calendar" />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-        <div style={{ ...FS.kicker, marginBottom: 0 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />STATION CALENDAR</div>
+        <CardHead icon={Calendar} title="Station calendar" style={{ marginBottom: 0, width: "auto" }} />
         {withImportanceMode && (
-          <div style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${FIRE.btnBorder}`, borderRadius: 8, overflow: "hidden" }}>
+          <div style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, overflow: "hidden" }}>
             {[["grid", "Grid"], ["importance", "By importance"]].map(([k, l], i) => (
-              <button key={k} onClick={() => setView(k)} style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: view === k ? FIRE.red : FIRE.btnBg, color: view === k ? "#fff" : FIRE.navLabel, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+              <button key={k} onClick={() => setView(k)} style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: view === k ? FIRE.red : FIRE.card2Noir, color: view === k ? "#fff" : FIRE.navLabel, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{l}</button>
             ))}
           </div>
         )}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10, alignItems: "center", paddingTop: 9, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10, alignItems: "center", paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}` }}>
         <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted2, fontWeight: 700, marginRight: 4 }}>Filter</span>
         {FILTERS.map((f) => {
           const active = filter === f.key;
@@ -6475,14 +7148,14 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         })}
       </div>
       {withImportanceMode && view === "importance" ? (
-        <div style={{ ...FS.card, padding: "8px 14px" }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 6 }}>{CAL_MONTHS[cur.m]} {cur.y}</div>
+        <div style={{ ...FS.cardNoir, padding: "10px 14px" }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, marginBottom: 6 }}>{CAL_MONTHS[cur.m]} {cur.y}</div>
           {monthItems.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>No events this month.</div> :
             [["training", "Training"], ["actionitem", "Action items"], ["funding", "Funding"], ["recruit", "Recruitment"], ["social", "Social"]].map(([src, lbl]) => {   // priority order = SOURCE_RANK
               const group = monthItems.filter((it) => it.source === src).slice().sort((a, b) => a.d - b.d);   // date order within a tier
               if (!group.length) return null;
               return (
-                <div key={src} style={{ padding: "6px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div key={src} style={{ padding: "6px 0", borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: SOURCE_COLORS[src], marginBottom: 3 }}>{lbl}</div>
                   {group.map((it) => (
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
@@ -6497,7 +7170,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         </div>
       ) : (
         <MonthCalendar
-          cur={cur} setCur={setCur} dark
+          cur={cur} setCur={setCur} dark tiles card
           items={monthItems}
           renderChip={(it) => { const restricted = it.source === "training" && isRestrictedEvent(it); const isBoardEvt = it.audience === "board"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: restricted ? (isBoardEvt ? FIRE.blueText : FIRE.amberText) : it.color, dashed: restricted, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${restricted ? (isBoardEvt ? "Board only · " : "Leadership only · ") : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
           todayColor={FIRE.red}
@@ -6516,9 +7189,9 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         const SRC_LABEL = { training: "Training", actionitem: "Action item", recruit: "Recruitment", funding: "Funding", social: "Social" };
         const dateStr = new Date(it.y, it.m, it.d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
         return (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={() => setDetailEvent(null)}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={() => setDetailEvent(null)}>
             <div style={{ ...FS.card, width: "min(460px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ width: 10, height: 10, borderRadius: 999, background: it.color, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>{SRC_LABEL[it.source] || it.source}</div>
@@ -6541,6 +7214,32 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
     </div>
   );
 }
+/* The drafted caption as the PR mock shows it: a card on the shared AI blue edge, the caption in body text, the
+   hashtags pulled onto their own line in the AI blue (inline ones are tinted where they sit), and Copy / Rewrite.
+   Copy takes the caption exactly as drafted; Rewrite runs the same draft() again. */
+function CaptionCard({ text, onRewrite, rewriting, notify }) {
+  const t = String(text || "").trim();
+  const m = t.match(/((?:\s*#[\w]+)+)\s*$/);
+  const body = m ? t.slice(0, m.index).trim() : t;
+  const tags = m ? m[1].trim().split(/\s+/).join(" ") : "";
+  const tint = (str) => str.split(/(#[\w]+)/g).map((p, i) => p.startsWith("#") ? <span key={i} style={{ color: NOIR_AI.blueText, fontWeight: 600 }}>{p}</span> : p);
+  async function copy() {
+    try { await navigator.clipboard.writeText(t); notify?.({ kind: "success", title: "Copied", text: "The caption is on your clipboard." }); }
+    catch { notify?.({ kind: "error", title: "Couldn't copy", text: "Your browser blocked the clipboard — select the text and copy it instead." }); }
+  }
+  return (
+    <div style={{ marginTop: 13, borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 12 }}>
+      <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 9, padding: "12px 13px" }}>
+        <p style={{ margin: 0, fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tint(body)}</p>
+        {tags && <div style={{ marginTop: 8, fontSize: 12.5, color: NOIR_AI.blueText, fontWeight: 600 }}>{tags}</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 11 }}>
+          <button onClick={copy} style={{ ...FS.btn, padding: "7px 11px", fontSize: 12 }}><Copy size={13} color={FIRE.btnIcon} /> Copy</button>
+          <button onClick={onRewrite} disabled={rewriting} style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, opacity: rewriting ? 0.6 : 1 }}>{rewriting ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} color={FIRE.btnIcon} />} Rewrite</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function Visibility({ S, brand, role, notify }) {
   const [topic, setTopic] = useState("A Tuesday-night ladder drill");
   const [ideasOpen, setIdeasOpen] = useState(false);   // Ideas for Things to Make — collapsed by default
@@ -6552,7 +7251,7 @@ function Visibility({ S, brand, role, notify }) {
     catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <PageShell kicker="PUBLIC RELATIONS" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week.">
+    <PageShell band watermark="PR" kicker="PUBLIC RELATIONS" title="Stay seen between calls" sub="A simple monthly content calendar, ideas for what to make, and a hand writing the captions — 20 minutes a week.">
       <NoirSkin>
       <CardHead icon={Calendar} title="Monthly content calendar" />
       <ContentCalendar S={S} role={role} notify={notify} />
@@ -6567,17 +7266,17 @@ function Visibility({ S, brand, role, notify }) {
         { h: "Thank-you post", p: "Recognize a donor, a volunteer, or the whole community." },
       ]} />}
 
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <CardHead icon={Sparkles} title="AI caption helper" />
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Write a post for your station</h3>
+          <div style={{ ...NOIR_AI.chip, background: "none", border: "none", padding: 0, marginBottom: 9 }}><Sparkles size={13} /> AI caption helper</div>
+          <h3 style={NOIR_FEAT_TITLE}>Write a post for your station</h3>
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What's the post about?</span>
             <input style={FS.input} value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
-          {post && <RichOutput S={S} text={post} dark />}
+          {err && <div style={NOIR_ERR}>{err}</div>}
+          {post && <CaptionCard text={post} onRewrite={draft} rewriting={loading} notify={notify} />}
         </div>
       </div>
 
@@ -6774,6 +7473,8 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
   const [pcOpen, setPcOpen] = useState(false);      // inline "record proceeds"
   const [pcInput, setPcInput] = useState("");
   const [pcBusy, setPcBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);   // "Share with the station" switch in flight
+  const [tickBusy, setTickBusy] = useState(null);      // which step's "Show the station" tick is in flight
   const DOC_TYPES = [
     { v: "cta",    label: "Community call-to-action", sys: CTA_SYS,    hint: "Short and warm — for social or a flyer." },
     { v: "letter", label: "Donation-request letter",  sys: LETTER_SYS, hint: "For a local business or community member." },
@@ -6850,6 +7551,25 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
   const when = frWhen(fundraiser.target_date, todayISO);
   const spList = sponsors || [];
 
+  /* STATION FUNDRAISER — what the whole department may see. Two flags, each written ONLY through its reviewed
+     SECURITY DEFINER function (department-scoped leaders; the DB re-checks): the fundraiser's share switch, and a
+     per-step tick. The station card then reads get_station_fundraisers() — counts + ticked open steps, never money. */
+  async function setShared(v) {
+    setShareBusy(true);
+    const { error } = await supabase.rpc("set_fundraiser_shared", { p_fundraiser_id: fundraiser.id, p_shared: v });
+    setShareBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't change that", text: /leaders|department/i.test(error.message || "") ? error.message : "Please try again.", details: error.message }); return; }
+    notify({ kind: "success", text: v ? "Shared with the station — members now see the countdown and progress." : "No longer shared with the station." });
+    onFundraiserChanged?.();
+  }
+  async function setStepVisible(it, v) {
+    setTickBusy(it.id);
+    const { error } = await supabase.rpc("set_fundraiser_step_visible", { p_item_id: it.id, p_visible: v });
+    setTickBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't change that", text: /leaders|planning step/i.test(error.message || "") ? error.message : "Please try again.", details: error.message }); return; }
+    load();
+  }
+
   async function addTask() {
     const text = tf.text.trim();
     if (!text) { notify({ kind: "error", title: "What needs doing?", text: "A job needs a description before you can add it." }); return; }
@@ -6890,7 +7610,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
     load();
   }
   async function cancelItem(it) {
-    const reason = window.prompt(`Why is "${it.text}" no longer needed? (a reason is required)`);
+    const reason = await noirPrompt({ title: "No longer needed?", body: `Why is “${it.text}” no longer needed?`, label: "Reason", placeholder: "e.g. Handled at the last meeting", required: true, confirmLabel: "Mark not needed" });
     if (reason === null) return;
     if (!reason.trim()) { notify({ kind: "error", title: "Reason required", text: "Please give a reason for cancelling this item." }); return; }
     const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });
@@ -7207,6 +7927,11 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {it.status === "open" ? (<>
+            <button type="button" aria-pressed={!!it.station_visible} disabled={tickBusy === it.id} onClick={() => setStepVisible(it, !it.station_visible)}
+              title={it.station_visible ? "The station sees this step on the fundraiser card — tap to hide it" : "Show this step to the whole station on the fundraiser card"}
+              style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5, opacity: tickBusy === it.id ? 0.6 : 1, ...(it.station_visible ? { color: FIRE.blueText, borderColor: "rgba(91,155,213,.5)", background: "rgba(91,155,213,.1)" } : {}) }}>
+              {it.station_visible ? <CheckCircle2 size={12} /> : <Users size={12} />} {it.station_visible ? "Station sees this" : "Show the station"}
+            </button>
             <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => completeItem(it)}><CheckCircle2 size={12} /> Done</button>
             <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => cancelItem(it)}>Not needed</button>
           </>) : (
@@ -7254,6 +7979,40 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
         {stat("Jobs", `${doneCount}/${counted.length}`, counted.length ? "done" : "nothing added yet", counted.length && doneCount === counted.length ? FIRE.greenText : FIRE.textSecondary)}
         {fundraiser.target_date && stat("When", when || "—", fundraiser.target_date, FIRE.textSecondary)}
       </div>
+
+      {/* SHARE WITH THE STATION — the whole department sees a countdown, planning progress and the ticked steps; never
+          dollar amounts or donors (the station reads through get_station_fundraisers, which can't return them). */}
+      {(() => {
+        const on = !!fundraiser.shared_with_station;
+        const ticked = open.filter((i) => i.station_visible).length;
+        const why = !fundraiser.target_date ? "Set a target date — the station card counts down to it, so it won't show without one."
+          : fundraiser.target_date < todayISO ? "The date has passed, so the station card is no longer shown."
+          : (fundraiser.status === "done" || fundraiser.status === "archived") ? "This fundraiser is finished, so the station card isn't shown."
+          : null;
+        return (
+          <div style={{ ...NOIR_INSET, padding: "12px 14px", marginBottom: 16, borderColor: on ? "rgba(91,155,213,.45)" : FIRE.lineNoir }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <Users size={17} color={on ? FIRE.blueText : FIRE.textMuted} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>Share with the station</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, lineHeight: 1.45, marginTop: 2 }}>The whole station will see a countdown, planning progress, and the steps you tick below — never dollar amounts or donors.</div>
+              </div>
+              <button type="button" disabled={shareBusy} onClick={() => setShared(!on)} aria-pressed={on} aria-label={on ? "Stop sharing with the station" : "Share with the station"}
+                style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: shareBusy ? "default" : "pointer", fontFamily: "inherit", padding: 4, opacity: shareBusy ? 0.7 : 1 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }}>{shareBusy ? "Saving…" : on ? "Shared" : "Not shared"}</span>
+                <span aria-hidden="true" style={{ width: 46, height: 26, borderRadius: 999, position: "relative", background: on ? FIRE.blueText : FIRE.card2Noir, border: `1px solid ${on ? FIRE.blueText : FIRE.line2Noir}` }}>
+                  <span style={{ position: "absolute", top: 2, left: on ? 22 : 2, width: 20, height: 20, borderRadius: 999, background: "#fff", transition: "left .15s" }} />
+                </span>
+              </button>
+            </div>
+            {on && (
+              <div style={{ fontSize: 12, color: why ? FIRE.amberText : FIRE.textSecondary, marginTop: 8, lineHeight: 1.45 }}>
+                {why || `${ticked} step${ticked === 1 ? "" : "s"} shown to the station · tick "Show the station" on an open job below to add one.`}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* THE PROMPT IS THE POINT. A finished fundraiser with no number recorded is the single most
           common way this data goes missing — the night ends, everyone goes home, and nobody comes
@@ -7622,7 +8381,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
   // Dept-scoped AND leadership-gated by RLS — no client-side filter, which is how the two drift.
   function load() {
     supabase.from("fundraisers")
-      .select("id, name, description, target_date, goal_amount, status, point_person_id, campaign_id, proceeds, sort, color")
+      .select("id, name, description, target_date, goal_amount, status, point_person_id, campaign_id, proceeds, sort, color, shared_with_station")
       .then(({ data, error }) => {
         // A failed read is not an empty department: keep the last-known list rather than telling a
         // department it runs no fundraisers because the network dropped.
@@ -7747,7 +8506,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
   }
 
   const form = (
-    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 190 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
         <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="Pancake Breakfast 2026" /></label>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Target date</span>
@@ -7776,7 +8535,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
           {CATEGORY_COLORS.map((col) => (
             <button key={col} title={col} onClick={() => setF((x) => ({ ...x, color: col }))}
-              style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: f.color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.btnBorder}` }} />
+              style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: f.color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
           ))}
         </div>
       </div>
@@ -7792,8 +8551,8 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
   return (
     <div style={{ marginBottom: 22 }}>
       {loadErr && <OfflineNotice onRetry={load} what="fundraisers" />}
-      <div style={{ ...FS.kicker, marginBottom: 4 }}>FUNDRAISERS</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The events you're running. Each one becomes the home for its plan, dates, sponsors and jobs.</p>
+      <div style={{ ...NOIR_LABEL, marginBottom: 4 }}>FUNDRAISERS</div>
+      <p style={{ ...NOIR_HELP, marginBottom: 10 }}>The events you're running. Each one becomes the home for its plan, dates, sponsors and jobs.</p>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fundraiser</button>}
@@ -7813,7 +8572,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
       {rows === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
       ) : shown.length === 0 ? (
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           {view === "done" ? "Nothing finished yet. Fundraisers you mark Done will collect here."
            : view === "archived" ? "Nothing archived. Events you put away wait here, with what they raised."
            : "No fundraisers yet. Add one — a pancake breakfast, a boot drive — and you'll be able to hang its plan, dates, sponsors, and tasks off it."}
@@ -7826,7 +8585,7 @@ function FundraiserIndex({ S, notify, meId, members, dept, focusId, reloadKey, o
             const soon = r.target_date && r.target_date >= todayISO && r.status !== "done";
             return (
               <div key={r.id} onClick={() => setSelectedId(r.id)}
-                   style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: r.status === "archived" ? 0.72 : 1, cursor: "pointer" }}>
+                   style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 10, opacity: r.status === "archived" ? 0.72 : 1, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <PartyPopper size={17} color={st.color()} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -8050,14 +8809,10 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
     setOpenDraft(data); setEditing(false); setEditBuf(""); loadDrafts();                 // modal live-updates + list marker lights up
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}
-      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>FUNDRAISERS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Plan fundraisers, write the appeals, line up sponsors</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident.</div>
-      </div>
+    <PageShell band watermark="FUNDS" kicker="FUNDRAISERS" title="Plan fundraisers, write the appeals, line up sponsors"
+      sub="Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident."
+      above={<>{loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}{back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding</button>}</>}>
+      <NoirSkin>
 
       {/* THE EVENTS THEMSELVES, above the planner. The planner is a tool you reach for once; the
           list of what the department is actually running is what you come back to, so it opens the
@@ -8067,13 +8822,13 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
                                      focusId={focusFr} reloadKey={frReload} onFocusHandled={() => setFocusFr(null)}
                                      onOpenDoc={reopen} onWorkAdded={() => setFundingReloadKey((k) => k + 1)} />}
 
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><PartyPopper size={13} style={{ verticalAlign: "-2px" }} />FUNDRAISER PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
+          <button onClick={() => setPlannerOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: plannerOpen ? 8 : 0, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}><PartyPopper size={13} style={{ verticalAlign: "-2px" }} />FUNDRAISER PLANNER<span style={{ marginLeft: "auto", display: "inline-flex" }}>{plannerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span></button>
           {plannerOpen && (<>
-          <div style={S.segRow}>
+          <div style={{ display: "inline-flex", flexWrap: "wrap", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 12 }}>
             {["Plan a fundraiser", "Community call-to-action", "Format a letter"].map((m) => (
-              <button key={m} onClick={() => { setMode(m); setOut(""); setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setErr(""); }} style={{ ...S.segBtn, background: mode === m ? FIRE.btnBg : "transparent", borderColor: mode === m ? FIRE.red : FIRE.btnBorder, color: mode === m ? FIRE.textPrimary : FIRE.navLabel }}>{m}</button>
+              <button key={m} onClick={() => { setMode(m); setOut(""); setPhase("input"); setIdeas([]); setChosenIdea(null); setRawIdeas(""); setErr(""); }} aria-pressed={mode === m} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: mode === m ? FIRE.redBright : "transparent", color: mode === m ? "#fff" : FIRE.textSecondary }}>{m}</button>
             ))}
           </div>
           {phase === "input" && (<>
@@ -8090,13 +8845,13 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
             <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={mode === "Plan a fundraiser" ? brainstorm : generate} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> {loadingLabel}</> : <><Sparkles size={16} /> {mode === "Plan a fundraiser" ? "Get ideas" : "Generate"}</>}
             </button>
-            {rawIdeas && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.textSecondary, whiteSpace: "pre-wrap", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, maxHeight: 180, overflowY: "auto" }}>{rawIdeas}</div>}
+            {rawIdeas && <div style={{ ...S.errBox, ...NOIR_INSET, color: FIRE.textSecondary, whiteSpace: "pre-wrap", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, maxHeight: 180, overflowY: "auto" }}>{rawIdeas}</div>}
           </>)}
           {mode === "Plan a fundraiser" && phase === "ideas" && (<>
-            <p style={{ ...S.helpP, color: FIRE.textMuted }}>Six ideas across proven, fresh, and bold. Pick one to build a full plan — or start over to change your inputs.</p>
+            <p style={NOIR_HELP}>Six ideas across proven, fresh, and bold. Pick one to build a full plan — or start over to change your inputs.</p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
               {ideas.map((idea, i) => (
-                <div key={i} style={{ ...FS.card, padding: "10px 12px", display: "flex", flexDirection: "column" }}>
+                <div key={i} style={{ ...FS.cardNoir, padding: "10px 12px", display: "flex", flexDirection: "column" }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{idea.name}</div>
                   <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 4, flex: 1, lineHeight: 1.35 }}>{idea.pitch}</div>
                   <button style={{ ...FS.btn, marginTop: 8, padding: "5px 9px", fontSize: 11.5, width: "100%", justifyContent: "center" }} onClick={() => chooseIdea(idea)}><Sparkles size={13} /> Build the plan</button>
@@ -8111,7 +8866,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
               {loading && <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 10, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> {loadingLabel}</span>}
             </div>
           )}
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
@@ -8139,17 +8894,17 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         </div>
       </div>
 
-      <button onClick={() => setIdeasOpen((v) => !v)} style={{ ...FS.kicker, marginBottom: ideasOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+      <button onClick={() => setIdeasOpen((v) => !v)} style={{ ...NOIR_LABEL, marginBottom: ideasOpen ? 8 : 16, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
         <PartyPopper size={13} style={{ verticalAlign: "-2px" }} />EVENT IDEAS ({FUNDRAISER_IDEAS.length})
         <span style={{ marginLeft: "auto", display: "inline-flex" }}>{ideasOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
       </button>
       {ideasOpen && (<>
-        <p style={{ ...S.helpP, color: FIRE.textMuted }}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
+        <p style={NOIR_HELP}>Tap “Plan this” to load an idea into the planner above. Anything you’ve run lately is flagged so you can mix it up — or repeat it on purpose.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8, marginBottom: 22 }}>
           {FUNDRAISER_IDEAS.map((idea) => {
             const recent = recentFor(idea);
             return (
-              <div key={idea.title} style={{ ...FS.card, padding: "10px 12px" }}>
+              <div key={idea.title} style={{ ...FS.cardNoir, padding: "10px 12px" }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{idea.title}</div>
                   {recent && <Pill S={S} color={FIRE.amberText}>DONE {recent.date}</Pill>}
@@ -8162,16 +8917,16 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         </div>
       </>)}
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
       <FundingCalendar key={fundingReloadKey} S={S} role={role} notify={notify} />
 
-      <div style={{ ...FS.kicker, marginBottom: 8, display: "flex", alignItems: "center" }}>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8, display: "flex", alignItems: "center" }}>
         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
         {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: FIRE.greenText, fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
       </div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
+      <p style={NOIR_HELP}>What you’ve run lately and what it brought in. Log each event so the ideas above know what to flag.</p>
       {addingLog ? (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Event</span><input style={FS.input} value={ln} placeholder="e.g. Chili Cook-Off" onChange={(e) => setLn(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>When</span><input style={FS.input} value={ld} placeholder="e.g. Jun 2026" onChange={(e) => setLd(e.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Raised ($)</span><input style={FS.input} value={la} placeholder="e.g. 1500" onChange={(e) => setLa(e.target.value)} /></label>
@@ -8180,9 +8935,9 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         </div>
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAddingLog(true)}><Plus size={15} /> Log a fundraiser</button>}
       <div style={{ marginBottom: 6 }}>
-        {log.length === 0 ? <div style={{ ...S.opCard, ...FS.card, fontSize: 13, color: FIRE.textMuted }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
+        {log.length === 0 ? <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13, color: FIRE.textMuted }}>Nothing logged yet. Add a fundraiser to start tracking.</div> :
           log.map((e) => (
-            <div key={e.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={e.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <PartyPopper size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{e.name}</span>
@@ -8194,14 +8949,14 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
           ))}
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</div>
-      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 22 }}>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED DRAFTS</div>
+      <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved drafts yet.</div> : drafts.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled draft"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -8212,10 +8967,10 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
         })}
       </div>
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openDraft.title || "Draft"}</div>
+              <div style={{ ...NOIR_LABEL, marginBottom: 0 }}>{openDraft.title || "Draft"}</div>
               <div style={{ display: "flex", gap: 8 }}>
                 {/* Print. Not gated on canManage — a member who can read the document can put it
                     on paper; nothing is written and nothing leaves the department. Uses the shared
@@ -8239,10 +8994,173 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
           </div>
         </div>
       )}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
+/* ---------------- Funding hub · overview (b4c_funding_noir.html) ----------------
+   The mock's one-page hub: four stat chips, the funds with their bars, the fundraisers beside the
+   planner, and the donation tracker. Every figure is computed here from rows the sub-pages already
+   read (same tables, same RLS — is_canmanage(), so the caller only mounts this inside that gate).
+   Each section links DOWN into the existing page that owns the edits; nothing is written here.
+
+   NEW HUB READS (flagged for review before promote): donation_campaigns, donation_activity (all kinds,
+   for raised-per-fund, received-per-donor and last contact), fundraisers, donation_donors.
+
+   LEFT OUT OF THE MOCK ON PURPOSE — no data behind them: "tickets sold", "tasks 4 of 11 done", and the
+   planner's inline prompt + idea chips (the planner's state lives in Fundraisers; the card opens it).
+   App wording kept for donor stages (Prospect / Talking / Committed / Gave / Declined). */
+function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open }) {
+  const [funds, setFunds] = useState(null), [acts, setActs] = useState(null), [frs, setFrs] = useState(null), [donors, setDonors] = useState(null);
+  const [err, setErr] = useState(false);
+  const load = () => {
+    let failed = false;
+    const done = () => setErr(failed);
+    const take = (setter) => ({ data, error }) => { if (error || !data) { failed = true; return; } setter(data); };
+    Promise.all([
+      supabase.from("donation_campaigns").select("id, name, tagline, status, goal_amount, sort, created_at")
+        .order("sort", { ascending: true }).order("created_at", { ascending: true }).then(take(setFunds)),
+      supabase.from("donation_activity").select("donor_id, campaign_id, kind, amount, occurred_on").then(take(setActs)),
+      supabase.from("fundraisers").select("id, name, target_date, goal_amount, status, proceeds").then(take(setFrs)),
+      supabase.from("donation_donors").select("id, name, organization, role, amount_committed, stage, next_follow_up")
+        .eq("active", true).order("name", { ascending: true }).then(take(setDonors)),
+    ]).then(done);
+  };
+  useEffect(() => { load(); }, []);
+  useReconnect(() => { if (err) load(); });
+
+  const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
+  const short = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : money(v));
+  const todayIso = toISO(new Date());
+  const fmtD = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+
+  // derived — every one stays null (renders "—") until its rows arrived
+  const contributions = (acts || []).filter((a) => a.kind === "contribution");
+  const raisedBy = (key) => { const m = {}; for (const a of contributions) if (a[key]) m[a[key]] = (m[a[key]] || 0) + (Number(a.amount) || 0); return m; };
+  const byFund = acts ? raisedBy("campaign_id") : null, byDonor = acts ? raisedBy("donor_id") : null;
+  const lastContact = {}; for (const a of acts || []) if (a.donor_id && a.occurred_on && (!lastContact[a.donor_id] || a.occurred_on > lastContact[a.donor_id])) lastContact[a.donor_id] = a.occurred_on;
+  const liveFunds = (funds || []).filter((f) => f.status !== "archived");
+  const goalFunds = liveFunds.filter((f) => Number(f.goal_amount) > 0);
+  const goalSum = goalFunds.reduce((t, f) => t + Number(f.goal_amount), 0);
+  const goalRaised = byFund ? goalFunds.reduce((t, f) => t + (byFund[f.id] || 0), 0) : null;
+  const openFrs = (frs || []).filter((r) => r.status === "planning" || r.status === "active");
+  const liveN = openFrs.filter((r) => r.status === "active").length;
+  const dueFollow = (donors || []).filter((d) => d.next_follow_up && d.next_follow_up <= todayIso).length;
+  const frRows = [
+    ...openFrs.slice().sort((a, b) => (a.target_date || "9999").localeCompare(b.target_date || "9999")),
+    ...(frs || []).filter((r) => r.status === "done").sort((a, b) => (b.target_date || "").localeCompare(a.target_date || "")).slice(0, 2),
+  ].slice(0, 5);
+  const trackRows = (donors || []).slice().sort((a, b) => ((a.next_follow_up || "9999") <= todayIso ? 0 : 1) - ((b.next_follow_up || "9999") <= todayIso ? 0 : 1)).slice(0, 6);
+
+  const chip = (Icon, label, value, sub, color) => (
+    <div style={{ ...FS.cardNoir, boxShadow: FIRE.tileShadowNoir, borderRadius: 11, padding: "10px 13px", flex: "1 1 160px", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}><Icon size={13} color={FIRE.redBright} />{label}</div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1.1, marginTop: 5, color: color || FIRE.textPrimary, ...FS.num }}>{value}</div>
+      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
+    </div>
+  );
+  const link = (label, to) => <button onClick={() => open(to)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, color: FIRE.textSecondary }}>{label} ›</button>;
+  const pill = (text, color) => <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", padding: "2px 8px", borderRadius: 999, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{text}</span>;
+  const FR_PILL = { active: ["LIVE", FIRE.greenText], planning: ["PLANNING", FIRE.amberText], done: ["DONE", FIRE.textSecondary] };
+
+  return (<>
+    {err && <OfflineNotice onRetry={load} what="part of the funding overview" />}
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+      {chip(DollarSign, "Raised this year", money(raisedTotal), raisedTotal == null ? "waiting on both totals" : `donations ${short(donationsYtd)} · fundraisers ${short(fundraisersYtd)}`, raisedTotal ? FIRE.greenText : undefined)}
+      {chip(TrendingUp, "Toward goals", goalRaised == null || !funds ? "—" : goalSum ? `${Math.round((goalRaised / goalSum) * 100)}%` : "—", !funds || goalRaised == null ? "loading" : goalSum ? `${short(goalRaised)} of ${short(goalSum)}` : "no fund goals set", goalSum ? FIRE.amberText : undefined)}
+      {chip(PartyPopper, "Active fundraisers", frs ? String(openFrs.length) : "—", frs ? `${liveN} live · ${openFrs.length - liveN} planning` : "loading")}
+      {chip(Users, "Donors tracked", donors ? String(donors.length) : "—", donors ? (dueFollow ? `${dueFollow} need a follow-up` : "no follow-ups due") : "loading", undefined)}
+    </div>
+    <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "-4px 0 12px" }}>Raised this year counts donations and fundraiser proceeds dated in {year}; the Fundraisers quick-log isn't dated, so it isn't included.</div>
+
+    <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+      <CardHead icon={DollarSign} title="Funds" right={link("Manage funds", "donations")} />
+      {funds && liveFunds.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No funds yet — set one up under Manage funds.</div> : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 10 }}>
+          {liveFunds.map((f) => {
+            const got = byFund ? (byFund[f.id] || 0) : null, goal = Number(f.goal_amount) || 0;
+            const pct = goal && got != null ? Math.round((got / goal) * 100) : null;
+            return (
+              <div key={f.id} style={{ ...NOIR_INSET, padding: "12px 13px", display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>{f.name}</div>
+                {f.tagline && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{f.tagline}</div>}
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+                  <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, color: FIRE.textPrimary, ...FS.num }}>{money(got)}</span>
+                  {goal > 0 && <span style={{ fontSize: 12, color: FIRE.textMuted }}>of {money(goal)}</span>}
+                </div>
+                {pct != null && <>
+                  {/* neutral until the goal is met, then green — same rule as onboarding progress */}
+                  <ProgressBar pct={pct} tone={pct >= 100 ? "green" : "muted"} />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: FIRE.textMuted }}><span><b style={{ color: FIRE.textPrimary }}>{pct}%</b> funded</span><span>{got >= goal ? "goal met" : `${money(goal - got)} to go`}</span></div>
+                </>}
+                <button onClick={() => open("donations")} style={{ ...FS.btn, alignSelf: "flex-start", marginTop: 6, padding: "5px 10px", fontSize: 12 }}><Plus size={13} color={FIRE.btnIcon} /> Record a gift</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+
+    <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+      <CardHead icon={PartyPopper} title="Fundraisers" right={link("Funding calendar", "fundraisers")} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
+        <div>
+          {frs && frRows.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No fundraisers yet.</div>}
+          {frRows.map((r, i) => {
+            const [pt, pc] = FR_PILL[r.status] || FR_PILL.planning;
+            const goal = Number(r.goal_amount) || 0, got = Number(r.proceeds) || 0;
+            const sub = [r.target_date ? fmtD(r.target_date) : null, r.status === "done" && goal ? `raised ${money(got)} of ${money(goal)}` : goal ? `goal ${money(goal)}` : null].filter(Boolean).join(" · ");
+            return (
+              <button key={r.id} onClick={() => open("fundraisers")} style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: i === frRows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, padding: "10px 0", cursor: "pointer", fontFamily: "inherit" }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><PartyPopper size={14} color={FIRE.redText} /></span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name} {pill(pt, pc)}</span>
+                  {sub && <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{sub}</span>}
+                </span>
+                <span style={{ textAlign: "right", flexShrink: 0 }}>
+                  <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary, ...FS.num }}>{r.status === "done" && goal ? `${Math.round((got / goal) * 100)}%` : money(got)}</span>
+                  <span style={{ display: "block", fontSize: 10.5, color: FIRE.textMuted }}>{r.status === "done" && goal ? "of goal" : "raised"}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ ...NOIR_INSET, padding: "14px 15px", background: `radial-gradient(120% 120% at 100% 0%, rgba(200,50,58,.12), transparent 55%), ${FIRE.card2Noir}` }}>
+          <CardHead icon={Sparkles} title="Fundraiser planner" style={{ marginBottom: 4 }} />
+          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>Describe a goal — AI drafts a plan you can turn into a fundraiser.</div>
+          <button onClick={() => open("fundraisers")} style={{ ...FS.btnPrimary, width: "100%", justifyContent: "center" }}><Sparkles size={15} /> Open the planner</button>
+        </div>
+      </div>
+    </Card>
+
+    <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+      <CardHead icon={HeartHandshake} title="Donation tracker" right={<>{donors && <span style={{ color: FIRE.textMuted }}>{donors.length} supporter{donors.length === 1 ? "" : "s"}</span>}{link("Add a donor", "donations")}</>} />
+      {donors && donors.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No supporters tracked yet.</div> : trackRows.map((d, i) => {
+        const st = stageMeta(d.stage);
+        const due = d.next_follow_up && d.next_follow_up <= todayIso;
+        const soon = d.next_follow_up && !due && d.next_follow_up <= toISO(new Date(Date.now() + 7 * 864e5));
+        const initials = (d.organization || d.name || "?").split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
+        return (
+          <button key={d.id} onClick={() => open("donations")} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none", padding: "10px 0", cursor: "pointer", fontFamily: "inherit" }}>
+            <span style={{ width: 30, height: 30, borderRadius: 999, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 700, color: FIRE.textSecondary, flexShrink: 0 }}>{initials}</span>
+            <span style={{ flex: "1 1 160px", minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.organization || d.name}</span>
+              <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>{d.organization ? d.name : (d.role || "Donor")}</span>
+            </span>
+            {pill(st.label.toUpperCase(), stageColor(d.stage))}
+            <span style={{ width: 92, textAlign: "right", fontSize: 12, color: FIRE.textSecondary, ...FS.num }}><span style={{ display: "block", fontSize: 10, color: FIRE.textMuted }}>pledged</span>{d.amount_committed != null ? money(Number(d.amount_committed)) : "—"}</span>
+            <span style={{ width: 92, textAlign: "right", fontSize: 12, color: FIRE.textPrimary, fontWeight: 600, ...FS.num }}><span style={{ display: "block", fontSize: 10, color: FIRE.textMuted, fontWeight: 400 }}>received</span>{byDonor ? money(byDonor[d.id] || 0) : "—"}</span>
+            <span style={{ width: 130, textAlign: "right", fontSize: 11.5, color: due ? FIRE.redText : soon ? FIRE.amberText : FIRE.textMuted }}>
+              {due ? (d.next_follow_up < todayIso ? "Follow up — overdue" : "Follow up — today") : soon ? `Follow up — ${fmtD(d.next_follow_up)}` : lastContact[d.id] ? `Last contact ${fmtD(lastContact[d.id])}` : "No contact logged"}
+            </span>
+          </button>
+        );
+      })}
+      {donors && donors.length > trackRows.length && <div style={{ marginTop: 8 }}>{link(`All ${donors.length} supporters`, "donations")}</div>}
+    </Card>
+  </>);
+}
 /* ---------------- Funding hub ----------------
    Funding used to BE the fundraiser page. It is now a hub of sub-pages, so donations (and grants
    later) have somewhere to live that is not another collapsible section on an already-long screen.
@@ -8323,13 +9241,6 @@ function Funding({ S, role, notify, dept, meId, members }) {
      department that genuinely raised that much. Each split figure still shows its own state, so a
      half-loaded block says exactly which half it knows. */
   const raisedTotal = (donationsYtd == null || fundraisersYtd == null) ? null : donationsYtd + fundraisersYtd;
-  const stat = (label, value, caption, color) => (
-    <Card padding={14} style={{ flex: "1 1 210px", minWidth: 180 }}>
-      <SectionLabel style={{ marginBottom: 6 }}>{label}</SectionLabel>
-      <div style={{ fontSize: 22, fontWeight: 800, color, ...FS.num, lineHeight: 1.1 }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.45 }}>{caption}</div>
-    </Card>
-  );
 
   if (view === "fundraisers") {
     return <Fundraisers S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} back={() => setView(null)} />;
@@ -8340,10 +9251,7 @@ function Funding({ S, role, notify, dept, meId, members }) {
 
   const card = (key, Icon, title, desc) => (
     <Card key={key} padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView(key)}>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-        <Icon size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-        <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>{title}</div></div>
-      </div>
+      <CardHead icon={Icon} title={title} style={{ marginBottom: 0 }} />
       <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>{desc}</div>
       <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
         <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
@@ -8351,36 +9259,24 @@ function Funding({ S, role, notify, dept, meId, members }) {
     </Card>
   );
 
-  return (<PageShell kicker="FUNDING" title="Money in, and where it came from" sub="Plan and run fundraisers, and keep track of the people and businesses who give.">
-    {/* Headline, then the two dated figures it is made of — see the note above for what it does
-        and does not include. Whole block gated: a PA gets no money figures rather than a false $0. */}
-    {canSeeDonations && (
-      <div style={{ marginBottom: 18 }}>
-        <Card padding="16px 18px" style={{ marginBottom: 10 }}>
-          <SectionLabel style={{ marginBottom: 6 }}>RAISED THIS YEAR</SectionLabel>
-          <div style={{ fontSize: 34, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.05 }}>{money(raisedTotal)}</div>
-          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
-            {raisedTotal == null
-              ? `Waiting on ${donationsYtd == null ? "donations" : "fundraiser proceeds"} — the total is held back rather than shown short.`
-              : `Donations and fundraiser proceeds dated in ${year}. The quick-log on the Fundraisers page isn't dated by year, so it isn't counted here.`}
-          </div>
-        </Card>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {stat(`Donations · ${year}`, money(donationsYtd), `Gifts logged with a date in ${year}.`, FIRE.red)}
-          {stat(`Fundraisers · ${year}`, money(fundraisersYtd), `Proceeds recorded on fundraisers with a ${year} target date.`, FIRE.amberText)}
-        </div>
+  /* THE MOCK'S HUB (b4c_funding_noir.html) for the people who can see the money (canManage — see above);
+     everyone else in leadership keeps the tile list, which only offers what their RLS can read. */
+  return (<PageShell band watermark="FUNDS" kicker={dept?.name ? `FUNDING · ${dept.name}` : "FUNDING"} title="Money in, and where it came from" sub="Plan and run fundraisers, and keep track of the people and businesses who give."
+    actions={canSeeDonations ? (
+      <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
+        <button style={FS.btn} onClick={() => setView("fundraisers")}><PartyPopper size={14} color={FIRE.btnIcon} /> New fundraiser</button>
+        <button style={FS.btnPrimary} onClick={() => setView("donations")}><Plus size={15} /> Record a gift</button>
+      </div>
+    ) : null}>
+    <NoirSkin>
+    {canSeeDonations ? (
+      <FundingOverview year={year} raisedTotal={raisedTotal} donationsYtd={donationsYtd} fundraisersYtd={fundraisersYtd} open={setView} />
+    ) : (
+      <div style={S.opGrid}>
+        {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
       </div>
     )}
-
-    <div style={S.opGrid}>
-      {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
-      {/* GATED ON canManage, not on the nav's LEADERSHIP role. The two differ by exactly one role:
-          LEADERSHIP includes Project Admin, is_canmanage() does not — so a PA can reach the Funding
-          page but the donations RLS returns them nothing. Showing the tile anyway would open a
-          screen that is permanently, inexplicably empty. The mismatch is deliberate on both sides
-          (donor PII is department business), so the tile follows the DATA rule, not the nav rule. */}
-      {canManage(role) && card("donations", HeartHandshake, "Donations", "Track who gives — pledges, gifts received, and where each conversation stands.")}
-    </div>
+    </NoirSkin>
   </PageShell>);
 }
 
@@ -8421,13 +9317,10 @@ function Funding({ S, role, notify, dept, meId, members }) {
    RLS change on donation_campaigns and a split of this page — not a client-side condition. */
 function Donations({ S, role, notify, dept, meId, members, back }) {
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {back && <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Funding</button>}
-      <div style={{ marginBottom: 14 }}>
-        <div style={FS.kicker}>DONATIONS</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>What you're raising for, and who gives</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Keep track of the businesses and people who support the department, and the funds you're asking them to help with.</div>
-      </div>
+    <PageShell band watermark="FUNDS" kicker="DONATIONS" title="What you're raising for, and who gives"
+      sub="Keep track of the businesses and people who support the department, and the funds you're asking them to help with."
+      above={back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding</button>}>
+      <NoirSkin>
 
       {/* STACKED, not tabbed. The two answer different questions — "what are we raising for" and
           "who gives" — and a leader working a drive needs both in view: the funds give the asks
@@ -8435,10 +9328,11 @@ function Donations({ S, role, notify, dept, meId, members, back }) {
           made the page feel like two features sharing a tile. */}
       <DonationFunds S={S} notify={notify} meId={meId} members={members} />
 
-      <div style={{ marginTop: 28, paddingTop: 20, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+      <div style={{ marginTop: 28, paddingTop: 20, borderTop: `1px solid ${FIRE.lineNoir}` }}>
         <DonationBusinesses S={S} notify={notify} meId={meId} members={members} />
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -8578,7 +9472,7 @@ function DonationFunds({ S, notify, meId, members }) {
   }
 
   const form = (
-    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Fund name *</span>
         <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="New Engine Fund" /></label>
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Short line</span>
@@ -8608,8 +9502,8 @@ function DonationFunds({ S, notify, meId, members }) {
   return (
     <>
       {loadErr && <OfflineNotice onRetry={load} what="donations" />}
-      <div style={{ ...FS.kicker, marginBottom: 4 }}>FUNDS</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>What you're raising for. Each one can carry a donate link and a target, and fills up as gifts are logged against it.</p>
+      <div style={{ ...NOIR_LABEL, marginBottom: 4 }}>FUNDS</div>
+      <p style={{ ...NOIR_HELP, marginBottom: 10 }}>What you're raising for. Each one can carry a donate link and a target, and fills up as gifts are logged against it.</p>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a fund</button>}
         {/* Archived stays one click away, and says how many — so archiving reads as "put away"
@@ -8627,7 +9521,7 @@ function DonationFunds({ S, notify, meId, members }) {
         /* UNFORCED. A department that never runs a donation drive is not behind on anything, so the
            empty state invites rather than nags — and the archived view gets its own wording so it
            does not read as "you have no funds" when active ones exist. */
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           {showArchived
             ? "Nothing archived. Funds you put away will wait here, with their giving history intact."
             : "No funds yet — add one whenever you're ready. Plenty of departments run for years without one; it's here for when you're raising for something specific and want to keep track of who helped."}
@@ -8635,7 +9529,7 @@ function DonationFunds({ S, notify, meId, members }) {
       ) : (
         <div>
           {shown.map((c) => (
-            <div key={c.id} style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: c.status === "archived" ? 0.75 : 1 }}>
+            <div key={c.id} style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 10, opacity: c.status === "archived" ? 0.75 : 1 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                 <HeartHandshake size={17} color={FIRE.greenText} style={{ flexShrink: 0, marginTop: 2 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -8720,7 +9614,7 @@ function DonationFunds({ S, notify, meId, members }) {
                   </div>
 
                   {giftFor === c.id && (
-                    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "rgba(255,255,255,.03)", border: `0.5px solid ${FIRE.hairline}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "rgba(255,255,255,.03)", border: `1px solid ${FIRE.lineNoir}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                       <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Amount ($) *</span>
                         <input style={FS.input} value={gf.amount} onChange={(e) => setGf((x) => ({ ...x, amount: e.target.value }))} placeholder="250" inputMode="numeric" autoFocus /></label>
                       <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date received *</span>
@@ -8915,8 +9809,8 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
   }
 
   const stat = (label, value, sub, color) => (
-    <div style={{ ...FS.card, padding: 14, flex: "1 1 180px", minWidth: 150 }}>
-      <div style={{ ...FS.kicker, marginBottom: 6 }}>{label}</div>
+    <div style={{ ...FS.cardNoir, padding: 14, flex: "1 1 180px", minWidth: 150 }}>
+      <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 21, fontWeight: 800, color: color || FIRE.textPrimary, ...FS.num, lineHeight: 1.1 }}>{value}</div>
       {sub && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{sub}</div>}
     </div>
@@ -8927,7 +9821,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
       {loadErr && <OfflineNotice onRetry={load} what="this history" />}
       <button style={{ ...FS.btn, marginBottom: 12 }} onClick={onBack}><ArrowLeft size={15} /> All supporters</button>
 
-      <div style={{ ...S.opCard, ...FS.card, marginBottom: 14 }}>
+      <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
           <HeartHandshake size={20} color={stageColor(donor.stage)} style={{ flexShrink: 0, marginTop: 3 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -8949,7 +9843,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
           </div>
           <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => onEdit(donor)}><Pencil size={13} /> Edit</button>
         </div>
-        {donor.relationship_notes && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 10, lineHeight: 1.55, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}` }}>{donor.relationship_notes}</div>}
+        {donor.relationship_notes && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 10, lineHeight: 1.55, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>{donor.relationship_notes}</div>}
       </div>
 
       {/* Pledged and Received side by side, never reconciled — see the note above the component. */}
@@ -8965,7 +9859,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
       </div>
 
       {openForm === "touch" && (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>When *</span>
             <input style={FS.input} type="date" value={tf.occurred_on} onChange={(e) => setTf((x) => ({ ...x, occurred_on: e.target.value }))} /></label>
           <label style={{ ...S.field, flex: 1, minWidth: 220 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What came of it *</span>
@@ -8976,7 +9870,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
       )}
 
       {openForm === "gift" && (
-        <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Amount ($) *</span>
             <input style={FS.input} value={gf.amount} onChange={(e) => setGf((x) => ({ ...x, amount: e.target.value }))} placeholder="250" inputMode="numeric" autoFocus /></label>
           <label style={{ ...S.field, minWidth: 145 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date received *</span>
@@ -8995,11 +9889,11 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
         </div>
       )}
 
-      <div style={{ ...FS.kicker, marginBottom: 8 }}>HISTORY</div>
+      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}>HISTORY</div>
       {rows === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
       ) : list.length === 0 ? (
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           No history yet — log a call, a visit, or a gift.
         </div>
       ) : (
@@ -9009,13 +9903,13 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
             const Icon = meta.Icon;
             const isGift = r.kind === "contribution";
             return (
-              <div key={r.id} style={{ display: "flex", gap: 11, padding: "11px 2px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                <div style={{ paddingTop: 2, color: isGift ? FIRE.red : FIRE.textMuted }}><Icon size={15} /></div>
+              <div key={r.id} style={{ display: "flex", gap: 11, padding: "11px 2px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                <div style={{ paddingTop: 2, color: isGift ? FIRE.greenText : FIRE.textMuted }}><Icon size={15} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.label || meta.label}</span>
                     {isGift && r.amount != null && <span style={{ fontSize: 14, fontWeight: 800, color: FIRE.red, ...FS.num }}>${Number(r.amount).toLocaleString()}</span>}
-                    {isGift && r.campaign_id && <span style={{ fontSize: 11.5, color: FIRE.textMuted, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "1px 8px" }}>{fundName.get(r.campaign_id) || "a fund"}</span>}
+                    {isGift && r.campaign_id && <span style={{ fontSize: 11.5, color: FIRE.textMuted, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "1px 8px" }}>{fundName.get(r.campaign_id) || "a fund"}</span>}
                   </div>
                   {r.note && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>{r.note}</div>}
                 </div>
@@ -9124,7 +10018,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
   }
 
   const form = (
-    <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+    <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
         <input style={FS.input} value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="Dale Harris" /></label>
       <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Business</span>
@@ -9155,8 +10049,8 @@ function DonationBusinesses({ S, notify, meId, members }) {
   return (
     <>
       {loadErr && <OfflineNotice onRetry={load} what="supporters" />}
-      <div style={{ ...FS.kicker, marginBottom: 4 }}>DONATION TRACKER</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Everyone who gives or might — businesses and individuals alike. Note where each conversation stands and when to check back.</p>
+      <div style={{ ...NOIR_LABEL, marginBottom: 4 }}>DONATION TRACKER</div>
+      <p style={{ ...NOIR_HELP, marginBottom: 10 }}>Everyone who gives or might — businesses and individuals alike. Note where each conversation stands and when to check back.</p>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!adding && !editingId && <button style={FS.btn} onClick={startAdd}><Plus size={15} /> Add a supporter</button>}
         <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={() => setShowRetired((v) => !v)}>
@@ -9169,7 +10063,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
       {rows === null && !loadErr ? (
         <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</div>
       ) : shown.length === 0 ? (
-        <div style={{ ...S.opCard, ...FS.card, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ ...S.opCard, ...FS.cardNoir, fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
           {showRetired
             ? "Nobody retired. Supporters you stop working with wait here, with their giving history intact."
             : "No supporters yet. Add the businesses and people you'd ask — the hardware store, the feed store, the family that always turns up. You can note where each conversation stands and when to check back."}
@@ -9183,7 +10077,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
             const due = d.active && d.next_follow_up && d.next_follow_up <= todayISO;
             return (
               <div key={d.id} onClick={() => setSelectedId(d.id)}
-                   style={{ ...S.opCard, ...FS.card, marginBottom: 10, opacity: d.active ? 1 : 0.72, cursor: "pointer" }}>
+                   style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 10, opacity: d.active ? 1 : 0.72, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <HeartHandshake size={17} color={stageColor(d.stage)} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -9351,11 +10245,13 @@ function expPhrase(exp) {
   return `expires ${mon} ${y}`;
 }
 function Pill({ S, color, children }) {
+  // Inside <NoirSkin>: the Noir status pill (the Equipment pages' npill) — body font, not mono. Elsewhere unchanged.
+  if (React.useContext(NoirCtx)) return <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 10px", borderRadius: 999, flexShrink: 0, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{children}</span>;
   return <span style={{ ...S.opChip, color, borderColor: `${color}55`, background: `${color}14` }}>{children}</span>;
 }
 function Initials({ S, name, dark }) {
   const i = name.split(" ").map((w) => w[0]).slice(0, 2).join("");
-  return <span style={dark ? { ...S.avatar, border: `0.5px solid ${FIRE.btnBorder}` } : S.avatar}>{i}</span>;
+  return <span style={dark ? { ...S.avatar, border: `1px solid ${FIRE.line2Noir}` } : S.avatar}>{i}</span>;
 }
 
 // Standalone black-on-white printable roster (browser print / save-as-PDF). Reuses the ALREADY-loaded,
@@ -9579,6 +10475,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
     : [["members", "Members"]];
   const [tab, setTab] = useState(() => tabs.some(([k]) => k === initialTab) ? initialTab : "members");   // role-guarded deep-link seed
   const [sel, setSel] = useState(null);
+  const [bandEl, setBandEl] = useState(null);   // the band's action slot — RosterMembers portals its Print / Add member into it
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
   // Roster DISPLAY excludes PA/owner (countsInStats: not a Project Admin, not an excluded id)
@@ -9587,14 +10484,18 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   const rosterList = members.filter(countsInStats);
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} dept={dept} />;
   return (
-    <PageShell band kicker={dept?.name ? `ROSTER · ${dept.name}` : "ROSTER"} title="Your people, all in one place"
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>CREW</div>}
-      sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}>
+    <PageShell band kicker={(() => { const k = tab === "certs" ? "CERTIFICATIONS" : tab === "attendance" ? "ATTENDANCE" : "ROSTER"; return dept?.name ? `${k} · ${dept.name}` : k; })()} title="Your people, all in one place"
+      watermark={tab === "certs" ? "CERTS" : tab === "attendance" ? "PRESENT" : "CREW"}
+      sub={leader ? "Members, certifications, and who's showing up. Tap a member to see their full file." : "Your station directory and contacts."}
+      actions={tab === "members" ? <div ref={setBandEl} style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }} /> : null}>
       <NoirSkin>
-      <div style={S.segRow}>
-        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...S.segBtn, background: tab === k ? "rgba(224,58,68,.16)" : "transparent", borderColor: tab === k ? FIRE.redBright : FIRE.btnBorder, color: tab === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>)}
-      </div>
-      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} sessions={sessions} />}
+      {/* the mock's .segctl: a dark track with compact segments, the active one solid red */}
+      {tabs.length > 1 && (
+        <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 14, flexWrap: "wrap" }}>
+          {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} aria-pressed={tab === k} style={{ fontSize: 11, fontWeight: 600, padding: "4px 11px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: tab === k ? FIRE.redBright : "transparent", color: tab === k ? "#fff" : FIRE.textSecondary }}>{l}</button>)}
+        </div>
+      )}
+      {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} sessions={sessions} bandEl={bandEl} />}
       {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
       {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
@@ -9602,7 +10503,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
     </PageShell>
   );
 }
-function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, sessions }) {
+function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, sessions, bandEl }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canAdd = hasAny(role, DEPT_ADMIN_ROLES);
@@ -9613,7 +10514,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
   }
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
   useEditorOpen(adding);   // add-member form open — hold the roster refresh
-  const sColor = (s) => s === "Active" ? FIRE.green : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
+  const sColor = (s) => s === "Active" ? FIRE.greenText : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
   // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
   const q = query.trim().toLowerCase();
   const matches = (m) => !q || [m.name, m.email, m.role, (Array.isArray(m.access) ? m.access.join(" ") : "")].some((f) => (f || "").toLowerCase().includes(q));
@@ -9633,7 +10534,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
     .slice().sort((x, y) => sortBy === "name" ? (x.name || "").localeCompare(y.name || "")
       : sortBy === "compliance" ? (compliance(y) ?? -1) - (compliance(x) ?? -1)
       : sortBy === "status" ? (STATUS_RANK[x.status] ?? 3) - (STATUS_RANK[y.status] ?? 3) : 0);
-  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 70–89 amber · <70 red
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.greenText : p >= 70 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 70–89 amber · <70 red
   // CREW SPOTLIGHT — three cards from data already on this screen (roster rows + the loaded sessions):
   //  · Service milestone: longest tenure by the join YEAR on file (the roster carries the year, not the month).
   //  · Top responder: most sessions attended in the last 90 days (station hours aren't loaded on the roster).
@@ -9756,7 +10657,12 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
           </label>
           <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} onClick={add}><UserPlus size={15} /> Add member</button>
         </Card>
-      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>)}
+      ) : null)}
+      {/* Print roster + Add member live in the hero band (the mock's .ph-actions) — same gates, same handlers. */}
+      {bandEl && createPortal(<>
+        {canPrint && <button onClick={handlePrint} title="Print or save the roster as a PDF" style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }}><Printer size={14} color={FIRE.btnIcon} /> Print roster</button>}
+        {canAdd && !adding && <button style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setAdding(true)}><UserPlus size={15} /> Add member</button>}
+      </>, bandEl)}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", maxWidth: 360, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 8, padding: "7px 11px" }}>
           <Search size={15} color={FIRE.textMuted} />
@@ -9766,7 +10672,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[["all", "All", rosterTotal], ["Active", "Active", nActive], ["Probationary", "Probationary", nProb]].map(([k, l, n]) => {
             const on = statusTab === k;
-            return <button key={k} onClick={() => setStatusTab(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: on ? 700 : 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, padding: "5px 11px", background: on ? FIRE.redBright : FIRE.btnBg, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, color: on ? FIRE.white : FIRE.textSecondary }}>{l} <b style={FS.num}>{n}</b></button>;
+            return <button key={k} onClick={() => setStatusTab(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: on ? 700 : 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, padding: "5px 11px", background: on ? FIRE.redBright : FIRE.card2Noir, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, color: on ? FIRE.white : FIRE.textSecondary }}>{l} <b style={FS.num}>{n}</b></button>;
           })}
         </div>
         <select aria-label="Sort members" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...S.select, marginLeft: "auto" }}>
@@ -9776,20 +10682,20 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
           <option value="status">Sort: Status</option>
         </select>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
-        {canPrint && <button onClick={handlePrint} title="Print or save the roster as a PDF" style={{ ...FS.btn, marginLeft: "auto", padding: "6px 11px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }}><Printer size={14} color={FIRE.btnIcon} /> Print roster</button>}
-      </div>
+      {/* count + inactive toggle on ONE line (were two rows) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
       {members.some((m) => m.status === "Inactive") && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-          <button onClick={() => setShowInactive((v) => !v)} style={{ ...S.segBtn, background: showInactive ? FIRE.btnBg : "transparent", borderColor: showInactive ? FIRE.red : FIRE.btnBorder, color: showInactive ? FIRE.textPrimary : FIRE.navLabel }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
+        <div style={{ marginLeft: "auto" }}>
+          <button onClick={() => setShowInactive((v) => !v)} aria-pressed={showInactive} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(showInactive ? { borderColor: FIRE.redBright, background: "rgba(200,50,58,.12)", color: FIRE.textPrimary } : null) }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
         </div>
       )}
+      </div>
       {filtered.length === 0 && <Card padding="15px 16px" style={{ textAlign: "center", color: FIRE.textMuted }}>{query ? `No members match "${query}".` : "No members to show."}</Card>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(260px, 100%), 1fr))", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))", gap: 12 }}>
         {/* Owner + test + Project Admin hidden via countsInStats; search + status tab + inactive toggle compose (AND) */}
         {filtered.map((m) => { const cp = compliance(m); const ini = (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase(); return (
-          <Card key={m.id} padding="13px 14px" style={{ display: "flex", flexDirection: "column", gap: 10, ...(onOpen ? { cursor: "pointer" } : null) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
+          <Card key={m.id} className={onOpen ? "rl-card" : undefined} padding="13px" style={{ display: "flex", flexDirection: "column", gap: 9, ...(onOpen ? { cursor: "pointer" } : null) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
               <div title={cp == null ? "No certs on file" : `Cert compliance ${cp}%`} style={{ position: "relative", width: 46, height: 46, flexShrink: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: `conic-gradient(${cp == null ? "rgba(255,255,255,.09)" : pctColor(cp)} ${cp == null ? 0 : (cp * 3.6).toFixed(1)}deg, rgba(255,255,255,.09) 0)` }}>
                 <div style={{ width: 36, height: 36, borderRadius: "50%", background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{ini}</div>
@@ -9801,19 +10707,19 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
               {m.status ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 999, color: sColor(m.status), background: `${sColor(m.status)}1F`, border: `1px solid ${sColor(m.status)}66`, flexShrink: 0 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: sColor(m.status) }} />{m.status}</span> : null}
               {canAdd && canDeleteShared && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: FIRE.textMuted, flexWrap: "wrap" }}>
+              {m.joined && <span>since <b style={{ color: FIRE.textSecondary }}>{m.joined}</b> ·</span>}<Phone size={12} /> {m.phone}
+              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 11 }}>View file <ChevronRight size={13} /></span>
+                : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
+            </div>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: FIRE.textSecondary }}><span>Cert compliance</span><span style={{ fontWeight: 700, color: pctColor(cp), ...FS.num }}>{cp == null ? "—" : `${cp}%`}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: FIRE.textSecondary, marginBottom: 5 }}><span>Cert compliance</span><span style={{ fontWeight: 700, color: pctColor(cp), ...FS.num }}>{cp == null ? "—" : `${cp}%`}</span></div>
               {cp == null ? <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4 }}>No certs on file</div>
                 : <div style={{ height: 6, borderRadius: 4, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, overflow: "hidden", marginTop: 6 }}><div style={{ width: `${cp}%`, height: "100%", borderRadius: 4, background: pctColor(cp) }} /></div>}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: FIRE.textMuted, flexWrap: "wrap" }}>
-              {m.joined && <span>since <b style={{ color: FIRE.textSecondary }}>{m.joined}</b> ·</span>}<Phone size={13} /> {m.phone}
-              {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 12.5 }}>View file <ChevronRight size={14} /></span>
-                : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
-            </div>
             {m.email && (
-              <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: FIRE.textMuted, minWidth: 0 }}>
-                <Mail size={13} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: FIRE.textMuted, minWidth: 0 }}>
+                <Mail size={12} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</span>
               </div>
             )}
           </Card>
@@ -9850,12 +10756,25 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   useEffect(() => {                              // load DA/PA-only data; Board/TO skip (RLS would return nothing anyway)
     if (!assign) return;
     let alive = true;
-    supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
-      .then(({ data }) => { if (alive) setPriv(data || {}); });
-    supabase.from("member_notes").select("text, by, created_at").eq("member_id", member.id).order("created_at", { ascending: false })
-      .then(({ data }) => { if (alive) setNotes(data || []); });
+    loadPrivate(() => alive);
+    loadNotes(() => alive);
     return () => { alive = false; };
   }, [member.id, assign]);
+  /* A FAILED READ IS NOT "NOTHING ON FILE". member_private used to fall back to {} on error, which the Edit form
+     then seeded as blanks — and Save upserts those blanks, i.e. a hiccup could null a member's birthday,
+     address and joined date. privErr now blocks Edit until the details have actually loaded. (maybeSingle
+     returns data null with NO error for a member with no row — that is genuinely empty and stays {}.)
+     member_notes likewise kept [] and said "No notes yet". */
+  const [privErr, setPrivErr] = useState(false);
+  const [notesErr, setNotesErr] = useState(false);
+  function loadPrivate(isAlive = () => true) {
+    supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
+      .then(({ data, error }) => { if (!isAlive()) return; if (error) { setPrivErr(true); return; } setPrivErr(false); setPriv(data || {}); });
+  }
+  function loadNotes(isAlive = () => true) {
+    supabase.from("member_notes").select("text, by, created_at").eq("member_id", member.id).order("created_at", { ascending: false })
+      .then(({ data, error }) => { if (!isAlive()) return; if (error || !data) { setNotesErr(true); return; } setNotesErr(false); setNotes(data); });
+  }
   function startEditForm() {
     setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
     setEditing(true);
@@ -9864,8 +10783,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     const goInactive = member.status !== "Inactive";
     if (goInactive && member.id === meId) { notify({ kind: "error", title: "Can't deactivate yourself", text: "Have another leader deactivate your account." }); return; }   // self-lockout, matches saveMember's intent
     const next = goInactive ? "Inactive" : "Active";
-    if (goInactive && !window.confirm(`Deactivate ${member.name}? They'll drop off the active roster; you can reactivate anytime.`)) return;
-    if (!goInactive && !window.confirm(`Reactivate ${member.name}? They'll return to the active roster.`)) return;
+    if (goInactive && !(await noirConfirm({ title: `Deactivate ${member.name}?`, body: "They'll drop off the active roster. You can reactivate them anytime.", confirmLabel: "Deactivate", danger: true }))) return;
+    if (!goInactive && !(await noirConfirm({ title: `Reactivate ${member.name}?`, body: "They'll return to the active roster.", confirmLabel: "Reactivate" }))) return;
     const { error } = await supabase.from("members").update({ status: next }).eq("id", member.id);
     if (error) { notify({ kind: "error", title: goInactive ? "Couldn't deactivate the member" : "Couldn't reactivate the member", text: "Something went wrong. Please try again.", details: error.message }); return; }
     onUpdate({ ...member, status: next });
@@ -9903,7 +10822,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     setNotes((ns) => [data, ...ns]); setNote("");
   }
   async function removeCert(c) {
-    if (!window.confirm("Remove this certification? This cannot be undone.")) return;
+    if (!(await noirConfirm({ title: "Remove this certification?", body: "This cannot be undone.", confirmLabel: "Remove", danger: true }))) return;
     setBusyId(c.id);
     const { error } = await supabase.rpc("delete_cert", { cert_id: c.id });
     setBusyId(null);
@@ -9947,7 +10866,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   const nOld = certs.filter((c) => c.st.rank === 0).length, nUndated = certs.filter((c) => c.st.rank === 3).length;
   const CERT_CAP = 6;
   const shownCerts = showAllCerts ? certs : certs.slice(0, CERT_CAP);   // sorted expired → expiring → current → undated
-  const statusTone = member.status === "Active" ? FIRE.green : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted;
+  const statusTone = member.status === "Active" ? FIRE.greenText : member.status === "Probationary" ? FIRE.amberText : FIRE.textMuted;
   const chip = (label, value, tone, sub, bar) => (
     <div style={{ ...FS.cardNoir, borderRadius: 11, boxShadow: FIRE.tileShadowNoir, padding: "11px 13px", minWidth: 0 }}>
       <div style={{ fontSize: 11, color: FIRE.textSecondary }}>{label}</div>
@@ -9956,7 +10875,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       {sub && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 4 }}>{sub}</div>}
     </div>
   );
-  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText);   // the 75 / 50 member-file thresholds
+  const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText);   // the 75 / 50 member-file thresholds
   return (
     <PageShell band
       above={<button style={{ ...S.backBtn, color: FIRE.textSecondary }} onClick={back}><ArrowLeft size={16} /> Back to roster</button>}
@@ -9965,11 +10884,11 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       lead={<div style={{ width: 84, height: 84, borderRadius: 18, background: "linear-gradient(135deg, #2A313A, #12161C)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 32, color: FIRE.redText, flexShrink: 0, boxShadow: "0 8px 22px rgba(0,0,0,.5)" }}>{initials}</div>}
       kicker={dept?.name ? `MEMBER FILE · ${dept.name}` : "MEMBER FILE"} title={member.name}
       // No join year → drop the "since" segment rather than print "since null" (JOINED below shows "—" the same way).
-      sub={[member.role, member.joined ? `since ${member.joined}` : null, member.phone].filter(Boolean).join(" · ")}
+      sub={[member.role, member.joined ? `Member since ${member.joined}` : null, assign ? null : member.phone].filter(Boolean).join(" · ")}   /* leaders with the Profile card see the phone there */
       actions={<span style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, padding: "5px 11px", borderRadius: 999, color: statusTone, background: `${statusTone}1F`, border: `1px solid ${statusTone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: statusTone }} />{member.status}</span>}>
       <NoirSkin>
       {/* Quick-stat chips — participation (live 90-day), station hours (6 mo), training attendance, certs. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
         {chip("Participation · 90d", part90 == null ? "—" : `${part90}%`, part90 == null ? null : pctColor(part90), null,
           part90 != null && <ProgressBar pct={part90} tone={part90 >= 75 ? "green" : part90 >= 50 ? "amber" : "red"} style={{ marginTop: 8 }} />)}
         {hoursOn && chip("Station hours · 6 mo", hrsTotal == null ? "—" : (Math.round(hrsTotal * 10) / 10).toFixed(1), null, "credited")}
@@ -9981,7 +10900,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       {/* CONDENSED CERTIFICATIONS — summary counts + a capped list with a Show-all expander. Same rows, same
           actions (View proof / Edit / Remove) and the same inline editor; only the arrangement changed. */}
       <Card padding="14px 16px" style={{ marginBottom: 10 }}>
-        <CardHead icon={Award} title="Certifications" count={certs.length} />
+        <CardHead icon={Award} title="Certifications" />
         {certs.length === 0 ? <div style={{ fontSize: 13.5, color: FIRE.textMuted }}>No certifications on file yet.</div> : (<>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             {[[nCur, "current", FIRE.greenText], [nExp, "expiring soon", FIRE.amberText], [nOld, "expired", FIRE.redText], ...(nUndated ? [[nUndated, "no date", FIRE.textMuted2]] : [])].map(([n, l, c]) => (
@@ -10001,9 +10920,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
               </>) : (<>
-                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span> <span style={{ color: CERT_FIRE[c.st.label], fontSize: 11 }}>· {expPhrase(c.exp)}</span></div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
-                  <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5, display: "flex", alignItems: "center", gap: 9 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} /><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span></div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", flexShrink: 0, maxWidth: "100%" }}>
+                  <span style={{ fontSize: 10.5, color: c.st.rank === 2 ? FIRE.textMuted : CERT_FIRE[c.st.label], fontWeight: c.st.rank === 2 ? 400 : 600, marginRight: 4 }}>{expPhrase(c.exp)}</span>
                   {/* only when a proof is on file — a leader-entered cert legitimately has none */}
                   {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
                   {assign && (<>
@@ -10034,14 +10953,14 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
             <Card padding="14px 16px" style={{ minWidth: 0, ...(editing || !hoursOn ? { gridColumn: "1 / -1" } : null) }}>
         {assign && !editing && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-              <CardHead icon={Users} title="Profile · leadership only" style={{ marginBottom: 0, width: "auto" }} />
-              <div style={{ display: "flex", gap: 8 }}>
-                {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
-                <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={startEditForm}>Edit member</button>
-              </div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px 18px" }}>
+            <CardHead icon={Users} title="Profile" right={<>
+              <span style={{ fontSize: 10.5, color: FIRE.textMuted }}>leadership only</span>
+              {!(member.id === meId && member.status !== "Inactive") && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, color: member.status === "Inactive" ? FIRE.greenText : FIRE.redText }} onClick={toggleActive}>{member.status === "Inactive" ? "Reactivate" : "Deactivate"}</button>}
+              <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5, opacity: priv === null ? 0.5 : 1 }} onClick={startEditForm} disabled={priv === null} title={priv === null ? "Loading this member's details…" : undefined}>Edit ›</button>
+            </>} />
+            {privErr && <ReadRetry what="this member's joined date, birthday and address (Edit waits for them)" onRetry={() => loadPrivate()} />}
+            {/* the mock's .detl: two columns, email full width, small muted keys over 12.5px values */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: "12px 16px" }}>
               {[
                 ["Access", member.access?.length ? member.access.join(", ") : "—"],
                 ["Mentor", (members || []).find((m) => m.id === member.mentorId)?.name || "—"],
@@ -10061,13 +10980,14 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                      only fail is worse than none. Say what to do instead: the Edit member form
                      immediately above is where an address gets added. */
                   : (<span style={{ color: FIRE.amberText, fontStyle: "italic" }}>No email — can&rsquo;t sign in. Add one with <b style={{ fontStyle: "normal" }}>Edit member</b>.</span>)],
+                ["Phone", member.phone || "—"],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
                 ["Address", priv?.address || "—"],
               ].map(([l, v]) => (
-                <div key={l}>
-                  <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted2, fontWeight: 700 }}>{l}</div>
-                  <div style={{ fontSize: 13, color: FIRE.textSecondary, wordBreak: "break-word" }}>{v}</div>
+                <div key={l} style={l === "Email" || l === "Address" ? { gridColumn: "1 / -1" } : undefined}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted }}>{l}</div>
+                  <div style={{ fontSize: 12.5, color: FIRE.textPrimary, marginTop: 3, wordBreak: "break-word" }}>{v}</div>
                 </div>
               ))}
             </div>
@@ -10146,18 +11066,18 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               {shown.map((s, i, arr) => {
                 const present = (s.attendance || []).includes(member.id);
                 const preJoin = !present && !expectedAfterJoin(member, s);
-                const tone = present ? FIRE.green : preJoin ? FIRE.textMuted : FIRE.redText;
+                const tone = present ? FIRE.greenText : preJoin ? FIRE.textSecondary : FIRE.redText;
                 return (
                   <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ width: 40, textAlign: "center", flexShrink: 0 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: FIRE.textMuted }}>{sessDate(s).toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</div>
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", color: FIRE.redText }}>{sessDate(s).toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</div>
                       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{sessDate(s).getDate()}</div>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></div>
-                      <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 1 }}>{fmtSess(s)}</div>
+                      <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 1, ...FS.num }}>{[s.startTime ? fmtTime(s.startTime) : null, s.durationMin != null ? `${(Math.round((s.durationMin / 60) * 10) / 10).toFixed(1)} hrs` : null].filter(Boolean).join(" · ") || fmtSess(s)}</div>
                     </div>
-                    <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", flexShrink: 0, color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}>{present ? "Attended" : preJoin ? "Before joining" : "Missed"}</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", flexShrink: 0, color: tone, background: preJoin ? "#141922" : `${tone}1A`, border: `1px solid ${preJoin ? FIRE.line2Noir : tone + "66"}` }}>{present ? "Attended" : preJoin ? "Before joining" : "Missed"}</span>
                   </div>
                 );
               })}
@@ -10212,7 +11132,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 <div style={{ position: "relative", width: 96, height: 96, flexShrink: 0 }} title="Mean of cert compliance and 90-day participation">
                   <svg width="96" height="96" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
                     <circle cx="48" cy="48" r={R} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="9" />
-                    {ready != null && ready > 0 && <circle cx="48" cy="48" r={R} fill="none" stroke={ready >= 75 ? FIRE.green : ready >= 50 ? FIRE.amberText : FIRE.redText} strokeWidth="9" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - ready / 100)} />}
+                    {ready != null && ready > 0 && <circle cx="48" cy="48" r={R} fill="none" stroke={ready >= 75 ? FIRE.greenText : ready >= 50 ? FIRE.amberText : FIRE.redText} strokeWidth="9" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - ready / 100)} />}
                   </svg>
                   <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                     <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{ready == null ? "—" : <>{ready}<span style={{ fontSize: 14, color: FIRE.textMuted }}>%</span></>}</div>
@@ -10252,11 +11172,12 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
           <button style={FS.btnPrimary} onClick={addNote}>Add</button>
         </div>
         {notes.map((n, i) => (
-          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, alignItems: "flex-start" }}>
+          <div key={i} style={{ ...S.certRow, borderBottom: i === notes.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>{n.text}</div><div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{n.by} · {fmtLongDate((n.created_at || "").slice(0, 10)) || "recent"}</div></div>
           </div>
         ))}
-        {notes.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to department admins only — never to the member.</div>}
+        {notes.length === 0 && notesErr && <ReadRetry what="the member log" onRetry={() => loadNotes()} />}
+        {notes.length === 0 && !notesErr && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No notes yet. Notes here are visible to department admins only — never to the member.</div>}
       </Card>
       </>)}
       {proofMount}
@@ -10467,7 +11388,7 @@ function RosterCerts({ S, members }) {
       {/* COVERAGE BY CERTIFICATION */}
       {certGroups.length > 0 && (
         <Card padding="14px 16px" style={{ marginBottom: 12 }}>
-          <CardHead icon={Award} title="Coverage by certification" right={<span>how much of the crew holds each one</span>} />
+          <CardHead icon={Award} title="Coverage by certification" right={<span>How much of the crew holds each one</span>} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 12 }}>
             {(showAllGroups ? certGroups : certGroups.slice(0, GROUP_CAP)).map((g, i) => {
               const col = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
@@ -10493,25 +11414,13 @@ function RosterCerts({ S, members }) {
           {certGroups.length > GROUP_CAP && <button onClick={() => setShowAllGroups((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "11px 0 2px", cursor: "pointer", background: "none", border: "none", fontFamily: "inherit" }}>{showAllGroups ? "Show fewer" : `Show all ${certGroups.length} certifications`}</button>}
         </Card>
       )}
-      <Card padding="16px 18px" style={{ borderLeft: `3px solid ${FIRE.red}`, display: "flex", marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
-          <CardHead icon={CalendarCheck} title="Expiration engine" />
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Stay ahead of every renewal</h3>
-          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
-          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
-            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
-          </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
-        </div>
-      </Card>
       {/* TOOLBAR — search + sort (client-side over the loaded rows) */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "4px 0 10px" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
           <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)" }} />
           <input style={{ ...FS.input, paddingLeft: "2rem", background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by member or certification…" aria-label="Search certifications by member or certification name" />
         </div>
-        <select aria-label="Sort certifications" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={S.select}>
+        <select aria-label="Sort certifications" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...S.select, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9, padding: "9px 30px 9px 13px", fontSize: 12, fontWeight: 600, color: FIRE.textSecondary }}>
           <option value="soonest">Sort: Soonest to expire</option>
           <option value="member">Sort: Member</option>
           <option value="cert">Sort: Certification</option>
@@ -10562,13 +11471,14 @@ function RosterCerts({ S, members }) {
           return (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 2px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <span style={{ width: 34, height: 34, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: FIRE.textPrimary, flexShrink: 0 }}>{ini}</span>
-              <div style={{ flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.member}</span> <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>· {r.cert}</span>
-                <div style={{ fontSize: 11.5, color: CERT_FIRE[r.st.label], marginTop: 1 }}>{expPhrase(r.exp)}</div>
-                {cl && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
+              <div style={{ width: 150, flexShrink: 0, minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{r.member}</div>
+              <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
+                <div style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{r.cert}</div>
+                {cl && <div style={{ fontSize: 11.5, color: FIRE.greenText, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
-                <Pill S={S} color={CERT_FIRE[r.st.label]}>{r.st.label}</Pill>
+              <div style={{ width: 90, flexShrink: 0, fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(r.exp)}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", flexShrink: 0, maxWidth: "100%" }}>
+                {(() => { const col = r.st.label === "CURRENT" ? FIRE.greenText : CERT_FIRE[r.st.label]; return <span style={{ width: 78, textAlign: "center", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "3px 9px", color: col, background: `${col}1A`, border: `1px solid ${col}66` }}>{r.st.label.toLowerCase()}</span>; })()}
                 {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
                 {r.proofPath && <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }} onClick={() => openProof(r.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
               </div>
@@ -10577,6 +11487,19 @@ function RosterCerts({ S, members }) {
         })}
         {sorted.length > ROW_CAP && <button onClick={() => setShowAllRows((v) => !v)} style={{ display: "block", width: "100%", textAlign: "center", color: FIRE.textSecondary, fontSize: 11.5, padding: "11px 0 2px", cursor: "pointer", background: "none", border: "none", fontFamily: "inherit" }}>{showAllRows ? "Show fewer" : `Show all ${sorted.length} certifications`}</button>}
       </Card>
+      {/* Expiration engine — kept (not in the mock), moved below the list, plain Noir styling (no accent bar). */}
+      <Card padding="14px 16px" style={{ display: "flex", marginTop: 12 }}>
+        <div style={{ flex: 1 }}>
+          <CardHead icon={CalendarCheck} title="Expiration engine" />
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, marginBottom: 4 }}>Stay ahead of every renewal</div>
+          <p style={{ fontSize: 12, lineHeight: 1.5, color: FIRE.textMuted, margin: "0 0 10px" }}>Every expiring or lapsed cert is matched to the next class that clears it. Draft the reminders here — you review and send.</p>
+          <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftReminders} disabled={loading}>
+            {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
+          </button>
+          {err && <div style={{ marginTop: 10, fontSize: 12, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText }}>{err}</div>}
+          {out && <RichOutput S={S} text={out} dark />}
+        </div>
+      </Card>
       {proofMount}
     </div>
   );
@@ -10584,6 +11507,7 @@ function RosterCerts({ S, members }) {
 function RosterPending({ S, members, notify }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);   // a failed read is not "no pending items"
   const [busyId, setBusyId] = useState(null);
   const nameFor = (id) => { const m = members.find((x) => x.id === id); return m ? m.name : "Unknown member"; };
 
@@ -10591,10 +11515,11 @@ function RosterPending({ S, members, notify }) {
     setLoading(true);
     const { data, error } = await supabase.from("cert_submissions").select("*").eq("status", "pending");
     setLoading(false);
-    if (error) { notify({ kind: "error", title: "Couldn't load pending items", text: "Something went wrong loading those. Please try again.", details: error.message }); return; }
-    setRows(data || []);
+    if (error || !data) { setLoadErr(true); notify({ kind: "error", title: "Couldn't load pending items", text: "Something went wrong loading those. Please try again.", details: error?.message }); return; }
+    setLoadErr(false); setRows(data);
   }
   useEffect(() => { loadPending(); }, []);
+  useReconnect(() => { if (loadErr) loadPending(); });   // the OfflineNotice promises a refresh on reconnect
 
   async function approve(row) {
     setBusyId(row.id);
@@ -10604,7 +11529,7 @@ function RosterPending({ S, members, notify }) {
     loadPending();
   }
   async function reject(row) {
-    const reason = window.prompt("Reason for rejecting (optional):", "");
+    const reason = await noirPrompt({ title: "Reject this certification?", body: "Tell the member why — they'll see the reason on their cert, so they know what to fix.", label: "Reason", placeholder: "e.g. Proof is expired — please upload the current card.", confirmLabel: "Send rejection", danger: true });
     if (reason === null) return; // user cancelled the prompt
     setBusyId(row.id);
     const { error } = await supabase.rpc("reject_cert_submission", { submission_id: row.id, reason: reason.trim() || null });
@@ -10620,26 +11545,56 @@ function RosterPending({ S, members, notify }) {
     setViewerProof({ url: data.signedUrl, name: (row.proof_path || "").split("/").pop() });   // inline image (most proofs) or PDF; Download opens the original
   }
 
-  if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>Loading…</div>;
-  if (rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>No pending items.</div>;
+  // Presentation only below. The read, approve_cert_submission, the reject reason prompt and the proof viewer are above, unchanged.
+  const scopeNote = (
+    <div style={{ ...NOIR_INSET, padding: "9px 12px", marginBottom: 10, display: "flex", alignItems: "center", gap: 9 }}>
+      <Lock size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+      <span style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.4 }}>Your department only — you can't see or act on another department's submissions.</span>
+    </div>
+  );
+  if (loading && rows.length === 0) return <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}><Loader2 size={14} className="spin" /> Loading pending certifications…</div>;
+  if (rows.length === 0 && loadErr) return <OfflineNotice onRetry={loadPending} what="pending items" />;
+  if (rows.length === 0) return (
+    <div style={{ marginTop: 4 }}>
+      {scopeNote}
+      <div style={{ ...FS.cardNoir, padding: "16px 18px", display: "flex", alignItems: "center", gap: 10 }}>
+        <CheckCircle2 size={18} color={FIRE.greenText} style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 13.5, color: FIRE.textSecondary }}>Nothing waiting — every proposed certification has been reviewed.</span>
+      </div>
+    </div>
+  );
+  const initials = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  const proposed = (r) => r.created_at ? new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
   return (
     <div style={{ marginTop: 4 }}>
-      {rows.map((r) => (
-        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-          <Award size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
-          <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
-            <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {nameFor(r.member_id)}</span>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Review &amp; approve</span>
+        <span style={{ fontSize: 12.5, color: FIRE.amberText, fontWeight: 600, ...FS.num }}>{rows.length} waiting</span>
+        <span style={{ fontSize: 12, color: FIRE.textMuted, flexBasis: "100%" }}>Members proposed these with proof. Approve to add them, or reject with a reason.</span>
+      </div>
+      {scopeNote}
+      {rows.map((r) => {
+        const who = nameFor(r.member_id), busy = busyId === r.id;
+        return (
+          <div key={r.id} style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 8, borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", opacity: busy ? 0.7 : 1 }}>
+            <span aria-hidden="true" style={{ width: 38, height: 38, borderRadius: 999, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13.5, color: FIRE.amberText, background: `${FIRE.amberText}1A`, border: `1px solid ${FIRE.amberText}55` }}>{initials(who)}</span>
+            <div style={{ flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{who}</div>
+              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 1 }}>{r.name} · {r.exp ? expPhrase(r.exp) : "no expiry"}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
+                {r.proof_path
+                  ? <button type="button" disabled={busy} onClick={() => viewProof(r)} title="View proof" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: FIRE.blueText, background: "rgba(91,155,213,.1)", border: "1px solid rgba(91,155,213,.35)", borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: "inherit", maxWidth: 220 }}><FileText size={12} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.proof_path || "").split("/").pop()}</span></button>
+                  : <span style={{ fontSize: 11.5, color: FIRE.amberText, border: `1px solid ${FIRE.amberText}44`, borderRadius: 999, padding: "2px 9px" }}>No proof attached</span>}
+                <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{[proposed(r) && `proposed ${proposed(r)}`, r.source, r.note].filter(Boolean).join(" · ")}</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0, maxWidth: "100%" }}>
+              <button style={{ ...FS.btnPrimary, background: FIRE.green, borderColor: FIRE.green, padding: "8px 14px", fontSize: 13 }} disabled={busy} onClick={() => approve(r)}>{busy ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />} Approve</button>
+              <button style={{ ...FS.btn, padding: "8px 13px", fontSize: 13, color: FIRE.deleteRed, borderColor: "rgba(200,50,58,.45)" }} disabled={busy} onClick={() => reject(r)}><X size={14} color={FIRE.deleteRed} /> Reject</button>
+            </div>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
-            {r.proof_path
-              ? <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === r.id} onClick={() => viewProof(r)}>View proof</button>
-              : <span style={{ fontSize: 11.5, color: FIRE.textMuted, alignSelf: "center" }}>no proof</span>}
-            <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.green }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
-            <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
-          </div>
-        </div>
-      ))}
+        );
+      })}
       {viewerProof && <DocViewer url={viewerProof.url} name={viewerProof.name} onClose={() => setViewerProof(null)} />}
     </div>
   );
@@ -10676,12 +11631,14 @@ function RosterAttendance({ S, members, sessions, plan }) {
   const top3 = ranked.slice().sort((a, b) => b.pct - a.pct || b.attended - a.attended).slice(0, 3);
   const nudge3 = ranked.filter((r) => r.pct < 75).sort((a, b) => a.pct - b.pct).slice(0, 3);
   const { draftFor, runDraft, draftBox } = useInsightDrafts();
-  const pTone = (p) => (p == null ? FIRE.textMuted : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText);
+  // COLOUR ONLY — the roster rule (>=90 green · 70–89 amber · <70 red). Who is listed under "Needs a nudge" is a
+  // separate rule (nudge3, <75) and deliberately unchanged.
+  const pTone = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.greenText : p >= 70 ? FIRE.amberText : FIRE.redText);
   const ini = (n) => (n || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const av = (n, size) => <span style={{ width: size, height: size, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: size <= 26 ? 10 : 11, color: FIRE.textPrimary, flexShrink: 0 }}>{ini(n)}</span>;
   const chip = (Icon, label, value, sub, tone) => (
     <div style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
-      <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{label}</div>
+      <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.textMuted} />{label}</div>
       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>}
     </div>
@@ -10775,8 +11732,8 @@ function RosterAttendance({ S, members, sessions, plan }) {
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", borderBottom: i === top3.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ fontSize: 13, width: 18, textAlign: "center" }}>{["🥇", "🥈", "🥉"][i]}</span>{av(r.name, 30)}
                 <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
-                <span style={{ width: 90, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><span style={{ display: "block", width: `${r.pct}%`, height: "100%", borderRadius: 999, background: FIRE.greenText }} /></span>
-                <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: FIRE.greenText, ...FS.num }}>{r.pct}%</span>
+                <span style={{ width: 90, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><span style={{ display: "block", width: `${r.pct}%`, height: "100%", borderRadius: 999, background: pTone(r.pct) }} /></span>
+                <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: pTone(r.pct), ...FS.num }}>{r.pct}%</span>
               </div>
             ))}
           </Card>
@@ -10789,6 +11746,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13, width: 18, textAlign: "center", color: FIRE.redText, fontWeight: 700 }}>!</span>{av(r.name, 30)}
                     <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span>
+                    <span style={{ width: 90, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", flexShrink: 0 }}><span style={{ display: "block", width: `${r.pct}%`, height: "100%", borderRadius: 999, background: pTone(r.pct) }} /></span>
                     <span style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 700, color: pTone(r.pct), ...FS.num }}>{r.pct}%</span>
                     <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => runDraft(key, CHECKIN_SYS, ctx)}>Draft a check-in</button>
                   </div>
@@ -10808,7 +11766,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
         {recentEvents.length === 0 ? <div style={{ padding: "6px 2px", fontSize: 13, color: FIRE.textMuted }}>No recent events yet.</div> :
           recentEvents.map((e, i) => {
           const pct = e.total ? Math.min(100, Math.round((e.present / e.total) * 100)) : 0;   // cap display + bar at 100%; raw present/total shown as-is
-          const tone = e.optional ? FIRE.textMuted : (pct >= 75 ? FIRE.green : FIRE.amberText);   // same rule as before: optional = neutral, else >=75 green / amber
+          const tone = e.optional ? FIRE.textMuted : pTone(pct);   // optional = neutral; otherwise the roster rule (90/70)
           const [mon, day] = String(e.date).split(" ");
           return (
             <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 13, padding: "11px 2px", borderBottom: i === recentEvents.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
@@ -10837,7 +11795,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
         <div style={{ marginTop: 12 }}>
         {(showAllPeople ? people : people.slice(0, PEOPLE_CAP)).map((m, i, arr) => {
           const p = pctById.get(m.id) ?? null;   // live 90-day pct (null = no eligible drills in window → "—")
-          const tone = p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;   // same 75 / 50 thresholds as before
+          const tone = pTone(p);   // the roster rule (90/70)
           return (
           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
             {av(m.name, 32)}
@@ -10853,8 +11811,31 @@ function RosterAttendance({ S, members, sessions, plan }) {
     </div>
   );
 }
-function RosterReports({ S, role, members, sessions, dept, back, meId, notify }) {
+/* "FROM THE CHIEF" — the chief's own words, human-authored, verbatim. It is NEVER sent to the AI, never grounded,
+   never rewritten, and never shown as one of the report's figures. Saved reports keep it in the same ai_outputs row (no schema):
+   the AI draft, then CHIEF_NOTE_MARKER, then the note exactly as typed. Reading splits on the marker, so a report
+   saved before this existed (no marker) reads exactly as it always did. */
+const CHIEF_NOTE_MARKER = "\n\n<<<B4C:FROM-THE-CHIEF>>>\n";
+const splitChiefNote = (text) => {
+  const t = String(text || ""); const i = t.indexOf(CHIEF_NOTE_MARKER);
+  return i < 0 ? { body: t, chief: "" } : { body: t.slice(0, i), chief: t.slice(i + CHIEF_NOTE_MARKER.length) };
+};
+function ChiefNoteSection({ text, style }) {
+  if (!String(text || "").trim()) return null;
+  return (
+    <div style={{ marginTop: 14, padding: "14px 16px", borderRadius: 12, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderLeft: `4px solid ${FIRE.textSecondary}`, ...style }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <MessageSquare size={15} color={FIRE.textSecondary} />
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>From the Chief</span>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "2px 8px" }}>Chief's own words &amp; figures · not from B4C records</span>
+      </div>
+      <div style={{ fontSize: 14, color: FIRE.textPrimary, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</div>
+    </div>
+  );
+}
+function RosterReports({ S, role, members, sessions, dept, back, meId, notify, initialReport }) {
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+  const [chiefNote, setChiefNote] = useState("");   // "From the Chief" — the chief's own words; never sent to the AI
   const [presetKey, setPresetKey] = useState("year"); const [range, setRange] = useState(() => presetRange("year"));   // report period; default This Year (prior behavior)
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only; members stays full for names/identity
   const active = cm.filter((m) => m.status === "Active").length;
@@ -10895,6 +11876,33 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   // is told — printing zeros would put "0 credited hours" in front of a council because a query failed.
   const shOk = sh.loaded && !sh.err;
   const apOk = ap.loaded && !ap.err;
+  /* NEW FACTS (b4c_reports_chief_noir.html). Each flows to the panel, buildReportData() (PDF) and draft() (AI), and
+     each is OMITTED — never zeroed — when its read fails. DURING: funding, roster growth, board turnout, apparatus-
+     check compliance, certs approved. AS OF TODAY: equipment readiness. */
+  const onMod = (k) => moduleEnabled(k, dept?.disabled_modules);
+  const canSeeMoney = canManage(role) && onMod("funding");   // Board Stats' money gate, exactly
+  const mf = useMoneyFacts(range, canSeeMoney);
+  // Per-report chooser (default ON): a money viewer can leave funding out of THIS report. It governs the OUTPUTS —
+  // draft lines, buildReportData() / PDF, and so the saved copy — while the on-screen card stays under canSeeMoney.
+  const [includeFunding, setIncludeFunding] = useState(true);
+  const fundingInReport = canSeeMoney && includeFunding;
+  // The saved copy is the AI draft, so it must match the toggle: remember the setting each draft was made under and
+  // block Save (with a "redraft" note) if it has changed since. The PDF reads the toggle live, so it never mismatches.
+  const [draftedWithFunding, setDraftedWithFunding] = useState(null);
+  const fundOk = canSeeMoney && !mf.moneyErr && mf.donations != null && mf.proceeds != null && mf.funds != null && mf.raised != null;
+  const fundAllTime = fundOk ? mf.funds.reduce((t, f) => t + (mf.raised[f.id] || 0), 0) : null;
+  const usdExact = (v) => `$${Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;   // never rounded
+  // Roster growth: `joined` is free text and only a leading 4-digit year is trusted (Board Stats' joinedYear), so the
+  // period is widened to the calendar year(s) it touches and labelled that way.
+  const joinedYear = (m) => { const y = /^(\d{4})/.exec(String(m.joined || "").trim()); return y ? Number(y[1]) : null; };
+  const fyJ = Number(String(range.from || "").slice(0, 4)) || new Date().getFullYear(), tyJ = Number(String(range.to || "").slice(0, 4)) || fyJ;
+  const newJoins = cm.filter((m) => { const y = joinedYear(m); return y != null && y >= fyJ && y <= tyJ; });
+  const joinLabel = fyJ === tyJ ? `joined in ${fyJ}` : `joined ${fyJ}–${tyJ}`;
+  const { avg: boardPct, doneBoard, rows: boardRows } = boardAttendance(members, sessions, null, range);
+  const boardRated = doneBoard.length > 0 && boardRows.some((r) => r.pct != null);   // no board meetings in range -> "—", not 0%
+  const cc = useCheckCompliance(range, onMod("apparatus"));
+  const ca = useCertsApproved(range, members);
+  const eq = useEquipmentReadiness(onMod("equipment"));
   const h1r = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
   // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
   const flaggedCerts = [];
@@ -10934,6 +11942,13 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
   const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
+  const Unavail = ({ what, retry }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
+      <AlertTriangle size={14} color={FIRE.redText} style={{ flexShrink: 0 }} />
+      <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{what} couldn't be loaded — this section will be left out of the report.</span>
+      <button onClick={retry} style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }}><RefreshCw size={12} color={FIRE.btnIcon} /> Retry</button>
+    </div>
+  );
   const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
   const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
   const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
@@ -10963,6 +11978,14 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         attestedHrs: sh.totals.attestedHrs, vTrue: sh.totals.vTrue, oTrue: sh.totals.oTrue,
         rows: sh.rows.slice(0, 10).map((r) => ({ name: r.name, credited: r.total, unverified: r.unverified, shifts: r.n })),
       } : null,
+      // New facts — null when gated off or when the read failed, so the PDF omits the section rather than print zeros.
+      funding: fundingInReport && fundOk ? { contributions: mf.donations, proceeds: mf.proceeds, activeCampaigns: mf.funds.length, allTimeRaised: fundAllTime } : null,
+      rosterGrowth: { n: newJoins.length, label: joinLabel, names: newJoins.slice(0, 8).map((m) => m.name) },
+      boardTurnout: { meetings: doneBoard.length, pct: boardRated ? boardPct : null },
+      checkCompliance: cc.ok ? { checks: cc.checks, units: cc.units, failed: cc.failed, totalUnits: apOk ? ap.totals.total : null } : null,
+      certsApproved: ca.ok ? { count: ca.count, list: ca.list.slice(0, 10) } : null,
+      equipment: eq.ok ? { openIssues: eq.openIssues, issueKinds: eq.issueKinds, agingOut: eq.agingOut, asOf: todayLabel } : null,
+      chiefNote: chiefNote.trim() ? chiefNote : "",   // the chief's own words, verbatim — its own PDF section, never a figure
       readiness: apOk ? {
         ...ap.totals, asOf: todayLabel,
         flaggedRigs: ap.flaggedRigs.map((r) => ({ name: r.name, note: r.note })),
@@ -10971,7 +11994,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     };
   }
   async function draft() {
-    setLoading(true); setErr(""); setOut("");
+    setLoading(true); setErr(""); setOut(""); setDraftedWithFunding(fundingInReport);
     const topN = (arr, fmt, n = 3) => {
       if (!arr.length) return "none";
       const shown = arr.slice(0, n).map(fmt).join("; ");
@@ -10999,6 +12022,19 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         `Share of check-ins location-verified: ${sh.totals.vpct}%`,
         ...(sh.totals.autoClosed ? [`Shifts auto-closed by the system and awaiting an officer's confirmation: ${sh.totals.autoClosed} (their hours are NOT credited until reviewed)`] : []),
       ] : [`Station hours: unavailable — the record could not be read, so no hours figure is provided.`]),
+      ...(fundingInReport ? (fundOk ? [
+        `Funding — contributions received during the period: ${usdExact(mf.donations)} (exact; do not round)`,
+        `Funding — fundraiser proceeds for fundraisers dated in the period: ${usdExact(mf.proceeds)} (exact; do not round)`,
+        `Funding — active donation campaigns: ${mf.funds.length}; raised all-time across those campaigns: ${usdExact(fundAllTime)} (all-time, NOT a period figure)`,
+      ] : [`Funding: unavailable — the records could not be read, so no funding figures are provided. Do not write a Funding section.`]) : []),
+      `New members (by join YEAR — the roster records a year, not a date): ${newJoins.length} ${joinLabel}${newJoins.length ? ` — ${topN(newJoins, (m) => m.name, 5)}` : ""}`,
+      `Board / leadership meetings held during the period: ${doneBoard.length}${boardRated ? `; average board turnout ${boardPct}%` : "; no board turnout figure (no board meetings with attendance in the period)"}`,
+      ...(onMod("apparatus") ? (cc.ok
+        ? [`Apparatus checks completed during the period: ${cc.checks} on ${cc.units}${apOk ? ` of ${ap.totals.total}` : ""} unit${cc.units === 1 ? "" : "s"}${cc.failed ? ` (${cc.failed} recorded a failure)` : ""}`]
+        : [`Apparatus check compliance: unavailable — not read, so no figure is provided.`]) : []),
+      ...(ca.ok
+        ? [`Certifications approved during the period: ${ca.count}${ca.count ? ` — ${topN(ca.list, (c) => `${c.member}'s ${c.cert}`, 5)}` : ""}`]
+        : [`Certifications approved during the period: unavailable — not read, so no figure is provided.`]),
       ``,
       `=== AS OF TODAY (${todayLabel}) — current status, NOT specific to the period above ===`,
       `Members: ${active} active, ${prob} probationary (${cm.length} total)`,
@@ -11019,19 +12055,23 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
         `Apparatus needing attention: ${topN(ap.flaggedRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
         `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
       ] : [`Apparatus readiness: unavailable — the record could not be read, so no readiness figure is provided.`]),
+      ...(onMod("equipment") ? (eq.ok ? [
+        `Equipment: ${eq.openIssues} open equipment issue${eq.openIssues === 1 ? "" : "s"} reported${eq.issueKinds.length ? ` (${eq.issueKinds.map((k) => `${k.n} ${k.label.toLowerCase()}`).join(", ")})` : ""}; ${eq.agingOut} item${eq.agingOut === 1 ? "" : "s"} of gear past or within 3 months of service life`,
+      ] : [`Equipment readiness: unavailable — not read, so no figure is provided.`]) : []),
     ];
     const summary = lines.join("\n");
-    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's real records for a specific REPORT PERIOD. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), and Recommended Next Steps.\n\nPERIOD vs. CURRENT — the data below is split into two labeled blocks. 'DURING THE REPORT PERIOD' facts describe what happened in the report window: narrate them as the period's activity and STATE THE REPORT PERIOD near the top. 'AS OF TODAY' facts are the department's CURRENT status (certification currency, roster) and are NOT specific to the period: narrate them as today's standing, and NEVER imply the current numbers describe the period — do not say attendance, certification, or roster levels were a certain value 'during the period' unless it is a DURING-THE-PERIOD fact. Keep the two clearly distinct so a reader always knows whether a number covers the period or today.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 400 words.";
+    const sys = "You write a concise, professional readiness and activity report for a volunteer fire department chief to share with the city council or board, drafted from the department's real records for a specific REPORT PERIOD. Structure it with clear bold section titles and short bullets: an Overview, Certifications, Duties, Training (recent and upcoming), Readiness (apparatus readiness, apparatus-check compliance, and equipment), Funding (ONLY when funding facts are listed), and Recommended Next Steps.\n\nPERIOD vs. CURRENT — the data below is split into two labeled blocks. 'DURING THE REPORT PERIOD' facts describe what happened in the report window: narrate them as the period's activity and STATE THE REPORT PERIOD near the top. 'AS OF TODAY' facts are the department's CURRENT status (certification currency, roster) and are NOT specific to the period: narrate them as today's standing, and NEVER imply the current numbers describe the period — do not say attendance, certification, or roster levels were a certain value 'during the period' unless it is a DURING-THE-PERIOD fact. Keep the two clearly distinct so a reader always knows whether a number covers the period or today.\n\nMake it specific to THIS department: when the data names specific items — which certifications are expiring or expired and whose, which duties are overdue and who owns them, the dates of upcoming training, whose certifications are awaiting approval — name them. Specifics are what make it read like this department's report and not a generic template.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts provided in the data below. NEVER invent or infer a duty, certification, member name, date, count, or event that is not explicitly listed. Do not round, embellish, or add plausible-sounding detail. If a category says 'none', state plainly that there are none (for example, 'No duties are currently overdue') — do NOT manufacture items to fill a section. Where the data shows '…and N more', you may refer to that remaining count without naming them. The harm this prevents is real: a chief reads this to a city council, and a fabricated duty, certification, member name, or date is a false statement on the public record.\n\nMONEY — quote every dollar figure EXACTLY as given: never round, estimate, add figures together into a new total, or describe an all-time figure as belonging to the period. If no funding facts are listed, or funding is marked unavailable, write no Funding section at all. New members are counted by join YEAR — say so as labelled (for example 'joined in 2026'), never as an exact period count.\n\nKeep the certification window exactly as stated ('within 90 days') — do not change it. Confident, factual, plain tone. Under 450 words.";
     try { const t = await callClaude(sys, summary); setOut(t); } catch { setErr("Couldn't draft the report just now. Try again."); } finally { setLoading(false); }
   }
   const [saving, setSaving] = useState(false);
   async function saveReport() {
-    if (!out) return;
+    if (!out || draftedWithFunding !== fundingInReport) return;   // never save a draft made under the other funding setting
     setSaving(true);
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const title = `Chief's Report — ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "report", title, ai_text: out, created_by: meId });   // feature MUST be "report" → DA/PA-only INSERT branch
+    const saved = chiefNote.trim() ? `${out}${CHIEF_NOTE_MARKER}${chiefNote}` : out;   // AI draft, then the chief's own words after the marker (verbatim)
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "report", title, ai_text: saved, created_by: meId });   // feature MUST be "report" → DA/PA-only INSERT branch
     setSaving(false);
     if (error) { notify({ kind: "error", title: "Couldn't save the report", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
     notify({ kind: "success", text: "Report saved." });
@@ -11039,7 +12079,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   }
   // --- Saved reports (persisted feature="report"; soft-deletable, inherits the Phase 1 failsafe) ---
   const [reports, setReports] = useState([]);
-  const [openReport, setOpenReport] = useState(null);
+  const [openReport, setOpenReport] = useState(initialReport || null);   // the hub can open a saved report directly
   const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
   async function loadReports() {
     const { data } = await supabase.from("ai_outputs").select("*").eq("feature", "report").is("deleted_at", null);   // dept-scoped by RLS; hide soft-deleted
@@ -11047,7 +12087,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
   }
   useEffect(() => { loadReports(); }, []);
   async function softDelete(d) {
-    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    if (!(await noirConfirm({ title: "Delete this record?", body: "It moves to the trash and can be restored by an admin.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(d.id);
     const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
     setDeletingId(null);
@@ -11055,17 +12095,16 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
     loadReports();   // deleted row falls out via the .is("deleted_at", null) filter
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={FS.kicker}>REPORTS · CHIEF'S REPORT</div>
-      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Chief's Report</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 14 }}>The board &amp; city readiness report — the chief's narrative over your locked, period-filtered facts.</div>
+    <PageShell band watermark="REPORTS" kicker="REPORTS · CHIEF'S REPORT" title="Chief's Report"
+      sub="The board & city readiness report — the chief's narrative over your locked, period-filtered facts."
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
       <div style={{ marginBottom: 14 }}>
         <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 8 }}>Report period: <strong style={{ color: FIRE.textSecondary }}>{periodLabel}</strong> · Generated {todayLabel}</div>
       </div>
-      <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>DURING THIS PERIOD · {periodLabel}</div>
+      <div style={{ ...FS.cardNoir, padding: "10px 16px", marginBottom: 14 }}>
+        <CardHead icon={CalendarCheck} title="During this period" right={periodLabel} style={{ marginTop: 4 }} />
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
           <Stat S={S} dark n={String(drillsHeld)} label="Training sessions" />
           <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
@@ -11080,7 +12119,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
           <CoverageNote cov={cov} />
         </div>
       </div>
-      <div style={{ ...FS.card, padding: "10px 16px", marginBottom: 14 }}>
+      <div style={{ ...FS.cardNoir, padding: "10px 16px", marginBottom: 14 }}>
         {/* Station hours belong to the PERIOD block: they describe the window, not today. */}
         {sh.err ? (
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
@@ -11101,7 +12140,34 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
             {sh.totals.autoClosed > 0 && <Line>⚠ {sh.totals.autoClosed} auto-closed shift{sh.totals.autoClosed > 1 ? "s" : ""} awaiting officer confirmation — not credited</Line>}
           </>
         )}
-        <div style={{ ...FS.kicker, marginBottom: 2 }}>AS OF TODAY · CURRENT STATUS</div>
+        {/* New DURING facts — same truth rule: a failed read is left out (and said so), never a zero. */}
+        {canSeeMoney && (mf.moneyErr ? <Unavail what="Funding" retry={mf.retry} /> : fundOk && (<>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 0 }}><SubHead>Funding — {usdExact(mf.donations)} contributions · {usdExact(mf.proceeds)} fundraiser proceeds</SubHead></div>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, fontWeight: 600, color: FIRE.textSecondary, cursor: "pointer" }}>
+              <button type="button" role="switch" aria-checked={includeFunding} onClick={() => setIncludeFunding((v) => !v)}
+                style={{ width: 36, height: 20, borderRadius: 10, padding: 0, position: "relative", cursor: "pointer", flexShrink: 0,
+                  border: `1px solid ${includeFunding ? "rgba(47,168,105,.5)" : FIRE.line2Noir}`, background: includeFunding ? "rgba(47,168,105,.22)" : FIRE.insetNoir }}>
+                <span aria-hidden="true" style={{ position: "absolute", top: 2, left: includeFunding ? 18 : 2, width: 14, height: 14, borderRadius: 7, background: includeFunding ? FIRE.greenText : FIRE.textMuted, transition: "left .15s" }} />
+              </button>
+              Include in report
+            </label>
+          </div>
+          <Line><span style={{ color: FIRE.textMuted }}>{includeFunding ? "Off leaves all funding out of the draft, the PDF, and the saved copy." : "Left out — funding won't appear in the draft, the PDF, or the saved copy."}</span></Line>
+          <Line>{mf.funds.length} active campaign{mf.funds.length === 1 ? "" : "s"} · {usdExact(fundAllTime)} raised all-time (not a period figure)</Line>
+        </>))}
+        <SubHead>New members — {newJoins.length} {joinLabel}</SubHead>
+        {newJoins.length > 0 && <Line>{newJoins.slice(0, 6).map((m) => m.name).join(" · ")}{newJoins.length > 6 ? ` · +${newJoins.length - 6} more` : ""}</Line>}
+        <Line><span style={{ color: FIRE.textMuted }}>By join year — the roster records a year, not a date.</span></Line>
+        <SubHead>Board meetings — {doneBoard.length} held · {boardRated ? `${boardPct}% turnout` : "—"}</SubHead>
+        {onMod("apparatus") && (cc.err ? <Unavail what="Apparatus check compliance" retry={cc.retry} /> : cc.ok && (
+          <SubHead>Apparatus checks — {cc.checks} completed on {cc.units}{apOk ? ` of ${ap.totals.total}` : ""} unit{cc.units === 1 ? "" : "s"}{cc.failed ? ` · ${cc.failed} with a failure` : ""}</SubHead>
+        ))}
+        {ca.err ? <Unavail what="Approved certifications" retry={ca.retry} /> : ca.ok && (<>
+          <SubHead>Certifications approved — {ca.count}</SubHead>
+          {ca.list.slice(0, 6).map((c, i) => <Line key={i}>{c.member} · {c.cert}</Line>)}
+        </>)}
+        <CardHead icon={Clock} title="As of today · current status" style={{ marginTop: 14 }} />
         <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
         {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
         <SubHead>Flagged certifications — {expd} expired · {expg} expiring</SubHead>
@@ -11122,14 +12188,18 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
               : [...ap.flaggedRigs, ...ap.oosRigs].slice(0, 6).map((r) => <Line key={r.id}>{r.name}{r.note ? ` · ${r.note}` : ""}{r.inService ? "" : " · out of service"}</Line>)}
           </>
         )}
+        {onMod("equipment") && (eq.err ? <Unavail what="Equipment readiness" retry={eq.retry} /> : eq.ok && (<>
+          <SubHead>Equipment — {eq.openIssues} open issue{eq.openIssues === 1 ? "" : "s"} · {eq.agingOut} aging out</SubHead>
+          {eq.issueKinds.length > 0 && <Line>{eq.issueKinds.map((k) => `${k.n} ${k.label.toLowerCase()}`).join(" · ")}</Line>}
+        </>))}
         <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
         {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
       </div>
-      <div style={{ ...S.aiBanner, ...FS.card, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}><BarChart3 size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />BOARD &amp; CITY REPORT</div>
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Turn your numbers into a report — in one tap</h3>
-          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, and participation.</p>
+          <CardHead icon={BarChart3} title="Board & city report" />
+          <h3 style={NOIR_FEAT_TITLE}>Turn your numbers into a report — in one tap</h3>
+          <p style={NOIR_HELP}>The summary the chief usually hand-builds for the city, drafted from your current roster, certs, and participation.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><BarChart3 size={16} /> Draft the report</>}
@@ -11140,32 +12210,52 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
               <Download size={16} /> Download PDF
             </button>
             {isDeptAdmin(role) && out && (
-              <button style={{ ...FS.btn, opacity: saving ? 0.7 : 1 }} onClick={saveReport} disabled={saving}>
+              <button style={{ ...FS.btn, opacity: (saving || draftedWithFunding !== fundingInReport) ? 0.6 : 1 }} onClick={saveReport} disabled={saving || draftedWithFunding !== fundingInReport}
+                title={draftedWithFunding !== fundingInReport ? "Funding was switched since this draft — draft it again before saving" : undefined}>
                 {saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><FileText size={16} /> Save report</>}
               </button>
             )}
           </div>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {out && draftedWithFunding !== fundingInReport && (
+            <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 8, lineHeight: 1.45 }}>Funding was {fundingInReport ? "switched on" : "left out"} after this draft — draft the report again so the saved copy matches.</div>
+          )}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {out && (
             <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-                <div style={{ ...FS.kicker, marginBottom: 0 }}>DRAFT PREVIEW</div>
+                <SectionBar label="Draft preview" style={{ margin: 0, flex: 1 }} />
                 <button title="Clear" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => { setOut(""); setErr(""); }}><X size={14} color={FIRE.deleteRed} /></button>
               </div>
               <RichOutput S={S} text={out} dark />
+              {/* The chief's own section, right after the AI narrative — one report, but outside the AI block and never
+                  styled as a figure. Same component the saved report and the input card use. */}
+              <ChiefNoteSection text={chiefNote} />
             </div>
           )}
         </div>
       </div>
 
+      {/* FROM THE CHIEF — the chief's own words, outside the AI card and apart from the report's figures. Not sent to the AI.
+          Authoring is leaders-only, the same isDeptAdmin gate as Save. */}
+      {isDeptAdmin(role) && (
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", marginBottom: 16 }}>
+          <CardHead icon={MessageSquare} title="From the Chief" />
+          <label style={{ ...S.field, marginTop: 2 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From the Chief — your own words &amp; outside numbers (optional)</span>
+            <textarea style={{ ...FS.input, minHeight: 96, resize: "vertical", lineHeight: 1.55 }} value={chiefNote} onChange={(e) => setChiefNote(e.target.value)}
+              placeholder="Notable calls, thank-yous, what's ahead — and any outside figures, e.g. “142 calls this quarter per ESO”…" /></label>
+          <p style={{ ...NOIR_HELP, marginBottom: 0 }}>Added to the report as written, in your own voice — notable calls, thank-yous, and any outside figures (e.g. ESO). Shown as your own section, separate from the figures B4C pulls from your records. The AI never sees it.</p>
+          {!out && <ChiefNoteSection text={chiefNote} />}   {/* with a draft, it previews under the draft instead — once */}
+        </div>
+      )}
+
       {/* SAVED REPORTS — persisted Chief's Reports (feature="report"); Open to view, DA/PA soft-delete. Mirrors the Minutes saved-drafts list. */}
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED REPORTS</div>
-      <div style={{ ...FS.card, padding: "4px 16px", marginBottom: 8 }}>
+      <SectionBar icon={FileText} label="Saved reports" count={reports.length} style={{ marginTop: 22 }} />
+      <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 8 }}>
         {reports.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved reports yet.</div> : reports.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Chief's Report"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}</div>
@@ -11178,17 +12268,16 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
       </div>
 
       {openReport && (
-        <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ ...FS.kicker, marginBottom: 0 }}>{openReport.title || "Chief's Report"}</div>
-              <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={() => setOpenReport(null)}><X size={14} color={FIRE.btnIcon} /></button>
-            </div>
-            <RichOutput S={S} text={openReport.current_text ?? openReport.ai_text} dark />
+        <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%" }}>
+            <NoirModalHead icon={BarChart3} title={openReport.title || "Chief's Report"} sub="Saved report" onClose={() => setOpenReport(null)} />
+            {(() => { const { body, chief } = splitChiefNote(openReport.current_text ?? openReport.ai_text);
+              return <div style={{ padding: "14px 18px 18px" }}><RichOutput S={S} text={body} dark /><ChiefNoteSection text={chief} /></div>; })()}
           </div>
         </div>
       )}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -11196,88 +12285,14 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify })
 // Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
 function Reports({ S, role, members, sessions, dept, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; "attendance" | "chief"
+  const [openReport, setOpenReport] = useState(null);   // a saved report picked from the hub's peek opens straight into its viewer
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
-  if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} back={() => setView(null)} />;
+  if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} initialReport={openReport} back={() => { setOpenReport(null); setView(null); }} />;
   if (view === "actions") return <ActionItemsReport S={S} members={members} back={() => setView(null)} />;
   if (view === "stationhours") return <StationHoursReport S={S} role={role} dept={dept} notify={notify} back={() => setView(null)} />;   // notify: the needs-review panel writes, so it reports failures the same way every other leadership mutation does. role: the open-shift panel is ADMIN-only, narrower than this screen
   if (view === "capital") return <CapitalPlanReport S={S} dept={dept} back={() => setView(null)} />;
   if (view === "apparatuschecks") return <ApparatusChecksReport S={S} dept={dept} back={() => setView(null)} />;
-  return (
-    <PageShell kicker="REPORTS" title="Reporting hub" sub="The records your department gets audited on — attendance, readiness, and board reports — in one place.">
-      <div style={S.opGrid}>
-        <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("attendance")}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <CalendarCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Yearly Attendance Report</div></div>
-          </div>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Full-year training attendance per member — the durable record for audits, not the rolling calendar view.</div>
-          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-          </div>
-        </Card>
-        <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("chief")}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <BarChart3 size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Chief's Report</div></div>
-          </div>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The board &amp; city readiness report — drafted from your live roster, certifications, and attendance.</div>
-          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-          </div>
-        </Card>
-        <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("actions")}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Action Items</div></div>
-          </div>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.</div>
-          <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-            <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-          </div>
-        </Card>
-        {/* hidden for a department that's switched the Station Hours module off — the report is that module's data */}
-        {moduleEnabled("stationhours", dept?.disabled_modules) && (
-          <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("stationhours")}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <Clock size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Station Hours</div></div>
-            </div>
-            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Verified standby and training hours by member — for ISO, LOSAP, and staffing.</div>
-            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-            </div>
-          </Card>
-        )}
-        {/* hidden for a department that's switched the Apparatus module off — the plan is that module's data */}
-        {moduleEnabled("apparatus", dept?.disabled_modules) && (
-          <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("capital")}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <Truck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Capital Replacement Plan</div></div>
-            </div>
-            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>What the fleet cost and when each unit comes due — the forecast a chief hands the selectboard.</div>
-            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-            </div>
-          </Card>
-        )}
-        {/* Same apparatus-module gate as the Capital Plan above: both read the apparatus tables,
-            so a department that switched the module off should not be offered either. */}
-        {moduleEnabled("apparatus", dept?.disabled_modules) && (
-          <Card padding="15px 16px" style={{ cursor: "pointer" }} onClick={() => setView("apparatuschecks")}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ ...S.personName, color: FIRE.textPrimary }}>Apparatus Checks</div></div>
-            </div>
-            <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 7 }}>Completed truck checks per unit — download any one as the county report.</div>
-            <div style={{ display: "flex", alignItems: "center", marginTop: 11 }}>
-              <button style={{ ...FS.btn, marginLeft: "auto", padding: "7px 12px", fontSize: 12.5 }}>Open <ChevronRight size={14} /></button>
-            </div>
-          </Card>
-        )}
-      </div>
-    </PageShell>
-  );
+  return <ReportsHub S={S} members={members} sessions={sessions} dept={dept} open={(k, report) => { setOpenReport(report || null); setView(k); }} />;
 }
 /* ---------------- Board Stats (read-only) ----------------
    What Board Members and Officers see when they tap Reports. Report GENERATION (the hub, the Chief's
@@ -11294,6 +12309,98 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
 // BoardStats building blocks. MODULE-LEVEL on purpose: defined inside BoardStats they were new component
 // types every render, so React remounted their children on each state change — harmless for flat tiles,
 // but it would re-run every chart's fetch (StationHoursBars is 24 RPCs) whenever any section loaded.
+/* REPORTING HUB (b4c_reports_hub_noir.html): an audit-at-a-glance strip, report cards that each show a headline,
+   and the latest saved Chief's Reports. Every figure reuses an existing derivation so it matches Board Stats and
+   the report it opens: certCoverage + deptAttendance (data the app already holds), useStationHoursRange and
+   useApparatusReadiness (the same hooks Board Stats calls). The one read added here is the saved-report peek —
+   the same ai_outputs feature="report" query RosterReports runs, newest 3. A figure not loaded or failed is "—". */
+function ReportsHub({ S, members, sessions, dept, open }) {
+  const year = useMemo(() => presetRange("year"), []);
+  const cov = certCoverage(members, { includeProbationary: true });
+  const { avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, year);
+  const onSH = moduleEnabled("stationhours", dept?.disabled_modules), onAp = moduleEnabled("apparatus", dept?.disabled_modules);
+  const sh = useStationHoursRange(year);
+  const ap = useApparatusReadiness();
+  const shOk = sh.loaded && !sh.err, apOk = ap.loaded && !ap.err;
+  const [saved, setSaved] = useState(null);
+  useEffect(() => {
+    supabase.from("ai_outputs").select("*").eq("feature", "report").is("deleted_at", null)   // same read as RosterReports; dept-scoped by RLS
+      .then(({ data, error }) => { if (!error && data) setSaved(data.sort((a, b) => (b.edited_at || b.created_at).localeCompare(a.edited_at || a.created_at))); });
+  }, []);
+  const fmtShort = (ts) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
+  // Values follow the colour rule — green good, amber warning, red bad — not a fixed accent per tile.
+  const tone = (p) => p == null ? FIRE.textSecondary : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText;
+  const apTone = !apOk ? FIRE.textSecondary : ap.totals.oos ? FIRE.redText : ap.totals.flagged ? FIRE.amberText : FIRE.greenText;
+  const glance = [
+    ["Cert coverage", cov.pct == null ? "—" : `${cov.pct}%`, cov.total ? `${cov.covered} of ${cov.total} covered` : "no active members", tone(cov.pct)],
+    ["Avg attendance", drills.length ? `${avgPart}%` : "—", `${drills.length} drill${drills.length === 1 ? "" : "s"} held`, tone(drills.length ? avgPart : null)],
+    ...(onSH ? [["Station hrs credited", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : (sh.err ? "unavailable" : "loading"), FIRE.greenText]] : []),
+    ...(onAp ? [["Apparatus ready", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? `${ap.totals.flagged} need attention · ${ap.totals.oos} OOS` : (ap.err ? "unavailable" : "loading"), apTone]] : []),
+  ];
+  const card = (key, Icon, acc, title, blurb, pv, pm, badge, pvColor) => (
+    <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => open(key)}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}22`, color: acc }}><Icon size={16} /></span>
+        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>{title}</span>
+        {badge && <span style={{ ...NOIR_AI.chip, fontSize: 9, padding: "2px 6px" }}>{badge}</span>}
+      </div>
+      <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.45, flex: 1 }}>{blurb}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+        {pv != null && <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: pvColor || FIRE.textPrimary, ...FS.num }}>{pv}</span>}
+        {pm && <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{pm}</span>}
+        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 600, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 3 }}>Open <ChevronRight size={14} /></span>
+      </div>
+    </Card>
+  );
+  const last = saved && saved[0];
+  return (
+    <PageShell band watermark="REPORTS" kicker="REPORTS" title="Reporting hub" sub="The records your department gets audited on — attendance, readiness, and board reports — in one place. Each one pulls from your live data.">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 6 }}>
+        <CardHead icon={ShieldAlert} title="Board-ready at a glance" right={<span>This year</span>} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 10 }}>
+          {glance.map(([l, n, x, c]) => (
+            <div key={l} style={{ ...NOIR_INSET, borderTop: `3px solid ${c}`, padding: "11px 13px" }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 24, lineHeight: 1, color: c, ...FS.num }}>{n}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textPrimary, marginTop: 5 }}>{l}</div>
+              <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>{x}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "0 2px 14px", lineHeight: 1.45 }}>A summary of the numbers a chief gets asked for — the reports below document each one for the council, the board, and the county.</div>
+      <SectionBar label="Reports — open any to view, draft, or download" style={{ marginTop: 0 }} />
+      <div style={S.opGrid}>
+        {card("attendance", CalendarCheck, NOIR_AI.blue, "Yearly Attendance", "Full-year training attendance per member — the durable record for audits, not the rolling calendar view.", drills.length ? `${avgPart}%` : "—", `avg · ${drills.length} drill${drills.length === 1 ? "" : "s"}`, null, tone(drills.length ? avgPart : null))}
+        {card("chief", BarChart3, FIRE.redBright, "Chief's Report", "The board & city readiness report — the chief's narrative over your locked, period-filtered facts.", last ? fmtShort(last.edited_at || last.created_at) : (saved ? "None yet" : "—"), saved ? `${last ? "last saved · " : ""}${saved.length} saved` : null, "AI-drafted", last ? FIRE.textPrimary : FIRE.textMuted)}
+        {card("actions", ClipboardCheck, FIRE.amberText, "Action Items", "The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.", null, null)}
+        {onSH && card("stationhours", Clock, FIRE.green, "Station Hours", "Credited standby and training hours by member — for ISO, LOSAP, and staffing.", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `credited · ${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : null, null, shOk ? FIRE.greenText : FIRE.textSecondary)}
+        {onAp && card("capital", Truck, "#D8A24A", "Capital Replacement Plan", "What the fleet cost and when each unit comes due — the forecast a chief hands the selectboard.", null, null)}
+        {onAp && card("apparatuschecks", ClipboardCheck, "#6D8CAC", "Apparatus Checks", "Completed truck checks per unit — download any one as the county report.", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? "units ready today" : null, null, apTone)}
+      </div>
+      {saved && saved.length > 0 && (<>
+        <SectionBar icon={FileText} label="Recent saved reports" count={saved.length} />
+        <div style={{ ...FS.cardNoir, padding: "4px 16px" }}>
+          {saved.slice(0, 3).map((d, i, arr) => {
+            const who = (members || []).find((m) => m.id === d.created_by)?.name || "Unknown";
+            return (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 0", borderBottom: i === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><FileText size={14} color={FIRE.redText} /></span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title || "Chief's Report"}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{who} · {fmtShort(d.edited_at || d.created_at)}</div>
+                </div>
+                <button style={{ ...FS.btn, padding: "5px 10px", fontSize: 11.5 }} onClick={() => open("chief", d)}>Open</button>
+              </div>
+            );
+          })}
+        </div>
+      </>)}
+      </NoirSkin>
+    </PageShell>
+  );
+}
 function StatsSection({ title, note, icon, children }) {
   // Department stats (BoardStats) section: CardHead title + the period note at right.
   return (
@@ -11371,37 +12478,12 @@ function BoardStats({ S, role, members, sessions, dept }) {
 
   // Funding — is_canmanage() RLS (Board/DA/Officer). Same reads as the Funding hub and the funds list.
   const canSeeMoney = canManage(role) && on("funding");
-  const [donations, setDonations] = useState(null);     // contributions in the period; null = unknown
-  const [proceeds, setProceeds] = useState(null);       // fundraiser proceeds in the period
-  const [funds, setFunds] = useState(null);             // active donation campaigns
-  const [raised, setRaised] = useState(null);           // campaign_id -> all-time contributions
-  const [moneyErr, setMoneyErr] = useState(false);
-  const loadMoney = () => {
-    if (!canSeeMoney) return;
-    setMoneyErr(false);
-    const fail = () => setMoneyErr(true);
-    supabase.from("donation_activity").select("amount").eq("kind", "contribution")
-      .gte("occurred_on", range.from).lte("occurred_on", range.to)
-      .then(({ data, error }) => { if (error || !data) return fail(); setDonations(data.reduce((t, r) => t + (Number(r.amount) || 0), 0)); });
-    supabase.from("fundraisers").select("proceeds")
-      .gte("target_date", range.from).lte("target_date", range.to)
-      .then(({ data, error }) => { if (error || !data) return fail(); setProceeds(data.reduce((t, r) => t + (Number(r.proceeds) || 0), 0)); });
-    supabase.from("donation_campaigns").select("id, name, status, goal_amount, sort, created_at")
-      .order("sort", { ascending: true }).order("created_at", { ascending: true })
-      .then(({ data, error }) => { if (error || !data) return fail(); setFunds(data.filter((c) => c.status !== "archived")); });
-    supabase.from("donation_activity").select("campaign_id, amount").eq("kind", "contribution").not("campaign_id", "is", null)
-      .then(({ data, error }) => {
-        if (error || !data) return fail();
-        const m = {}; for (const r of data) m[r.campaign_id] = (m[r.campaign_id] || 0) + (Number(r.amount) || 0);
-        setRaised(m);
-      });
-  };
-  useEffect(() => { loadMoney(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [canSeeMoney, range.from, range.to]);
-  useReconnect(() => { if (moneyErr) loadMoney(); });
+  // Same four reads, now shared with the Chief's Report so both quote the same money (useMoneyFacts).
+  const { donations, proceeds, funds, raised, moneyErr, retry: loadMoney } = useMoneyFacts(range, canSeeMoney);
   const money = (v) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
 
   return (
-    <PageShell kicker={dept?.name ? `DEPARTMENT STATS · ${dept.name}` : "DEPARTMENT STATS"} title="Department at a glance"
+    <PageShell band watermark="REPORTS" kicker={dept?.name ? `DEPARTMENT STATS · ${dept.name}` : "DEPARTMENT STATS"} title="Department at a glance"
       sub="The live numbers behind the Chief's Report — the same figures your Department Admin sees. Read-only.">
       <NoirSkin>
       <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
@@ -11430,7 +12512,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
             <div style={{ ...FS.cardNoir, padding: 18 }}>
               <ApparatusReadinessView ap={ap} />
               {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
-                <div style={{ marginTop: 10, paddingTop: 4, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ marginTop: 10, paddingTop: 4, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <StatsRigList label="Needs attention" rigs={ap.flaggedRigs} />
                   <StatsRigList label="Out of service" rigs={ap.oosRigs} />
                 </div>
@@ -11468,7 +12550,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
             {funds && funds.length > 0 && (
               <div style={{ ...FS.cardNoir, padding: "6px 16px", marginTop: 12 }}>
                 {funds.map((c, i) => (
-                  <div key={c.id} style={{ borderBottom: i < funds.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+                  <div key={c.id} style={{ borderBottom: i < funds.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
                     <FundProgress name={c.name} raised={raised == null ? null : (raised[c.id] || 0)} goal={c.goal_amount} />
                   </div>
                 ))}
@@ -11498,7 +12580,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
         </StatsGrid>
         <div style={{ ...FS.cardNoir, padding: "6px 16px", marginTop: 12 }}>
           {upcoming.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0" }}>Nothing scheduled.</div> : upcoming.map((s, i) => (
-            <div key={s.id} style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "9px 0", borderBottom: i < upcoming.length - 1 ? `0.5px solid ${FIRE.hairline}` : "none" }}>
+            <div key={s.id} style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "9px 0", borderBottom: i < upcoming.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none" }}>
               <span style={{ fontSize: 12.5, color: FIRE.textMuted, minWidth: 150, ...FS.num }}>{fmtSess(s)}</span>
               <span style={{ flex: 1, minWidth: 140, fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{s.title}<EventAudienceTag audience={s.audience} /></span>
             </div>
@@ -11532,7 +12614,7 @@ function DateRangePicker({ S, range, setRange, presetKey, setPresetKey }) {
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {RANGE_PRESETS.map(([k, label]) => {
           const on = presetKey === k;
-          return <button key={k} onClick={() => pick(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>;
+          return <button key={k} onClick={() => pick(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.card2Noir, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>;
         })}
       </div>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From</span><input type="date" style={FS.input} value={range.from} onChange={(e) => { setPresetKey("custom"); setRange((r) => ({ ...r, from: e.target.value })); }} /></label>
@@ -11585,8 +12667,6 @@ async function fetchResultsForChecks(ids) {
   return { data: out };
 }
 
-// "All apparatus" is a scope, not a rig id. A sentinel that cannot collide with a uuid.
-const ALL_RIGS = "__all__";
 
 /* ---------------- Apparatus Checks (leadership) ----------------
    A home in Reports for the county PDF that previously existed only as a button on an
@@ -11610,15 +12690,16 @@ function ApparatusChecksReport({ S, dept, back }) {
   const [rigs, setRigs] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");            // a failed read is not "no apparatus" — never show empty as fact
-  const [scope, setScope] = useState("");          // a rig id, or ALL_RIGS
+  const [selected, setSelected] = useState(() => new Set());   // rig ids ticked for Combined / Separate PDFs
+  const [expanded, setExpanded] = useState("");                // the one rig whose finalized checks are listed
+  const [searchText, setSearchText] = useState("");   // narrows what's SHOWN only — never changes `selected`
+  const [typeFilter, setTypeFilter] = useState("all");
   const [range, setRange] = useState(() => presetRange("month"));
   const [presetKey, setPresetKey] = useState("month");
   const [fleetBusy, setFleetBusy] = useState(false);
   const [fleetErr, setFleetErr] = useState("");
-  const isFleet = scope === ALL_RIGS;
-  // The per-rig list keeps reading a plain rig id, so fleet mode simply parks it. Nothing in the
-  // existing single-check path had to change to make room for the combined one.
-  const rigId = isFleet ? "" : scope;
+  // The per-rig check list reads a plain rig id — now the EXPANDED row rather than a dropdown choice.
+  const rigId = expanded;
   const [checks, setChecks] = useState([]);
   const [checksLoading, setChecksLoading] = useState(false);
   const [checksErr, setChecksErr] = useState("");
@@ -11632,12 +12713,29 @@ function ApparatusChecksReport({ S, dept, back }) {
         if (error) { setErr(error.message || "Please try again."); return; }
         const list = data || [];
         setRigs(list);
-        // Land on the first unit rather than an empty screen. Only when nothing is chosen yet,
-        // so a retry after an error does not yank the user off the rig they were looking at.
-        setScope((cur) => cur || (list[0]?.id ?? ""));
+        // Every truck ticked on first load (the old default was "all apparatus" for the combined report);
+        // a retry keeps whatever the user had ticked.
+        setSelected((cur) => (cur.size ? cur : new Set(list.map((r) => r.id))));
       });
   };
   useEffect(() => { loadRigs(); }, []);
+  /* PER-TRUCK SUMMARY for the list — last finalized check, its PASS/FAIL, total finalized checks. One light read
+     of the same table (apparatus_checks, finalized, three columns), dept-scoped by its existing RLS. A failure
+     shows "—" in those columns, never "never checked". */
+  const [summary, setSummary] = useState(null);   // { [apparatus_id]: { last, outcome, n } } | null = not loaded
+  const [summaryErr, setSummaryErr] = useState(false);
+  const loadSummary = () => {
+    setSummaryErr(false);
+    supabase.from("apparatus_checks").select("apparatus_id, performed_at, outcome").eq("state", "finalized").order("performed_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error || !data) { setSummaryErr(true); return; }
+        const m = {};
+        for (const c of data) { const e = m[c.apparatus_id]; if (!e) m[c.apparatus_id] = { last: c.performed_at, outcome: c.outcome, n: 1 }; else e.n += 1; }
+        setSummary(m);
+      });
+  };
+  useEffect(() => { loadSummary(); }, []);
+  useReconnect(() => { if (summaryErr) loadSummary(); });
 
   const loadChecks = (id) => {
     if (!id) { setChecks([]); return; }
@@ -11682,20 +12780,22 @@ function ApparatusChecksReport({ S, dept, back }) {
      Local-midnight bounds, and `< the day after` rather than `<= the end date`. A YYYY-MM-DD
      compared against a timestamptz means midnight, so a naive .lte() would drop almost the whole
      final day of the range — on a county report, silently. */
-  async function downloadFleet() {
-    setFleetErr(""); setFleetBusy(true);
+  async function downloadFleet(ids, opts = {}) {
+    if (!ids || !ids.length) { setFleetErr("Tick at least one truck first."); return false; }
+    setFleetErr(""); setFleetBusy(opts.label || true);
     try {
       const startAt = new Date(`${range.from}T00:00:00`);
       const endAt = new Date(`${range.to}T00:00:00`); endAt.setDate(endAt.getDate() + 1);
-      if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) { setFleetErr("Those dates don't look right — nothing was downloaded."); return; }
+      if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) { setFleetErr("Those dates don't look right — nothing was downloaded."); return false; }
 
       const { data: checks, error: cErr } = await supabase.from("apparatus_checks")
         .select(APPARATUS_CHECK_COLS)
+        .in("apparatus_id", ids)   // only the ticked trucks
         .eq("state", "finalized")
         .gte("performed_at", startAt.toISOString())
         .lt("performed_at", endAt.toISOString())
         .order("performed_at", { ascending: false });
-      if (cErr) { setFleetErr(cErr.message || "Couldn't load the checks — nothing was downloaded."); return; }
+      if (cErr) { setFleetErr(cErr.message || "Couldn't load the checks — nothing was downloaded."); return false; }
 
       // Items for every check in the range, batched. REFUSE on failure: a combined packet missing
       // its checklists is a WRONG document, not a partial one, and the wrong one gets filed.
@@ -11703,41 +12803,48 @@ function ApparatusChecksReport({ S, dept, back }) {
       const itemsByCheck = {};
       if (ids.length) {
         const { data: rows, error: rErr } = await fetchResultsForChecks(ids);
-        if (rErr) { setFleetErr(rErr.message || "Couldn't load the checklist items — nothing was downloaded."); return; }
+        if (rErr) { setFleetErr(rErr.message || "Couldn't load the checklist items — nothing was downloaded."); return false; }
         for (const r of rows) { (itemsByCheck[r.check_id] = itemsByCheck[r.check_id] || []).push(r); }
       }
 
       // Grouped by truck in the rig order already on screen. Every rig is included even with no
       // checks in the period: a truck missing from a county packet reads as an oversight, while a
       // truck listed as "no checks in this period" is a finding.
-      const byRig = rigs.map((r) => ({
+      const byRig = rigs.filter((r) => ids.includes(r.id)).map((r) => ({
         name: r.name, type: r.type,
         checks: (checks || []).filter((c) => c.apparatus_id === r.id)
           .map((c) => ({ ...c, items: itemsByCheck[c.id] || [] })),
       }));
 
-      downloadFleetCheck({
+      await downloadFleetCheck({
         deptName: dept?.name || "Department",
         station: dept?.station || "",
         range: { from: range.from, to: range.to },
         rigs: byRig,
       });
+      return true;
     } finally { setFleetBusy(false); }
+  }
+  /* SEPARATE PDFs — one per ticked truck for the same window: the combined generator scoped to one rig at a time,
+     in order, each awaited (so a phone's share sheet opens once per truck rather than all at once). */
+  async function downloadSeparate(ids) {
+    if (!ids || !ids.length) { setFleetErr("Tick at least one truck first."); return; }
+    for (const id of ids) {
+      const r = rigs.find((x) => x.id === id);
+      if (!(await downloadFleet([id], { label: r?.name || "truck" }))) break;   // stop at the first failure; its error is on screen
+    }
   }
 
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }); };
 
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>APPARATUS CHECKS</div>
-        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Completed checks for each unit, newest first. Download any one as the county report.</div>
-      </div>
+    <PageShell band watermark="REPORTS" kicker="APPARATUS CHECKS" title={dept?.name || "Department"}
+      sub="Completed checks for each unit, newest first. Download any one as the county report."
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
 
       {err && (
-        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
           <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load the apparatus list</div>
@@ -11747,88 +12854,143 @@ function ApparatusChecksReport({ S, dept, back }) {
         </div>
       )}
 
-      {/* TOOLBAR. Scope first: a single unit keeps the per-check list exactly as it was, and
-          "All apparatus" swaps in a date range plus one combined download. The date controls
-          appear only in fleet mode — a range would do nothing in single-rig mode, and a control
-          that does nothing is worse than no control. */}
-      {loaded && !err && rigs.length > 0 && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
-          <label style={{ ...S.field, minWidth: 220 }}>
-            <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Apparatus</span>
-            <select style={FS.input} value={scope} onChange={(e) => setScope(e.target.value)}>
-              <option value={ALL_RIGS}>All apparatus — combined report</option>
-              {rigs.map((r) => <option key={r.id} value={r.id}>{r.name}{r.type ? ` — ${r.type}` : ""}</option>)}
-            </select>
-          </label>
-          {isFleet && <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />}
-        </div>
-      )}
-
-      {/* FLEET MODE — one combined PDF for every unit over the range. The per-rig list below is
-          untouched and still runs the single-check path. */}
-      {loaded && !err && rigs.length > 0 && isFleet && (
-        <div style={{ ...FS.card, padding: "16px 18px" }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <ClipboardCheck size={18} color={FIRE.red} style={{ flexShrink: 0, marginTop: 2 }} />
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Combined apparatus report</div>
-              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
-                Every unit's completed checks between the selected dates, in one PDF: a fleet summary,
-                then each truck's checks. Failed checks are expanded item by item.
-              </div>
+      {/* TRUCK PICKER (scales to any fleet): search + type chips narrow what's SHOWN; `selected` is the single source of
+          truth and is never changed by filtering — a ticked truck that's filtered out stays ticked and stays in the
+          report. Groups by type with a per-group 'Select all N' (adds only). A sticky bar keeps the count (of ALL
+          trucks), Clear and the two report buttons in reach. Expanding a row still lists that truck's checks with
+          the per-check County report — unchanged. */}
+      {loaded && !err && rigs.length > 0 && (() => {
+        const ids = rigs.filter((r) => selected.has(r.id)).map((r) => r.id);   // report ids: ALL ticked trucks, filtered or not
+        const BUCKETS = [["Pumper", /pumper|engine/i], ["Tender / Tanker", /tender|tanker/i], ["Brush", /brush/i], ["Rescue", /rescue/i],
+          ["Ladder / Aerial", /ladder|aerial|quint|tower/i], ["Squad", /squad/i], ["Command", /command|chief|utility/i], ["Ambulance", /ambulance|medic|ems/i]];
+        const bucketOf = (r) => (BUCKETS.find(([, re]) => re.test(r.type || "")) || ["Other"])[0];
+        const q = searchText.trim().toLowerCase();
+        const matchesSearch = (r) => !q || String(r.name || "").toLowerCase().includes(q);
+        const counts = {}; rigs.filter(matchesSearch).forEach((r) => { const k = bucketOf(r); counts[k] = (counts[k] || 0) + 1; });
+        const shown = rigs.filter((r) => matchesSearch(r) && (typeFilter === "all" || bucketOf(r) === typeFilter));
+        const groups = [...BUCKETS.map(([k]) => k), "Other"].map((k) => [k, shown.filter((r) => bucketOf(r) === k)]).filter(([, l]) => l.length);
+        const shownOn = shown.filter((r) => selected.has(r.id)).length;
+        const master = !shown.length ? "none" : shownOn === shown.length ? "all" : shownOn ? "some" : "none";
+        const addAll = (list) => setSelected((cur) => { const n = new Set(cur); list.forEach((r) => n.add(r.id)); return n; });
+        const toggleShown = () => setSelected((cur) => { const n = new Set(cur); if (master === "all") shown.forEach((r) => n.delete(r.id)); else shown.forEach((r) => n.add(r.id)); return n; });
+        const toggle = (id) => setSelected((cur) => { const n = new Set(cur); n.has(id) ? n.delete(id) : n.add(id); return n; });
+        const box = (on) => ({ width: 18, height: 18, borderRadius: 5, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${on ? FIRE.redBright : FIRE.line2Noir}`, background: on ? FIRE.redBright : "transparent" });
+        const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
+        const chip = (k, label, n) => {
+          const on = typeFilter === k;
+          return <button key={k} type="button" onClick={() => setTypeFilter(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 10px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? FIRE.redBright : FIRE.line2Noir}`, background: on ? "rgba(200,50,58,.14)" : FIRE.card2Noir, color: on ? FIRE.textPrimary : FIRE.textSecondary }}>{label} <span style={{ opacity: 0.7 }}>{n}</span></button>;
+        };
+        return (<>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
+            <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
+          </div>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "0 2px 10px", lineHeight: 1.45 }}>Reports cover the ticked trucks' completed checks between the selected dates. Combined: a fleet summary, then each truck. Failed checks are expanded item by item.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ position: "relative", flex: "1 1 200px", maxWidth: 320 }}>
+              <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }} />
+              <input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Find a truck…" aria-label="Find a truck" style={{ ...FS.input, paddingLeft: 32 }} />
             </div>
-            <button disabled={fleetBusy} onClick={downloadFleet}
-              style={{ ...FS.btnPrimary, opacity: fleetBusy ? 0.6 : 1 }}>
-              {fleetBusy ? <><Loader2 size={14} className="spin" /> Building…</> : <><Download size={15} /> Download combined report</>}
+            {chip("all", "All", rigs.filter(matchesSearch).length)}
+            {[...BUCKETS.map(([k]) => k), "Other"].filter((k) => counts[k]).map((k) => chip(k, k, counts[k]))}
+          </div>
+          <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", marginBottom: 8, borderRadius: 11, border: `1px solid ${FIRE.line2Noir}`, background: "rgba(14,17,22,.96)", backdropFilter: "blur(4px)" }}>
+            <button onClick={toggleShown} disabled={!shown.length} aria-label={master === "all" ? "Untick the trucks shown" : "Tick the trucks shown"} title={master === "all" ? "Untick the trucks shown" : "Tick the trucks shown"} style={{ ...box(master !== "none"), cursor: shown.length ? "pointer" : "default", padding: 0 }}>
+              {master === "all" ? <Check size={12} color="#fff" strokeWidth={3} /> : master === "some" ? <span style={{ width: 8, height: 2, background: "#fff", borderRadius: 1 }} /> : null}
             </button>
+            <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}><b style={{ color: FIRE.textPrimary }}>{ids.length}</b> of {rigs.length} truck{rigs.length === 1 ? "" : "s"} selected</span>
+            {ids.length > 0 && <button onClick={() => setSelected(new Set())} style={{ ...FS.btn, padding: "4px 10px", fontSize: 11.5 }}>Clear</button>}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button disabled={!!fleetBusy || !ids.length} onClick={() => downloadFleet(ids)} style={{ ...FS.btnPrimary, opacity: (fleetBusy || !ids.length) ? 0.6 : 1 }}>
+                {fleetBusy === true ? <><Loader2 size={14} className="spin" /> Building…</> : <><Download size={15} /> Combined report ({ids.length})</>}
+              </button>
+              <button disabled={!!fleetBusy || !ids.length} onClick={() => downloadSeparate(ids)} style={{ ...FS.btn, opacity: (fleetBusy || !ids.length) ? 0.6 : 1 }}>
+                {typeof fleetBusy === "string" ? <><Loader2 size={14} className="spin" /> {fleetBusy}…</> : <><Download size={14} color={FIRE.btnIcon} /> Separate PDFs ({ids.length})</>}
+              </button>
+            </div>
           </div>
           {fleetErr && (
-            <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 12, padding: "9px 11px", borderRadius: 9, background: "rgba(200,50,58,.10)", border: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ ...NOIR_ERR, display: "flex", alignItems: "center", gap: 9, margin: "0 0 10px" }}>
               <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
               <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{fleetErr}</span>
             </div>
           )}
-        </div>
-      )}
-
-      {!loaded || err || isFleet ? null : rigs.length === 0 ? (
-        <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+          {summaryErr && <ReadRetry what="the last-check summary" onRetry={loadSummary} />}
+          {shown.length === 0 && <div style={{ ...FS.cardNoir, padding: "18px 16px", fontSize: 13, color: FIRE.textMuted }}>No trucks match — clear the search or pick another type. Ticked trucks stay ticked.</div>}
+          {groups.map(([gk, list]) => {
+            const allIn = list.every((r) => selected.has(r.id));
+            return (
+              <div key={gk} style={{ ...FS.cardNoir, padding: "2px 14px", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                  <span style={{ flex: 1, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>{gk} · {list.length}</span>
+                  <span style={{ width: 150, textAlign: "right", fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Last check</span>
+                  <span style={{ width: 60, textAlign: "right", fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Checks</span>
+                  <button onClick={() => addAll(list)} disabled={allIn} style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, opacity: allIn ? 0.5 : 1 }}>{allIn ? "All selected" : `Select all ${list.length}`}</button>
+                </div>
+                {list.map((r, i) => {
+                  const sm = summary ? summary[r.id] : undefined, on = selected.has(r.id), open = expanded === r.id;
+                  return (
+                    <div key={r.id} style={{ borderBottom: i === list.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
+                        <button onClick={() => toggle(r.id)} aria-pressed={on} aria-label={`${on ? "Untick" : "Tick"} ${r.name}`} style={{ ...box(on), cursor: "pointer", padding: 0 }}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</button>
+                        <button onClick={() => setExpanded(open ? "" : r.id)} style={{ flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
+                          {r.type && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.type}</div>}
+                        </button>
+                        <span style={{ width: 150, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, whiteSpace: "nowrap" }}>
+                          {summary === null ? <span style={{ fontSize: 12, color: FIRE.textMuted }}>—</span>
+                            : sm ? <><span style={{ fontSize: 11.5, color: FIRE.textSecondary }}>{fmtDay(sm.last)}</span><ResultBadge pass={sm.outcome !== "fail"}>{sm.outcome === "fail" ? "FAIL" : "PASS"}</ResultBadge></>
+                            : <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Never checked</span>}
+                        </span>
+                        <span style={{ width: 60, textAlign: "right", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, ...FS.num }}>{summary === null ? "—" : (sm ? sm.n : 0)}</span>
+                        <button onClick={() => setExpanded(open ? "" : r.id)} aria-expanded={open} title={open ? "Hide checks" : "Show checks"} style={{ width: 22, background: "none", border: "none", padding: 0, cursor: "pointer", color: FIRE.textMuted, display: "inline-flex", justifyContent: "center" }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+                      </div>
+                  {open && (
+                    <div style={{ padding: "0 0 12px 28px" }}>
+                      {checksErr && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                          <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>{checksErr}</div>
+                          <button onClick={() => loadChecks(rigId)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><RefreshCw size={13} color={FIRE.btnIcon} /> Try again</button>
+                        </div>
+                      )}
+                      {checksLoading ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading checks…</div>
+                      ) : (checks.length === 0 && !checksErr) ? (
+                        <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No completed checks recorded for {r.name} yet.</div>
+                      ) : checks.map((c) => {
+                        const failed = c.outcome === "fail";
+                        return (
+                          <div key={c.id} style={{ ...NOIR_INSET, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            <ResultBadge pass={!failed}>{failed ? "FAIL" : "PASS"}</ResultBadge>
+                            <div style={{ flex: 1, minWidth: 160 }}>
+                              <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
+                              <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
+                            </div>
+                            <button disabled={busyId === c.id} onClick={() => downloadOne(c)}
+                              style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: busyId === c.id ? 0.6 : 1 }}>
+                              {busyId === c.id ? <><Loader2 size={13} className="spin" /> Preparing…</> : <><Download size={13} color={FIRE.btnIcon} /> County report</>}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </>);
+      })()}
+      {loaded && !err && rigs.length === 0 && (
+        <div style={{ ...FS.cardNoir, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus on record yet.</div>
         </div>
-      ) : (<>
-        {checksErr && (
-          <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-            <AlertTriangle size={17} color={FIRE.redText} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>{checksErr}</div>
-            <button onClick={() => loadChecks(rigId)} style={FS.btn}><RefreshCw size={14} color={FIRE.btnIcon} /> Try again</button>
-          </div>
-        )}
-        {checksLoading ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading checks…</div>
-        ) : (checks.length === 0 && !checksErr) ? (
-          <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
-            <ClipboardCheck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
-            <div>No completed checks recorded for {rig?.name || "this unit"} yet.</div>
-          </div>
-        ) : checks.map((c) => {
-          const failed = c.outcome === "fail";
-          return (
-            <div key={c.id} style={{ ...FS.card, background: FIRE.btnBg, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <Pill S={S} color={failed ? FIRE.redBright : FIRE.green}>{failed ? "FAIL" : "PASS"}</Pill>
-              <div style={{ flex: 1, minWidth: 180 }}>
-                <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
-                <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
-              </div>
-              <button disabled={busyId === c.id} onClick={() => downloadOne(c)}
-                style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, opacity: busyId === c.id ? 0.6 : 1 }}>
-                {busyId === c.id ? <><Loader2 size={13} className="spin" /> Preparing…</> : <><Download size={13} color={FIRE.btnIcon} /> County report</>}
-              </button>
-            </div>
-          );
-        })}
-      </>)}
-    </div>
+      )}
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -11849,6 +13011,102 @@ function ApparatusChecksReport({ S, dept, back }) {
    FAILURE. Never blanks: the last good figures stay, `err` is raised so the caller can OMIT the section
    rather than print zeros, and useReconnect retries. A Chief's Report claiming "0 credited hours"
    because a query failed is far worse than one with no hours section at all. */
+/* ---- Chief's Report facts (b4c_reports_chief_noir.html) ----
+   Shared so the report and Board Stats quote the same numbers by construction. Every hook follows the
+   station-hours pattern: null/unloaded until a read lands, `err` on failure (the caller OMITS the section and
+   says so — never zeros), and a reconnect retry. */
+// FUNDING — BoardStats' loadMoney, lifted verbatim (same four reads, same RLS). `enabled` is the caller's money-viewer
+// gate, the same one Board Stats applies (managers, Funding module on); when false nothing is read.
+function useMoneyFacts(range, enabled) {
+  const [donations, setDonations] = useState(null);     // contributions in the period; null = unknown
+  const [proceeds, setProceeds] = useState(null);       // fundraiser proceeds in the period
+  const [funds, setFunds] = useState(null);             // active donation campaigns
+  const [raised, setRaised] = useState(null);           // campaign_id -> all-time contributions
+  const [moneyErr, setMoneyErr] = useState(false);
+  const loadMoney = () => {
+    if (!enabled) return;
+    setMoneyErr(false);
+    const fail = () => setMoneyErr(true);
+    supabase.from("donation_activity").select("amount").eq("kind", "contribution")
+      .gte("occurred_on", range.from).lte("occurred_on", range.to)
+      .then(({ data, error }) => { if (error || !data) return fail(); setDonations(data.reduce((t, r) => t + (Number(r.amount) || 0), 0)); });
+    supabase.from("fundraisers").select("proceeds")
+      .gte("target_date", range.from).lte("target_date", range.to)
+      .then(({ data, error }) => { if (error || !data) return fail(); setProceeds(data.reduce((t, r) => t + (Number(r.proceeds) || 0), 0)); });
+    supabase.from("donation_campaigns").select("id, name, status, goal_amount, sort, created_at")
+      .order("sort", { ascending: true }).order("created_at", { ascending: true })
+      .then(({ data, error }) => { if (error || !data) return fail(); setFunds(data.filter((c) => c.status !== "archived")); });
+    supabase.from("donation_activity").select("campaign_id, amount").eq("kind", "contribution").not("campaign_id", "is", null)
+      .then(({ data, error }) => {
+        if (error || !data) return fail();
+        const m = {}; for (const r of data) m[r.campaign_id] = (m[r.campaign_id] || 0) + (Number(r.amount) || 0);
+        setRaised(m);
+      });
+  };
+  useEffect(() => { loadMoney(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled, range.from, range.to]);
+  useReconnect(() => { if (moneyErr) loadMoney(); });
+  return { donations, proceeds, funds, raised, moneyErr, retry: loadMoney };
+}
+// APPARATUS-CHECK COMPLIANCE — finalized apparatus_checks performed in the period (the table ApparatusChecksReport
+// reads), with local-midnight bounds and `< the day after` like the fleet report.
+function useCheckCompliance(range, enabled) {
+  const [rows, setRows] = useState(null); const [err, setErr] = useState(false);
+  const load = () => {
+    if (!enabled || !range.from || !range.to) return;
+    setErr(false);
+    const st = new Date(`${range.from}T00:00:00`), en = new Date(`${range.to}T00:00:00`); en.setDate(en.getDate() + 1);
+    supabase.from("apparatus_checks").select("apparatus_id, outcome").eq("state", "finalized")
+      .gte("performed_at", st.toISOString()).lt("performed_at", en.toISOString())
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setRows(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled, range.from, range.to]);
+  useReconnect(() => { if (err) load(); });
+  const ok = enabled && rows != null && !err;
+  return { ok, err: enabled && err, retry: load,
+    checks: ok ? rows.length : null, units: ok ? new Set(rows.map((r) => r.apparatus_id)).size : null,
+    failed: ok ? rows.filter((r) => r.outcome === "fail").length : null };
+}
+// CERTS APPROVED — cert_submissions decided 'approved' in the period. approve_cert_submission stamps reviewed_at,
+// so the period filter is on the real decision time. Dept-scoped by the admin read policy.
+function useCertsApproved(range, members) {
+  const [rows, setRows] = useState(null); const [err, setErr] = useState(false);
+  const load = () => {
+    if (!range.from || !range.to) return;
+    setErr(false);
+    const st = new Date(`${range.from}T00:00:00`), en = new Date(`${range.to}T00:00:00`); en.setDate(en.getDate() + 1);
+    supabase.from("cert_submissions").select("id, name, member_id, reviewed_at").eq("status", "approved")
+      .gte("reviewed_at", st.toISOString()).lt("reviewed_at", en.toISOString()).order("reviewed_at", { ascending: false })
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setRows(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [range.from, range.to]);
+  useReconnect(() => { if (err) load(); });
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const ok = rows != null && !err;
+  return { ok, err, retry: load, count: ok ? rows.length : null,
+    list: ok ? rows.map((r) => ({ member: nameById.get(r.member_id) || "A member", cert: r.name })) : [] };
+}
+// EQUIPMENT READINESS — AS OF TODAY: open equipment_issues by kind (labels per the CHECK constraint) and gear aging
+// out (gearStatus rank <= 1 — the Equipment page's agingN rule, over units of active types).
+function useEquipmentReadiness(enabled) {
+  const [issues, setIssues] = useState(null); const [units, setUnits] = useState(null); const [err, setErr] = useState(false);
+  const load = () => {
+    if (!enabled) return;
+    setErr(false);
+    supabase.from("equipment_issues").select("id, kind").is("resolved_at", null)
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setIssues(data); });
+    supabase.from("equipment").select("id, manufacture_date, equipment_type(service_life_years, active)")
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setUnits(data); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled]);
+  useReconnect(() => { if (err) load(); });
+  const ok = enabled && issues != null && units != null && !err;
+  const byKind = {};
+  if (ok) for (const i of issues) byKind[i.kind] = (byKind[i.kind] || 0) + 1;
+  return { ok, err: enabled && err, retry: load,
+    openIssues: ok ? issues.length : null,
+    issueKinds: ok ? ISSUE_KINDS.filter(([k]) => byKind[k]).map(([k, label]) => ({ label, n: byKind[k] })) : [],
+    agingOut: ok ? units.filter((u) => u.equipment_type?.active !== false && gearStatus(u.manufacture_date, u.equipment_type?.service_life_years).rank <= 1).length : null };
+}
 function useStationHoursRange(range) {
   const [shifts, setShifts] = useState([]);
   const [iso, setIso] = useState([]);
@@ -11977,20 +13235,15 @@ function CapitalPlanReport({ S, dept, back }) {
   const TH = { textAlign: "left", padding: "6px 12px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" };
   const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={{ marginBottom: 16, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={FS.kicker}>CAPITAL REPLACEMENT PLAN</div>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
-          <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>What the fleet cost, when each unit is due for replacement, and what that adds up to by year.</div>
-        </div>
-        {loaded && !err && (planned.length > 0 || unplanned.length > 0) && (
-          <button style={FS.btn} onClick={() => downloadCapitalPlan({ deptName: dept?.name || "Department", station: dept?.station || "", groups, unplanned, grandTotal, recommendedAnnual })}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
-        )}
-      </div>
+    <PageShell band watermark="REPORTS" kicker="CAPITAL REPLACEMENT PLAN" title={dept?.name || "Department"}
+      sub="What the fleet cost, when each unit is due for replacement, and what that adds up to by year."
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}
+      actions={loaded && !err && (planned.length > 0 || unplanned.length > 0) ? (
+        <button style={FS.btn} onClick={() => downloadCapitalPlan({ deptName: dept?.name || "Department", station: dept?.station || "", groups, unplanned, grandTotal, recommendedAnnual })}><Download size={15} color={FIRE.btnIcon} /> Download PDF</button>
+      ) : null}>
+      <NoirSkin>
       {err && (
-        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
           <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load the apparatus list</div>
@@ -12000,7 +13253,7 @@ function CapitalPlanReport({ S, dept, back }) {
         </div>
       )}
       {!loaded || err ? null : rigs.length === 0 ? (
-        <div style={{ ...FS.card, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
+        <div style={{ ...FS.cardNoir, padding: "26px 18px", textAlign: "center", color: FIRE.textMuted, fontSize: 14 }}>
           <Truck size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No apparatus on record yet.</div>
         </div>
@@ -12009,54 +13262,65 @@ function CapitalPlanReport({ S, dept, back }) {
             cost eventually; it does not tell them what to do on Monday. The per-year set-aside
             does — it is the number that goes in a budget line. Above the forecast because it is
             the answer, and the tables below it are the working. */}
-        {groups.length > 0 && (
-          <div style={{ ...FS.card, padding: "16px 18px", marginBottom: 14, borderLeft: `3px solid ${FIRE.red}` }}>
-            <div style={{ ...FS.kicker, marginBottom: 6 }}>RECOMMENDED SET-ASIDE</div>
-            <div style={{ fontSize: 30, fontWeight: 800, color: FIRE.red, ...FS.num, lineHeight: 1.05 }}>
-              {money(recommendedAnnual)}{recommendedAnnual != null && <span style={{ fontSize: 16, fontWeight: 700, color: FIRE.textSecondary }}> / year</span>}
+        {groups.length > 0 && (() => {
+          /* Gold headline tiles (b4c_reports_capital_noir.html) — grandTotal and recommendedAnnual, both already
+             computed above. The set-aside stays the answer; the total is the scale it answers. */
+          const gold = { ...FS.cardNoir, flex: "1 1 240px", minWidth: 0, padding: "16px 18px", borderTop: "3px solid #D8A24A", background: `radial-gradient(120% 140% at 100% 0%, rgba(216,162,74,.12), transparent 55%), ${FIRE.cardNoir}` };
+          const big = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 32, lineHeight: 1.05, color: "#E6C078", ...FS.num };
+          const lab = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 7 };
+          const costed = planned.filter((r) => r.finalCost != null).length;
+          return (
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={gold}>
+                <div style={lab}>Total fleet replacement</div>
+                <div style={big}>{anyCost ? money(grandTotal) : "—"}</div>
+                <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 6 }}>{costed} unit{costed === 1 ? "" : "s"} with a replacement cost{unplanned.length ? ` · ${unplanned.length} not yet planned` : ""}</div>
+              </div>
+              <div style={gold}>
+                <div style={lab}>Recommended set-aside</div>
+                <div style={big}>{money(recommendedAnnual)}{recommendedAnnual != null && <span style={{ fontSize: 17, color: FIRE.textMuted, fontWeight: 400, fontFamily: "inherit" }}> / yr</span>}</div>
+                <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 6, lineHeight: 1.45 }}>
+                  {recommendedAnnual == null
+                    ? "No replacement costs recorded yet — add a cost today or an override on the Apparatus page to get this figure."
+                    : "Set this aside each year to fund each unit by its replacement year."}
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, lineHeight: 1.45 }}>
-              {recommendedAnnual == null
-                ? "No replacement costs recorded yet — add a cost today or an override on the Apparatus page to get this figure."
-                : "Set this aside each year to stay on track to fund every planned replacement."}
-            </div>
-          </div>
-        )}
+          );
+        })()}
         {/* forecast */}
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>FORECAST BY YEAR</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+          <CardHead icon={BarChart3} title="Forecast by year" style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
           {groups.length === 0 ? (
             <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No apparatus has a planned replacement year yet. Add one from the Apparatus page.</div>
           ) : (<>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
-              <thead><tr><th style={TH}>Year</th><th style={{ ...TH, textAlign: "right" }}>Units</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th></tr></thead>
-              <tbody>
-                {groups.map((g) => (
-                  <tr key={g.year} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                    <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary, ...FS.num }}>{g.year}</td>
-                    <td style={{ ...TD, textAlign: "right", ...FS.num }}>{g.rows.length}</td>
-                    <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</td>
-                  </tr>
-                ))}
-                <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
-                  <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Total</td>
-                  <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{planned.length}</td>
-                  <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{money(grandTotal)}</td>
-                </tr>
-              </tbody>
-            </table>
+            {(() => {
+              const max = Math.max(...groups.map((g) => g.subtotal), 1);
+              const short = (n) => n >= 1e6 ? `$${(n / 1e6).toFixed(2).replace(/0$/, "")}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : money(n);
+              return (
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 170, padding: "8px 14px 4px", overflowX: "auto" }}>
+                  {groups.map((g) => (
+                    <div key={g.year} title={`${g.year}: ${money(g.subtotal)} · ${g.rows.length} unit${g.rows.length === 1 ? "" : "s"}`} style={{ flex: "1 0 44px", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
+                      <div style={{ width: "100%", maxWidth: 46, height: `${Math.max(3, (g.subtotal / max) * 100)}%`, background: "linear-gradient(180deg,#E6C078,#D8A24A)", borderRadius: "5px 5px 0 0", opacity: g.subtotal ? 1 : 0.35 }} />
+                      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: FIRE.textSecondary }}>{g.year}</div>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{short(g.subtotal)}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             {!anyCost && <div style={{ fontSize: 11.5, color: FIRE.amberText, padding: "8px 12px 4px" }}>No replacement costs recorded yet — the totals above are $0 until a cost today or an override is filled in on the Apparatus page.</div>}
           </>)}
         </div>
         {/* per-year detail */}
         {groups.map((g) => (
-          <div key={g.year} style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-            <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>{g.year} — {money(g.subtotal)}</div>
+          <div key={g.year} style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+            <CardHead icon={Calendar} title={String(g.year)} right={<span style={{ ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</span>} style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
               <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th><th style={{ ...TH, textAlign: "right" }}>Set aside / yr</th></tr></thead>
               <tbody>
                 {g.rows.map((r) => (
-                  <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                     <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</td>
                     <td style={TD}>{r.type || "—"}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
@@ -12077,14 +13341,14 @@ function CapitalPlanReport({ S, dept, back }) {
         ))}
         {/* not yet planned */}
         {unplanned.length > 0 && (
-          <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
-            <div style={{ ...FS.kicker, padding: "10px 12px 4px", color: FIRE.textMuted2 }}>NOT YET PLANNED</div>
+          <div style={{ ...FS.cardNoir, padding: "8px 0", overflowX: "auto" }}>
+            <CardHead icon={Truck} title="Not yet planned" style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
             <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "0 12px 6px" }}>No planned replacement year on record.</div>
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
               <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th></tr></thead>
               <tbody>
                 {unplanned.map((r) => (
-                  <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                  <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                     <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</td>
                     <td style={TD}>{r.type || "—"}</td>
                     <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
@@ -12095,8 +13359,49 @@ function CapitalPlanReport({ S, dept, back }) {
             </table>
           </div>
         )}
+        {/* DEPRECIATION — ESTIMATE, fenced off from every entered/computed dollar above. Not an appraisal. */}
+        {rigs.length > 0 && (() => {
+          const rows = rigs.map((r) => ({ r, d: depreciationOf(r, thisYear) }));
+          const est = rows.filter((x) => x.d);
+          const fleetValue = est.reduce((t, x) => t + x.d.value, 0);
+          const lifeText = CAPITAL_DEFAULT_LIFE.map(([re, y]) => `${String(re.source).split("|")[0].replace(/^\w/, (c) => c.toUpperCase())} ${y}`).join(" · ");
+          return (
+            <div style={{ ...FS.cardNoir, padding: "14px 16px", marginTop: 14, border: `1px dashed ${FIRE.line2Noir}` }}>
+              <CardHead icon={BarChart3} title="Depreciation estimate" right={<span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", color: FIRE.amberText, border: `1px solid ${FIRE.amberText}66`, borderRadius: 5, padding: "2px 7px" }}>ESTIMATE · NOT AN APPRAISAL</span>} />
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ ...NOIR_INSET, padding: "12px 14px", minWidth: 220 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 6 }}>Est. current fleet value</div>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{est.length ? money(fleetValue) : "—"}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 5 }}>covers {est.length} of {rigs.length} unit{rigs.length === 1 ? "" : "s"}{est.length < rigs.length ? " — the rest need a purchase cost and year" : ""}</div>
+                </div>
+                <div style={{ flex: "1 1 260px", fontSize: 11.5, color: FIRE.textMuted, lineHeight: 1.5 }}>
+                  Straight-line to a $0 residual over each unit's service life — an estimate for planning, not an appraisal, book value or resale price, and never part of the replacement totals above. Life comes from the unit's planned replacement year when set, otherwise a default by type ({lifeText}; others {CAPITAL_DEFAULT_LIFE_FALLBACK} yrs).
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+                  <thead><tr><th style={TH}>Apparatus</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={TH}>Service life</th><th style={{ ...TH, minWidth: 120 }}>Age of life</th><th style={{ ...TH, textAlign: "right" }}>Depreciated</th><th style={{ ...TH, textAlign: "right" }}>Est. value today</th></tr></thead>
+                  <tbody>
+                    {rows.map(({ r, d }) => (
+                      <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                        <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}{r.type ? <span style={{ color: FIRE.textMuted, fontWeight: 400 }}> · {r.type}</span> : null}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num }}>{money(r.purchaseCost)}</td>
+                        <td style={TD}>{d ? <>{d.life} yrs <span style={{ color: FIRE.textMuted }}>· {d.fromPlan ? "plan" : "default"}</span></> : "—"}</td>
+                        <td style={TD}>{d ? <span style={{ display: "block", height: 6, borderRadius: 99, background: FIRE.line2Noir, overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${Math.round(d.ageFrac * 100)}%`, background: d.ageFrac >= 1 ? FIRE.redBright : d.ageFrac >= 0.75 ? FIRE.amberText : FIRE.textSecondary }} /></span> : "—"}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num }}>{d ? `${d.pctDepreciated}%` : "—"}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{d ? money(d.value) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
       </>)}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -12113,6 +13418,7 @@ const RANGES = {
 // summary are guaranteed to be the same rows. Still no coordinates anywhere — a shift carries only
 // verified true/false, and no distance is ever computed or shown.
 function StationHoursReport({ S, role, dept, notify, back }) {
+  const [openDay, setOpenDay] = useState(null);   // day-of-month opened in the Month-at-a-glance detail (null = closed)
   const [rangeKey, setRangeKey] = useState("month");
   const [shifts, setShifts] = useState([]);
   const [onNow, setOnNow] = useState([]);
@@ -12272,7 +13578,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
     loadReview(); load(rangeKey);
   }
   async function rejectOffsite(r) {
-    if (!window.confirm(`Reject ${r.member_name || "this member"}'s off-site time for "${r.offsite_label || "this work"}"?\n\nThe record is kept but credits zero hours.`)) return;
+    if (!(await noirConfirm({ title: "Reject this off-site time?", body: `${r.member_name || "This member"}'s off-site time for “${r.offsite_label || "this work"}”.\n\nThe record is kept but credits zero hours.`, confirmLabel: "Reject", danger: true }))) return;
     setBusyId(r.shift_id);
     const { error } = await supabase.rpc("reject_offsite", { p_shift_id: r.shift_id });
     setBusyId(null);
@@ -12281,7 +13587,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
     loadReview(); load(rangeKey);
   }
   async function voidShift(r) {
-    if (!window.confirm(`Void ${r.member_name || "this member"}'s shift from ${new Date(r.checked_in_at).toLocaleString()}?\n\nThe record is kept but credits zero hours.`)) return;
+    if (!(await noirConfirm({ title: "Void this shift?", body: `${r.member_name || "This member"}'s shift from ${new Date(r.checked_in_at).toLocaleString()}.\n\nThe record is kept but credits zero hours.`, confirmLabel: "Void shift", danger: true }))) return;
     setBusyId(r.shift_id);
     const { error } = await supabase.rpc("void_auto_closed_shift", { p_shift_id: r.shift_id });
     setBusyId(null);
@@ -12409,11 +13715,15 @@ function StationHoursReport({ S, role, dept, notify, back }) {
   const TD = { padding: "7px 12px", color: FIRE.textSecondary, whiteSpace: "nowrap" };
   const log = showAll ? shiftsForLog : shiftsForLog.slice(0, LOG_CAP);
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>STATION HOURS REPORT</div>
-        <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>{dept?.name || "Department"}</h1>
+    <PageShell band watermark="HOURS" kicker="STATION HOURS REPORT" title={dept?.name || "Department"} sub="Credited, de-overlapped hours · all stations"
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}
+      actions={
+        /* The range picker, moved into the band as the mocks' .segctl — same RANGES, same setRangeKey. */
+        <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap", position: "relative" }}>
+          {Object.entries(RANGES).map(([k, fn]) => <button key={k} onClick={() => setRangeKey(k)} aria-pressed={rangeKey === k} style={{ fontSize: 11, fontWeight: 600, padding: "5px 11px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: rangeKey === k ? FIRE.redBright : "transparent", color: rangeKey === k ? "#fff" : FIRE.textSecondary }}>{fn().label}</button>)}
+        </div>}>
+      <NoirSkin>
+      <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Who's putting in time at the station, and how much of it was verified on location.</div>
       </div>
       {/* PDF export. Hands the builder the figures THIS SCREEN ALREADY COMPUTED — the same `rows` the
@@ -12440,7 +13750,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         </div>
       )}
       {err && (
-        <div style={{ ...FS.card, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: "16px 18px", borderLeft: `3px solid ${FIRE.red}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
           <AlertTriangle size={18} color={FIRE.redText} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>Couldn't load station hours</div>
@@ -12453,7 +13763,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           Sits above the figures because it changes how they should be read: those hours are missing
           from Credited on purpose. */}
       {review.length > 0 && (
-        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
           <AlertTriangle size={18} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{review.length} shift{review.length === 1 ? "" : "s"} auto-closed — needs review</div>
@@ -12466,8 +13776,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           the dedicated RPCs, which raise rather than no-op, so a rejected correction is always visible
           to the leader rather than silently discarded. */}
       {reviewOpen && review.length > 0 && (
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 12 }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFTS NEEDING REVIEW</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}`, background: `radial-gradient(120% 140% at 100% 0%, rgba(204,158,82,.10), transparent 55%), ${FIRE.cardNoir}` }}>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead icon={AlertTriangle} title="Shifts needing review" count={review.length} style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             Oldest first, and not limited to the selected period — a shift flagged weeks ago still shows here.
           </div>
@@ -12492,7 +13802,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                a narrower edit permission into a narrower view of the department's own hours. */
             const canAct = isOffsite || isDA;
             return (
-              <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={r.shift_id} style={{ padding: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: isOffsite ? FIRE.amberText : FIRE.textMuted2 }}>
@@ -12574,7 +13884,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           sits on a screen leaders read for other reasons, and a panel that is always present stops
           being noticed. It appears only when there is something to do. */}
       {isDA && openLong.length > 0 && (
-        <div style={{ ...FS.card, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
           <AlertTriangle size={18} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{openLong.length} open shift{openLong.length === 1 ? "" : "s"} that may have missed a checkout</div>
@@ -12586,8 +13896,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         </div>
       )}
       {isDA && openLongShown && openLong.length > 0 && (
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 12 }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>OPEN SHIFTS — MAY HAVE MISSED A CHECKOUT</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 12 }}>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Clock} title="Open shifts — may have missed a checkout" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             Longest-running first, and not limited to the selected period. Times are Central.
           </div>
@@ -12595,7 +13905,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           {openLong.map((r) => {
             const busy = busyId === r.shift_id;
             return (
-              <div key={r.shift_id} style={{ padding: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={r.shift_id} style={{ padding: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{r.kind === "offsite" ? "Off-site" : "Standby"}</span>
@@ -12631,13 +13941,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           })}
         </div>
       )}
-      {/* range chips */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-        {Object.entries(RANGES).map(([k, fn]) => {
-          const on = rangeKey === k;
-          return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, ...(on ? { background: FIRE.btnBg, borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
-        })}
-      </div>
+      {/* range chips — moved into the hero band */}
       {/* summary — the credited figures lead; unverified is shown beside them, never inside them */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 10 }}>
         <Stat S={S} dark n={h1(dept_total)} label="Verified hours (credited)" />
@@ -12647,11 +13951,124 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         <Stat S={S} dark n={`${dept_vpct}%`} label="Verified at station" pct={dept_vpct} />
       </div>
       <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 14 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
+      {/* TOP CONTRIBUTORS (the mock's .leadgrid) — the same credited per-member rows the table below ranks, top 8,
+          bars relative to the leader. Presentation over loaded data; no new read. */}
+      {(() => {
+        const top = [...rows].filter((r) => (Number(r.total) || 0) > 0).sort((x, y) => y.total - x.total).slice(0, 8);
+        if (!top.length) return null;
+        const max = top[0].total || 1;
+        return (
+          <Card padding="14px 16px" style={{ marginBottom: 14 }}>
+            <CardHead icon={Award} title="Top contributors" right={<span>credited hours · {RANGES[rangeKey]().label.toLowerCase()}</span>} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", columnGap: 22 }}>
+              {top.map((r, i) => (
+                <div key={`${r.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                  <span style={{ width: 16, textAlign: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: i === 0 ? FIRE.redText : FIRE.textMuted, ...FS.num }}>{i + 1}</span>
+                  <span style={{ width: 30, height: 30, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, color: FIRE.textPrimary, flexShrink: 0 }}>{(r.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name || "—"}</div>
+                    <div style={{ height: 4, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", marginTop: 5 }}><div style={{ width: `${Math.round((r.total / max) * 100)}%`, height: "100%", borderRadius: 999, background: FIRE.redBright }} /></div>
+                  </div>
+                  <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flexShrink: 0, ...FS.num }}>{h1(r.total)}<span style={{ fontSize: 10, color: FIRE.textMuted, fontWeight: 500, fontFamily: "inherit" }}> hrs</span></span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
       {/* Monthly trend of the credited figure above — fixed trailing window, independent of the range chips. */}
       <DeptHoursByMonthPanel multiStation={multiStation} />
+      {/* MONTH AT A GLANCE (the mock's .hcal) — how many shifts started each day of the range's latest month, from
+          the shift rows already loaded. A count of shifts, not hours: crediting stays with the figures above. */}
+      {shifts.length > 0 && (() => {
+        const latest = shifts.reduce((m, x) => { const d = new Date(x.checked_in_at); return isNaN(d) ? m : (!m || d > m ? d : m); }, null);
+        if (!latest) return null;
+        const y = latest.getFullYear(), mo = latest.getMonth();
+        const dim = new Date(y, mo + 1, 0).getDate(), lead = new Date(y, mo, 1).getDay();
+        const perDay = new Array(dim + 1).fill(0);
+        shifts.forEach((x) => { const d = new Date(x.checked_in_at); if (!isNaN(d) && d.getFullYear() === y && d.getMonth() === mo) perDay[d.getDate()]++; });
+        const peak = Math.max(1, ...perDay);
+        const shade = (n) => n === 0 ? FIRE.insetNoir : `rgba(224,58,68,${(0.12 + 0.68 * (n / peak)).toFixed(2)})`;
+        return (
+          <Card padding="14px 16px" style={{ marginBottom: 14 }}>
+            <CardHead icon={CalendarCheck} title="Month at a glance" right={<span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{new Date(y, mo, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })} · shifts per day · less {[0.12, 0.32, 0.55, 0.8].map((o) => <i key={o} style={{ width: 10, height: 10, borderRadius: 2, background: `rgba(224,58,68,${o})`, display: "inline-block" }} />)} more</span>} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, maxWidth: 520 }}>
+              {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} style={{ textAlign: "center", fontSize: 9.5, fontWeight: 600, color: FIRE.textMuted }}>{d}</div>)}
+              {Array.from({ length: lead }, (_, i) => <div key={`b${i}`} />)}
+              {Array.from({ length: dim }, (_, i) => i + 1).map((d) => (
+                perDay[d] > 0 ? (
+                  <button key={d} type="button" onClick={() => setOpenDay(openDay === d ? null : d)} aria-pressed={openDay === d} title={`${new Date(y, mo, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: ${perDay[d]} shift${perDay[d] === 1 ? "" : "s"} — tap for detail`} style={{ aspectRatio: "1 / .8", borderRadius: 6, background: shade(perDay[d]), border: `1px solid ${openDay === d ? "#fff" : FIRE.lineNoir}`, boxShadow: openDay === d ? `0 0 0 2px ${FIRE.redBright}` : "none", fontSize: 10, fontWeight: 600, color: "#fff", padding: "3px 5px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", display: "block", width: "100%" }}>{d}</button>
+                ) : (
+                  <div key={d} title={`${new Date(y, mo, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: 0 shifts`} style={{ aspectRatio: "1 / .8", borderRadius: 6, background: shade(0), border: `1px solid ${FIRE.lineNoir}`, fontSize: 10, fontWeight: 600, color: FIRE.textMuted, padding: "3px 5px" }}>{d}</div>
+                )
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8 }}>Tap any day with shifts to see who was on station.</div>
+        {openDay && perDay[openDay] > 0 && (() => {
+          /* DAY DETAIL — the day's shift rows from the SAME `shifts` the figures above use (no new read). Every
+             number and badge comes from the shared rollupStationHours rule — run over the day for the tiles and
+             over each shift alone for its badge — so there is no second crediting rule to drift. Credited and
+             not-credited stay side by side, never summed together. */
+          const dayShifts = shifts.filter((x) => { const t = new Date(x.checked_in_at); return !isNaN(t) && t.getFullYear() === y && t.getMonth() === mo && t.getDate() === openDay; })
+            .sort((p, q) => String(p.checked_in_at).localeCompare(String(q.checked_in_at)));
+          const day = rollupStationHours(dayShifts).totals;
+          const onStation = dayShifts.reduce((t, x) => t + (Number(x.hours) || 0), 0);
+          // The rollup files every hour in exactly one bucket (standby, training, or not credited), so the
+          // not-credited hours are the day's recorded hours minus the credited ones.
+          const credited = day.standby + day.training, notCredited = Math.max(0, onStation - credited), officerN = day.oTrue;
+          const memberN = new Set(dayShifts.map((x) => x.member_id)).size;
+          const badgeOf = (x) => {
+            const r = rollupStationHours([x]).totals;
+            if (r.autoClosed) return ["Not credited · auto-closed", FIRE.amberText];   // the rule's first branch
+            if (r.vTrue) return ["Verified", FIRE.greenText];
+            if (r.oTrue) return ["Officer", "#7FB2E6"];
+            return ["Not credited · location not confirmed", FIRE.amberText];
+          };
+          const tile = (label, v, c) => (
+            <div style={{ ...NOIR_INSET, padding: "10px 12px", minWidth: 0 }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1, color: c || FIRE.textPrimary, ...FS.num }}>{v}</div>
+              <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 4 }}>{label}</div>
+            </div>
+          );
+          return (
+            <div style={{ ...NOIR_INSET, padding: "13px 14px", marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>{new Date(y, mo, openDay).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{dayShifts.length} shift{dayShifts.length === 1 ? "" : "s"} · {memberN} member{memberN === 1 ? "" : "s"}</div>
+                </div>
+                <button onClick={() => setOpenDay(null)} aria-label="Close day detail" title="Close" style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}><X size={14} color={FIRE.textSecondary} /></button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(130px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
+                {tile("On station (all recorded)", `${h1(onStation)} h`)}
+                {tile("Credited (Verified + Officer) · sum of shifts", `${h1(credited)} h`, FIRE.greenText)}
+                {tile("Officer check-ins", String(officerN), "#7FB2E6")}
+                {tile("Recorded — not credited", `${h1(notCredited)} h`, notCredited ? FIRE.amberText : undefined)}
+              </div>
+              <div style={{ fontSize: 10.5, color: FIRE.textMuted, margin: "-2px 0 8px", lineHeight: 1.4 }}>Sums of this day's shifts. A drill during a standby shift counts once in the period figures above, which stay the credited record.</div>
+              {dayShifts.map((x, i) => {
+                const [bl, bc] = badgeOf(x);
+                const outNextDay = x.checked_out_at && new Date(x.checked_in_at).toDateString() !== new Date(x.checked_out_at).toDateString();
+                return (
+                  <div key={`${x.member_id}-${x.checked_in_at}-${i}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none", flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{x.member_name || "A member"}</div>
+                      <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{fmtHm(x.checked_in_at)} – {x.checked_out_at ? `${outNextDay ? `${fmtDate(x.checked_out_at)} · ` : ""}${fmtHm(x.checked_out_at)}` : "open"} · {x.kind === "training" ? "training" : "standby"}</div>
+                    </div>
+                    <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1(x.hours)} h</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".04em", color: bc, background: `${bc}1A`, border: `1px solid ${bc}55`, borderRadius: 5, padding: "2px 7px" }}>{bl}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+          </Card>
+        );
+      })()}
       {/* on station right now */}
-      <div style={{ ...FS.card, padding: 18, marginBottom: 14 }}>
-        <div style={FS.kicker}>ON STATION RIGHT NOW</div>
+      <div style={{ ...FS.cardNoir, padding: 18, marginBottom: 14 }}>
+        <CardHead icon={MapPin} title="On station right now" />
         {onNow.length === 0 && !onNowByHouse ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 10 }}>No one is clocked in right now.</div>
         ) : onNowByHouse ? (
@@ -12662,12 +14079,12 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           <div style={{ marginTop: 6 }}>
             {onNowByHouse.map((g) => (
               <div key={g.key} style={{ marginTop: 10 }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingBottom: 4, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, paddingBottom: 4, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: g.people.length ? FIRE.textSecondary : FIRE.textMuted2 }}>{g.name}</span>
                   <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{g.people.length || "nobody"}{g.people.length ? (g.people.length === 1 ? " person" : " people") : " there"}</span>
                 </div>
                 {g.people.map((p, i) => (
-                  <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === g.people.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                  <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === g.people.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                     <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
                     <div style={FS.rowTitle}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
@@ -12687,7 +14104,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         ) : (
           <div style={{ marginTop: 8 }}>
             {onNow.map((p, i) => (
-              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === onNow.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === onNow.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
                 <div style={FS.rowTitle}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
@@ -12705,8 +14122,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         )}
       </div>
       {/* hours by member */}
-      <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>HOURS BY MEMBER</div>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Users} title="Hours by member" style={{ marginBottom: 0 }} /></div>
         {rows.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
         ) : (
@@ -12716,7 +14133,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Credited</th><th style={{ ...TH, textAlign: "right", color: FIRE.textMuted2 }}>Unverified</th><th style={{ ...TH, textAlign: "right" }}>Verified</th></tr></thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={i} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <tr key={i} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name || "—"}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training)}</td>
@@ -12728,7 +14145,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: r.vpct == null ? FIRE.textMuted2 : vColor(r.vpct), fontWeight: 700 }}>{r.vpct == null ? "—" : `${r.vpct}%`}</td>
                 </tr>
               ))}
-              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+              <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
                 <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_standby)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(dept_training)}</td>
@@ -12748,8 +14165,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           The explainer names both in plain words and labels the number neutrally, because a chief who
           spots a gap without an explanation will assume the report is broken, and a gap that was
           labelled "overlap" when it is partly boundary clipping is worse than no label at all. */}
-      <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS — NO DOUBLE-COUNTING</div>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ShieldAlert} title="ISO hours — no double-counting" style={{ marginBottom: 0 }} /></div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
           Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This is the per-member breakdown of the <b style={{ color: FIRE.textSecondary }}>Credited</b> figure above; the two agree exactly, because they are the same numbers.
           {/* Was a reconciliation note explaining a legitimate gap between two derivations. There is
@@ -12767,14 +14184,14 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             <tbody>
               {/* order comes from the RPC (credited time desc, ties by name) — not re-sorted here */}
               {iso.map((r) => (
-                <tr key={r.member_id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <tr key={r.member_id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.member_name || "—"}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.training_hours)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(r.standby_hours)}</td>
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(r.iso_total_hours)}</td>
                 </tr>
               ))}
-              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+              <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
                 <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_training)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_standby)}</td>
@@ -12811,8 +14228,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
 
            SUPPRESSED ENTIRELY FOR A SINGLE-STATION DEPARTMENT — see multiStation. */}
       {multiStation && isoByStation.length > 0 && (
-        <div style={{ ...FS.card, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
-          <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>ISO HOURS BY HOUSE</div>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+          <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Building2} title="ISO hours by house" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             The same ISO total above, split across your houses. Every minute is counted once and lands in exactly one house, so these add up to the department total.
           </div>
@@ -12820,7 +14237,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             <thead><tr><th style={TH}>House</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>ISO total</th></tr></thead>
             <tbody>
               {byHouse.map((h) => (
-                <tr key={h.key} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <tr key={h.key} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <td style={{ ...TD, fontWeight: 600, color: h.station_id ? FIRE.textPrimary : FIRE.textMuted2 }}>
                     {h.station_name || "Station not recorded"}
                     {/* The Unassigned bucket is a REAL, PERMANENT category, not a configuration
@@ -12834,7 +14251,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{h1(h.iso_total_hours)}</td>
                 </tr>
               ))}
-              <tr style={{ borderTop: `1px solid ${FIRE.btnBorder}` }}>
+              <tr style={{ borderTop: `1px solid ${FIRE.line2Noir}` }}>
                 <td style={{ ...TD, fontWeight: 700, color: FIRE.textPrimary }}>Department total</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_training)}</td>
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_standby)}</td>
@@ -12845,8 +14262,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         </div>
       )}
       {/* shift log */}
-      <div style={{ ...FS.card, padding: "8px 0", overflowX: "auto" }}>
-        <div style={{ ...FS.kicker, padding: "10px 12px 4px" }}>SHIFT LOG</div>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", overflowX: "auto" }}>
+        <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ClipboardList} title="Shift log" style={{ marginBottom: 0 }} /></div>
         {/* Station filter, reusing the shipped all-houses idiom: ALL_STATIONS first and default,
             then each house, then Unassigned only when there is something in it. Chips rather than
             a select because the house count is small and a chip row shows the whole choice set at
@@ -12920,9 +14337,11 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           )}
         </>)}
       </div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
+
 function AttendanceReport({ S, members, sessions, dept, back }) {
   const [presetKey, setPresetKey] = useState("year");                  // default This Year (matches prior on-load behavior)
   const [range, setRange] = useState(() => presetRange("year"));
@@ -12931,6 +14350,16 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
   const rangeText = `${fmtD(range.from)} – ${fmtD(range.to)}`;
   const rows = [...attRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
   const pctColor = (p) => p == null ? FIRE.textMuted : p >= 75 ? FIRE.green : p >= 50 ? FIRE.amberText : FIRE.redText;
+  // b4c_reports_attendance_noir.html — the monthly trend is BoardStats' series (attendanceSeries over monthsBetween,
+  // same deptAttendance per month), so the two screens can't disagree; the crew split buckets the per-member pct above.
+  const trendMonths = useMemo(() => monthsBetween(range.from, range.to, 12), [range.from, range.to]);
+  const trend = useMemo(() => attendanceSeries(members, sessions, trendMonths.months), [members, sessions, trendMonths]);
+  const bands = [
+    ["strong (≥75%)", rows.filter((r) => r.pct != null && r.pct >= 75).length, FIRE.green],
+    ["fair (50–74%)", rows.filter((r) => r.pct != null && r.pct >= 50 && r.pct < 75).length, FIRE.amberText],
+    ["low (<50%)", rows.filter((r) => r.pct != null && r.pct < 50).length, FIRE.redBright],
+    ["too new to rate", rows.filter((r) => r.pct == null).length, "#2A2F38"],
+  ];
   const [detail, setDetail] = useState(false);      // false = summary view, true = by-session grid
   const [fullYear, setFullYear] = useState(false);  // grid scope: false = recent 10, true = all sessions in year
   const chron = [...doneThisYear].sort(sessSort);   // chronological columns
@@ -12963,11 +14392,10 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
     saveOrShareText(csv, `attendance-${range.from}_to_${range.to}.csv`);
   }
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={FS.kicker}>REPORTS · ATTENDANCE</div>
-      <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Attendance Report</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>Training attendance per member for {rangeText}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.</div>
+    <PageShell band watermark="REPORTS" kicker="REPORTS · ATTENDANCE" title="Attendance Report"
+      sub={`Training attendance per member for ${rangeText}. Each member's eligible total reflects the events they were expected at — leadership-only events count only for leaders.`}
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
@@ -12975,10 +14403,10 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={S.segRow}>
+        <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}` }}>
           {[["summary", "Summary"], ["detail", "By session"]].map(([k, l]) => {
             const on = detail === (k === "detail");
-            return <button key={k} onClick={() => setDetail(k === "detail")} style={{ ...S.segBtn, background: on ? FIRE.btnBg : "transparent", borderColor: on ? FIRE.red : FIRE.btnBorder, color: on ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>;
+            return <button key={k} onClick={() => setDetail(k === "detail")} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: on ? FIRE.redBright : "transparent", color: on ? "#fff" : FIRE.textSecondary }}>{l}</button>;
           })}
         </div>
         {detail && chron.length > 10 && (
@@ -12994,12 +14422,45 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         <Stat S={S} dark n={String(rows.length)} label="Members" />
       </div>
 
+      {!detail && trend.length > 0 && (
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", marginTop: 14 }}>
+          <CardHead icon={BarChart3} title="Attendance trend" right={<span>avg per month{doneThisYear.length ? <> · period <b style={{ color: FIRE.textPrimary }}>{avgPct}%</b></> : ""}</span>} />
+          <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 6, height: 150, padding: "18px 2px 0" }}>
+            {doneThisYear.length > 0 && (
+              <div style={{ position: "absolute", left: 0, right: 0, bottom: 19 + avgPct,   /* px: 15px month label + 4px gap + the bar scale (1px = 1%) */ borderTop: `1px dashed ${FIRE.line2Noir}`, pointerEvents: "none" }}>
+                <span style={{ position: "absolute", left: 0, top: -15, fontSize: 10, color: FIRE.textSecondary, background: FIRE.cardNoir, padding: "0 4px 0 0" }}>{avgPct}% avg</span>
+              </div>
+            )}
+            {trend.map((m, i) => (
+              <div key={i} title={m.pct == null ? `${m.label}: no drills` : `${m.label}: ${m.pct}% · ${m.drills} drill${m.drills === 1 ? "" : "s"}`} style={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                <div style={{ fontSize: 10.5, color: m.pct == null ? FIRE.textMuted : FIRE.textSecondary, ...FS.num }}>{m.pct == null ? "—" : m.pct}</div>
+                <div style={{ width: "100%", maxWidth: 34, height: m.pct == null ? 4 : Math.max(4, m.pct), borderRadius: "5px 5px 0 0", background: m.pct == null ? FIRE.lineNoir : `linear-gradient(180deg, ${pctColor(m.pct)}, ${pctColor(m.pct)}CC)`, opacity: m.partial ? 0.65 : 1 }} />
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, lineHeight: "15px", height: 15, color: FIRE.textMuted }}>{m.label}</div>
+              </div>
+            ))}
+          </div>
+          {trendMonths.truncated && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6 }}>Showing the most recent 12 months of the range.</div>}
+        </div>
+      )}
+      {!detail && rows.length > 0 && (
+        <div style={{ ...FS.cardNoir, padding: "14px 16px", marginTop: 12 }}>
+          <CardHead icon={Users} title="How the crew splits" right={<span>{rows.length} member{rows.length === 1 ? "" : "s"}</span>} />
+          <div style={{ display: "flex", height: 22, borderRadius: 6, overflow: "hidden", background: FIRE.insetNoir }}>
+            {bands.filter(([, n]) => n > 0).map(([l, n, c]) => (
+              <i key={l} title={`${n} ${l}`} style={{ width: `${(n / rows.length) * 100}%`, background: c, display: "flex", alignItems: "center", justifyContent: "center", fontStyle: "normal", fontSize: 11, fontWeight: 700, color: c === "#2A2F38" ? FIRE.textMuted : c === FIRE.redBright ? "#fff" : "#07120b" }}>{n}</i>
+            ))}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 9, fontSize: 11.5, color: FIRE.textSecondary }}>
+            {bands.map(([l, n, c]) => <span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: c }} /><b style={{ color: FIRE.textPrimary }}>{n}</b> {l}</span>)}
+          </div>
+        </div>
+      )}
       {detail ? (
-        <div style={{ ...FS.card, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             <thead>
               <tr>
-                <th style={{ position: "sticky", left: 0, background: FIRE.card, textAlign: "left", padding: "6px 14px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", zIndex: 1 }}>Member</th>
+                <th style={{ position: "sticky", left: 0, background: FIRE.cardNoir, textAlign: "left", padding: "6px 14px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", zIndex: 1 }}>Member</th>
                 {gridCols.map((s) => (
                   <th key={s.id} title={s.title} style={{ padding: "6px 9px", color: FIRE.textMuted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>
                     {colLabel(s)}{s.audience === "board" ? <span style={{ color: FIRE.blueText }}> ·B</span> : s.audience === "leadership" ? <span style={{ color: FIRE.amberText }}> ·L</span> : null}
@@ -13010,8 +14471,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                  <td style={{ position: "sticky", left: 0, background: FIRE.card, padding: "7px 14px", fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", zIndex: 1 }}>{r.name}</td>
+                <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                  <td style={{ position: "sticky", left: 0, background: FIRE.cardNoir, padding: "7px 14px", fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", zIndex: 1 }}>{r.name}</td>
                   {gridCols.map((s) => { const c = CELL[cellState(r, s)]; return <td key={s.id} style={{ textAlign: "center", padding: "7px 9px", color: c.c, fontWeight: 700 }}>{c.ch}</td>; })}
                   <td style={{ textAlign: "center", padding: "7px 12px", ...FS.num, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{r.attended}/{r.eligible}</td>
                 </tr>
@@ -13021,14 +14482,14 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
           <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "8px 14px 2px" }}><span style={{ color: FIRE.green, fontWeight: 700 }}>✓</span> attended · <span style={{ color: FIRE.redText, fontWeight: 700 }}>✗</span> absent · <span style={{ fontWeight: 700 }}>—</span> not expected · <span style={{ color: FIRE.amberText }}>·L</span> leadership · <span style={{ color: FIRE.blueText }}>·B</span> board</div>
         </div>
       ) : (
-      <div style={{ ...FS.card, padding: "4px 16px", marginTop: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
+      <div style={{ ...FS.cardNoir, padding: "4px 16px", marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
           <div style={{ flex: 1, minWidth: 0 }}>Member</div>
           <div style={{ width: 90, textAlign: "right" }}>Attended</div>
           <div style={{ width: 60, textAlign: "right" }}>Rate</div>
         </div>
         {rows.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "12px 0" }}>No members to report.</div> : rows.map((r) => (
-          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
               <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.role}</div>
@@ -13040,7 +14501,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
       )}
       {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {rangeText} yet.</div>}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -13068,6 +14530,7 @@ function ActionItemsReport({ S, members, back }) {
   // Current snapshot: ALL currently-open, regardless of range
   const open      = all.filter((it) => it.status === "open").sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"));
   const nothing = !completed.length && !cancelled.length && !open.length;
+  const overdueN = open.filter((it) => it.due_date && it.due_date < todayISO).length;   // same rule row() flags OVERDUE with
 
   const fmtD  = (d)  => d  ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
   const fmtTs = (ts) => ts ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
@@ -13083,10 +14546,14 @@ function ActionItemsReport({ S, members, back }) {
               : kind === "cancelled" ? <X size={16} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
               :                        <Clock size={16} color={overdue ? FIRE.redText : FIRE.amberText} style={{ flexShrink: 0 }} />;
     return (
-      <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+      <div key={it.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
         {icon}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ fontWeight: 600, color: kind === "open" ? FIRE.textPrimary : FIRE.textMuted2, textDecoration: kind === "open" ? "none" : "line-through" }}>{it.text}</span>
+          {/* Resolved rows stay READABLE: a soft strike-through on near-primary text (green-tinted for done,
+              neutral for cancelled) instead of the near-invisible muted grey they used to drop to. */}
+          <span style={{ fontWeight: 600, color: kind === "open" ? FIRE.textPrimary : kind === "done" ? "#CDD3DC" : "#AEB5C0",
+            textDecoration: kind === "open" ? "none" : "line-through", textDecorationThickness: "1.5px",
+            textDecorationColor: kind === "done" ? "rgba(85,190,135,.6)" : "rgba(255,255,255,.28)" }}>{it.text}</span>
           <div style={{ fontSize: 12, color: overdue ? FIRE.redText : FIRE.textMuted, marginTop: 1 }}>{meta}</div>
         </div>
       </div>
@@ -13094,7 +14561,7 @@ function ActionItemsReport({ S, members, back }) {
   };
 
   const section = (title, count, note, rows, emptyText) => (
-    <div style={{ ...FS.card, padding: "14px 16px", marginBottom: 12 }}>
+    <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>{title}</span>
         <span style={{ fontSize: 12, color: FIRE.textMuted }}>({count})</span>
@@ -13127,11 +14594,10 @@ function ActionItemsReport({ S, members, back }) {
   }
 
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <button style={{ ...FS.btn, marginBottom: 14 }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>
-      <div style={FS.kicker}>REPORTS · ACTION ITEMS</div>
-      <h1 style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Action Items</h1>
-      <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 16 }}>What got done, what was dropped, and what's still open. Completed &amp; cancelled are the items resolved during {rangeText}; still-open is a live snapshot as of today.</div>
+    <PageShell band watermark="REPORTS" kicker="REPORTS · ACTION ITEMS" title="Action Items"
+      sub={`What got done, what was dropped, and what's still open. Completed & cancelled are the items resolved during ${rangeText}; still-open is a live snapshot as of today.`}
+      above={<button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Back to Reports</button>}>
+      <NoirSkin>
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
@@ -13139,15 +14605,24 @@ function ActionItemsReport({ S, members, back }) {
       </div>
 
       {items === null ? (
-        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading action items…</div>
+        <div style={{ ...FS.cardNoir, padding: 24, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading action items…</div>
       ) : nothing ? (
-        <div style={{ ...FS.card, padding: 24, color: FIRE.textMuted }}>No action items resolved in this period, and none currently open.</div>
+        <div style={{ ...FS.cardNoir, padding: 24, color: FIRE.textMuted }}>No action items resolved in this period, and none currently open.</div>
       ) : (<>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(130px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
+          {[["Completed", completed.length, FIRE.greenText], ["Cancelled", cancelled.length, FIRE.textSecondary], ["Still open", open.length, FIRE.amberText], ["Overdue", overdueN, overdueN ? FIRE.redText : FIRE.textSecondary]].map(([l, n, c]) => (
+            <div key={l} style={{ ...FS.cardNoir, borderTop: `3px solid ${c}`, borderRadius: 11, padding: "11px 13px" }}>
+              <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 24, lineHeight: 1, color: c, ...FS.num }}>{n}</div>
+              <div style={{ fontSize: 11, color: FIRE.textSecondary, marginTop: 4 }}>{l}</div>
+            </div>
+          ))}
+        </div>
         {section("✓ Completed (in range)", completed.length, null, completed.map((it) => row(it, "done")), "None completed in this period.")}
         {section("✕ Cancelled (in range)", cancelled.length, null, cancelled.map((it) => row(it, "cancelled")), "None cancelled in this period.")}
         {section("○ Still open", open.length, `current snapshot — as of ${fmtD(todayISO)}`, open.map((it) => row(it, "open")), "Nothing currently open.")}
       </>)}
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -13163,6 +14638,26 @@ const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "
    when the field is genuinely blank. Note that rules out `rate || CAPITAL_DEFAULT_RATE`, which
    would silently turn an explicit 0 into 3. */
 const CAPITAL_DEFAULT_RATE = 3;
+/* DEFAULT SERVICE LIFE (years) for the depreciation ESTIMATE only, by apparatus type — used when a rig has no
+   usable replacement year. Code constants in v1 (same shape as CAPITAL_DEFAULT_RATE); making them editable per
+   department needs a persisted store = schema + a write, which is a reviewed Phase 2, not this. */
+const CAPITAL_DEFAULT_LIFE = [[/aerial|ladder|quint|tower/i, 25], [/pumper|engine/i, 20], [/tender|tanker/i, 20], [/brush/i, 15], [/rescue|squad/i, 15]];
+const CAPITAL_DEFAULT_LIFE_FALLBACK = 20;
+const defaultLifeFor = (type) => (CAPITAL_DEFAULT_LIFE.find(([re]) => re.test(type || "")) || [null, CAPITAL_DEFAULT_LIFE_FALLBACK])[1];
+/* Straight-line value today, to a $0 residual. Needs BOTH purchase cost and purchase year — otherwise null ("—"),
+   never a 0 or a guess. Life = the department's own plan (replace_year − purchase_year) when that is positive,
+   else the type default. Floors at $0 once past its life; capped at the purchase cost. DISPLAY ESTIMATE ONLY:
+   it must never feed grandTotal, recommendedAnnual, the Chief's Report funding figures or any entered-money path. */
+const depreciationOf = (r, thisYear) => {
+  const cost = r.purchaseCost == null || r.purchaseCost === "" ? null : Number(r.purchaseCost);
+  const py = r.purchaseYear == null || r.purchaseYear === "" ? null : Number(r.purchaseYear);
+  if (cost == null || !Number.isFinite(cost) || cost < 0 || py == null || !Number.isFinite(py)) return null;
+  const ry = r.replaceYear == null || r.replaceYear === "" ? null : Number(r.replaceYear);
+  const fromPlan = ry != null && Number.isFinite(ry) && ry > py;
+  const life = fromPlan ? ry - py : defaultLifeFor(r.type);
+  const frac = Math.min(1, Math.max(0, (py + life - thisYear) / life));
+  return { life, fromPlan, value: cost * frac, pctDepreciated: Math.round((1 - frac) * 100), ageFrac: Math.min(1, Math.max(0, (thisYear - py) / life)) };
+};
 const projectCost = (currentCost, rate, replaceYear, thisYear) => {
   // Explicit null/blank checks BEFORE Number(): Number(null) is 0 and Number("") is 0, both of
   // which pass Number.isFinite. Without this a rig with a cost and no replacement year projects
@@ -13195,8 +14690,8 @@ function CapitalFields({ S, v, set }) {
   const projected = projectCost(num(v.currentCost), num(v.inflationRate), num(v.replaceYear), thisYear);
   const overridden = num(v.replaceCost) != null;
   return (
-    <div style={{ flexBasis: "100%", borderTop: `0.5px solid ${FIRE.hairline}`, marginTop: 4, paddingTop: 10 }}>
-      <div style={{ ...FS.kicker, marginBottom: 2 }}>CAPITAL PLANNING (OPTIONAL)</div>
+    <div style={{ flexBasis: "100%", borderTop: `1px solid ${FIRE.lineNoir}`, marginTop: 4, paddingTop: 10 }}>
+      <div style={{ ...NOIR_LABEL, marginBottom: 2 }}>CAPITAL PLANNING (OPTIONAL)</div>
       <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 6 }}>What it cost, what it costs today, and when it's due — the app projects the replacement figure. Feeds the Capital Replacement Plan report.</div>
       {/* GRID, not a wrapping flex row. Six fields with hints of different heights left the inputs
           stepping up and down as labels wrapped; even columns keep them on one baseline at every
@@ -13414,7 +14909,8 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
   }
 
   return (
-    <PageShell above={<button style={{ ...FS.btn, marginBottom: 14 }} onClick={onBack}><ArrowLeft size={15} /> Apparatus</button>} kicker="AFTER-CALL CHECKLIST" title="Back in service" sub={<>Tick off what you did after the call. What you skip is recorded too, so the next crew knows what&rsquo;s still outstanding.</>}>
+    <PageShell band watermark="FLEET" above={<button style={{ ...FS.btn, marginBottom: 14 }} onClick={onBack}><ArrowLeft size={15} /> Apparatus</button>} kicker="AFTER-CALL CHECKLIST" title="Back in service" sub={<>Tick off what you did after the call. What you skip is recorded too, so the next crew knows what&rsquo;s still outstanding.</>}>
+      <NoirSkin>
 
       {/* ---- the run form ---- */}
       <Card padding={18} style={{ marginBottom: 14 }}>
@@ -13426,7 +14922,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
           </select>
         </label>
 
-        {tasksErr && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 12, lineHeight: 1.5 }}>Couldn&rsquo;t load the tasks: {tasksErr}</div>}
+        {tasksErr && <div style={{ ...NOIR_ERR, marginTop: 12 }}>Couldn&rsquo;t load the tasks: {tasksErr}</div>}
         {tasks === null && !tasksErr && <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 12 }}>Loading tasks…</div>}
 
         {/* Nothing to run. Names where the list comes from, so a member who hits this knows who to
@@ -13438,18 +14934,18 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
         )}
 
         {tasks !== null && tasks.length > 0 && (<>
-          <SectionLabel style={{ marginTop: 16 }}>WHAT YOU DID · {doneCount} of {tasks.length}</SectionLabel>
+          <SectionBar icon={ClipboardCheck} label="What you did" count={`${doneCount} of ${tasks.length}`} style={{ margin: "16px 0 0" }} />
           <div style={{ marginTop: 6 }}>
             {tasks.map((t) => {
               const on = !!ticks[t.id];
               return (
-                <div key={t.id} style={{ padding: "10px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div key={t.id} style={{ padding: "10px 0", borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   {/* The whole row is the target. A tick box alone is a small thing to hit on a
                       phone in the dark with gloves on. */}
                   <div onClick={() => setTicks((m) => ({ ...m, [t.id]: !on }))}
                        style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                     <span style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                   border: `1.5px solid ${on ? FIRE.green : FIRE.btnBorder}`, background: on ? FIRE.green : "transparent" }}>
+                                   border: `1.5px solid ${on ? FIRE.green : FIRE.line2Noir}`, background: on ? FIRE.green : "transparent" }}>
                       {on && <CheckCircle2 size={14} color="#0E1014" />}
                     </span>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: on ? FIRE.textPrimary : FIRE.textSecondary }}>{t.label}</span>
@@ -13480,7 +14976,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
 
       {/* ---- the running log ---- */}
       <Card padding="8px 0">
-        <CardHead icon={ClipboardList} title="Checklist history" />
+        <CardHead icon={ClipboardList} title="Checklist history" style={{ padding: "8px 14px 0" }} />
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 14px 10px" }}>
           Grouped by day, newest first. Times are Central. Tap one to see what was done and what wasn&rsquo;t.
         </div>
@@ -13499,7 +14995,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
             )}
           </div>
         </div>
-        {runsErr && <div style={{ fontSize: 12.5, color: FIRE.redText, padding: "0 14px 10px", lineHeight: 1.5 }}>Couldn&rsquo;t load the log: {runsErr}</div>}
+        {runsErr && <div style={{ ...NOIR_ERR, margin: "0 14px 10px" }}>Couldn&rsquo;t load the log: {runsErr}</div>}
         {runs === null && !runsErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "0 14px 12px" }}>Loading…</div>}
         {/* RANGE-AWARE. "Nothing logged yet" would be a claim about the whole department; this is
             only ever a claim about the dates on screen. */}
@@ -13515,7 +15011,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
         )}
         {days.map((d) => (
           <div key={d.key}>
-            <div style={{ padding: "8px 14px 6px", borderTop: `0.5px solid ${FIRE.hairline}`, background: FIRE.btnBg }}>
+            <div style={{ padding: "8px 14px 6px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir }}>
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textSecondary }}>{d.label}</span>
               <span style={{ fontSize: 11.5, color: FIRE.textMuted2, marginLeft: 8 }}>{d.runs.length} checklist{d.runs.length === 1 ? "" : "s"}</span>
             </div>
@@ -13523,7 +15019,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
           const open = expanded === r.id;
           const items = itemsByRun[r.id];
           return (
-            <div key={r.id} style={{ borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
               <div onClick={() => toggleExpand(r.id)}
                    style={{ padding: "11px 14px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", flexWrap: "wrap" }}>
                 <Truck size={16} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -13559,6 +15055,7 @@ function AfterCallRun({ S, rigs, meId, notify, onBack }) {
           </div>
         ))}
       </Card>
+      </NoirSkin>
     </PageShell>
   );
 }
@@ -13684,7 +15181,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     setServiceFor(null); setServiceReason(""); setServiceKey((k) => k + 1); loadRigs();
   }
   async function returnToService(rigId, rigName) {
-    if (!window.confirm(`Return "${rigName}" to service? It'll be marked Needs attention until its next check.`)) return;
+    if (!(await noirConfirm({ title: `Return ${rigName} to service?`, body: "It'll be marked Needs attention until its next check.", confirmLabel: "Return to service" }))) return;
     setServiceBusy(rigId);
     const { error } = await supabase.rpc("return_apparatus_to_service", { p_apparatus_id: rigId });
     setServiceBusy(null);
@@ -13851,7 +15348,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
      hard delete and would now understate the undo. Saying it can be put back is the difference
      between a decision someone hesitates over and one they can safely make. */
   async function removeRig(id, name) {
-    if (!window.confirm(`Take "${name}" out of the fleet?\n\nIt stops appearing in lists and checklists. You can put it back from "Recently removed", and the app records that you removed it.`)) return;
+    if (!(await noirConfirm({ title: `Remove ${name}?`, body: "This takes it out of your fleet — it stops appearing in lists and checklists. You can restore it from “Recently removed”, and the app records that you removed it.", confirmLabel: "Remove apparatus", danger: true }))) return;
     const { error } = await supabase.rpc("retire_apparatus", { p_id: id });
     // The RPC raises rather than no-opping, so error.message is a sentence a DA can act on
     // ("Only a Department Admin can remove a rig.") — surface it rather than swallowing it.
@@ -13917,10 +15414,13 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       <div key={`${r.id}-detail`} style={{ gridColumn: "1 / -1", ...FS.cardNoir, padding: "16px 18px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary }}>{r.name}</div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary, lineHeight: 1.1 }}>{r.name}</div>
             <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[r.type, r.purchaseYear, outOfService ? "Out of service" : ok ? "In service" : "Needs attention"].filter(Boolean).join(" · ")}</div>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+          {(() => { const tone = outOfService ? FIRE.redBright : ok ? FIRE.green : FIRE.amberText; return (
+            <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 6, letterSpacing: ".03em", color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: tone }} />{outOfService ? "Out of service" : ok ? "In service" : "Needs attention"}</span>
+          ); })()}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
           {/* canRemove, NOT canManage — removal is Department-Admin-only. An Officer in edit
               mode sees Edit and no X, which is the whole permission change on this screen. */}
@@ -13980,15 +15480,20 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
             <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
           </Card>
         )}
-        {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
+        {/* Mock order (b4c_apparatus_noir.html): photo strip → [checklist | maintenance log] → check history →
+            service history → capital tiles. Same components, same gates — only their order and dress changed. */}
         {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
+        <div className="ap-cols" style={{ marginTop: 2 }}>
+          {canManage && <ApparatusChecklist S={S} rig={r} notify={notify} />}
+          <div style={{ minWidth: 0, marginTop: 18 }}>
+            <RigMaintenanceLog rig={r} canManage={canManage} meId={meId} meName={(members || []).find((m) => m.id === meId)?.name || "Unknown"} notify={notify} />
+          </div>
+        </div>
         <ApparatusHistory key={`${r.id}-${historyKey}`} S={S} rig={r} role={role} notify={notify} onResolved={loadRigs} dept={dept} />
         <ApparatusServiceHistory key={`svc-${r.id}-${serviceKey}`} S={S} rig={r} />
-        <div className="ap-cols" style={{ marginTop: 14 }}>
-          <RigMaintenanceLog rig={r} canManage={canManage} meId={meId} meName={(members || []).find((m) => m.id === meId)?.name || "Unknown"} notify={notify} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 }}>Capital &amp; replacement</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))", gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+            <SectionBar icon={Landmark} label="Capital & replacement" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 12 }}>
               {[[r.purchaseYear || "—", `PURCHASED${r.purchaseCost != null ? ` · ${money(r.purchaseCost)}` : ""}`], [r.replaceYear || "—", "REPLACE YEAR"], [money(r.replaceCost), "EST. REPLACEMENT COST"]].map(([n, l]) => (
                 <div key={l} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 13px", minWidth: 0 }}>
                   <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary, ...FS.num }}>{n}</div>
@@ -13996,7 +15501,6 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
                 </div>
               ))}
             </div>
-          </div>
         </div>
       </div>
     );
@@ -14016,7 +15520,19 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     return <AfterCallRun S={S} rigs={rigs} meId={meId} notify={notify} onBack={() => setAftercallOpen(false)} />;
   }
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />} kicker={<>APPARATUS & EQUIPMENT</>} title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}>
+    <PageShell band watermark="FLEET" above={loadErr && <OfflineNotice onRetry={loadRigs} what="apparatus" />} kicker={dept?.name ? `APPARATUS · ${dept.name}` : "APPARATUS"} title="Know your rigs are ready" sub={canManage ? "Add the apparatus in your station, pull what's no longer here, and log checks so the whole crew can see what's good to roll." : "Log your apparatus and equipment checks so the whole crew can see what's good to roll."}
+      actions={canManage && !allMode && (rigs.length > 0 || !adding) ? (
+        /* The page's two actions, moved INSIDE the band (the mock's .ph-actions) — same gates, same handlers as when
+           they sat above the fleet: Edit/Done when there are rigs; Add apparatus whenever the add form is reachable. */
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
+          {rigs.length > 0 && (
+            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
+              {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit apparatus</>}
+            </button>
+          )}
+          {(editMode || rigs.length === 0) && !adding && <button style={FS.btnPrimary} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>}
+        </div>
+      ) : null}>
       <NoirSkin>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
         {(() => {
@@ -14075,13 +15591,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       {/* Add and edit are hidden in all-houses mode: it is a read/scan view, and "Go to this
           station" is the way into the house where both already work. That also removes any
           path by which a new rig could be created without a real station. */}
-      {canManage && !allMode && rigs.length > 0 && (
-        <div style={{ display: "flex", marginBottom: 12 }}>
-          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
-            {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit apparatus</>}
-          </button>
-        </div>
-      )}
+      {/* Edit/Done and Add apparatus now live in the hero band (actions, above). */}
       {canManage && !allMode && (editMode || rigs.length === 0) && (adding ? (
         <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name / unit</span><input style={FS.input} value={nm} placeholder="e.g. Engine 2" onChange={(e) => setNm(e.target.value)} /></label>
@@ -14093,7 +15603,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           <button style={FS.btnPrimary} onClick={addRig}><Plus size={15} /> Add to station</button>
           <button style={FS.btn} onClick={() => { setAdding(false); setNm(""); setCap(CAP_BLANK); }}>Cancel</button>
         </Card>
-      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add apparatus</button>)}
+      ) : null)}
       {grouped ? (
         /* One section per house. The global empty state is skipped here on purpose: with houses
            to show, "no apparatus" belongs under the house it is true of, not over the whole page. */
@@ -14135,7 +15645,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
                 These rigs are out of the fleet but not gone. Putting one back returns it to its station with its checks and history intact.
               </div>
               {removed.map((r) => (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}{r.type && <span style={{ fontSize: 12, color: FIRE.textMuted, marginLeft: 6, fontWeight: 400 }}>{r.type}</span>}</div>
                     {/* WHO AND WHEN, stated plainly. This is the line the incident was about. */}
@@ -14254,6 +15764,10 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
   // items are loaded active=true, so "all active items marked" = every loaded item marked.
   const allMarked = !!items && items.length > 0 && markedCount === items.length;
   const unmarked = (items?.length || 0) - markedCount;
+  // Display only: the split of what's been marked, from the same marks map.
+  const passCount = (items || []).filter((it) => marks[it.id]?.result === "pass").length;
+  const failCount = (items || []).filter((it) => marks[it.id]?.result === "fail").length;
+  const pctMarked = items && items.length ? Math.round((markedCount / items.length) * 100) : 0;
   // Photo view (read-only dots colored by marks; taps → the Pass/Fail panel below).
   const dotsFor = (pid) => (items || []).filter((it) => it.photo_id === pid && it.x_pct != null);
   const checkPhoto = photos.find((p) => p.id === checkPhotoId) || photos[0] || null;
@@ -14261,13 +15775,13 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
     <button key={p.id} onClick={() => setCheckPhotoId(p.id)} style={{ ...FS.btn, padding: "7px 11px", fontSize: 12.5, flexShrink: 0, ...(active ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{p.angle_label || "Photo"} {md}/{ds.length}</button>
   ); }) : null;
   const checkPanel = (it) => { const mk = marks[it.id]; const editingNote = noteItemId === it.id; return (
-    <div style={{ background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: "12px 16px" }}>
+    <div style={{ background: FIRE.card, borderTop: `1px solid ${FIRE.lineNoir}`, padding: "12px 16px" }}>
       <div style={{ fontSize: 14.5, fontWeight: 700, color: FIRE.textPrimary }}>{it.label}</div>
       {it.location && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{it.location}</div>}
       {mk && <div style={{ fontSize: 11.5, color: mk.result === "fail" ? FIRE.redText : FIRE.greenText, marginTop: 3 }}>{mk.result === "fail" ? "✗ Fail" : "✓ Pass"} · {mk.marked_by_name || "—"}{mk.result === "fail" && mk.note ? ` · ${mk.note}` : ""}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button disabled={savingItemId === it.id} onClick={() => onPass(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: mk?.result === "pass" ? FIRE.green : FIRE.btnBg, color: mk?.result === "pass" ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><CheckCircle2 size={16} /> Pass</button>
-        <button disabled={savingItemId === it.id} onClick={() => openFail(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: (mk?.result === "fail" || editingNote) ? FIRE.redBright : FIRE.btnBg, color: (mk?.result === "fail" || editingNote) ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><X size={16} /> Fail</button>
+        <button disabled={savingItemId === it.id} onClick={() => onPass(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: mk?.result === "pass" ? FIRE.green : FIRE.card2Noir, color: mk?.result === "pass" ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><CheckCircle2 size={16} /> Pass</button>
+        <button disabled={savingItemId === it.id} onClick={() => openFail(it)} style={{ ...FS.btnPrimary, flex: 1, justifyContent: "center", background: (mk?.result === "fail" || editingNote) ? FIRE.redBright : FIRE.card2Noir, color: (mk?.result === "fail" || editingNote) ? "#fff" : FIRE.btnText, padding: "11px 16px", opacity: savingItemId === it.id ? 0.6 : 1 }}><X size={16} /> Fail</button>
       </div>
       {editingNote && (
         <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
@@ -14294,19 +15808,12 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
   // desktop (react-zoom-pan-pinch drives mouse pan via native document listeners, so those clicks
   // slipped past the portal-root guard). Close only via the header ✕ / footer Close buttons.
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
       {photoOpen && checkPhoto && <PhotoDotEditor S={S} url={photoUrls[checkPhoto.id]} photo={checkPhoto}
         dots={dotsFor(checkPhoto.id)} unplaced={[]} marks={marks} editable={false}
         tabs={photoTabs} checkPanel={checkPanel} onClose={() => setPhotoOpen(false)} busy={false} />}
-      <div style={{ ...FS.cardNoir, width: "min(560px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-          <Truck size={18} color={FIRE.btnIcon} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Truck check</div>
-            <div style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontWeight: 700, fontSize: 18, color: FIRE.textPrimary }}>{rig.name}</div>
-          </div>
-          <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={onClose}><X size={16} color={FIRE.textSecondary} /></button>
-        </div>
+      <div style={{ ...NOIR_MODAL_PANEL, width: "min(560px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+        <NoirModalHead icon={Truck} title={rig.name} sub="Truck check" onClose={onClose} />
         <div style={{ padding: 16 }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: FIRE.textMuted }}><Loader2 size={15} className="spin" /> Loading…</div>
@@ -14315,25 +15822,41 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
           ) : err ? (
             <div style={{ fontSize: 13.5, color: FIRE.redText, lineHeight: 1.5 }}>{err}</div>
           ) : (<>
-            <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span>{markedCount} of {(items || []).length} items marked · walk the truck and mark each one.</span>
-              {photos.length > 0 && <button onClick={() => setPhotoOpen(true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}><ImageIcon size={14} color={FIRE.btnIcon} /> Photo view</button>}
+            <div style={{ ...NOIR_INSET, padding: "11px 13px", marginBottom: 12, ...(allMarked ? { borderColor: "rgba(47,168,105,.45)" } : {}) }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: allMarked ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{markedCount}<span style={{ color: FIRE.textMuted, fontSize: 14 }}> / {(items || []).length}</span></span>
+                <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{allMarked ? "All marked — ready to finalize" : "items marked · walk the truck and mark each one"}</span>
+                {photos.length > 0 && <button onClick={() => setPhotoOpen(true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}><ImageIcon size={14} color={FIRE.btnIcon} /> Photo view</button>}
+              </div>
+              <div style={{ height: 6, borderRadius: 999, background: FIRE.card2Noir, overflow: "hidden", marginTop: 8, display: "flex" }} aria-hidden="true">
+                <span style={{ width: `${items && items.length ? (passCount / items.length) * 100 : 0}%`, background: FIRE.green }} />
+                <span style={{ width: `${items && items.length ? (failCount / items.length) * 100 : 0}%`, background: FIRE.redBright }} />
+              </div>
+              <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 11.5, ...FS.num }} aria-label={`${pctMarked}% marked`}>
+                <span style={{ color: FIRE.greenText }}>{passCount} pass</span>
+                <span style={{ color: failCount ? FIRE.redText : FIRE.textMuted }}>{failCount} fail</span>
+                <span style={{ color: unmarked ? FIRE.amberText : FIRE.textMuted }}>{unmarked} unmarked</span>
+              </div>
             </div>
             {groups.map((loc) => (
               <div key={loc} style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "6px 0 3px" }}>{loc}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "6px 0 3px" }}>
+                  <span style={{ flex: 1 }}>{loc}</span>
+                  {(() => { const g = gmap.get(loc); const d = g.filter((it) => marks[it.id]).length; return <span style={{ letterSpacing: 0, textTransform: "none", fontWeight: 600, color: d === g.length ? FIRE.greenText : FIRE.textMuted, ...FS.num }}>{d}/{g.length}</span>; })()}
+                </div>
                 {gmap.get(loc).map((it) => {
                   const mk = marks[it.id];
                   return (
-                    <div key={it.id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <div key={it.id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 999, flexShrink: 0, background: mk ? (mk.result === "fail" ? FIRE.redBright : FIRE.green) : "transparent", border: `1.5px solid ${mk ? (mk.result === "fail" ? FIRE.redBright : FIRE.green) : FIRE.textMuted2}` }} />
                         <button onClick={() => it.description && setExpandedItemId(expandedItemId === it.id ? null : it.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: it.description ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
                           <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
                           {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
                         </button>
                         <div style={{ display: "inline-flex", gap: 6 }}>
-                          <button disabled={savingItemId === it.id} title="Pass" onClick={() => onPass(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : mk?.result === "pass" ? 1 : 0.45 }}><CheckCircle2 size={14} color={FIRE.green} /> Pass</button>
-                          <button disabled={savingItemId === it.id} title="Fail (needs a note)" onClick={() => openFail(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : (mk?.result === "fail" || noteItemId === it.id) ? 1 : 0.45 }}><X size={14} color={FIRE.redBright} /> Fail</button>
+                          <button disabled={savingItemId === it.id} title="Pass" onClick={() => onPass(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : 1, ...(mk?.result === "pass" ? { background: FIRE.green, borderColor: FIRE.green, color: "#fff" } : { color: FIRE.textSecondary }) }}><CheckCircle2 size={14} color={mk?.result === "pass" ? "#fff" : FIRE.green} /> Pass</button>
+                          <button disabled={savingItemId === it.id} title="Fail (needs a note)" onClick={() => openFail(it)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, opacity: savingItemId === it.id ? 0.6 : 1, ...((mk?.result === "fail" || noteItemId === it.id) ? { background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" } : { color: FIRE.textSecondary }) }}><X size={14} color={(mk?.result === "fail" || noteItemId === it.id) ? "#fff" : FIRE.redBright} /> Fail</button>
                         </div>
                       </div>
                       {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 4px", lineHeight: 1.45 }}>{it.description}</div>}
@@ -14354,7 +15877,7 @@ function CheckRunModal({ S, rig, meId, notify, canManage, onClose, onFinalized }
             ))}
           </>)}
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: `0.5px solid ${FIRE.hairline}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
           {!loading && !err && items && items.length > 0 && !allMarked && (
             <div style={{ marginRight: "auto", fontSize: 12, color: FIRE.textMuted }}>{unmarked} item{unmarked === 1 ? "" : "s"} still unmarked</div>
           )}
@@ -14488,25 +16011,22 @@ function ApparatusChecklist({ S, rig, notify }) {
     return out.sort((a, b) => a.localeCompare(b));
   })();
   return (
-    <div style={{ marginTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
-      <button onClick={toggleOpen} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <ClipboardList size={14} color={FIRE.btnIcon} /> Checklist{items ? ` (${items.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={ClipboardList} label="Truck checklist" count={items ? items.length : null} open={open} onToggle={toggleOpen} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ ...NOIR_INSET, padding: "8px 14px" }}>
           {/* Clean by default: read-only text. "Edit checklist" reveals add/edit/retire on all rows
               (reading vs restructuring). An empty list shows Add directly to bootstrap the first item. */}
           {!loading && items && items.length > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{items.length} item{items.length === 1 ? "" : "s"}</span>
-              <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+              <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
                 {editMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={FIRE.btnIcon} /> Edit checklist</>}
               </button>
             </div>
           )}
           {(editMode || (items && items.length === 0)) && (adding ? (
-            <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ ...FS.cardNoir, background: FIRE.card2Noir, padding: 12, marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={label} placeholder="e.g. SCBA pressure" onChange={(e) => setLabel(e.target.value)} /></label>
               <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={location} onChange={setLocation} /></div>
               <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={description} placeholder="Optional detail, shown on tap" onChange={(e) => setDescription(e.target.value)} /></label>
@@ -14528,9 +16048,10 @@ function ApparatusChecklist({ S, rig, notify }) {
                 <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2, margin: "8px 0 2px" }}>{loc}</div>
                 {gmap.get(loc).map((it) => (
                   <div key={it.id}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                      <CheckMark state="todo" />
                       <button onClick={() => it.description && setExpandedItemId(expandedItemId === it.id ? null : it.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: it.description ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
-                        <span style={{ fontSize: 13.5, color: FIRE.textPrimary }}>{it.label}</span>
+                        <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{it.label}</span>
                         {it.description && (expandedItemId === it.id ? <ChevronUp size={13} color={FIRE.textMuted} /> : <ChevronDown size={13} color={FIRE.textMuted} />)}
                       </button>
                       {editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(it)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
@@ -14538,7 +16059,7 @@ function ApparatusChecklist({ S, rig, notify }) {
                     </div>
                     {expandedItemId === it.id && it.description && <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "2px 0 8px", lineHeight: 1.45 }}>{it.description}</div>}
                     {editingId === it.id && (
-                      <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 12, margin: "6px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ ...FS.cardNoir, background: FIRE.card2Noir, padding: 12, margin: "6px 0", display: "flex", flexDirection: "column", gap: 10 }}>
                         <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span><input style={FS.input} value={editBuf.label} onChange={(e) => setEditBuf((b) => ({ ...b, label: e.target.value }))} /></label>
                         <div style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Location / Area</span><LocationPicker existing={distinctLocations} value={editBuf.location} onChange={(v) => setEditBuf((b) => ({ ...b, location: v }))} /></div>
                         <label style={{ ...S.field }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Description (optional)</span><textarea style={{ ...FS.input, minHeight: 54, resize: "vertical" }} value={editBuf.description} onChange={(e) => setEditBuf((b) => ({ ...b, description: e.target.value }))} /></label>
@@ -14564,10 +16085,10 @@ function ApparatusChecklist({ S, rig, notify }) {
                 ) : (retired && retired.length === 0) ? (
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 6 }}>No retired items.</div>
                 ) : (retired || []).map((it) => (
-                  <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+                  <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: 13, color: FIRE.textMuted, textDecoration: "line-through" }}>{it.label}</span>
-                      {it.location && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.location}</span>}
+                      {it.location && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.navLabel, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", marginLeft: 7 }}>{it.location}</span>}
                     </div>
                     <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => restore(it.id)}><RotateCcw size={13} color={FIRE.btnIcon} /> Restore</button>
                   </div>
@@ -14610,15 +16131,19 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
     await reloadResults(checkId);   // refresh this item's trail in place
     onResolved?.();                 // reload the rig card (flag flips to READY if this was the last open failure)
   }
+  const [checksErr, setChecksErr] = useState(false);   // a failed read is not "no checks recorded"
+  async function loadChecks() {
+    setLoading(true);
+    const { data, error } = await supabase.from("apparatus_checks")
+      .select(APPARATUS_CHECK_COLS)
+      .eq("apparatus_id", rig.id).eq("state", "finalized").order("performed_at", { ascending: false });
+    setLoading(false);
+    if (error || !data) { setChecksErr(true); return; }   // checks stays null -> retried on the next open
+    setChecksErr(false); setChecks(data);
+  }
   async function toggleOpen() {
     const next = !open; setOpen(next);
-    if (next && checks === null) {
-      setLoading(true);
-      const { data } = await supabase.from("apparatus_checks")
-        .select(APPARATUS_CHECK_COLS)
-        .eq("apparatus_id", rig.id).eq("state", "finalized").order("performed_at", { ascending: false });
-      setChecks(data || []); setLoading(false);
-    }
+    if (next && checks === null) await loadChecks();
   }
   async function toggleCheck(id) {
     if (expanded === id) { setExpanded(null); return; }
@@ -14630,32 +16155,35 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
     }
   }
   const fmtWhen = (iso) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  // Opens with the rig detail (the mock shows history inline) — the same read toggleOpen always made, fired when the
+  // rig is expanded instead of on a second click. Collapsing still works.
+  useEffect(() => { if (!open && checks === null) toggleOpen(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   return (
-    <div style={{ marginTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 10 }}>
-      <button onClick={toggleOpen} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <ClipboardCheck size={14} color={FIRE.btnIcon} /> Check history{checks ? ` (${checks.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={ClipboardCheck} label="Truck check history" count={checks ? checks.length : null} open={open} onToggle={toggleOpen} right={<span>pass / fail per check</span>} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ ...NOIR_INSET, padding: "2px 14px" }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (checksErr && checks === null) ? (
+            <ReadRetry what="the check history" onRetry={loadChecks} />
           ) : (checks && checks.length === 0) ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>No checks recorded yet.</div>
           ) : (checks || []).map((c) => {
             const failed = c.outcome === "fail"; const isOpen = expanded === c.id;
             return (
-              <div key={c.id} style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: "9px 12px", marginBottom: 6 }}>
-                <button onClick={() => toggleCheck(c.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                  <Pill S={S} color={failed ? FIRE.redBright : FIRE.green}>{failed ? "FAIL" : "PASS"}</Pill>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{fmtWhen(c.performed_at)}</div>
-                    <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{c.performed_by_name} · {c.pass_count} pass · {c.fail_count} fail</div>
-                  </div>
+              <div key={c.id} style={{ padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                {/* The mock's .h2row: date · who + count · PASS/FAIL pill. Tap to see the items (same lazy load). */}
+                <button onClick={() => toggleCheck(c.id)} title={fmtWhen(c.performed_at)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                  <span style={{ width: 54, fontSize: 11, color: FIRE.textMuted, flexShrink: 0, fontWeight: 600 }}>{new Date(c.performed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: FIRE.textSecondary }}>
+                    <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{c.performed_by_name}</b> · {(c.pass_count || 0) + (c.fail_count || 0)} item{(c.pass_count || 0) + (c.fail_count || 0) === 1 ? "" : "s"}{failed ? ` · ${c.fail_count} failed` : ""}
+                  </span>
+                  <ResultBadge pass={!failed}>{failed ? `${c.pass_count || 0}/${(c.pass_count || 0) + (c.fail_count || 0)} · FAIL` : `${c.pass_count || 0}/${c.pass_count || 0} PASS`}</ResultBadge>
                   {isOpen ? <ChevronUp size={14} color={FIRE.textMuted} /> : <ChevronDown size={14} color={FIRE.textMuted} />}
                 </button>
                 {isOpen && (
-                  <div style={{ marginTop: 8, borderTop: `0.5px solid ${FIRE.hairline}`, paddingTop: 8 }}>
+                  <div style={{ marginTop: 8, padding: "4px 0 2px", borderTop: `1px dashed ${FIRE.lineNoir}` }}>
                     {/* County report. INSIDE the expanded block and gated on resultsById[c.id]
                         deliberately: the items are lazy-loaded on expand, so a button on the
                         collapsed row would fire with items === undefined and hand the county a
@@ -14687,10 +16215,10 @@ function ApparatusHistory({ S, rig, role, notify, onResolved, dept }) {
                       const isResolved = !!it.resolved_at;
                       const editing = resolveFor === it.id;
                       return (
-                        <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "4px 0" }}>
-                          {itFail ? <X size={15} color={FIRE.redBright} style={{ flexShrink: 0, marginTop: 1 }} /> : <CheckCircle2 size={15} color={FIRE.green} style={{ flexShrink: 0, marginTop: 1 }} />}
+                        <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "5px 0" }}>
+                          <CheckMark state={itFail ? "fail" : "pass"} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, color: FIRE.textPrimary }}>{it.item_label}</div>
+                            <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: "18px" }}>{it.item_label}</div>
                             {itFail && it.note && <div style={{ fontSize: 12, color: FIRE.redText, marginTop: 1 }}>{it.note}</div>}
                             {itFail && isResolved && (
                               <div style={{ fontSize: 11.5, color: FIRE.green, marginTop: 2 }}>Resolved by {it.resolved_by_name || "—"}{it.resolved_at ? ` · ${fmtWhen(it.resolved_at)}` : ""}{it.resolution_note ? `: ${it.resolution_note}` : ""}</div>
@@ -14728,34 +16256,37 @@ function ApparatusServiceHistory({ S, rig }) {
   const [open, setOpen] = useState(false);
   const [periods, setPeriods] = useState(null);   // null = not loaded yet
   const [loading, setLoading] = useState(false);
+  const [periodsErr, setPeriodsErr] = useState(false);   // a failed read is not "never taken out of service"
+  async function loadPeriods() {
+    setLoading(true);
+    const { data, error } = await supabase.from("apparatus_service_periods")
+      .select("id, out_at, out_by_name, out_reason, back_at, back_by_name")
+      .eq("apparatus_id", rig.id).order("out_at", { ascending: false });
+    setLoading(false);
+    if (error || !data) { setPeriodsErr(true); return; }
+    setPeriodsErr(false); setPeriods(data);
+  }
   async function toggle() {
     const next = !open; setOpen(next);
-    if (next && periods === null) {
-      setLoading(true);
-      const { data } = await supabase.from("apparatus_service_periods")
-        .select("id, out_at, out_by_name, out_reason, back_at, back_by_name")
-        .eq("apparatus_id", rig.id).order("out_at", { ascending: false });
-      setPeriods(data || []); setLoading(false);
-    }
+    if (next && periods === null) await loadPeriods();
   }
   const fmtD = (iso) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={toggle} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <Wrench size={13} color={FIRE.btnIcon} /> Service history{periods ? ` (${periods.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={Wrench} label="Service history" count={periods ? periods.length : null} open={open} onToggle={toggle} right={<span>out-of-service periods</span>} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ ...NOIR_INSET, padding: "4px 14px" }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (periodsErr && periods === null) ? (
+            <ReadRetry what="the service history" onRetry={loadPeriods} />
           ) : (periods && periods.length === 0) ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted }}>Never taken out of service.</div>
           ) : (periods || []).map((p) => {
             const stillOut = !p.back_at;
             return (
-              <div key={p.id} style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: "8px 12px", marginBottom: 6, fontSize: 12.5 }}>
-                <div style={{ color: FIRE.textPrimary }}>{stillOut ? `Out of service since ${fmtD(p.out_at)}` : `Out of service ${fmtD(p.out_at)} – ${fmtD(p.back_at)}`}</div>
+              <div key={p.id} style={{ padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 12.5 }}>
+                <div style={{ color: stillOut ? FIRE.redText : FIRE.textPrimary, fontWeight: 600 }}>{stillOut ? `Out of service since ${fmtD(p.out_at)}` : `Out of service ${fmtD(p.out_at)} – ${fmtD(p.back_at)}`}</div>
                 <div style={{ color: FIRE.textSecondary, marginTop: 2 }}>{p.out_reason}</div>
                 <div style={{ color: FIRE.textMuted, marginTop: 2 }}>Out by {p.out_by_name || "—"}{p.back_at ? ` · back by ${p.back_by_name || "—"}` : ""}</div>
               </div>
@@ -14858,7 +16389,7 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
                 onClick={(e) => { if (drag) return; if (!editable) return; /* check mode: empty-photo click is a NO-OP — panning across a truck makes near-clicks constantly; never disturb the selected item / Pass-Fail panel. Selection changes only by tapping a dot. */ const { xp, yp } = pctFromEvent(e); setSelectedId(null); setPending({ xp, yp }); setNewLabel(""); }}>
                 {url
                   ? <img ref={imgRef} src={url} alt={photo.angle_label || "Apparatus photo"} draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} />
-                  : <div style={{ height: 260, background: FIRE.btnBg, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
+                  : <div style={{ height: 260, background: FIRE.card2Noir, display: "grid", placeItems: "center", color: FIRE.textMuted }}><Loader2 size={16} className="spin" /></div>}
                 {dots.map((it) => {
                   const dragging = drag && drag.id === it.id;
                   const x = dragging ? drag.xp : it.x_pct;
@@ -14882,7 +16413,7 @@ function PhotoDotEditor({ S, url, photo, dots, unplaced, onCreate, onLink, onMov
         </TransformWrapper>
       </div>
       {editable && (pending || selected) && (
-        <div style={{ flexShrink: 0, background: FIRE.card, borderTop: `0.5px solid ${FIRE.hairline}`, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", maxHeight: "48vh", overflowY: "auto" }}>
+        <div style={{ flexShrink: 0, background: FIRE.card, borderTop: `1px solid ${FIRE.lineNoir}`, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", maxHeight: "48vh", overflowY: "auto" }}>
           {pending ? (<>
             <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 8 }}>Place a dot here:</div>
             {/* portrait: field on its own full-width line, actions wrap below (never a fixed row) */}
@@ -14931,20 +16462,24 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
   const [editDotsId, setEditDotsId] = useState(null);   // photo whose dot-placement canvas is open
   const [editMode, setEditMode] = useState(false);   // false = view (thumbnail + label + dot-count); true = reveal label-edit/dots/reorder/remove + add
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditLabelId(null); setEditDotsId(null); } return !v; }); }
+  const [photosErr, setPhotosErr] = useState(false);   // a failed read is not "no photos yet"
   async function loadItems() {
-    const { data } = await supabase.from("apparatus_check_items")
+    const { data, error } = await supabase.from("apparatus_check_items")
       .select("id, label, active, photo_id, x_pct, y_pct, sort_order")
       .eq("apparatus_id", rig.id).eq("active", true)
       .order("sort_order", { ascending: true });
-    setItems(data || []);
+    if (error || !data) return;   // keep the last-known dots rather than wiping them
+    setItems(data);
   }
   async function load() {
     setLoading(true);
-    const { data } = await supabase.from("apparatus_photos")
+    const { data, error } = await supabase.from("apparatus_photos")
       .select("id, storage_path, angle_label, sort_order")
       .eq("apparatus_id", rig.id).is("deleted_at", null)
       .order("sort_order", { ascending: true }).order("created_at", { ascending: true });
-    const list = data || [];
+    if (error || !data) { setPhotosErr(true); setLoading(false); return; }   // photos keeps its last value (null on first load)
+    setPhotosErr(false);
+    const list = data;
     const paths = list.map((p) => p.storage_path).filter(Boolean);
     const map = {};
     if (paths.length) {
@@ -14956,6 +16491,8 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
     setLoading(false);
   }
   async function toggle() { const next = !open; setOpen(next); if (next && photos === null) await load(); }
+  // Opens with the rig detail (the mock's inline photo strip) — the same load toggle always ran, fired on expand.
+  useEffect(() => { if (!open && photos === null) toggle(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   // Dot placement writes (apparatus_check_items UPDATE/INSERT — gated by ops-manage-check-items RLS).
   async function createDot(photo, xp, yp, label) {
     const name = (label || "").trim(); if (!name) return;
@@ -15032,7 +16569,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
     } finally { setBusy(false); }
   }
   async function del(p) {
-    if (!window.confirm(`Remove this photo${p.angle_label ? ` ("${p.angle_label}")` : ""}? It'll be hidden from the rig.`)) return;
+    if (!(await noirConfirm({ title: "Remove this photo?", body: `${p.angle_label ? `“${p.angle_label}” ` : "It "}will be hidden from the rig.`, confirmLabel: "Remove", danger: true }))) return;
     setBusy(true);
     try {
       const { error } = await supabase.from("apparatus_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", p.id);
@@ -15044,34 +16581,55 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
     } finally { setBusy(false); }
   }
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={toggle} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <ImageIcon size={13} color={FIRE.btnIcon} /> Photos{photos ? ` (${photos.length})` : ""}
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
+    <div style={{ minWidth: 0 }}>
+      <SectionBar icon={ImageIcon} label="Photos" count={photos ? photos.length : null} open={open} onToggle={toggle} />
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+          ) : (photosErr && photos === null) ? (
+            <ReadRetry what="the photos" onRetry={load} />
           ) : (
             <>
               {(photos || []).length > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: FIRE.textMuted2 }}>{photos.length} photo{photos.length === 1 ? "" : "s"}</span>
-                  <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+                  <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", padding: "5px 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
                     {editMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={FIRE.btnIcon} /> Edit photos</>}
                   </button>
                 </div>
               )}
-              {(photos || []).length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 8 }}>No photos yet — add one so you can build a visual check later.</div>}
-              {(photos || []).map((p, i) => {
+              {(photos || []).length === 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 8 }}>No photos yet — add one so you can build a visual check later.</div>}
+              {/* VIEW: the mock's photo strip — captioned thumbnails + an Add photo tile (same addPhoto as the edit-mode
+                  buttons; library picker, which on a phone also offers the camera). EDIT: the full rows below. */}
+              {!editMode && (
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+                  {(photos || []).map((p) => {
+                    const dots = (items || []).filter((it) => it.photo_id === p.id && it.x_pct != null).length;
+                    return (
+                      <div key={p.id} title={p.angle_label || "Unlabeled"} style={{ width: 124, height: 84, borderRadius: 10, position: "relative", overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "flex-end", background: FIRE.card2Noir, flexShrink: 0 }}>
+                        {urls[p.id]
+                          ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                          : <ImageIcon size={20} color={FIRE.textMuted2} style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-60%)" }} />}
+                        {dots > 0 && <span title={`${dots} checklist dot${dots === 1 ? "" : "s"} placed`} style={{ position: "absolute", top: 6, right: 6, zIndex: 1, display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,.55)", borderRadius: 999, padding: "2px 6px" }}><MapPin size={10} color="#fff" />{dots}</span>}
+                        <span style={{ position: "relative", zIndex: 1, width: "100%", fontSize: 9.5, fontWeight: 600, color: "#eaf0f6", padding: "14px 8px 6px", background: "linear-gradient(0deg, rgba(0,0,0,.72), transparent)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontStyle: p.angle_label ? "normal" : "italic" }}>{p.angle_label || "Unlabeled"}</span>
+                      </div>
+                    );
+                  })}
+                  <label title="Add a photo" style={{ width: 124, height: 84, borderRadius: 10, border: `1.5px dashed ${FIRE.line2Noir}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, color: FIRE.textMuted, fontSize: 10.5, cursor: busy ? "default" : "pointer", background: FIRE.card2Noir, opacity: busy ? 0.6 : 1, flexShrink: 0 }}>
+                    {busy ? <Loader2 size={18} className="spin" /> : <Plus size={19} />}{busy ? "Working…" : "Add photo"}
+                    <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addPhoto(f); }} />
+                  </label>
+                </div>
+              )}
+              {editMode && (photos || []).map((p, i) => {
                 const dotCount = (items || []).filter((it) => it.photo_id === p.id && it.x_pct != null).length;
                 const editingDots = editDotsId === p.id;
                 return (
                 <div key={p.id} style={{ marginBottom: 6 }}>
-                  <div style={{ ...FS.cardNoir, background: FIRE.btnBg, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ ...FS.cardNoir, background: FIRE.card2Noir, padding: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     {urls[p.id]
-                      ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `0.5px solid ${FIRE.hairline}` }} />
+                      ? <img src={urls[p.id]} alt={p.angle_label || "Apparatus photo"} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `1px solid ${FIRE.lineNoir}` }} />
                       : <div style={{ width: 64, height: 64, borderRadius: 8, background: FIRE.card, display: "grid", placeItems: "center", flexShrink: 0 }}><ImageIcon size={20} color={FIRE.textMuted2} /></div>}
                     {editMode && editLabelId === p.id ? (
                       <input autoFocus value={labelDraft} placeholder="Label (e.g. Front, Driver side)" onChange={(e) => setLabelDraft(e.target.value)}
@@ -15113,7 +16671,7 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
                   onLink={(it, xp, yp) => linkDot(it, p, xp, yp)}
                   onMove={moveDot} onUnlink={unlinkDot} onClose={() => setEditDotsId(null)} busy={busy} editable />;
               })()}
-              {(editMode || (photos || []).length === 0) && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {editMode && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {/* Take photo: capture="environment" opens the REAR camera on a phone. */}
                 <label title="Take a photo with the camera" style={{ ...FS.btn, padding: "7px 11px", fontSize: 12, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
                   {busy ? <><Loader2 size={13} className="spin" /> Working…</> : <><Camera size={14} color={FIRE.btnIcon} /> Take photo</>}
@@ -15170,12 +16728,15 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   const [editMode, setEditMode] = useState(false);   // false = clean text; true = reveal Add + per-item Edit/Remove. Mark done stays at rest (daily ops).
   function toggleEditMode() { setEditMode((v) => { if (v) { setEditingMaintId(null); setAdding(false); } return !v; }); }
   const rigNameById = new Map((rigs || []).map((r) => [r.id, r.name]));
+  const [maintErr, setMaintErr] = useState(false);       // a failed read is not "all maintenance up to date"
+  const [maintLoaded, setMaintLoaded] = useState(false);
   const loadMaint = () => {
     supabase.from("apparatus_maintenance")
       .select("id, rig_id, task, cadence, last_done_at")
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
-        if (error || !data) return;
+        if (error || !data) { setMaintErr(true); return; }   // keep last-known items
+        setMaintErr(false); setMaintLoaded(true);
         setItems(data.map((r) => ({
           id: r.id, rigId: r.rig_id,
           unit: r.rig_id ? (rigNameById.get(r.rig_id) || "Unknown unit") : "All units",
@@ -15185,7 +16746,8 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
         })));
       });
   };
-  useEffect(() => { loadMaint(); }, [rigs]);   // reload when rigs load/change so rig_id → unit name resolves
+  useEffect(() => { loadMaint(); }, [rigs]);
+  useReconnect(() => { if (maintErr) loadMaint(); });   // reload when rigs load/change so rig_id → unit name resolves
   useEffect(() => { if (onItems) onItems(items); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [items]);   // fleet board's open-maintenance flags read this same list
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const order = { Overdue: 0, "Due soon": 1, Current: 2 };
@@ -15261,13 +16823,14 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   }
   return (
     <div style={{ marginTop: 22 }}>
-      <div style={{ ...FS.kicker, marginBottom: 8 }}><Wrench size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAINTENANCE & REMINDERS</div>
-      <div style={{ fontSize: 13, color: due > 0 ? FIRE.red : FIRE.greenText, margin: "2px 0 12px", fontWeight: 600 }}>
+      <SectionBar icon={Wrench} label="Maintenance & reminders" count={items.length} style={{ marginTop: 0 }} />
+      {maintErr && !maintLoaded ? <ReadRetry what="maintenance" onRetry={loadMaint} /> : (
+      <div style={{ fontSize: 13, color: due > 0 ? FIRE.redText : FIRE.greenText, margin: "-2px 0 12px", fontWeight: 600 }}>
         {due > 0 ? `${due} maintenance item${due === 1 ? "" : "s"} need attention` : "All maintenance up to date"}
-      </div>
+      </div>)}
       {canManage && items.length > 0 && (
         <div style={{ display: "flex", marginBottom: 12 }}>
-          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
+          <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
             {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit items</>}
           </button>
         </div>
@@ -15283,7 +16846,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
       ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAdding(true)}><Plus size={15} /> Add maintenance item</button>)}
       <div>
         {sorted.map((i) => (
-          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={i.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <Wrench size={15} color={MAINT_FIRE[i.status]} style={{ flexShrink: 0 }} />
             <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
               <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{i.task}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {i.unit}</span>
@@ -15298,7 +16861,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
               {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeItem(i)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
             {doneFor === i.id && (
-              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ ...NOIR_INSET, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div style={{ flexBasis: "100%", fontSize: 12.5, color: FIRE.textSecondary }}>Recording <strong style={{ color: FIRE.textPrimary }}>{i.task}</strong> as done today — notes and cost are optional.</div>
                 <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Notes (optional)</span><input style={FS.input} value={doneNotes} placeholder="e.g. replaced filter, topped off fluids" onChange={(e) => setDoneNotes(e.target.value)} /></label>
                 <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cost (optional)</span><input style={FS.input} value={doneCost} placeholder="e.g. 240" inputMode="numeric" onChange={(e) => setDoneCost(e.target.value)} /></label>
@@ -15307,7 +16870,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
               </div>
             )}
             {histFor === i.id && (
-              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%" }}>
+              <div style={{ ...NOIR_INSET, padding: 14, marginTop: 8, width: "100%" }}>
                 <CardHead icon={Wrench} title="Completion history" />
                 {histBusy === i.id && !(hist[i.id] || []).length ? (
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><Loader2 size={14} className="spin" /> Loading…</div>
@@ -15321,7 +16884,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
                   <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No completions recorded yet.</div>
                 ) : (
                   (hist[i.id] || []).map((h, hi, arr) => (
-                    <div key={h.id} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline", padding: "7px 0", borderBottom: hi === arr.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+                    <div key={h.id} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline", padding: "7px 0", borderBottom: hi === arr.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                       <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, minWidth: 96 }}>{fmtLogAt(h.done_at)}</span>
                       <span style={{ fontSize: 12.5, color: FIRE.textSecondary, minWidth: 110 }}>{h.done_by_name || "Unknown"}</span>
                       {h.notes && <span style={{ flex: 1, minWidth: 150, fontSize: 12.5, color: FIRE.textMuted }}>{h.notes}</span>}
@@ -15332,7 +16895,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
               </div>
             )}
             {editingMaintId === i.id && (
-              <div style={{ ...FS.cardNoir, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ ...NOIR_INSET, padding: 14, marginTop: 8, width: "100%", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={maintBuf.task} onChange={(e) => setMaintBuf((b) => ({ ...b, task: e.target.value }))} /></label>
                 <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Cadence</span><select style={FS.input} value={maintBuf.cadence} onChange={(e) => setMaintBuf((b) => ({ ...b, cadence: e.target.value }))}><option>Weekly</option><option>Monthly</option><option>Quarterly</option><option>Annual</option></select></label>
                 <button style={FS.btnPrimary} onClick={() => saveEditMaint(i.id)}><CheckCircle2 size={15} /> Save</button>
@@ -15343,15 +16906,15 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
         ))}
       </div>
       {canManage && (
-        <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}`, marginTop: 16 }}>
+        <div style={{ ...NOIR_AI_BANNER, marginTop: 16 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ ...FS.kicker, marginBottom: 8 }}><Sparkles size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI MAINTENANCE CHECKLIST</div>
-            <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft a preventive-maintenance checklist</h3>
-            <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
+            <CardHead icon={Sparkles} title="AI maintenance checklist" />
+            <h3 style={NOIR_FEAT_TITLE}>Draft a preventive-maintenance checklist</h3>
+            <p style={NOIR_HELP}>A starting checklist for your rigs, grouped by cadence. A qualified person still performs and signs off each item.</p>
             <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={draftChecklist} disabled={loading}>
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Wrench size={16} /> Draft a checklist</>}
             </button>
-            {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+            {err && <div style={NOIR_ERR}>{err}</div>}
             {out && <RichOutput S={S} text={out} dark />}
           </div>
         </div>
@@ -15390,7 +16953,7 @@ function SignaturePad({ onChange, height = 160 }) {
   return (
     <div>
       <canvas ref={canvasRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
-        style={{ width: "100%", height, background: "#fff", borderRadius: 8, border: `1px solid ${FIRE.btnBorder}`, touchAction: "none", display: "block", cursor: "crosshair" }} />
+        style={{ width: "100%", height, background: "#fff", borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, touchAction: "none", display: "block", cursor: "crosshair" }} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
         <span style={{ fontSize: 11, color: FIRE.textMuted }}>Sign above</span>
         <button type="button" onClick={clear} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}>Clear</button>
@@ -15450,7 +17013,7 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
     } finally { setBusy(false); }
   }
   async function remove(row) {
-    if (!row || !window.confirm("Remove this photo?")) return;
+    if (!row || !(await noirConfirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true }))) return;
     setBusy(true);
     try {
       const { error } = await supabase.from("equipment_photos").update({ deleted_at: new Date().toISOString(), deleted_by: meId }).eq("id", row.id);
@@ -15459,24 +17022,26 @@ function EquipmentUnitPhotos({ unit, canManage, meId, notify }) {
     } finally { setBusy(false); }
   }
   return (
-    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "4px 0 10px" }}>
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "4px 0 10px" }}>
+      {/* The mocks' photo strip: 122×84 tiles, label as a caption over the photo, dashed tile when empty. */}
       {SLOTS.map(([kind, label]) => {
         const row = byKind?.[kind] || null; const url = urls[kind];
+        const cap = <span style={{ position: "absolute", left: 0, right: 0, bottom: 0, fontSize: 9.5, fontWeight: 600, color: "#eaf0f6", padding: "14px 8px 6px", background: "linear-gradient(0deg, rgba(0,0,0,.72), transparent)", borderRadius: "0 0 10px 10px", pointerEvents: "none" }}>{label}</span>;
         return (
           <div key={kind}>
-            <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 4 }}>{label}</div>
             {url ? (
-              <div style={{ position: "relative", width: 96, height: 96 }}>
-                <img src={url} alt={label} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: `1px solid ${FIRE.hairline}`, display: "block" }} />
-                {canManage && <button title="Remove photo" onClick={() => remove(row)} disabled={busy} style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 999, background: FIRE.pageBg, border: `1px solid ${FIRE.btnBorder}`, cursor: busy ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={12} color={FIRE.deleteRed} /></button>}
+              <div style={{ position: "relative", width: 122, height: 84 }}>
+                <img src={url} alt={label} style={{ width: 122, height: 84, objectFit: "cover", borderRadius: 10, border: `1px solid ${FIRE.line2Noir}`, display: "block" }} />
+                {cap}
+                {canManage && <button title="Remove photo" onClick={() => remove(row)} disabled={busy} style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 999, background: FIRE.pageBg, border: `1px solid ${FIRE.line2Noir}`, cursor: busy ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={12} color={FIRE.deleteRed} /></button>}
               </div>
             ) : canManage ? (
-              <label style={{ ...FS.btn, width: 96, height: 96, minHeight: 44, display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1, fontSize: 11, textAlign: "center" }}>
-                <Camera size={16} color={FIRE.btnIcon} /> {busy ? "Working…" : "Add photo"}
+              <label style={{ width: 122, height: 84, borderRadius: 10, border: `1.5px dashed ${FIRE.line2Noir}`, background: FIRE.card2Noir, color: FIRE.textMuted, display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1, fontSize: 10.5, textAlign: "center" }}>
+                <Camera size={16} color={FIRE.textMuted} /> {busy ? "Working…" : `Add ${label.toLowerCase()}`}
                 <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) addPhoto(f, kind); }} />
               </label>
             ) : (
-              <div style={{ width: 96, height: 96, borderRadius: 8, border: `1px dashed ${FIRE.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", color: FIRE.textMuted2, fontSize: 11 }}>No photo</div>
+              <div style={{ width: 122, height: 84, borderRadius: 10, border: `1.5px dashed ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", color: FIRE.textMuted2, fontSize: 10.5, textAlign: "center", padding: 6 }}>No {label.toLowerCase()}</div>
             )}
           </div>
         );
@@ -15534,9 +17099,13 @@ function EquipmentCustodyLedger({ unit }) {
             const lost = r.close_action === "marked_lost";
             const tone = !r.closed_at ? FIRE.blueText : lost ? FIRE.redText : FIRE.textMuted;
             return (
-              <div key={r.id} style={{ padding: "9px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+              <div key={r.id} style={{ display: "flex", gap: 11, padding: "9px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: !r.closed_at ? "rgba(79,144,214,.14)" : lost ? "rgba(200,50,58,.14)" : "rgba(47,168,105,.14)", border: `1px solid ${!r.closed_at ? "rgba(79,144,214,.4)" : lost ? "rgba(200,50,58,.4)" : "rgba(47,168,105,.4)"}` }}>
+                  {!r.closed_at ? <ArrowLeftRight size={13} color={FIRE.blueText} /> : lost ? <X size={13} color={FIRE.redText} /> : <Check size={13} color={FIRE.greenText} />}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.holder_name || "—"}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.holder_name || "—"}</span>
                   <span style={{ fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{fmt(r.opened_at)} → {r.closed_at ? fmt(r.closed_at) : "now"}</span>
                   <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: tone }}>{r.closed_at ? (CLOSE[r.close_action] || "Closed").toUpperCase() : "HOLDING"}</span>
                 </div>
@@ -15554,6 +17123,7 @@ function EquipmentCustodyLedger({ unit }) {
                       : <button key={path} onClick={() => view(path)} style={{ ...FS.btn, padding: "5px 9px", fontSize: 11 }}><Camera size={12} color={FIRE.btnIcon} /> Condition photo {photos[r.id].length > 1 ? k + 1 : ""}</button>)}
                   </div>
                 )}
+                </div>
               </div>
             );
           })}
@@ -15609,61 +17179,86 @@ function IssueEquipmentModal({ S, availableUnits, members, managers, meId, notif
     notify({ kind: "success", title: "Equipment issued", text: `Issued ${selected.size} item${selected.size === 1 ? "" : "s"} to ${recipient?.name || "the member"}.` });
     onIssued();
   }
+  // The modals revamp mock (b4c_equipment_modals_revamp.html). Layout only — recipient / selection / signature /
+  // witness state and submit() (issue_equipment_batch) are exactly as before. Issue stays disabled until a member,
+  // at least one item and the recipient's signature are present; submit() still re-checks every rule.
+  const flabel = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, margin: "0 0 8px", display: "flex", alignItems: "center", gap: 8 };
+  const field = { width: "100%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: "12px 14px", color: FIRE.textPrimary, fontSize: 13.5, fontFamily: "inherit" };
+  const ready = !!recipientId && selected.size > 0 && !!sig && (!selfIssue || (!!witnessId && !!witnessSig));
+  const firstName = (recipient?.name || "").split(" ")[0];
+  const ini = (n) => (n || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   return createPortal(
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 480, padding: 20, margin: "24px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={Briefcase} title="Issue equipment" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 660, margin: "24px 0", background: "linear-gradient(180deg, #0E1218, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "16px 20px", borderBottom: `1px solid ${FIRE.lineNoir}`, position: "relative", background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)" }}>
+          <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Briefcase size={20} color={FIRE.redText} /></span>
+          <div style={{ minWidth: 0, paddingRight: 40 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, lineHeight: 1, color: FIRE.textPrimary }}>Issue equipment</div>
+            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4 }}>Sign gear out to a member — they confirm custody on the spot.</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ position: "absolute", top: 15, right: 16, width: 30, height: 30, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}><X size={14} color={FIRE.textSecondary} /></button>
         </div>
 
-        <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Issue to</span>
-          <select style={FS.input} value={recipientId} onChange={(e) => { setRecipientId(e.target.value); setSig(""); }}>
-            <option value="">Choose a member…</option>
-            {recipients.map((m) => <option key={m.id} value={m.id}>{m.name}{m.id === meId ? " (you)" : ""}</option>)}
-          </select>
-        </label>
+        <div style={{ padding: "16px 20px" }}>
+          <div style={flabel}>Issue to</div>
+          <div style={{ position: "relative", marginBottom: 16 }}>
+            {recipient && <span aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg, #242a32, #12161c)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10, color: FIRE.redText, pointerEvents: "none" }}>{ini(recipient.name)}</span>}
+            <select aria-label="Issue to" style={{ ...field, appearance: "none", WebkitAppearance: "none", paddingLeft: recipient ? 48 : 14, paddingRight: 34, color: recipient ? FIRE.textPrimary : FIRE.textMuted, cursor: "pointer" }} value={recipientId} onChange={(e) => { setRecipientId(e.target.value); setSig(""); }}>
+              <option value="">Choose a member…</option>
+              {recipients.map((m) => <option key={m.id} value={m.id}>{m.name}{m.role ? ` · ${m.role}` : ""}{m.id === meId ? " (you)" : ""}</option>)}
+            </select>
+            <ChevronDown size={16} color={FIRE.textMuted} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+          </div>
 
-        <div style={{ ...FS.kicker, marginBottom: 6 }}>ITEMS · {selected.size} selected</div>
-        <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${FIRE.hairline}`, borderRadius: 10, padding: "2px 10px", marginBottom: 14 }}>
-          {availableUnits.length === 0 ? (
-            <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No available items — everything is issued or out of inventory.</div>
-          ) : groupNames.map((cat) => (
-            <div key={cat}>
-              <div style={{ ...FS.kicker, padding: "8px 0 4px" }}>{cat}</div>
-              {grouped[cat].map((u) => {
-                const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
-                return (
-                  <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 40, padding: "4px 0", cursor: "pointer", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-                    <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggle(u.id)} style={{ width: 16, height: 16, flexShrink: 0, accentColor: FIRE.red }} />
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.textPrimary }}>{u.typeName} · {idLabel}</span>
-                    <span style={{ fontSize: 11, color: u.condition === "Serviceable" ? FIRE.greenText : FIRE.textMuted2 }}>{u.condition}</span>
-                  </label>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+          <div style={flabel}>Items to issue <span style={{ marginLeft: "auto", fontFamily: "inherit", fontWeight: 700, fontSize: 11, letterSpacing: 0, textTransform: "none", color: selected.size ? FIRE.redText : FIRE.textMuted }}>{selected.size} selected</span></div>
+          <div style={{ border: `1px solid ${FIRE.lineNoir}`, borderRadius: 11, overflow: "hidden", marginBottom: 16, maxHeight: 280, overflowY: "auto" }}>
+            {availableUnits.length === 0 ? (
+              <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "12px 14px" }}>No available items — everything is issued or out of inventory.</div>
+            ) : groupNames.flatMap((cat) => grouped[cat].map((u) => {
+              const on = selected.has(u.id);
+              const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
+              return (
+                <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderBottom: `1px solid ${FIRE.lineNoir}`, cursor: "pointer", background: on ? "rgba(224,58,68,.07)" : "transparent" }}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(u.id)} style={{ position: "absolute", opacity: 0, width: 1, height: 1, pointerEvents: "none" }} />
+                  <span aria-hidden="true" style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${on ? FIRE.redBright : FIRE.line2Noir}`, background: on ? FIRE.redBright : "transparent" }}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{u.typeName}</span>
+                    <span style={{ display: "block", fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{idLabel} · <span style={{ color: u.condition === "Serviceable" ? FIRE.greenText : FIRE.amberText }}>{u.condition}</span></span>
+                  </span>
+                  <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", borderRadius: 5, padding: "3px 8px", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.textSecondary, flexShrink: 0, textTransform: "uppercase" }}>{cat}</span>
+                </label>
+              );
+            }))}
+          </div>
 
-        <div style={{ ...FS.kicker, marginBottom: 6 }}>SIGNATURE</div>
-        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 6 }}>{recipient ? <><b style={{ color: FIRE.textPrimary }}>{recipient.name}</b> signs to accept custody:</> : "Choose a recipient first."}</div>
-        {recipient && <div style={{ marginBottom: 14 }}><SignaturePad key={recipientId} onChange={setSig} /></div>}
+          <div style={flabel}>Sign-out — recipient confirms custody</div>
+          <div style={{ border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 11, padding: 14, background: FIRE.card2Noir }}>
+            {recipient ? (<>
+              <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 8 }}><b style={{ color: FIRE.textPrimary }}>{recipient.name}</b> signs to accept custody:</div>
+              <SignaturePad key={recipientId} onChange={setSig} />
+            </>) : <div style={{ fontSize: 12.5, color: FIRE.textMuted, textAlign: "center", padding: "8px 0" }}>Choose who's receiving the gear first.</div>}
+          </div>
+          <div style={{ fontSize: 11, color: sig ? FIRE.greenText : FIRE.amberText, display: "flex", alignItems: "center", gap: 7, marginTop: 10 }}>
+            {sig ? <CheckCircle2 size={14} style={{ flexShrink: 0 }} /> : <AlertTriangle size={14} style={{ flexShrink: 0 }} />}
+            {sig ? "Signed — ready to issue." : "Signature is required — it records who's responsible for this gear."}
+          </div>
 
-        {selfIssue && (<>
-          <div style={{ ...FS.kicker, marginBottom: 6 }}>WITNESS · REQUIRED FOR SELF-ISSUE</div>
-          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 6 }}>You can't be the only signature on your own custody — another manager or a DA witnesses.</div>
-          <label style={{ ...S.field, marginBottom: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Witness</span>
-            <select style={FS.input} value={witnessId} onChange={(e) => { setWitnessId(e.target.value); setWitnessSig(""); }}>
+          {selfIssue && (<div style={{ marginTop: 16 }}>
+            <div style={flabel}>Witness · required for self-issue</div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 8 }}>You can't be the only signature on your own custody — another manager or a DA witnesses.</div>
+            <select aria-label="Witness" style={{ ...field, marginBottom: 10 }} value={witnessId} onChange={(e) => { setWitnessId(e.target.value); setWitnessSig(""); }}>
               <option value="">Choose a witness…</option>
               {witnessOptions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
-          </label>
-          {witnessId && <div style={{ marginBottom: 14 }}><SignaturePad key={witnessId} onChange={setWitnessSig} /></div>}
-        </>)}
+            {witnessId && <div style={{ border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 11, padding: 14, background: FIRE.card2Noir }}><SignaturePad key={witnessId} onChange={setWitnessSig} /></div>}
+          </div>)}
+        </div>
 
-        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Issuing…" : selected.size ? `Issue ${selected.size} item${selected.size === 1 ? "" : "s"}` : "Issue"}</button>
-          <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
+        <div style={{ display: "flex", gap: 11, padding: "15px 20px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, flexWrap: "wrap" }}>
+          <button disabled={busy || !ready} onClick={submit} style={{ ...FS.btnPrimary, flex: "2 1 220px", justifyContent: "center", padding: "13px 18px", fontSize: 13.5, borderRadius: 10, opacity: (busy || !ready) ? 0.5 : 1, cursor: (busy || !ready) ? "default" : "pointer" }}>
+            {busy ? "Issuing…" : selected.size && recipient ? `Issue ${selected.size} item${selected.size === 1 ? "" : "s"} to ${firstName}` : "Issue"}
+          </button>
+          <button disabled={busy} onClick={onClose} style={{ ...FS.btn, flex: "0 0 auto", padding: "13px 18px", borderRadius: 10 }}>Cancel</button>
         </div>
       </div>
     </div>,
@@ -15707,11 +17302,9 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
   }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={ClipboardCheck} title="Confirm return" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
-        </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "100%", maxWidth: 420, margin: "24px 0" }}>
+        <NoirModalHead icon={ClipboardCheck} title="Confirm return" onClose={onClose} />
+        <div style={{ padding: "16px 18px 18px" }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{row.equipment_name}</div>
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 14 }}>Returned by {row.holder_name}</div>
         <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition on return</span>
@@ -15728,6 +17321,7 @@ function ConfirmReturnModal({ S, row, meId, notify, onClose, onConfirmed }) {
           <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Confirming…" : "Confirm return"}</button>
           <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
         </div>
+      </div>
       </div>
     </div>,
     document.body
@@ -15768,11 +17362,9 @@ function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
   }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={RotateCcw} title="Recover item" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={onClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
-        </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "100%", maxWidth: 420, margin: "24px 0" }}>
+        <NoirModalHead icon={RotateCcw} title="Recover item" onClose={onClose} />
+        <div style={{ padding: "16px 18px 18px" }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{unit.label}</div>
         <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 8 }}>{unit.holder_name ? `Currently signed to ${unit.holder_name}` : "Currently checked out"}</div>
         <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 14, lineHeight: 1.45 }}>Reclaiming without a member return — this closes their custody as a manager recovery and puts the item back in inventory.</div>
@@ -15790,6 +17382,7 @@ function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
           <button disabled={busy} onClick={submit} style={{ ...FS.btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Recovering…" : "Recover to inventory"}</button>
           <button disabled={busy} onClick={onClose} style={FS.btn}>Cancel</button>
         </div>
+      </div>
       </div>
     </div>,
     document.body
@@ -15855,11 +17448,9 @@ function HandoffModal({ items, notify, onClose }) {
 
   return createPortal(
     <div onClick={cancelAndClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 420, padding: 20, margin: "24px 0", textAlign: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <CardHead icon={ArrowLeftRight} title="Start transfer" style={{ marginBottom: 0, width: "auto" }} />
-          <button onClick={cancelAndClose} style={{ marginLeft: "auto", ...FS.btn, padding: "5px 8px" }}><X size={14} color={FIRE.textSecondary} /></button>
-        </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "100%", maxWidth: 420, margin: "24px 0", textAlign: "center" }}>
+        <NoirModalHead icon={ArrowLeftRight} title="Start transfer" onClose={cancelAndClose} />
+        <div style={{ padding: "16px 18px 18px" }}>
 
         <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 12 }}>
           Have the receiver scan this with their phone camera. Custody moves to them when they confirm — it can’t happen without the scan.
@@ -15889,6 +17480,7 @@ function HandoffModal({ items, notify, onClose }) {
 
         <button onClick={cancelAndClose} style={{ ...FS.btn, marginTop: 16 }}>{st.phase === "live" ? "Cancel transfer" : "Close"}</button>
       </div>
+      </div>
     </div>,
     document.body
   );
@@ -15899,6 +17491,7 @@ const issueKindLabel = (k) => (ISSUE_KINDS.find(([v]) => v === k) || [null, "Iss
 function MyEquipment({ S, meId, notify }) {
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);   // a failed read is not "you're not signed for anything"
   const [busyId, setBusyId] = useState(null);   // equipment_id mid mark/cancel
   const [selMode, setSelMode] = useState(false);
   const [sel, setSel] = useState(() => new Set());        // equipment_ids picked to transfer
@@ -15916,9 +17509,10 @@ function MyEquipment({ S, meId, notify }) {
       .select("id, equipment_id, equipment_name, opened_at, condition_at_open, open_action, opened_by_name, return_requested_at, equipment(manufacture_date, condition, equipment_type(service_life_years))")
       .eq("holder_member_id", meId).is("closed_at", null)   // .eq is REQUIRED: a manager's "read all custody" RLS would otherwise return the whole dept — scope to self
       .order("opened_at", { ascending: false })
-      .then(({ data, error }) => { if (!error && data) setRows(data); setLoaded(true); });
+      .then(({ data, error }) => { if (!error && data) { setRows(data); setLoadErr(false); } else setLoadErr(true); setLoaded(true); });
   };
   useEffect(() => { load(); }, [meId]);
+  useReconnect(() => { if (loadErr) load(); });
   // APPROVED NEW READ (B3): MY open issues — the "Issue reported" line on a held item. .eq(reported_by) is REQUIRED:
   // a manager's "managers read issues" RLS would otherwise return the whole dept. Failed read keeps last-known.
   const [myIssues, setMyIssues] = useState([]);
@@ -15961,10 +17555,20 @@ function MyEquipment({ S, meId, notify }) {
     load();
   }
   const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
-  const condColor = (c) => c === "Serviceable" ? FIRE.green : c === "Out of service" ? FIRE.textMuted2 : FIRE.redBright;
+  // green = serviceable · amber = needs attention (a warning) · muted = out of service
+  const condColor = (c) => c === "Serviceable" ? FIRE.greenText : c === "Out of service" ? FIRE.textMuted2 : FIRE.amberText;
+  const npill = (color, text) => <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 10px", borderRadius: 999, flexShrink: 0, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{text}</span>;
+  const gbtn = { fontSize: 11, fontWeight: 600, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 7, padding: "6px 11px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" };
   return (
     <PageShell band kicker="MY EQUIPMENT" title="What you're signed for" sub="The gear currently in your custody — what you signed for, and the condition it was in when you took it."
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>}>
+      watermark="MY GEAR"
+      actions={rows.some(transferable) ? (
+        /* Transfer moved into the band (the mock's .ph-actions) — same select-mode handlers. */
+        <div style={{ display: "flex", gap: 9, position: "relative" }}>
+          {!selMode
+            ? <button onClick={() => setSelMode(true)} style={FS.btn}><ArrowLeftRight size={14} color={FIRE.btnIcon} /> Transfer to someone</button>
+            : <button onClick={exitSelMode} style={FS.btn}>Cancel transfer</button>}
+        </div>) : null}>
       <NoirSkin>
       {/* CHIPS — counted from the rows already loaded (same gearStatus rule as each row's pill) */}
       {loaded && rows.length > 0 && (() => {
@@ -15987,22 +17591,18 @@ function MyEquipment({ S, meId, notify }) {
           </div>
         );
       })()}
-      {rows.some(transferable) && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          {!selMode
-            ? <button onClick={() => setSelMode(true)} style={FS.btn}><ArrowLeftRight size={14} color={FIRE.btnIcon} /> Transfer to someone</button>
-            : <button onClick={exitSelMode} style={FS.btn}>Cancel</button>}
-        </div>
-      )}
-      {!loaded ? null : rows.length === 0 ? (
+      {selMode && <div style={{ fontSize: 12, color: FIRE.textSecondary, margin: "-4px 0 10px" }}>Pick the items to hand off, then Start transfer.</div>}
+      {loaded && loadErr && rows.length === 0 ? <OfflineNotice onRetry={load} what="your equipment" /> : !loaded ? null : rows.length === 0 ? (
         <Card padding="26px 18px" style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6 }}>
           <HardHat size={26} color={FIRE.textMuted2} />
           <div style={{ fontSize: 14, color: FIRE.textSecondary }}>You're not signed for any equipment.</div>
           <div style={{ fontSize: 12, color: FIRE.textMuted }}>When an equipment manager issues you gear, it shows up here.</div>
         </Card>
       ) : (
-        <Card padding="10px 16px">
-          <CardHead icon={HardHat} title="In your custody" count={rows.length} right={<span>live condition · service life</span>} />
+        <>
+        <CardHead icon={HardHat} title="In your custody" count={rows.length} right={<span>live condition · service life</span>} />
+        {/* The mock's .ggrid of .gcard item cards — border tinted by state (amber attention / red retire). */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 14 }}>
           {rows.map((r, i) => {
             const pending = !!r.return_requested_at;
             const busy = busyId === r.equipment_id;
@@ -16019,18 +17619,33 @@ function MyEquipment({ S, meId, notify }) {
             // against `cond` — with no live condition the pill is already showing the snapshot, and
             // deriving this from `cond` would make correctness depend on that fallback staying in place.
             const signedFor = (r.equipment?.condition && r.equipment.condition !== r.condition_at_open) ? r.condition_at_open : null;
+            const openIssue = myIssues.find((x) => x.equipment_id === r.equipment_id);
+            // Service-life bar (the mock's .glifewrap): elapsed share of life from the loaded dates; coloured by
+            // gearStatus (in life / aging / retire), not by percentage.
+            const yrs = Number(r.equipment?.equipment_type?.service_life_years) || 0;
+            const madeM = /^(\d{4})-(\d{2})-(\d{2})/.exec(r.equipment?.manufacture_date || "");
+            const usedPct = gear.tracked && madeM ? Math.min(100, Math.max(0, Math.round(((Date.now() - new Date(+madeM[1], +madeM[2] - 1, +madeM[3])) / (gear.retire - new Date(+madeM[1], +madeM[2] - 1, +madeM[3]))) * 100))) : null;
             return (
-              <div key={r.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+              <div key={r.id} style={{ ...FS.cardNoir, borderRadius: 14, padding: 0, minWidth: 0, display: "flex", flexDirection: "column", border: `1px solid ${gear.rank === 0 ? "rgba(200,50,58,.45)" : (gear.rank === 1 || openIssue || cond !== "Serviceable") ? "rgba(204,158,82,.45)" : FIRE.lineNoir}` }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "15px 16px", flex: 1 }}>
                 {selMode && (
                   <input type="checkbox" disabled={!transferable(r)} checked={sel.has(r.equipment_id)} onChange={() => toggleSel(r.equipment_id)}
                     style={{ width: 16, height: 16, marginTop: 3, flexShrink: 0, accentColor: FIRE.red, opacity: transferable(r) ? 1 : 0.35 }} />
                 )}
-                <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.card2Noir, border: `1px solid ${gear.rank === 0 ? FIRE.redText + "66" : gear.rank === 1 ? FIRE.amberText + "66" : FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={18} color={gear.rank === 0 ? FIRE.redText : gear.rank === 1 ? FIRE.amberText : FIRE.textMuted} /></span>
+                <span style={{ width: 72, height: 72, borderRadius: 11, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><HardHat size={30} color={gear.rank === 0 ? FIRE.redText : gear.rank === 1 ? FIRE.amberText : FIRE.textMuted} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.3 }}>{r.equipment_name}</div>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY_FONT, fontSize: 16, fontWeight: 700, color: FIRE.textPrimary, lineHeight: 1.2 }}>{r.equipment_name}</div>
+                    {!hideServiceable && npill(condColor(cond), cond || "—")}
+                  </div>
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>Signed for {fmtWhen(r.opened_at)}{r.open_action === "transfer_accepted" ? " · received by transfer" : r.opened_by_name ? ` · issued by ${r.opened_by_name}` : ""}</div>
-                  {gear.tracked && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Made {r.equipment.manufacture_date.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
-                  {signedFor && <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 3 }}>Signed for as {signedFor}</div>}
+                  {usedPct != null && (
+                    <div style={{ marginTop: 9 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: FIRE.textMuted, marginBottom: 4, ...FS.num }}><span>service life{yrs ? ` · ${yrs} yr` : ""}</span><span>made {r.equipment.manufacture_date.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span></div>
+                      <div style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${usedPct}%`, height: "100%", borderRadius: 999, background: gear.fire }} /></div>
+                    </div>
+                  )}
+                  {signedFor && <div style={{ fontSize: 11, color: FIRE.amberText, marginTop: 5 }}>Signed for as {signedFor}</div>}
                   {pending && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Return pending — a manager will confirm receipt.</div>}
                   {(() => { const iss = myIssues.find((x) => x.equipment_id === r.equipment_id); return iss && <div style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, fontWeight: 600 }}>Issue reported · {issueKindLabel(iss.kind)} — a manager will follow up.</div>; })()}
                   {reportFor === r.equipment_id && (
@@ -16047,19 +17662,24 @@ function MyEquipment({ S, meId, notify }) {
                     </div>
                   )}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                  {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
-                  {!hideServiceable && <Pill S={S} color={condColor(cond)}>{(cond || "—").toUpperCase()}</Pill>}
-                  {r.equipment_id && reportFor !== r.equipment_id && !myIssues.some((x) => x.equipment_id === r.equipment_id) &&
-                    <button onClick={() => { setReportFor(r.equipment_id); setRKind("damaged"); setRNote(""); }} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><AlertTriangle size={12} color={FIRE.amberText} /> Report issue</button>}
-                  {pending
-                    ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
-                    : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
+                </div>
+                {/* .gfoot: the life-status flag on the left, the item's actions on the right */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 16px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                  {gear.tracked ? <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", borderRadius: 6, padding: "3px 8px", color: gear.fire, background: `${gear.fire}1A`, border: `1px solid ${gear.fire}55` }}>{gear.label}</span>
+                    : <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", color: FIRE.textMuted }}>NOT TRACKED</span>}
+                  <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                    {r.equipment_id && reportFor !== r.equipment_id && !openIssue &&
+                      <button onClick={() => { setReportFor(r.equipment_id); setRKind("damaged"); setRNote(""); }} style={{ ...gbtn, color: FIRE.redText, borderColor: "rgba(200,50,58,.35)" }}><AlertTriangle size={12} color={FIRE.redText} /> Report issue</button>}
+                    {pending
+                      ? <button disabled={busy} onClick={() => cancelReturn(r)} style={{ ...gbtn, opacity: busy ? 0.6 : 1 }}>Cancel request</button>
+                      : <button disabled={busy} onClick={() => markReturned(r)} style={{ ...gbtn, opacity: busy ? 0.6 : 1 }}>Mark returned</button>}
+                  </span>
                 </div>
               </div>
             );
           })}
-        </Card>
+        </div>
+        </>
       )}
       {selMode && sel.size > 0 && (
         <div style={{ position: "sticky", bottom: 0, marginTop: 12, display: "flex", justifyContent: "center" }}>
@@ -16090,7 +17710,7 @@ function MyEquipment({ S, meId, notify }) {
 // no client policies, so a direct table select is denied by design — never add one here.
 function StationHours({ S, dept, notify }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
-  const BADGE = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", background: FIRE.btnBg, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
+  const BADGE = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", background: FIRE.card2Noir, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" };
   const [open, setOpen] = useState(null);       // the open station_presence row, or null when clocked out
   const [ready, setReady] = useState(false);    // a read has SUCCEEDED — gates the status card
   const [tried, setTried] = useState(false);    // a read has finished either way — stops the first-paint flash
@@ -16199,7 +17819,7 @@ function StationHours({ S, dept, notify }) {
   const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
   const fmtHm2 = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
   return (
-    <PageShell kicker="STATION HOURS" title="Your time at the station" sub="Clock in when you get to the station, out when you leave. If your phone shares its location we check it against the station and mark the shift verified — the location itself is never stored.">
+    <PageShell band watermark="ON DUTY" kicker="STATION HOURS" title="Your time at the station" sub="Clock in when you get to the station, out when you leave. If your phone shares its location we check it against the station and mark the shift verified — the location itself is never stored.">
       <NoirSkin>
       {!tried ? null : (
         <>
@@ -16260,15 +17880,93 @@ function StationHours({ S, dept, notify }) {
           ))}
           {geoNote && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 12, lineHeight: 1.45 }}>{geoNote}</div>}
           {ready && !stationSet && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12, lineHeight: 1.45 }}>Your department hasn't set a station location yet, so shifts can't be marked verified. An admin can add it under Settings &amp; Support.</div>}
+          {/* ---- MY STATION HOURS, member build (b4c_mystationhours_noir.html) ----
+               Everything below reads ONLY this member's rows: myShifts (my_station_shifts — scoped in SQL to
+               my_member_id()), the totals from the shared myHoursTotals rule, and vShifts (the same on-location
+               subset the totals use). No new read. The range buttons moved up here from the card below. */}
+          {(() => {
+            const onLoc = new Set(vShifts);   // identity set: the very rows the credited total counts
+            const known = hoursLoaded && !hoursFailed;
+            const tile = (label, value, sub, good) => (
+              <div style={{ ...FS.cardNoir, borderRadius: 11, padding: "12px 13px", minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginBottom: 7, letterSpacing: ".04em" }}>{label}</div>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 23, lineHeight: 1, color: good ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{value}</div>
+                <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 4 }}>{sub}</div>
+              </div>
+            );
+            const hrs = (n) => known ? <>{h1n(n)}<small style={{ fontSize: 12, color: FIRE.textSecondary, fontWeight: 400, fontFamily: "inherit" }}> h</small></> : "—";
+            // month at a glance: the range's own month (last month for "Last month", else this month)
+            const base = new Date(); if (rangeKey === "last") base.setMonth(base.getMonth() - 1, 1);
+            const y = base.getFullYear(), mo = base.getMonth(), dim = new Date(y, mo + 1, 0).getDate(), lead = new Date(y, mo, 1).getDay();
+            const byDay = {};
+            myShifts.forEach((s) => {
+              const d = new Date(s.checked_in_at); if (isNaN(d.getTime()) || d.getFullYear() !== y || d.getMonth() !== mo) return;
+              const k = d.getDate(); const e = byDay[k] || (byDay[k] = { h: 0, loc: false });
+              e.h += Number(s.hours) || 0; if (onLoc.has(s)) e.loc = true;
+            });
+            const isToday = (d) => { const t = new Date(); return t.getFullYear() === y && t.getMonth() === mo && t.getDate() === d; };
+            const tag = (s) => s.source === "gps_geofence" ? ["GEOFENCE", FIRE.greenText] : onLoc.has(s) ? ["ON LOCATION", FIRE.greenText] : ["MANUAL", FIRE.amberText];
+            const recent = myShifts.slice(0, 5);
+            return (<>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "16px 0 10px" }}>
+                <SectionBar icon={BarChart3} label="My hours" style={{ margin: 0, flex: 1 }} />
+                <NoirSeg options={Object.entries(RANGES).map(([k, fn]) => [k, fn().label])} value={rangeKey} onChange={setRangeKey} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
+                {tile("CREDITED", hrs(myTotal), "counts toward ISO/LOSAP", known)}
+                {tile("STANDBY / DUTY", hrs(myStandby), "station presence")}
+                {tile("TRAINING", hrs(myTraining), "drills attended")}
+                {tile("SHIFTS", known ? myShifts.length : "—", known ? `${vShifts.length} on location · ${myShifts.length - vShifts.length} manual` : "this range")}
+              </div>
+              <MyStationHoursPanel />
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+                <div style={{ ...FS.cardNoir, padding: "13px 15px", flex: "1 1 260px", minWidth: 0 }}>
+                  <CardHead icon={Calendar} title={`${CAL_MONTHS[mo]} — at a glance`} style={{ marginBottom: 9 }} />
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4, marginBottom: 4 }}>
+                    {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i} style={{ fontSize: 9.5, fontWeight: 700, color: FIRE.textMuted, textAlign: "center" }}>{d}</span>)}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 4 }}>
+                    {Array.from({ length: lead }).map((_, i) => <span key={`o${i}`} />)}
+                    {Array.from({ length: dim }, (_, i) => i + 1).map((d) => {
+                      const e = byDay[d]; const lvl = !e ? 0 : e.h >= 5 ? 0.7 : e.h >= 2 ? 0.42 : 0.22;
+                      return (
+                        <span key={d} title={e ? `${h1n(e.h)} h${e.loc ? " · on location" : " · manual"}` : undefined}
+                          style={{ aspectRatio: "1", borderRadius: 5, border: `1px solid ${isToday(d) ? "rgba(224,58,68,.6)" : FIRE.lineNoir}`, background: lvl ? `rgba(224,58,68,${lvl})` : FIRE.card2Noir, boxShadow: e && e.loc ? `inset 0 0 0 1.5px ${FIRE.greenText}` : "none", display: "flex", alignItems: "flex-start", justifyContent: "flex-end", padding: 3, fontSize: 8.5, color: lvl >= 0.42 ? "#fff" : FIRE.textMuted }}>{d}</span>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 10, color: FIRE.textSecondary, marginTop: 9 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><i style={{ width: 9, height: 9, borderRadius: 2, background: "rgba(224,58,68,.42)", display: "inline-block" }} />hours logged</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><i style={{ width: 9, height: 9, borderRadius: 2, boxShadow: `inset 0 0 0 1.5px ${FIRE.greenText}`, display: "inline-block" }} />on location</span>
+                  </div>
+                  {rangeKey !== "month" && rangeKey !== "last" && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 6 }}>Showing this month from the {RANGES[rangeKey]().label.toLowerCase()} range.</div>}
+                </div>
+                <div style={{ ...FS.cardNoir, padding: "13px 15px", flex: "1 1 260px", minWidth: 0 }}>
+                  <CardHead icon={Clock} title="Recent shifts" style={{ marginBottom: 5 }} />
+                  {!known ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>{hoursFailed ? "Couldn't load your shifts — see below." : "Loading…"}</div>
+                    : recent.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No shifts in this range.</div>
+                    : recent.map((s, i) => {
+                      const d = new Date(s.checked_in_at); const [tl, tc] = tag(s);
+                      return (
+                        <div key={`${s.checked_in_at}-${i}`} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 0", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none" }}>
+                          <div style={{ width: 34, textAlign: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10, lineHeight: 1.15, color: FIRE.textSecondary, flexShrink: 0 }}>{d.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}<br /><span style={{ fontSize: 15, color: FIRE.textPrimary }}>{d.getDate()}</span></div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(s.hours)} h · {s.kind === "training" ? "training" : "standby"}</div>
+                            <div style={{ fontSize: 11, color: FIRE.textMuted }}>{fmtHm2(s.checked_in_at)}–{s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"}</div>
+                          </div>
+                          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", color: tc, background: `${tc}1A`, border: `1px solid ${tc}55`, borderRadius: 5, padding: "2px 7px", flexShrink: 0 }}>{tl}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "10px 2px 0", lineHeight: 1.45 }}>These are <b style={{ color: FIRE.textSecondary }}>your</b> hours — no one else's.</div>
+            </>);
+          })()}
           {/* ---- my hours ---- chips stay put while a range reloads; only the figures below are gated on the read */}
           <Card padding="14px 16px" style={{ marginTop: 10 }}>
-            <CardHead icon={BarChart3} title="My hours" style={{ marginBottom: 0 }} />
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "10px 0 12px" }}>
-              {Object.entries(RANGES).map(([k, fn]) => {
-                const on = rangeKey === k;
-                return <button key={k} onClick={() => setRangeKey(k)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(on ? { background: "rgba(224,58,68,.16)", borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>{fn().label}</button>;
-              })}
-            </div>
+            <CardHead icon={ClipboardList} title="Shift log" style={{ marginBottom: 0 }} />
+            <div style={{ height: 10 }} />
             {hoursFailed ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
@@ -16276,37 +17974,31 @@ function StationHours({ S, dept, notify }) {
                 <button onClick={() => loadHours(rangeKey)} style={{ ...FS.btn, padding: "5px 10px", fontSize: 12 }}><RefreshCw size={13} color={FIRE.btnIcon} /> Try again</button>
               </div>
             ) : !hoursLoaded ? null : (<>
-              <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "baseline" }}>
-                <div>
-                  <div style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, letterSpacing: "-0.01em", ...FS.num }}>{h1n(myTotal)}</div>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginTop: 1 }}>Verified hours</div>
-                </div>
-                <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.6 }}>
-                  <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myStandby)}</span> standby / duty</div>
-                  <div><span style={{ ...FS.num, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(myTraining)}</span> training</div>
-                  {myUnverified > 0 && <div style={{ color: FIRE.amberText }}><span style={{ ...FS.num, fontWeight: 600 }}>{h1n(myUnverified)}</span> unverified — not counted</div>}
-                </div>
+              {/* The headline figures (credited, standby, training) live in the tiles above. This slim strip keeps only
+                  what the tiles don't show: hours that didn't count, the crediting rule, and the per-station split. */}
+              <div style={{ ...NOIR_INSET, padding: "10px 12px" }}>
+                {myUnverified > 0 && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginBottom: 4 }}><span style={{ ...FS.num, fontWeight: 600 }}>{h1n(myUnverified)}</span> unverified — not counted</div>}
+                <div style={{ fontSize: 11.5, color: FIRE.textMuted, lineHeight: 1.45 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
+                {/* Only rendered when there IS more than one house. These lines sum to the
+                    Credited tile above — same verified-only set — so the two can never disagree. */}
+                {byStation.length > 0 && (
+                  <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginBottom: 5 }}>Verified hours by station</div>
+                    {byStation.map((b) => (
+                      <div key={b.name} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "2px 0" }}>
+                        <span style={{ fontSize: 12.5, color: FIRE.textSecondary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                        <span style={{ ...FS.num, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, flexShrink: 0 }}>{h1n(b.hours)} h</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.45 }}>Only verified station presence counts toward ISO/LOSAP. Unverified time is recorded but not credited.</div>
-              {/* Only rendered when there IS more than one house. These lines sum to the
-                  headline above — same verified-only set — so the two can never disagree. */}
-              {byStation.length > 0 && (
-                <div style={{ marginTop: 12, paddingTop: 11, borderTop: `0.5px solid ${FIRE.hairline}` }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted2, marginBottom: 7 }}>Verified hours by station</div>
-                  {byStation.map((b) => (
-                    <div key={b.name} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "3px 0" }}>
-                      <span style={{ fontSize: 12.5, color: FIRE.textSecondary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
-                      <span style={{ ...FS.num, fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, flexShrink: 0 }}>{h1n(b.hours)} h</span>
-                    </div>
-                  ))}
-                </div>
-              )}
               {myShifts.length === 0 ? (
                 <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 12 }}>No shifts in this range.</div>
               ) : (
                 <div style={{ marginTop: 12 }}>
                   {(showAllHours ? myShifts : myShifts.slice(0, MY_LOG_CAP)).map((s, i, shown) => (
-                    <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}`, padding: "9px 2px" }}>
+                    <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, padding: "9px 2px" }}>
                       <div style={FS.rowTitle}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{fmtDay(s.checked_in_at)}</div>
                         <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}{multiStation ? ` · ${stationOf(s)}` : ""}</div>
@@ -16379,7 +18071,7 @@ function Equipment({ S, role, members, meId, notify }) {
   const [recovering, setRecovering] = useState(null); // held unit being recovered (modal)
   const [lostId, setLostId] = useState(null);         // equipment_id mid mark-lost
   async function markLost(u, idLabel) {
-    if (!window.confirm(`Mark ${idLabel} lost? This records it as missing and closes ${u.holderName || "the holder"}'s custody. It can't be undone in the app.`)) return;
+    if (!(await noirConfirm({ title: `Mark ${idLabel} lost?`, body: `This records it as missing and closes ${u.holderName || "the holder"}'s custody. It can't be undone in the app.`, confirmLabel: "Mark lost", danger: true }))) return;
     setLostId(u.id);
     const { error } = await supabase.rpc("mark_equipment_lost", { p_equipment_id: u.id });
     setLostId(null);
@@ -16461,7 +18153,7 @@ function Equipment({ S, role, members, meId, notify }) {
     setMgrPick(""); loadManagers();
   }
   async function removeManager(memberId, name) {
-    if (!window.confirm(`Remove ${name} as an equipment manager?`)) return;
+    if (!(await noirConfirm({ title: `Remove ${name} as an equipment manager?`, body: "They'll no longer manage the equipment ledger. You can assign them again later.", confirmLabel: "Remove manager", danger: true }))) return;
     setMgrBusy(true);
     const { data, error } = await supabase.rpc("remove_equipment_manager", { p_member_id: memberId });
     setMgrBusy(false);
@@ -16600,24 +18292,27 @@ function Equipment({ S, role, members, meId, notify }) {
   /* The type-grouped equipment list for ONE scope. Extracted so all-houses mode can render it
      once per house; the markup inside is unchanged. Groups are computed from the list passed in
      rather than the component-wide `types`, which is what makes a per-house call correct. */
-  const renderTypes = (typeList) => {
+  // The mocks' inventory card: Inventory head INSIDE the card (withHead), muted category bars, .irow unit rows.
+  const npill = (color, text, w) => <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 10px", borderRadius: 999, minWidth: w || 0, textAlign: "center", flexShrink: 0, color, background: `${color}1A`, border: `1px solid ${color}66`, whiteSpace: "nowrap" }}>{text}</span>;
+  const renderTypes = (typeList, withHead) => {
     const groups = {};
     typeList.forEach((t) => { (groups[t.category || "Uncategorized"] = groups[t.category || "Uncategorized"] || []).push(t); });
     const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));   // types already ordered sort_order,name → preserved within each group
     return (
-      <Card padding="2px 16px">
+      <Card padding="12px 16px">
+      {withHead && <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} />}
       {groupNames.map((cat, gi) => (
         <div key={cat}>
-          <SectionLabel style={{ padding: gi === 0 ? "12px 0 6px" : "18px 0 6px" }}>{cat}</SectionLabel>
+          <SectionBar label={cat} style={{ margin: gi === 0 ? "4px 0 4px" : "16px 0 4px" }} />
           {groups[cat].map((t, ti) => {
             const open = expanded === t.id;
             const lastRow = gi === groupNames.length - 1 && ti === groups[cat].length - 1;
             return (
-              <div key={t.id} style={{ borderBottom: lastRow ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+              <div key={t.id} style={{ borderBottom: lastRow ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 44 }}>
                   <button onClick={() => toggleExpand(t.id)} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, minHeight: 44, background: "none", border: "none", padding: "6px 0", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}{!t.returnable && <span style={{ fontWeight: 400, fontSize: 11.5, color: FIRE.textMuted }}> · consumable</span>}</div>
-                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.green : FIRE.textMuted }}>{t.available} available</span></div>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}{!t.returnable && <span style={{ fontWeight: 400, fontSize: 11.5, color: FIRE.textMuted }}> · consumable</span>}</div>
+                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, whiteSpace: "nowrap" }}>{t.total} total · <span style={{ color: t.available > 0 ? FIRE.greenText : FIRE.textMuted }}>{t.available} available</span></div>
                     <span style={{ display: "inline-flex", flexShrink: 0 }}>{open ? <ChevronDown size={16} color={FIRE.textMuted} /> : <ChevronRight size={16} color={FIRE.textMuted} />}</span>
                   </button>
                   {canManage && editMode && <button title="Edit type" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEditType(t)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
@@ -16643,7 +18338,7 @@ function Equipment({ S, role, members, meId, notify }) {
                               : u.status === "maintenance" ? { label: "In maintenance", color: FIRE.amberText }
                               : u.status === "retired"     ? { label: "Retired",        color: FIRE.textMuted2 }
                               : u.status === "lost"        ? { label: "Lost",           color: FIRE.redBright }
-                              : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.green : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.redBright };
+                              : { label: u.condition, color: u.condition === "Serviceable" ? FIRE.greenText : u.condition === "Out of service" ? FIRE.textMuted2 : FIRE.amberText };
                   const idLabel = u.serial ? `SN ${u.serial}` : u.asset ? `Asset ${u.asset}` : "No ID";
                   const gear = gearStatus(u.manufactureDate, t.serviceLifeYears);   // this unit's date + its TYPE's service life
                   // NFPA retirement is mandatory by AGE regardless of condition, so a past-life unit is not
@@ -16656,15 +18351,18 @@ function Equipment({ S, role, members, meId, notify }) {
                   const hideServiceable = gear.rank === 0 && isConditionBadge && u.condition === "Serviceable";
                   return (
                     <div key={u.id}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `0.5px solid ${FIRE.hairline}` }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idLabel}</div>
-                          {u.status !== "in_inventory" && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Condition: {u.condition}{u.status === "held" && u.holderName ? ` · Held by ${u.holderName}` : ""}</div>}
+                      <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "10px 2px", flexWrap: "wrap", borderBottom: (i === t.units.length - 1 && editingId !== u.id) ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                        <div style={{ width: 110, flexShrink: 0, fontFamily: DISPLAY_FONT, fontSize: 12, color: FIRE.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...FS.num }}>{idLabel}</div>
+                        <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+                          <div style={{ fontSize: 12, color: FIRE.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {u.status === "held" ? <>held by <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{u.holderName || "—"}</b></> : u.status === "in_inventory" ? <span style={{ color: FIRE.textMuted }}>Unassigned</span> : badge.label}
+                            {u.status !== "in_inventory" && <span style={{ color: FIRE.textMuted }}> · condition {u.condition}</span>}
+                          </div>
                           {gear.tracked && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Made {u.manufactureDate.slice(0, 7)} · retires {gear.retire.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</div>}
                         </div>
-                        {issuesByEq.get(u.id) > 0 && <Pill S={S} color={FIRE.amberText}>NEEDS ATTENTION</Pill>}
-                        {gear.tracked && <Pill S={S} color={gear.fire}>{gear.label}</Pill>}
-                        {!hideServiceable && <Pill S={S} color={badge.color}>{badge.label.toUpperCase()}</Pill>}
+                        {issuesByEq.get(u.id) > 0 && npill(FIRE.amberText, "Needs attention")}
+                        {gear.tracked && npill(gear.fire, gear.label.charAt(0) + gear.label.slice(1).toLowerCase())}
+                        {!hideServiceable && npill(badge.color, badge.label, 92)}
                         {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => startEdit(u)}><Pencil size={13} color={FIRE.textSecondary} /></button>}
                         {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "5px 7px" }} onClick={() => removeUnit(u.id, idLabel)}><X size={13} color={FIRE.deleteRed} /></button>}
                         {(isManager || isDA) && editMode && u.status === "held" && <button title="Recover to inventory" style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => setRecovering({ equipment_id: u.id, label: `${t.name} · ${idLabel}`, holder_name: u.holderName })}>Recover</button>}
@@ -16684,37 +18382,71 @@ function Equipment({ S, role, members, meId, notify }) {
                     </div>
                   );
                 })}
-                {canManage && (addingFor === t.id ? (
-                  <Card padding={12} style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                    <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, minHeight: 44 }}>
-                      {[["ids", "Enter IDs"], ["qty", "Just a quantity"]].map(([val, lbl], i) => { const on = bulkMode === val; return <button key={val} type="button" onClick={() => setBulkMode(val)} style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
-                    </div>
-                    {bulkMode === "ids" ? (
-                      <div style={{ ...S.field, flex: 1, minWidth: 240 }}>
-                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}`, marginBottom: 6, alignSelf: "flex-start" }}>
-                          {[["serial", "These are serial numbers"], ["asset", "These are asset numbers"]].map(([val, lbl], i) => { const on = bulkIdKind === val; return <button key={val} type="button" onClick={() => setBulkIdKind(val)} style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? "#F0F2F5" : "#9AA1AC" }}>{lbl}</button>; })}
+                {canManage && <button style={{ ...FS.btn, marginTop: 8, minHeight: 44 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add units</button>}
+                {/* ADD UNITS — the modals revamp (b4c_equipment_modals_revamp.html). Layout only: the same state
+                    (bulkMode / bulkIdKind / bulkText / bulkQty / uCond / more fields) and the same addUnit(). */}
+                {canManage && addingFor === t.id && createPortal((() => {
+                  const flabel = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, margin: "0 0 8px", display: "flex", alignItems: "center", gap: 8 };
+                  const fieldS = { width: "100%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: "11px 13px", color: FIRE.textPrimary, fontSize: 13, fontFamily: "inherit" };
+                  const seg = (opts, val, set) => (
+                    <div style={{ display: "inline-flex", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 9, padding: 3, gap: 3, flexWrap: "wrap" }}>
+                      {opts.map(([v, l]) => <button key={v} type="button" onClick={() => set(v)} style={{ fontFamily: "inherit", fontSize: 12, fontWeight: 700, border: "none", borderRadius: 6, padding: "8px 15px", cursor: "pointer", background: val === v ? FIRE.redBright : "transparent", color: val === v ? "#fff" : FIRE.textMuted }}>{l}</button>)}
+                    </div>);
+                  const n = bulkMode === "ids" ? bulkText.split("\n").map((x) => x.trim()).filter(Boolean).length : Math.max(0, Math.min(50, parseInt(bulkQty, 10) || 0));
+                  return (
+                    <div onClick={resetAddUnit} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+                      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 660, margin: "24px 0", background: "linear-gradient(180deg, #0E1218, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,.6)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "16px 20px", borderBottom: `1px solid ${FIRE.lineNoir}`, position: "relative", background: "radial-gradient(120% 180% at 92% 0%, rgba(200,50,58,.16), transparent 46%)" }}>
+                          <span style={{ width: 38, height: 38, borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Plus size={20} color={FIRE.redText} /></span>
+                          <div style={{ minWidth: 0, paddingRight: 40 }}>
+                            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, lineHeight: 1, color: FIRE.textPrimary }}>Add units</div>
+                            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4 }}>Add one or more of this item to your inventory.</div>
+                          </div>
+                          <button onClick={resetAddUnit} aria-label="Close" style={{ position: "absolute", top: 15, right: 16, width: 30, height: 30, borderRadius: 8, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}><X size={14} color={FIRE.textSecondary} /></button>
                         </div>
-                        <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={4} placeholder={`One ${bulkIdKind} number per line`} style={{ ...FS.input, minHeight: 88, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+                        <div style={{ padding: "16px 20px" }}>
+                          {/* item context */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 15, marginBottom: 15, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                            <span style={{ width: 40, height: 40, borderRadius: 10, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Briefcase size={18} color={FIRE.textMuted} /></span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{t.name}</div>
+                              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{t.category || "Uncategorized"} · {t.total} in inventory</div>
+                            </div>
+                          </div>
+                          <div style={flabel}>How do you want to add them?</div>
+                          <div style={{ marginBottom: 16 }}>{seg([["ids", "Enter ID numbers"], ["qty", "Just a quantity"]], bulkMode, setBulkMode)}</div>
+                          {bulkMode === "ids" ? (<>
+                            <div style={flabel}>{bulkIdKind === "asset" ? "Asset numbers" : "Serial numbers"} <span style={{ marginLeft: "auto", fontFamily: "inherit", fontSize: 11, fontWeight: 600, letterSpacing: 0, textTransform: "none", color: FIRE.textSecondary }}>one per line</span></div>
+                            <div style={{ marginBottom: 10 }}>{seg([["serial", "Serial numbers"], ["asset", "Asset numbers"]], bulkIdKind, setBulkIdKind)}</div>
+                            <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={4} placeholder={`One ${bulkIdKind} number per line`} style={{ ...fieldS, minHeight: 88, resize: "vertical", lineHeight: 1.5 }} />
+                          </>) : (<>
+                            <div style={flabel}>How many (1–50)</div>
+                            <input type="number" min="1" max="50" value={bulkQty} onChange={(e) => setBulkQty(e.target.value)} style={{ ...fieldS, maxWidth: 160 }} />
+                            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6, lineHeight: 1.4 }}>Units without an ID can't be told apart. You can add serials later.</div>
+                          </>)}
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 11, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 7 }}>Condition</div>
+                            <select style={{ ...fieldS, maxWidth: 280 }} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select>
+                          </div>
+                          <button type="button" onClick={() => setMore((v) => !v)} style={{ marginTop: 14, fontSize: 12, fontWeight: 600, color: FIRE.redText, background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "inherit" }}>
+                            {more ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {more ? "Less detail" : "More detail — manufacturer, model, size, made date"}
+                          </button>
+                          {more && (
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginTop: 10 }}>
+                              {[["Manufacturer", uMfr, setUMfr, "text"], ["Model", uModel, setUModel, "text"], ["Size", uSize, setUSize, "text"], ["Manufacture date", uMfg, setUMfg, "date"]].map(([l, v, set, ty]) => (
+                                <label key={l} style={{ display: "block" }}><div style={{ fontSize: 11, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 6 }}>{l}</div><input type={ty} value={v} onChange={(e) => set(e.target.value)} style={fieldS} /></label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: 11, padding: "15px 20px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, flexWrap: "wrap" }}>
+                          <button onClick={() => addUnit(t.id, t.name)} style={{ ...FS.btnPrimary, flex: "2 1 220px", justifyContent: "center", padding: "13px 18px", fontSize: 13.5, borderRadius: 10 }}><Plus size={15} /> {n > 0 ? `Add ${n} unit${n === 1 ? "" : "s"}` : "Add units"}</button>
+                          <button onClick={resetAddUnit} style={{ ...FS.btn, flex: "0 0 auto", padding: "13px 18px", borderRadius: 10 }}>Cancel</button>
+                        </div>
                       </div>
-                    ) : (
-                      <div style={{ ...S.field, minWidth: 170 }}>
-                        <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How many (1–50)</span>
-                        <input type="number" min="1" max="50" value={bulkQty} onChange={(e) => setBulkQty(e.target.value)} style={{ ...FS.input, minHeight: 44 }} />
-                        <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4, lineHeight: 1.4 }}>Units without an ID can't be told apart. You can add serials later.</span>
-                      </div>
-                    )}
-                    <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Condition</span><select style={FS.input} value={uCond} onChange={(e) => setUCond(e.target.value)}><option>Serviceable</option><option>Needs attention</option><option>Out of service</option></select></label>
-                    {more && (<>
-                      <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacturer</span><input style={FS.input} value={uMfr} onChange={(e) => setUMfr(e.target.value)} /></label>
-                      <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Model</span><input style={FS.input} value={uModel} onChange={(e) => setUModel(e.target.value)} /></label>
-                      <label style={{ ...S.field, minWidth: 100 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Size</span><input style={FS.input} value={uSize} onChange={(e) => setUSize(e.target.value)} /></label>
-                      <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Manufacture date</span><input type="date" style={FS.input} value={uMfg} onChange={(e) => setUMfg(e.target.value)} /></label>
-                    </>)}
-                    <button style={FS.btn} onClick={() => setMore((v) => !v)}>{more ? "Less detail" : "More detail"}</button>
-                    <button style={{ ...FS.btnPrimary, minHeight: 44 }} onClick={() => addUnit(t.id, t.name)}><Plus size={15} /> Add units</button>
-                    <button style={FS.btn} onClick={resetAddUnit}>Cancel</button>
-                  </Card>
-                ) : <button style={{ ...FS.btn, marginTop: 8, minHeight: 44 }} onClick={() => { resetAddUnit(); setAddingFor(t.id); }}><Plus size={15} /> Add units</button>)}
+                    </div>
+                  );
+                })(), document.body)}
                   </div>
                 )}
               </div>
@@ -16727,7 +18459,18 @@ function Equipment({ S, role, members, meId, notify }) {
   };
   return (
     <PageShell band above={loadErr && <OfflineNotice onRetry={() => { loadEquipment(); loadManagers(); loadPending(); }} what="equipment" />} kicker="EQUIPMENT REGISTRY" title="Know what you've got"
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 104, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>GEAR</div>} sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}>
+      watermark="GEAR" sub={canManage ? "Track the gear your department owns by type — tap a type to see its units, add new ones, and log their condition." : "The gear your department owns, by type and condition."}
+      actions={(canManage || isManager || isDA) ? (
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
+          {types.length > 0 && (
+            <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>
+              {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
+            </button>
+          )}
+          {canManage && <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 6 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>}
+          {(isManager || isDA) && <button onClick={() => setIssuing(true)} style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={15} /> Issue equipment</button>}
+        </div>
+      ) : null}>
       <NoirSkin>
       {/* GEAR CHIPS — from the units already loaded (gearStatus unchanged: past life = retire, regardless of condition) */}
       {(() => {
@@ -16752,11 +18495,7 @@ function Equipment({ S, role, members, meId, notify }) {
           </div>
         );
       })()}
-      {(isManager || isDA) && (
-        <div style={{ marginBottom: 12 }}>
-          <button onClick={() => setIssuing(true)} style={{ ...FS.btnPrimary, display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardCheck size={15} /> Issue equipment</button>
-        </div>
-      )}
+      {/* Issue equipment / Add type / Edit now live in the hero band (actions) — same gates, same handlers. */}
       {(isDA || isManager) && (
         <Card padding="12px 16px" style={{ marginBottom: 14, background: FIRE.card2Noir }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -16833,7 +18572,7 @@ function Equipment({ S, role, members, meId, notify }) {
         <Card padding="14px 16px" style={{ marginBottom: 12 }}>
           <CardHead icon={ClipboardCheck} title="Pending returns" count={pending.length} />
           {pending.map((p, i) => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: i === pending.length - 1 ? "none" : `0.5px solid ${FIRE.hairline}` }}>
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: i === pending.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.equipment_name}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 1 }}>{p.holder_name} · requested {new Date(p.return_requested_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
@@ -16842,18 +18581,6 @@ function Equipment({ S, role, members, meId, notify }) {
             </div>
           ))}
         </Card>
-      )}
-      {(canManage || isManager || isDA) && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-          {canManage && (
-            <button onClick={() => { resetAddType(); setAddingType(true); }} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={15} color={FIRE.btnIcon} /> Add type</button>
-          )}
-          {types.length > 0 && (
-            <button onClick={toggleEditMode} style={{ ...FS.btn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>
-              {editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit</>}
-            </button>
-          )}
-        </div>
       )}
       {/* AGING OUT + BY CATEGORY — over the loaded units and their type's NFPA service life */}
       {(() => {
@@ -16907,7 +18634,7 @@ function Equipment({ S, role, members, meId, notify }) {
               </div>
             </Card>
           )}
-          <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} style={{ marginTop: 4 }} />
+          {grouped && <CardHead icon={ClipboardList} title="Inventory" right={<span>{totalUnits} item{totalUnits === 1 ? "" : "s"} · by type</span>} style={{ marginTop: 4 }} />}
         </>);
       })()}
       {canManage && addingType && (
@@ -16941,7 +18668,7 @@ function Equipment({ S, role, members, meId, notify }) {
           <Briefcase size={22} color={FIRE.textMuted2} style={{ marginBottom: 6 }} />
           <div>No equipment types yet.{canManage ? " Use “Add type” to create one." : ""}</div>
         </Card>
-      ) : renderTypes(types)}
+      ) : renderTypes(types, true)}
       {issuing && (
         <IssueEquipmentModal
           S={S} availableUnits={availableUnits} members={members} managers={managers} meId={meId}
@@ -16967,6 +18694,13 @@ function Equipment({ S, role, members, meId, notify }) {
     </PageShell>
   );
 }
+/* MINUTES ONLY — which sessions can hold minutes: a leadership/board session, or one a leader ticked "This is a
+   meeting" on (training_sessions.is_meeting — e.g. an everyone-audience business meeting). Mirrors the DB guard on
+   ai_outputs.session_id. A SEPARATE helper on purpose: the restricted-event test drives attendance eligibility, the rate,
+   rosters and board accountability, and must not widen. Never use isMeeting in an attendance path. */
+const isMeeting = (s) => isRestrictedEvent(s) || !!s?.isMeeting;
+const meetingKind = (s) => s?.audience === "board" ? "Board" : s?.audience === "leadership" ? "Leadership" : "Business meeting";   // picker label
+const meetingBucket = (s) => s?.audience === "board" ? "Board" : "Business";   // saved-minutes grouping: every non-board meeting is Business
 function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }) {
   const [mode, setMode] = useState(() => (initialMode === "agenda" || initialMode === "minutes" || initialMode === "action-items") ? (initialMode === "action-items" ? "minutes" : initialMode) : "agenda");   // role-guarded deep-link seed (via go("minutes", mode)); "action-items" opens the Minutes tab
   const scrollToActions = initialMode === "action-items";
@@ -16985,6 +18719,8 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const certContext = { expired: certRows.filter((r) => r.rank === 0), expiring: certRows.filter((r) => r.rank === 1) };
   const [title, setTitle] = useState("Monthly Business Meeting");
   const [date, setDate] = useState("");
+  const [mtgId, setMtgId] = useState("");   // picked leadership/board session ("" = not on the calendar, typed by hand)
+  const [mtgCtxOpen, setMtgCtxOpen] = useState(false);   // the detail behind the "this meeting's record" chips
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const [extracting, setExtracting] = useState(false);
@@ -16993,6 +18729,10 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
   const [review, setReview] = useState([]); const [creating, setCreating] = useState(false);
   const [showDone, setShowDone] = useState(false);   // Completed section — collapsed by default
+  const [minGroupOpen, setMinGroupOpen] = useState({});   // saved-minutes groups the user opened/closed ("year-Type" -> bool); default = this year open
+  const [showEarlierMinutes, setShowEarlierMinutes] = useState(false);   // earlier years of saved minutes — collapsed by default
+  const [assignFor, setAssignFor] = useState(null);   // the saved minutes row whose meeting is being set (null = picker closed)
+  const [assigning, setAssigning] = useState(false);
   const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items + save minutes → CANMANAGE (is_canmanage(): Board/DA/Officer)
   const canManageOps = hasAny(role, CANMANAGE_OPS_ROLES);   // file UPLOAD to station-documents is ops-only (DA/Officer) per station_docs_insert_leadership RLS; Board can still paste
   // Import minutes written OUTSIDE B4C (Firefly/Word/typed elsewhere). Stored source='imported' — never as AI-drafted.
@@ -17024,11 +18764,60 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const recentResolved = resolvedItems.filter((i) => !isArchived(i));   // within grace — reopenable
   const archivedResolved = resolvedItems.filter(isArchived);            // past grace — read-only, permanent
   const open = openItems.length;
+  /* THE MEETING'S RECORD — from data this screen already holds, no new read: the leadership/board
+     sessions (the `sessions` prop, which carries each session's attached plans), the action items loaded
+     below, and the saved minutes list. "Carried" = open items that were extracted from the most recent
+     minutes saved BEFORE this meeting's date (action_items.source_output_id), i.e. what the last meeting
+     left open. The agenda is what was PLANNED — the prompt is told never to treat it as what happened. */
+  const meetings = (sessions || []).filter(isMeeting).sort((a, b) => sessSort(b, a));   // newest first — the Minutes-only helper, never the attendance one
+  // Minutes are written AFTER a meeting, so the picker leads with meetings already held (most recent first);
+  // upcoming ones (recurring series run far ahead) follow, soonest first.
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const heldMeetings = meetings.filter((s) => sessDate(s) <= todayStart);
+  const upcomingMeetings = meetings.filter((s) => sessDate(s) > todayStart).reverse();
+  const mtg = meetings.find((s) => String(s.id) === String(mtgId)) || null;
+  const mtgAgendas = mtg ? (mtg.plans || []).filter((p) => p.kind === "ai" && (p.ai_text || "").trim()) : [];
+  const mtgFiles = mtg ? (mtg.plans || []).filter((p) => p.kind === "file") : [];
+  // The last minutes of the SAME kind of meeting when there is one (a board meeting carries from the last board
+  // minutes, not last month's business meeting) — title-based, like the saved list, until minutes can be
+  // assigned to a meeting. Falls back to the latest minutes of any kind.
+  // Best: the minutes ASSIGNED to the most recent earlier meeting of the same audience (ai_outputs.session_id).
+  // Otherwise the title-based guess below, for minutes nobody has assigned yet.
+  const sessionById = new Map((sessions || []).map((x) => [String(x.id), x]));
+  // Board or Business for a saved minutes record: its ASSIGNED meeting wins; unassigned rows fall back to the title.
+  const minutesBucket = (d) => { const m = d.session_id ? sessionById.get(String(d.session_id)) : null;
+    if (m) return meetingBucket(m);
+    return /board/i.test(d.title || "") ? "Board" : /business/i.test(d.title || "") ? "Business" : "Other"; };
+  const assignedPrior = mtg ? drafts
+    .map((d) => ({ d, s: d.session_id ? sessionById.get(String(d.session_id)) : null }))
+    .filter(({ s }) => s && meetingBucket(s) === meetingBucket(mtg) && sessDate(s) < sessDate(mtg))
+    .sort((a, b) => sessSort(b.s, a.s))[0]?.d || null : null;
+  const priorMinutes = mtg ? drafts.filter((d) => new Date(d.created_at) < sessDate(mtg) && String(d.session_id || "") !== String(mtg.id)).sort((a, b) => b.created_at.localeCompare(a.created_at)) : [];
+  const sameKind = (d) => mtg && minutesBucket(d) === meetingBucket(mtg);   // Board carries from Board, Business from Business
+  const lastMinutes = assignedPrior || priorMinutes.find(sameKind) || priorMinutes[0] || null;
+  const carried = lastMinutes ? openItems.filter((i) => i.source_output_id === lastMinutes.id) : [];
+  const otherOpenItems = openItems.filter((i) => !carried.includes(i));
+  function pickMeeting(id) {
+    setMtgId(id); setMtgCtxOpen(false);
+    const s = meetings.find((x) => String(x.id) === String(id));
+    if (s) { setTitle(s.title || "Meeting"); setDate(sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })); }
+  }
   async function draft() {
     if (!notes.trim()) { setErr("Add a few rough notes first and I'll shape them into minutes."); return; }
     setLoading(true); setErr(""); setOut("");
-    const sys = "You turn a volunteer fire department's rough meeting notes into clean, structured DRAFT minutes for the secretary and board to review and approve. Use plain headers: Attendees, Old Business, New Business, Decisions, and Action Items (each action with an owner and a due date if implied). Keep it factual to the notes — never invent attendance, votes, or decisions that aren't there. Under 350 words.";
-    try { const t = await callClaude(sys, `Meeting: ${title}${date ? ` on ${date}` : ""}\nRough notes:\n${notes}`); setOut(t); setSaveTitle(title.trim().slice(0, 60) || `Minutes · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
+    const baseSys = "You turn a volunteer fire department's rough meeting notes into clean, structured DRAFT minutes for the secretary and board to review and approve. Use plain headers: Attendees, Old Business, New Business, Decisions, and Action Items (each action with an owner and a due date if implied). Keep it factual to the notes — never invent attendance, votes, or decisions that aren't there. Under 350 words.";
+    const recordSys = "\n\nA MEETING RECORD from the department's system follows the notes: the agenda attached to this meeting, and the action items open on record. Use the agenda ONLY to order the minutes and to name items the way the agenda named them. An agenda item goes into the minutes ONLY if the rough notes show it was taken up — never record an agenda item as discussed, approved, or decided because it was on the agenda. Open action items on record may be listed under Old Business as carried items that are still open; mark one done, changed, or dropped ONLY if the notes say so.\n\nCRITICAL — TRUTH GUARDRAIL: Use ONLY the facts in the rough notes and the meeting record. NEVER invent or infer a decision, a vote, a motion, an attendee, a member name, a date, a count, or a dollar figure that is not there. Do not add plausible-sounding business to fill space. If the record says 'none', do not create items for it. Keep names, dates and amounts exactly as written. The harm this prevents is real: approved minutes are the department's official record, and a fabricated decision, vote, name, date, or dollar figure becomes part of it. Under 450 words.";
+    const topN = (arr, fmt, n = 8) => !arr.length ? "none" : arr.slice(0, n).map(fmt).join("; ") + (arr.length > n ? `; …and ${arr.length - n} more` : "");
+    const fmtItem = (i) => `${i.text} — ${i.assigned_to ? (nameById.get(i.assigned_to) || "unassigned") : "unassigned"}${i.due_date ? `, due ${i.due_date}` : ""}`;
+    const record = mtg ? [
+      "",
+      "MEETING RECORD (what was PLANNED and what is OPEN on record — not what happened):",
+      `Attached agenda: ${mtgAgendas.length ? mtgAgendas.map((p) => `"${p.title || "Agenda"}"\n${(p.ai_text || "").slice(0, 4000)}`).join("\n---\n") : "none attached"}`,
+      `Open action items carried from the last minutes${lastMinutes ? ` ("${lastMinutes.title || "Untitled minutes"}")` : ""}: ${topN(carried, fmtItem)}`,
+      `Other open action items on record: ${topN(otherOpenItems, fmtItem)}`,
+    ].join("\n") : "";
+    const sys = mtg ? baseSys.replace(" Under 350 words.", "") + recordSys : baseSys;
+    try { const t = await callClaude(sys, `Meeting: ${title}${date ? ` on ${date}` : ""}\nRough notes:\n${notes}${record}`); setOut(t); setSaveTitle(title.trim().slice(0, 60) || `Minutes · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`); }
     catch { setErr("Couldn't draft the minutes just now. Try again."); } finally { setLoading(false); }
   }
   async function saveDraft() {
@@ -17036,10 +18825,11 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     setSaving(true);
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
-    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "minutes", title: saveTitle.trim(), ai_text: out, created_by: meId });
+    // A meeting picked in the drafter is saved as the minutes' meeting (session_id); the DB guard re-checks it.
+    const { error } = await supabase.from("ai_outputs").insert({ department_id: deptId, feature: "minutes", title: saveTitle.trim(), ai_text: out, created_by: meId, session_id: mtg ? mtg.id : null });
     setSaving(false);
     if (error) { notify({ kind: "error", title: "Couldn't save the minutes", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    notify({ kind: "success", text: "Minutes saved." });
+    notify({ kind: "success", text: mtg ? `Minutes saved to ${mtg.title}.` : "Minutes saved." });
     loadDrafts();
   }
   // Save minutes brought in from OUTSIDE B4C. Paste path: text straight in (any minutes manager, Board incl.).
@@ -17076,6 +18866,20 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     setImpTitle(""); setImpText(""); setImpFile(null);
     loadDrafts();
   }
+  /* Assign (or clear, sessionId null) the meeting a saved minutes record belongs to. One RPC that sets
+     session_id only — no text change, no "edited by" stamp. Leaders in their own department; the meeting must
+     be a leadership/board session of the same department (enforced in the DB, not just here). Organisation
+     only: who can read the minutes does not change. */
+  async function assignMinutes(d, sessionId) {
+    setAssigning(true);
+    const { error } = await supabase.rpc("assign_minutes_to_session", { p_output_id: d.id, p_session_id: sessionId });
+    setAssigning(false);
+    if (error) { notify({ kind: "error", title: sessionId ? "Couldn't assign the minutes" : "Couldn't remove the meeting", text: "Please try again.", details: error.message }); return; }
+    const s = sessionId ? meetings.find((x) => String(x.id) === String(sessionId)) : null;
+    notify({ kind: "success", text: s ? `Assigned to ${s.title} · ${fmtSess(s)}.` : "Removed from its meeting." });
+    setAssignFor(null);
+    loadDrafts();
+  }
   async function downloadOriginal(d) {
     if (!d?.source_file_path) return;
     const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(d.source_file_path, 3600);
@@ -17088,7 +18892,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   }
   const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
   async function softDelete(d) {
-    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    if (!(await noirConfirm({ title: "Delete this record?", body: "It moves to the trash and can be restored by an admin.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(d.id);
     const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
     setDeletingId(null);
@@ -17204,7 +19008,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   }
   async function cancelItem(it) {
     if (!canManage) return;
-    const reason = window.prompt(`Why is "${it.text}" no longer needed? (a reason is required)`);
+    const reason = await noirPrompt({ title: "No longer needed?", body: `Why is “${it.text}” no longer needed?`, label: "Reason", placeholder: "e.g. Handled at the last meeting", required: true, confirmLabel: "Mark not needed" });
     if (reason === null) return;                                   // dismissed the prompt
     if (!reason.trim()) { notify({ kind: "error", title: "Reason required", text: "Please give a reason for cancelling this item." }); return; }
     const { error } = await supabase.rpc("cancel_action_item", { p_id: it.id, p_reason: reason.trim() });   // server-stamps cancelled_at/by + snapshots assignee_name
@@ -17220,7 +19024,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     const actor = done ? it.completed_by : it.cancelled_by;
     const who = (actor && nameById.get(actor)) || it.assignee_name || (it.assigned_to ? "Unknown" : "Unassigned");   // live actor → snapshot name → fallback
     return (
-      <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+      <div key={it.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
         {done
           ? <CheckCircle2 size={16} color={reopenable ? FIRE.green : FIRE.textMuted} style={{ flexShrink: 0 }} />
           : <X size={16} color={reopenable ? FIRE.redText : FIRE.textMuted} style={{ flexShrink: 0 }} />}
@@ -17246,30 +19050,64 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
     saveOrShareText(csv, "action-items-completed.csv");
   }
   return (
-    <PageShell kicker="MEETINGS" title={<>Agendas &amp; minutes</>} sub="Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.">
+    <PageShell band watermark="MEETINGS" kicker="MEETINGS" title={<>Agendas &amp; minutes</>} sub="Draft the agenda before the meeting from your real department data, then turn rough notes into clean minutes after.">
       <NoirSkin>
-      <div style={S.segRow}>
+      <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 14 }}>
         {[["agenda", "Agenda"], ["minutes", "Minutes"]].map(([k, l]) => (
-          <button key={k} onClick={() => setMode(k)} style={{ ...S.segBtn, background: mode === k ? FIRE.btnBg : "transparent", borderColor: mode === k ? FIRE.red : FIRE.btnBorder, color: mode === k ? FIRE.textPrimary : FIRE.navLabel }}>{l}</button>
+          <button key={k} onClick={() => setMode(k)} aria-pressed={mode === k} style={{ fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: mode === k ? FIRE.redBright : "transparent", color: mode === k ? "#fff" : FIRE.textSecondary }}>{l}</button>
         ))}
       </div>
       {mode === "agenda" ? (
         <MeetingAgenda S={S} role={role} notify={notify} dept={dept} meId={meId} members={members} sessions={sessions} certContext={certContext} />
       ) : (
       <>
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
           <CardHead icon={Sparkles} title="AI minutes drafter" />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+            <label style={{ ...S.field, flex: 1, minWidth: 220 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span>
+              <select style={FS.input} value={mtgId} onChange={(e) => pickMeeting(e.target.value)}>
+                <option value="">Not on the calendar — type it below</option>
+                {[["Held", heldMeetings], ["Upcoming", upcomingMeetings]].map(([label, list]) => list.length > 0 && (
+                  <optgroup key={label} label={label}>
+                    {list.map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)} · {meetingKind(s)}</option>)}
+                  </optgroup>
+                ))}
+              </select></label>
             <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
           </div>
+          {!mtg && <label style={{ ...S.field, marginTop: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting name</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>}
+          {mtg && (() => {
+            const chip = (label, tone) => <span style={{ fontSize: 11.5, fontWeight: 600, color: tone || FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" }}>{label}</span>;
+            const itemLine = (i) => <div key={i.id} style={{ fontSize: 12, color: FIRE.textSecondary, padding: "2px 0" }}>• {i.text}<span style={{ color: FIRE.textMuted }}> — {i.assigned_to ? (nameById.get(i.assigned_to) || "Unknown") : "Unassigned"}{i.due_date ? ` · due ${i.due_date}` : ""}</span></div>;
+            return (
+              <div style={{ ...NOIR_INSET, padding: "10px 12px", marginTop: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, flex: 1 }}>Starting from this meeting's record</span>
+                  <button type="button" onClick={() => setMtgCtxOpen((v) => !v)} aria-expanded={mtgCtxOpen} style={{ background: "none", border: "none", cursor: "pointer", color: FIRE.textSecondary, fontSize: 11.5, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 3, padding: 0 }}>{mtgCtxOpen ? "Hide" : "Show"}{mtgCtxOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {mtgAgendas.length ? chip(`Agenda attached · ${mtgAgendas[0].title || "Agenda"}${mtgAgendas.length > 1 ? ` +${mtgAgendas.length - 1}` : ""}`, FIRE.greenText) : chip(mtgFiles.length ? "Agenda attached as a file — not read into the draft" : "No agenda attached", FIRE.textMuted)}
+                  {chip(`${openItems.length} open action item${openItems.length === 1 ? "" : "s"}`)}
+                  {lastMinutes ? chip(`${carried.length} carried from ${lastMinutes.title || "the last minutes"}`, carried.length ? FIRE.amberText : undefined) : chip("No earlier minutes saved", FIRE.textMuted)}
+                </div>
+                {mtgCtxOpen && (
+                  <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                    {carried.length > 0 && <><div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, margin: "2px 0 3px" }}>Carried from the last minutes</div>{carried.map(itemLine)}</>}
+                    {otherOpenItems.length > 0 && <><div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, margin: "8px 0 3px" }}>Other open action items</div>{otherOpenItems.map(itemLine)}</>}
+                    {!openItems.length && <div style={{ fontSize: 12, color: FIRE.textMuted }}>No open action items on record.</div>}
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.4 }}>The draft follows this agenda's order and lists open items as carried — but only what your notes cover goes in as discussed or decided.</div>
+              </div>
+            );
+          })()}
           <label style={{ ...S.field, marginTop: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rough notes</span>
             <textarea style={{ ...FS.input, minHeight: 110, resize: "vertical", lineHeight: 1.5 }} value={notes} placeholder={"Who was there, what came up, what was decided, what people agreed to do…"} onChange={(e) => setNotes(e.target.value)} /></label>
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: loading ? 0.7 : 1 }} onClick={draft} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><ClipboardList size={16} /> Draft the minutes</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
           {out && <RichOutput S={S} text={out} dark />}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
@@ -17306,7 +19144,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               {impFile && <div style={{ fontSize: 12.5, color: FIRE.textPrimary, marginTop: 6, fontWeight: 600 }}>{impFile.name}</div>}
             </div>
           )}
-          {impErr && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText, marginTop: 10 }}>{impErr}</div>}
+          {impErr && <div style={NOIR_ERR}>{impErr}</div>}
           <button style={{ ...FS.btnPrimary, marginTop: 12, opacity: importing ? 0.7 : 1 }} onClick={saveImported} disabled={importing}>{importing ? <><Loader2 size={16} className="spin" /> Importing…</> : <><Upload size={16} /> Save imported minutes</>}</button>
           </>)}
         </Card>
@@ -17316,7 +19154,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
         <div ref={reviewRef} style={{ ...FS.cardNoir, padding: "12px 16px", marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
           <CardHead icon={ClipboardCheck} title="Review extracted items — confirm owner & due, then create" />
           {review.map((r, i) => (
-            <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <input type="checkbox" checked={r.keep} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x))} title="Include this item" style={{ marginBottom: 10 }} />
               <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Task</span><input style={FS.input} value={r.task} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, task: e.target.value } : x))} /></label>
               <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
@@ -17348,7 +19186,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
             const who = it.assigned_to ? (nameById.get(it.assigned_to) || "Unknown") : "Unassigned";
             const due = it.due_date ? new Date(it.due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "no due date";
             return (
-              <div key={it.id} style={{ ...S.certRow, borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={it.id} style={{ ...S.certRow, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <button onClick={() => completeItem(it)} disabled={!canManage} title={canManage ? "Mark done" : "Leaders only"} style={{ background: "none", border: "none", cursor: canManage ? "pointer" : "default", padding: 0, display: "inline-flex", flexShrink: 0 }}>
                   <span style={{ width: 16, height: 16, borderRadius: 999, border: `2px solid ${FIRE.textMuted}`, display: "inline-block" }} />
                 </button>
@@ -17373,11 +19211,11 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={exportCompletedCsv}><Download size={14} color={FIRE.btnIcon} /> Download CSV</button>
               </div>
               {recentResolved.length > 0 && (<>
-                <SectionLabel style={{ fontSize: 10.5, marginTop: 2, marginBottom: 4 }}>RECENTLY RESOLVED · REOPENABLE FOR 14 DAYS</SectionLabel>
+                <SectionBar label="Recently resolved · reopenable for 14 days" count={recentResolved.length} style={{ margin: "2px 0 4px" }} />
                 {[...recentResolved].sort((a, b) => (resolvedAt(b) || "").localeCompare(resolvedAt(a) || "")).map((it) => resolvedRow(it, true))}
               </>)}
               {archivedResolved.length > 0 && (<>
-                <SectionLabel style={{ fontSize: 10.5, marginTop: recentResolved.length ? 12 : 2, marginBottom: 4 }}>ARCHIVE · READ-ONLY</SectionLabel>
+                <SectionBar label="Archive · read-only" count={archivedResolved.length} style={{ margin: `${recentResolved.length ? 12 : 2}px 0 4px` }} />
                 {[...archivedResolved].sort((a, b) => (resolvedAt(b) || "").localeCompare(resolvedAt(a) || "")).map((it) => resolvedRow(it, false))}
               </>)}
             </div>
@@ -17386,26 +19224,127 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       )}
 
       <CardHead icon={FileText} title="Saved minutes" style={{ marginTop: 14 }} />
-      <Card padding="4px 16px" style={{ marginBottom: 22 }}>
-        {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved minutes yet.</div> : drafts.map((d) => {
+      {(() => {
+        /* Grouped + collapsible — the same rows from the one ai_outputs read above, nothing new fetched.
+           TYPE IS TITLE-BASED (v1): "board" in the title -> Board, "business" -> Business, else Other. It is a
+           heuristic on free text until a minutes record can be assigned to a meeting, whose audience is the
+           reliable source. YEAR is the year it was saved (created_at). This year's groups open; earlier years
+           sit under one collapsed "Earlier" disclosure. */
+        // An ASSIGNED meeting wins (board -> Board; leadership or a flagged business meeting -> Business); unassigned rows use the title.
+        const mtgOf = (d) => d.session_id ? sessionById.get(String(d.session_id)) || null : null;
+        const typeOf = minutesBucket;
+        const accent = { Board: FIRE.redBright, Business: "#8C9AAB", Other: FIRE.line2Noir };
+        const yearOf = (d) => new Date(d.created_at).getFullYear();
+        const thisYear = new Date().getFullYear();
+        const fmt = (iso, withYear) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(withYear ? { year: "numeric" } : {}) });
+        const row = (d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
-          const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          const when = fmt(d.edited_at || d.created_at, yearOf(d) !== thisYear);
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0 9px 10px", borderBottom: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${accent[typeOf(d)]}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{d.title || "Untitled minutes"}{d.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
+                {(() => {
+                  const m = mtgOf(d);
+                  if (m || d.session_id) {
+                    const label = m ? `${m.title} · ${fmtSess(m)}` : "Assigned meeting";
+                    const chipStyle = { display: "inline-flex", alignItems: "center", gap: 5, marginTop: 5, fontSize: 11, fontWeight: 600, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 9px", fontFamily: "inherit" };
+                    return canManage
+                      ? <button type="button" onClick={() => setAssignFor(d)} title="Change the meeting" style={{ ...chipStyle, cursor: "pointer" }}><Calendar size={12} color={FIRE.btnIcon} />{label}</button>
+                      : <span style={chipStyle}><Calendar size={12} color={FIRE.btnIcon} />{label}</span>;
+                  }
+                  return null;
+                })()}
               </div>
+              {canManage && !d.session_id && <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => setAssignFor(d)}><Calendar size={13} color={FIRE.btnIcon} /> Assign to meeting</button>}
               <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 11.5 }} onClick={() => reopen(d)}>Open</button>
               {isDeptAdmin(role) && <button title="Delete" disabled={deletingId === d.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => softDelete(d)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
           );
-        })}
-      </Card>
+        };
+        const TYPES = ["Board", "Business", "Other"];
+        const groupsFor = (rows, year) => TYPES.map((t) => {
+          const list = rows.filter((d) => typeOf(d) === t);
+          if (!list.length) return null;
+          const key = `${year}-${t}`;
+          const isOpen = key in minGroupOpen ? minGroupOpen[key] : year === thisYear;
+          return (
+            <div key={key}>
+              <SectionBar label={`${t}${year === thisYear ? "" : ` · ${year}`}`} count={list.length} open={isOpen} onToggle={() => setMinGroupOpen((g) => ({ ...g, [key]: !isOpen }))} style={{ margin: "12px 0 4px" }} />
+              {isOpen && list.map(row)}
+            </div>
+          );
+        });
+        const current = drafts.filter((d) => yearOf(d) === thisYear);
+        const earlierYears = [...new Set(drafts.filter((d) => yearOf(d) !== thisYear).map(yearOf))].sort((a, b) => b - a);
+        const nBoard = drafts.filter((d) => typeOf(d) === "Board").length, nBiz = drafts.filter((d) => typeOf(d) === "Business").length;
+        return (<>
+          {drafts.length > 0 && (
+            <div style={{ fontSize: 12, color: FIRE.textSecondary, margin: "-4px 0 8px", ...FS.num }}>
+              {drafts.length} saved · last {fmt(drafts[0].edited_at || drafts[0].created_at, true)} · {nBoard} board · {nBiz} business
+            </div>
+          )}
+          <Card padding="4px 16px 8px" style={{ marginBottom: earlierYears.length ? 10 : 22 }}>
+            {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved minutes yet.</div>
+              : current.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>Nothing saved yet in {thisYear}.</div>
+              : groupsFor(current, thisYear)}
+          </Card>
+          {earlierYears.length > 0 && (
+            <div style={{ marginBottom: 22 }}>
+              <button onClick={() => setShowEarlierMinutes((v) => !v)} aria-expanded={showEarlierMinutes} style={{ ...FS.btn, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span>Earlier — {earlierYears.map((y) => `${y} (${drafts.filter((d) => yearOf(d) === y).length})`).join(" & ")}</span>
+                {showEarlierMinutes ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+              {showEarlierMinutes && (
+                <Card padding="4px 16px 8px" style={{ marginTop: 8 }}>
+                  {earlierYears.map((y) => groupsFor(drafts.filter((d) => yearOf(d) === y), y))}
+                </Card>
+              )}
+            </div>
+          )}
+        </>);
+      })()}
+      {assignFor && (
+        <div onClick={() => !assigning && setAssignFor(null)} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, width: "min(480px, 100%)" }}>
+            <NoirModalHead icon={Calendar} title={assignFor.title || "Untitled minutes"} sub="Assign to meeting" onClose={() => !assigning && setAssignFor(null)} />
+            <div style={{ padding: "6px 14px 14px" }}>
+              <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "4px 4px 8px", lineHeight: 1.45 }}>Links these minutes to the leadership or board meeting they record. Who can read them doesn't change.</div>
+              {meetings.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: 8 }}>No leadership or board meetings on the calendar yet.</div>
+                : [["Held", heldMeetings], ["Upcoming", upcomingMeetings]].map(([label, list]) => list.length > 0 && (
+                  <div key={label}>
+                    <SectionBar label={label} count={list.length} style={{ margin: "10px 4px 4px" }} />
+                    {list.map((x) => {
+                      const on = String(assignFor.session_id || "") === String(x.id);
+                      return (
+                        <button key={x.id} type="button" disabled={assigning || on} onClick={() => assignMinutes(assignFor, x.id)}
+                          style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", marginBottom: 4, borderRadius: 9, cursor: on ? "default" : "pointer", fontFamily: "inherit", textAlign: "left",
+                                   background: on ? FIRE.card2Noir : "transparent", border: `1px solid ${on ? FIRE.greenText : FIRE.lineNoir}`, color: FIRE.textPrimary, opacity: assigning && !on ? 0.6 : 1 }}>
+                          <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: x.audience === "board" ? FIRE.redBright : "#8C9AAB" }} />
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{x.title}</span>
+                            <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>{fmtSess(x)} · {meetingKind(x)}</span>
+                          </span>
+                          {on && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.greenText }}>Assigned</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              {assignFor.session_id && (
+                <button type="button" disabled={assigning} onClick={() => assignMinutes(assignFor, null)} style={{ ...FS.btn, marginTop: 10, width: "100%", justifyContent: "center" }}>
+                  {assigning ? <><Loader2 size={14} className="spin" /> Saving…</> : "Remove from its meeting"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px", background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
               <div style={{ minWidth: 0 }}>
                 <CardHead icon={FileText} title={openDraft.title || "Minutes"} style={{ marginBottom: openDraft.source === "imported" ? 5 : 0, width: "auto" }} />
@@ -17452,11 +19391,14 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const [duties, setDuties] = useState([]);
   const [pendingCerts, setPendingCerts] = useState([]);
   const [loadErr, setLoadErr] = useState(false);
+  // Loaded flags so the context strip shows "—" until a read lands, never a false 0. Same two queries.
+  const [dutiesLoaded, setDutiesLoaded] = useState(false), [pendLoaded, setPendLoaded] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false);   // the per-item detail behind the strip's chips
   const loadAgendaContext = () => {
     supabase.from("duties").select("id, duty, due_date, done, done_at, recurrence, assigned_to")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); });                 // dept-scoped by RLS
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setDuties(data); setDutiesLoaded(true); });                 // dept-scoped by RLS
     supabase.from("cert_submissions").select("id, name, member_id").eq("status", "pending")
-      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); });   // dept-scoped by RLS
+      .then(({ data, error }) => { if (error || !data) { setLoadErr(true); return; } setPendingCerts(data); setPendLoaded(true); });   // dept-scoped by RLS
   };
   useEffect(() => { loadAgendaContext(); }, []);
   useReconnect(() => { if (loadErr) { setLoadErr(false); loadAgendaContext(); } });
@@ -17540,7 +19482,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   }
   const [deletingId, setDeletingId] = useState(null);   // per-row soft-delete busy
   async function softDelete(d) {
-    if (!window.confirm("Delete this record? It moves to the trash and can be restored by an admin.")) return;
+    if (!(await noirConfirm({ title: "Delete this record?", body: "It moves to the trash and can be restored by an admin.", confirmLabel: "Delete", danger: true }))) return;
     setDeletingId(d.id);
     const { error } = await supabase.rpc("soft_delete_ai_output", { p_id: d.id });   // DB stamps deleted_at + identity (is_dept_admin gate)
     setDeletingId(null);
@@ -17574,43 +19516,74 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const Line = ({ children }) => <div style={{ fontSize: 12.5, color: FIRE.textSecondary, padding: "3px 0" }}>{children}</div>;
   const None = () => <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "3px 0" }}>None.</div>;
   const SubHead = ({ children }) => <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 10 }}>{children}</div>;
+  /* WHAT'S GOING INTO THIS AGENDA (b4c_meetings_agenda_noir.html): the same facts generate() hands the AI, as
+     chips — so the leader sees, before drafting, exactly what the agenda can draw on. No new reads: duties,
+     pendingCerts, certContext, sessions, sh (station hours, same 30-day window) and ap (apparatus readiness).
+     A figure not loaded yet, or whose read failed, shows "—" rather than a zero. */
+  const TONE_C = { red: FIRE.redText, amber: FIRE.amberText, blue: NOIR_AI.blueText, green: FIRE.greenText, muted: FIRE.textMuted };
+  const TONE_BG = { red: "rgba(200,50,58,.13)", amber: "rgba(204,158,82,.13)", blue: "rgba(79,144,214,.13)", green: "rgba(47,168,105,.13)", muted: "rgba(255,255,255,.04)" };
+  const ctxChip = (Icon, tone, value, label, small) => (
+    <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 9, padding: "9px 11px", display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+      <span style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: TONE_BG[tone], color: TONE_C[tone] }}><Icon size={15} /></span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: small ? 12.5 : 15, lineHeight: 1, color: tone === "muted" ? FIRE.textPrimary : TONE_C[tone], ...FS.num }}>{value}</div>
+        <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.3 }}>{label}</div>
+      </div>
+    </div>
+  );
+  const nextSess = upcoming[0];
+  const apAttn = apOk ? ap.totals.flagged + ap.totals.oos : null;
   return (
     <div>
-      <div style={{ ...S.aiBanner, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.red}` }}>
+      <div style={{ ...FS.cardNoir, padding: "13px 15px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".03em", color: FIRE.textPrimary, marginBottom: 4 }}>
+          <ClipboardList size={14} color={FIRE.redBright} /> What's going into this agenda
+        </div>
+        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 11, lineHeight: 1.45 }}>Pulled live from your department — the AI uses <b style={{ color: FIRE.greenText }}>only these real facts</b>, and won't invent a duty, cert, name, or date.</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: 9 }}>
+          {ctxChip(ClipboardCheck, !dutiesLoaded ? "muted" : overdueDuties.length ? "red" : "muted", dutiesLoaded ? overdueDuties.length : "—", `overdue dut${overdueDuties.length === 1 ? "y" : "ies"}${dutiesLoaded ? ` · ${openDuties.length} open` : ""}`)}
+          {ctxChip(Award, expiring.length ? "amber" : "muted", certContext ? expiring.length : "—", `cert${expiring.length === 1 ? "" : "s"} expiring${expired.length ? ` · ${expired.length} expired` : ""}`)}
+          {ctxChip(FilePlus, !pendLoaded ? "muted" : pendingCerts.length ? "amber" : "muted", pendLoaded ? pendingCerts.length : "—", `cert${pendingCerts.length === 1 ? "" : "s"} pending approval`)}
+          {ctxChip(CalendarCheck, "blue", nextSess ? sessDate(nextSess).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None", nextSess ? `next training · ${nextSess.title}` : "next training", true)}
+          {ctxChip(Clock, shOk ? "green" : "muted", shOk ? `${h1r(sh.totals.credited)} h` : "—", shOk ? `credited · ${agendaSpan}` : (sh.err ? "station hours unavailable" : "station hours · loading"), true)}
+          {ctxChip(Truck, apOk ? (apAttn ? "red" : "green") : "muted", apOk ? apAttn : "—", apOk ? `apparatus need attention${ap.totals.oos ? ` · ${ap.totals.oos} out of service` : ""}` : (ap.err ? "apparatus unavailable" : "apparatus · loading"))}
+        </div>
+        {loadErr && <ReadRetry what="part of the agenda context" onRetry={() => { setLoadErr(false); loadAgendaContext(); }} />}
+        <button onClick={() => setCtxOpen((v) => !v)} aria-expanded={ctxOpen} style={{ ...NOIR_LABEL, display: "inline-flex", alignItems: "center", gap: 5, marginTop: 11, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+          {ctxOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />} {ctxOpen ? "Hide the details" : "Show the details"}
+        </button>
+        {ctxOpen && (
+          <div style={{ ...NOIR_INSET, padding: "4px 14px 10px", marginTop: 8 }}>
+            <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
+            {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
+            <SubHead>Upcoming training — {upcoming.length}</SubHead>
+            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "board" ? " · board" : s.audience === "leadership" ? " · leadership" : ""}</Line>)}
+            <SubHead>Certifications — {expired.length} expired · {expiring.length} expiring</SubHead>
+            {expired.length === 0 && expiring.length === 0 ? <None /> : [...expired, ...expiring].slice(0, 8).map((r, i) => <Line key={i}>{r.member} · {r.cert} · {r.phrase}</Line>)}
+            <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
+            {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
+          </div>
+        )}
+      </div>
+
+      <div style={NOIR_AI_BANNER}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...FS.kicker, marginBottom: 8 }}><ClipboardList size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />AI AGENDA BUILDER</div>
-          <h3 style={{ ...S.featTitle, color: FIRE.textPrimary }}>Draft an agenda from your real department data</h3>
-          <p style={{ ...S.helpP, color: FIRE.textMuted, marginBottom: 10 }}>Pulled live from your station — the draft references only what's real below, nothing invented.</p>
+          <div style={{ ...NOIR_AI.chip, background: "none", border: "none", padding: 0, marginBottom: 9 }}><Sparkles size={13} /> AI agenda drafter</div>
+          <h3 style={NOIR_FEAT_TITLE}>Draft an agenda from your real department data</h3>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
             <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
             <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={mtgDate} placeholder="e.g. Jul 8, 2026" onChange={(e) => setMtgDate(e.target.value)} /></label>
           </div>
 
-          <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Additional topics <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>— optional, your own items to add</span></span>
+          <label style={{ ...S.field, marginBottom: 12 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Your topics <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>— your own items; the AI slots them in, won't add detail you didn't give</span></span>
             <textarea style={{ ...FS.input, minHeight: 52, resize: "vertical" }} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="e.g. tanker purchase decision, fundraiser date vote, Johnson recognition" /></label>
-
-          <div style={{ ...FS.cardNoir, padding: "10px 14px", marginBottom: 12 }}>
-            <CardHead icon={Sparkles} title="Context we'll use" style={{ marginBottom: 4 }} />
-
-            <SubHead>Duties — {openDuties.length} open · {overdueDuties.length} overdue</SubHead>
-            {overdueDuties.length === 0 ? <None /> : overdueDuties.slice(0, 6).map((d) => <Line key={d.id}>⚠ {d.duty}{d.due_date ? ` · due ${d.due_date}` : ""}{d.assigned_to ? ` · ${nameById.get(d.assigned_to) || "Unassigned"}` : ""}</Line>)}
-
-            <SubHead>Upcoming training — {upcoming.length}</SubHead>
-            {upcoming.length === 0 ? <None /> : upcoming.map((s) => <Line key={s.id}>{s.title} · {fmtSess(s)}{s.audience === "board" ? " · board" : s.audience === "leadership" ? " · leadership" : ""}</Line>)}
-
-            <SubHead>Certifications — {expired.length} expired · {expiring.length} expiring</SubHead>
-            {expired.length === 0 && expiring.length === 0 ? <None /> : [...expired, ...expiring].slice(0, 8).map((r, i) => <Line key={i}>{r.member} · {r.cert} · {r.phrase}</Line>)}
-
-            <SubHead>Pending cert proposals — {pendingCerts.length}</SubHead>
-            {pendingCerts.length === 0 ? <None /> : pendingCerts.slice(0, 6).map((p) => <Line key={p.id}>{nameById.get(p.member_id) || "A member"} · {p.name}</Line>)}
-          </div>
 
           <button style={{ ...FS.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={generate} disabled={loading}>
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate agenda</>}
           </button>
-          {err && <div style={{ ...S.errBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
+          {err && <div style={NOIR_ERR}>{err}</div>}
+          {out && <div style={{ marginTop: 12, borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 10 }}><RichOutput S={S} text={out} dark /></div>}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Agenda title" /></label>
@@ -17620,14 +19593,14 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
         </div>
       </div>
 
-      <div style={{ ...FS.kicker, marginBottom: 8, marginTop: 22 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />SAVED AGENDAS</div>
+      <CardHead icon={FileText} title="Saved agendas" style={{ marginTop: 22 }} />
       <div style={{ ...FS.cardNoir, padding: "4px 16px", marginBottom: 22 }}>
         {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved agendas yet.</div> : drafts.map((d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
           const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{d.title || "Untitled agenda"}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -17639,8 +19612,8 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
         })}
       </div>
       {openDraft && (
-        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, maxWidth: 720, width: "100%", padding: "18px 20px" }}>
+        <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px", background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <CardHead icon={FileText} title={openDraft.title || "Agenda"} style={{ marginBottom: 0, width: "auto" }} />
               <div style={{ display: "flex", gap: 8 }}>
@@ -17752,7 +19725,7 @@ function MyOnboarding({ S, me, members }) {
   const total = (items || []).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
   return (
-    <PageShell kicker="YOUR ONBOARDING" title="Getting started" sub="Your new-member checklist. An officer signs each item off as you complete it.">
+    <PageShell band watermark="INTAKE" kicker="YOUR ONBOARDING" title="Getting started" sub="Your new-member checklist. An officer signs each item off as you complete it.">
       <NoirSkin>
       {err && !items ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Couldn't load your checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
@@ -17761,35 +19734,49 @@ function MyOnboarding({ S, me, members }) {
       ) : total === 0 ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Your department hasn't set up an onboarding checklist yet.</Card>
       ) : (<>
-        <Card padding={16} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>{done} of {total} complete</span><span>{pct}%</span></div>
+        <Card padding="16px 18px" style={{ marginBottom: 14 }}>
+          {/* Featured progress (the onboarding mock's head card): big Oswald %, the count, then the bar. */}
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 6 }}>Your progress</div>
+              <div style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{done} of {total} signed off</div>
+            </div>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{pct}%</div>
+          </div>
           <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
           {err && <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={reload}>Retry</button></div>}
         </Card>
-        {groupOnboarding(items).map((g) => (
-          <div key={g.category} style={{ marginBottom: 6 }}>
-            <CardHead icon={ClipboardCheck} title={g.category} />
-            {g.items.map((it) => {
+        {groupOnboarding(items).map((g) => {
+          const gDone = g.items.filter((it) => onboardingDone(it, me, prog)).length;
+          return (
+          <Card key={g.category} padding="14px 16px" style={{ marginBottom: 12 }}>
+            <CardHead icon={ClipboardCheck} title={g.category} right={<span style={{ color: gDone === g.items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{gDone}/{g.items.length}</span>} />
+            {g.items.map((it, i) => {
               const ok = onboardingDone(it, me, prog);
               const sub = it.is_mentor ? (mentorName ? `Mentor: ${mentorName}` : null) : onboardingSignedLine(prog[it.id], members);
               return (
-                <div key={it.id} style={FS.row}>
-                  {ok ? <CheckCircle2 size={18} color={FIRE.green} style={{ flexShrink: 0 }} /> : <span style={{ width: 16, height: 16, borderRadius: 5, border: `2px solid ${FIRE.textMuted2}`, display: "inline-block", flexShrink: 0 }} />}
+                <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                  {/* Signed off = an earned green check; open = the neutral ring (the shared CheckMark). */}
+                  <CheckMark state={ok ? "pass" : "todo"} size={20} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: FIRE.textPrimary, fontSize: 14 }}>{it.label}</div>
-                    <div style={{ fontSize: 12, color: FIRE.textMuted }}>{ok ? sub : "Open"}</div>
+                    <div style={{ color: ok ? FIRE.textSecondary : FIRE.textPrimary, fontSize: 13.5 }}>{it.label}</div>
+                    <div style={{ fontSize: 11.5, color: ok ? FIRE.textMuted : FIRE.amberText, marginTop: 1 }}>{ok ? sub : "Open"}</div>
                   </div>
                 </div>
               );
             })}
-          </div>
-        ))}
+          </Card>
+          );
+        })}
       </>)}
       </NoirSkin>
     </PageShell>
   );
 }
-function Onboarding({ S, members, setMembers, notify, role }) {
+function Onboarding({ S, members, setMembers, notify, role, dept }) {
+  // PROGRESS, NOT PASS/FAIL (Ashlea's call): in-progress onboarding fills in a neutral tone — never red for a
+  // new member, never green before it's earned. Green only at 100%. The 90/70 attendance rule does NOT apply here.
+  const progTone = (p) => (p != null && p >= 100 ? FIRE.greenText : FIRE.textSecondary);
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canEditItems = hasAny(role, DEPT_ADMIN_ROLES);   // add/rename/reorder/delete items + assign mentor: PA/DA — same set as is_dept_admin() (RLS enforces server-side)
@@ -17942,7 +19929,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
     await loadItems();
   }
   async function renameCategory(oldCat) {
-    const newCat = (window.prompt(`Rename category "${oldCat}" to:`, oldCat) || "").trim();
+    const newCat = ((await noirPrompt({ title: "Rename category", body: `Rename “${oldCat}” to:`, label: "New name", initial: oldCat, multiline: false, required: true, confirmLabel: "Rename" })) || "").trim();
     if (!newCat || newCat === oldCat || !deptId) return;
     setBusy(true);
     const { error } = await supabase.from("onboarding_items").update({ category: newCat }).eq("department_id", deptId).eq("category", oldCat);   // bulk rename all items in the category
@@ -17952,7 +19939,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
   }
   async function loadDefaults() {   // idempotent: skip existing (category+label); never add a 2nd mentor item
     if (!deptId) return;
-    if (!window.confirm("Add the default checklist items? Existing items are kept; duplicates are skipped.")) return;
+    if (!(await noirConfirm({ title: "Add the default checklist items?", body: "Existing items are kept; duplicates are skipped.", confirmLabel: "Add defaults" }))) return;
     const existing = new Set((items || []).map((it) => `${it.category}||${it.label}`));
     const hasMentor = (items || []).some((it) => it.is_mentor);
     let ord = (items || []).reduce((mx, it) => Math.max(mx, it.sort_order), 0);
@@ -17978,27 +19965,27 @@ function Onboarding({ S, members, setMembers, notify, role }) {
     catch { setErr("Couldn't draft the plan just now. Try again."); } finally { setLoading(false); }
   }
   return (
-    <PageShell band kicker="NEW-MEMBER ONBOARDING" title="Get new members started right" sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 92, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>INTAKE</div>}>
+    <PageShell band kicker={dept?.name ? `NEW-MEMBER ONBOARDING · ${dept.name}` : "NEW-MEMBER ONBOARDING"} title="Get new members started right"
+      above={loadErr ? <OfflineNotice onRetry={() => { setLoadErr(false); loadDeptId(); loadItems(); }} what="the onboarding checklist" /> : null} sub="A guided checklist for every new volunteer — paperwork, gear, training, and a mentor — plus an AI-drafted welcome and 30-day plan."
+      watermark="INTAKE"
+      actions={
+        /* The old Viewing/progress toolbar card, folded into the band: the member picker (still needed — candidates
+           include non-probationary members with no ring card) + Edit checklist. The duplicate progress bar is gone;
+           the featured card below shows it. */
+        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", position: "relative" }}>
+          <select aria-label="Viewing" style={{ ...S.select, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 9, padding: "8px 30px 8px 12px", fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, maxWidth: 220 }} value={selId} onChange={(e) => setSelId(e.target.value)}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+          {canEditItems && <button style={FS.btn} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
+        </div>}>
       <NoirSkin>
-      <Card padding="12px 16px" style={{ marginBottom: 12, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        <label style={{ ...S.field, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Viewing</span>
-          <select style={FS.input} value={selId} onChange={(e) => setSelId(e.target.value)}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>Onboarding progress</span><span>{pct}%</span></div>
-          <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
-        </div>
-        {canEditItems && <button style={{ ...FS.btn, alignSelf: "flex-end" }} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
-      </Card>
       {/* OVERVIEW is rendered here, above the featured member */}
       {/* OVERVIEW — tiles + a progress ring per probationary member (click to feature them) */}
       {!editMode && probMembers.length > 0 && items && items.length > 0 && (<>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
           {[[UserPlus, "In onboarding", String(probMembers.length), "probationary members", null],
-            [BarChart3, "Avg completion", avgDone == null ? "—" : `${avgDone}%`, probMembers.length === 1 ? "for the one member" : `across the ${probMembers.length}`, avgDone == null ? null : avgDone >= 75 ? FIRE.greenText : avgDone >= 40 ? FIRE.amberText : FIRE.redText],
+            [BarChart3, "Avg completion", avgDone == null ? "—" : `${avgDone}%`, probMembers.length === 1 ? "for the one member" : `across the ${probMembers.length}`, avgDone == null ? null : avgDone >= 100 ? FIRE.greenText : null],
             [ClipboardCheck, "Awaiting sign-off", awaiting == null ? "—" : String(awaiting), "open items", awaiting ? FIRE.amberText : null]].map(([Icon, l, v, sub, tone]) => (
             <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.redText} />{l}</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.textMuted} />{l}</div>
               <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
               <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{sub}</div>
             </div>
@@ -18009,7 +19996,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
           {overview.map(({ m, p }) => {
             const on = String(m.id) === String(selId);
             const R = 31, C = 2 * Math.PI * R;
-            const tone = p == null ? FIRE.textMuted : p.pct >= 75 ? FIRE.greenText : p.pct >= 40 ? FIRE.amberText : FIRE.redText;
+            const tone = p == null ? FIRE.textMuted : progTone(p.pct);
             const started = m.joinedOn ? new Date(m.joinedOn + "T00:00:00") : null;
             const dayN = started ? Math.max(1, Math.floor((Date.now() - started.getTime()) / 86400000) + 1) : null;
             const next = p && p.open.find((it) => !it.is_mentor) || (p && p.open[0]);
@@ -18050,7 +20037,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
           </Card>
           {(items || []).length === 0 && <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>No items yet — add one above or load the defaults.</Card>}
           {grouped.map((g) => (
-            <div key={g.category} style={{ marginBottom: 6 }}>
+            <Card key={g.category} padding="12px 16px" style={{ marginBottom: 12 }}>
               <CardHead icon={ClipboardCheck} title={g.category} right={<button style={{ ...FS.btn, padding: "2px 7px", fontSize: 11 }} onClick={() => renameCategory(g.category)} disabled={busy}>Rename</button>} />
               {g.items.map((it) => {
                 const catItems = items.filter((x) => x.category === it.category);
@@ -18075,7 +20062,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                   </div>
                 );
               })}
-            </div>
+            </Card>
           ))}
         </>
       ) : items === null ? (
@@ -18098,11 +20085,11 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                   <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[person?.status, person?.role].filter(Boolean).join(" · ")}{mentorName ? <> · mentor <b style={{ color: FIRE.textSecondary }}>{mentorName}</b></> : ""}</div>
                 </div>
                 <div style={{ marginLeft: "auto", textAlign: "right" }}>
-                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : pct >= 50 ? FIRE.amberText : FIRE.textPrimary, ...FS.num }}>{doneCount}<span style={{ fontSize: 15, color: FIRE.textMuted }}>/{items.length}</span></div>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{doneCount}<span style={{ fontSize: 15, color: FIRE.textMuted }}>/{items.length}</span></div>
                   <div style={{ fontSize: 11, color: FIRE.textMuted }}>steps complete</div>
                 </div>
               </div>
-              <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", margin: "14px 0 18px" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${FIRE.greenText}, #55BE87)` }} /></div>
+              <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", margin: "14px 0 18px" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: pct >= 100 ? `linear-gradient(90deg, ${FIRE.greenText}, #55BE87)` : progTone(pct) }} /></div>
             </>);
           })()}
           {grouped.map((g) => {
@@ -18119,7 +20106,7 @@ function Onboarding({ S, members, setMembers, notify, role }) {
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
                       <button onClick={signable && done ? () => toggle(it.id) : undefined} disabled={!(signable && done)} title={mentor ? "Reflects the assigned mentor" : done ? (signable ? "Undo sign-off" : "Signed off") : "Not yet signed off"}
                         style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, cursor: signable && done ? "pointer" : "default", background: done ? "rgba(47,168,105,.16)" : "transparent", border: done ? "1px solid rgba(47,168,105,.5)" : `1.5px dashed ${FIRE.line2Noir}` }}>
-                        {done && <CheckCircle2 size={12} color={FIRE.greenText} />}
+                        {done && <Check size={12} strokeWidth={3} color={FIRE.greenText} />}
                       </button>
                       <div style={{ flex: "1 1 200px", minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: done ? FIRE.textPrimary : FIRE.textSecondary }}>{it.label}{mentor && <span style={{ fontSize: 10, fontWeight: 700, color: FIRE.amberText, background: "rgba(204,158,82,.12)", border: "1px solid rgba(204,158,82,.3)", borderRadius: 5, padding: "2px 7px", marginLeft: 8, letterSpacing: ".03em" }}>MENTOR</span>}</div>
@@ -18233,7 +20220,7 @@ function CheckinConfirm({ S, result, members, meId, go }) {
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
       <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }}>
         {pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />}
-        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary }}>{pending ? "Checking you in…" : ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
+        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, letterSpacing: ".01em" }}>{pending ? "Checking you in…" : ok ? (result.already ? "Already checked in" : "You're checked in!") : "Couldn't check you in"}</h2>
         <p style={{ color: FIRE.textSecondary, fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
           {pending
             ? "One moment while we confirm your sign-in."
@@ -18265,7 +20252,7 @@ function HandoffConfirm({ S, result, go }) {
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
       <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }}>
         {pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />}
-        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
+        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, letterSpacing: ".01em" }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
         <p style={{ color: FIRE.textSecondary, fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
           {pending
             ? "One moment while we move custody to you."
@@ -18298,22 +20285,20 @@ function AiPlanViewer({ S, plan, onClose, dept, notify }) {
   const rest = blocks.filter((b) => !isRun(b)).join("\n").trim();
   const hasRun = runSheet.split("\n").slice(1).join("\n").trim().length > 0;   // heading alone doesn't count — never offer an empty Quick tab
   const shown = !hasRun ? rest : (view === "quick" ? runSheet : rest);
-  const tab = (key, label) => (
-    <button onClick={() => setView(key)} style={{ ...FS.btn, ...(view === key ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{label}</button>
-  );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 720, width: "100%", padding: "20px 22px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
-          <div style={{ ...FS.kicker, marginBottom: 0 }}>{plan.title || "AI-drafted plan"}</div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printPlan}><Printer size={14} color={FIRE.btnIcon} /> Print</button>
-            <button style={{ ...FS.btn, padding: "6px 10px" }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /> Close</button>
-          </div>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%" }}>
+        <NoirModalHead icon={FileText} title={plan.title || "AI-drafted plan"} sub="Training plan"
+          right={<button style={{ ...FS.btn, padding: "6px 10px" }} onClick={printPlan}><Printer size={14} color={FIRE.btnIcon} /> Print</button>} onClose={onClose} />
+        <div style={{ padding: "14px 18px 18px" }}>
+          {hasRun && (
+            <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 7, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, marginBottom: 12 }}>
+              {[["quick", "Quick run sheet"], ["full", "Full plan"]].map(([k, l]) => <button key={k} onClick={() => setView(k)} aria-pressed={view === k} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: view === k ? FIRE.redBright : "transparent", color: view === k ? "#fff" : FIRE.textSecondary }}>{l}</button>)}
+            </div>
+          )}
+          <Disclaimer S={S} compact dark />
+          <RichOutput S={S} text={shown} dark />
         </div>
-        {hasRun && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{tab("quick", "Quick run sheet")}{tab("full", "Full plan")}</div>}
-        <Disclaimer S={S} compact dark />
-        <RichOutput S={S} text={shown} dark />
       </div>
     </div>
   );
@@ -18323,14 +20308,12 @@ function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
   if (!session) return null;
   const plans = session.plans || [];
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...FS.card, maxWidth: 520, width: "100%", padding: "18px 20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
-          <div style={{ ...FS.kicker, marginBottom: 0 }}>{session.title} — PLANS ({plans.length})</div>
-          <button style={{ ...FS.btn, padding: "6px 10px", flexShrink: 0 }} onClick={onClose}><X size={14} color={FIRE.btnIcon} /></button>
-        </div>
-        {plans.map((p) => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 520, width: "100%" }}>
+        <NoirModalHead icon={FileText} title={session.title} sub={`${plans.length} plan${plans.length === 1 ? "" : "s"} attached`} onClose={onClose} />
+        <div style={{ padding: "6px 18px 14px" }}>
+        {plans.map((p, i) => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: i === plans.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
             <FileText size={14} color={p.kind === "ai" ? FIRE.amberText : FIRE.btnIcon} style={{ flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: FIRE.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || (p.kind === "ai" ? "AI-drafted plan" : "Untitled")}{p.kind === "ai" ? " · AI" : ""}</span>
             {p.kind === "ai"
@@ -18338,6 +20321,7 @@ function SessionPlanChooser({ S, session, onView, onOpen, onClose }) {
               : <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => onOpen(p)}>Open</button>}
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
@@ -18433,6 +20417,21 @@ function CountsAttendanceCheckbox({ checked, onChange, fieldStyle, labelStyle })
     </label>
   );
 }
+// "This is a meeting" (training_sessions.is_meeting). Only offered on EVERYONE sessions — leadership and board
+// sessions are meetings already. It only lets minutes be assigned to the session (Meetings page); it changes
+// nothing about who attends, who's expected or who's counted (the audience still decides all of that).
+function MeetingCheckbox({ checked, onChange, fieldStyle, labelStyle }) {
+  return (
+    <label style={{ ...fieldStyle, minWidth: 220, cursor: "pointer" }}>
+      <span style={labelStyle}>Meeting</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
+        <span style={{ fontSize: 12.5, color: "#C7CDD6" }}>This is a meeting</span>
+      </span>
+      <span style={{ fontSize: 10.5, color: "#8A929E", lineHeight: 1.3, maxWidth: 210 }}>Lets its minutes be assigned to it. Doesn't change who attends or who's counted.</span>
+    </label>
+  );
+}
 // Attach a saved agenda (ai_outputs feature='agenda') to a leadership event as a SNAPSHOT
 // session_plans ai-row → surfaces via the existing "View plan" / openSessionPlans path (zero new view code).
 function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) {
@@ -18457,23 +20456,16 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
     onAttached(); onClose();
   }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
-      <div style={{ ...FS.card, width: "min(480px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
-          <ClipboardList size={16} color={FIRE.btnIcon} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted2, textTransform: "uppercase" }}>Attach agenda</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.title}</div>
-          </div>
-          <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={onClose}><X size={16} color={FIRE.textSecondary} /></button>
-        </div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={onClose}>
+      <div style={{ ...NOIR_MODAL_PANEL, width: "min(480px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+        <NoirModalHead icon={ClipboardList} title={session.title} sub="Attach agenda" onClose={onClose} />
         <div style={{ padding: 12 }}>
           {agendas === null ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted, padding: 8 }}><Loader2 size={14} className="spin" /> Loading agendas…</div>
           ) : agendas.length === 0 ? (
             <div style={{ fontSize: 13, color: FIRE.textMuted, padding: 8, lineHeight: 1.5 }}>No saved agendas yet. Draft one in Minutes → Agenda, then attach it here.</div>
           ) : agendas.map((a) => (
-            <button key={a.id} disabled={!!busyId} onClick={() => pick(a)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `0.5px solid ${FIRE.hairline}`, padding: "10px 6px", cursor: "pointer", fontFamily: "inherit", opacity: busyId && busyId !== a.id ? 0.5 : 1 }}>
+            <button key={a.id} disabled={!!busyId} onClick={() => pick(a)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `1px solid ${FIRE.lineNoir}`, padding: "10px 6px", cursor: "pointer", fontFamily: "inherit", opacity: busyId && busyId !== a.id ? 0.5 : 1 }}>
               <ClipboardList size={14} color={FIRE.amberText} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title || "Untitled agenda"}</span>
               {busyId === a.id ? <Loader2 size={13} className="spin" color={FIRE.textMuted} /> : <ChevronRight size={14} color={FIRE.textMuted} />}
@@ -18484,7 +20476,78 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose }) 
     </div>
   );
 }
-function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, members, meId, notify, dept, addFeedback }) {
+/* ---------------- Register — a PLAN to attend, not attendance ----------------
+   A member's heads-up for whoever runs a session: Coming / Maybe / Not coming. It lives in its own table
+   (session_registrations) and is NEVER read by, or written from, anything attendance — not the roll, check-in,
+   finalize, the attendance rate, countsTowardRate, rollFor's expected roster. Attendance is still earned at the
+   session. Reads: the one query below (RLS returns a member only their own row, a leader their department's).
+   Write: set_my_session_registration (self-only, department-scoped, audience-eligible, refused once finalized). */
+const REG_OPTIONS = [["coming", "Coming"], ["maybe", "Maybe"], ["not_coming", "Not coming"]];
+const REG_TONE = { coming: FIRE.greenText, maybe: FIRE.amberText, not_coming: "#8C9AAB" };
+function useSessionRegistrations(sessionIds, notify) {
+  const key = [...new Set((sessionIds || []).filter(Boolean).map(String))].sort().join(",");
+  const [rows, setRows] = useState(null);   // null = not loaded
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState(false);
+  function load() {
+    if (!key) { setRows([]); return; }
+    supabase.from("session_registrations").select("session_id, member_id, status").in("session_id", key.split(","))
+      .then(({ data, error }) => { if (error || !data) { setErr(true); return; } setErr(false); setRows(data); });   // a failed read keeps last-known
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
+  async function setMine(sessionId, status) {
+    setBusyId(sessionId);
+    const { error } = await supabase.rpc("set_my_session_registration", { p_session_id: sessionId, p_status: status });
+    setBusyId(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't save your plan", text: /closed|eligible|department/i.test(error.message || "") ? error.message : "Please try again.", details: error.message }); return; }
+    load();
+  }
+  const mine = (sid, meId) => (rows || []).find((r) => String(r.session_id) === String(sid) && r.member_id === meId)?.status || null;
+  const forSession = (sid) => (rows || []).filter((r) => String(r.session_id) === String(sid));
+  return { rows, err, busyId, setMine, mine, forSession };
+}
+// The member's three-way control. Shows their own pick only — never a count.
+function RegisterControl({ value, busy, onPick, compact }) {
+  return (
+    <div role="group" aria-label="Your plan for this session" style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+      {REG_OPTIONS.map(([k, l]) => {
+        const on = value === k, c = REG_TONE[k];
+        return (
+          <button key={k} type="button" disabled={busy} aria-pressed={on} onClick={() => !on && onPick(k)}
+            style={{ fontFamily: "inherit", fontSize: compact ? 11 : 12, fontWeight: 600, padding: compact ? "4px 9px" : "6px 11px", borderRadius: 999, cursor: busy || on ? "default" : "pointer",
+                     color: on ? c : FIRE.textSecondary, background: on ? `${c}1F` : "transparent", border: `1px solid ${on ? `${c}88` : FIRE.line2Noir}`, opacity: busy ? 0.6 : 1 }}>
+            {on && <CheckCircle2 size={compact ? 11 : 12} style={{ verticalAlign: -2, marginRight: 4 }} />}{l}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+// Leaders only: "Coming 8 · Maybe 2 · Not coming 1", and (with nameById) the names grouped by status.
+function PlanSummary({ regs, nameById, compact }) {
+  const by = { coming: [], maybe: [], not_coming: [] };
+  (regs || []).forEach((r) => { if (by[r.status]) by[r.status].push(r); });
+  const total = (regs || []).length;
+  return (
+    <div>
+      <div style={{ display: "flex", gap: compact ? 8 : 10, flexWrap: "wrap", alignItems: "center", fontSize: compact ? 11.5 : 12.5 }}>
+        {total === 0 ? <span style={{ color: FIRE.textMuted }}>No plans yet</span> : REG_OPTIONS.map(([k, l]) => (
+          <span key={k} style={{ color: REG_TONE[k], fontWeight: 600, ...FS.num }}>{l} {by[k].length}</span>
+        ))}
+      </div>
+      {nameById && total > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+          {REG_OPTIONS.filter(([k]) => by[k].length).map(([k, l]) => (
+            <div key={k} style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.45 }}>
+              <span style={{ color: REG_TONE[k], fontWeight: 700 }}>{l}:</span> {by[k].map((r) => nameById.get(r.member_id) || "A member").join(", ")}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
@@ -18494,6 +20557,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const today = new Date();
   const me = members.find((m) => m.id === meId);
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [showAllMissed, setShowAllMissed] = useState(false);   // member view: catch-up list condensed to 3 until expanded
+  const [upOpen, setUpOpen] = useState(null);                  // member view: "Up next" row whose Details are open
+  const [plansOpen, setPlansOpen] = useState(null);            // leader view: session whose Register plans (names) are open — "hero" for the Next training card
   const [addingPlan, setAddingPlan] = useState(false);
   const [editPlanMode, setEditPlanMode] = useState(false);   // false = clean text; true = reveal Add + per-plan Edit/Remove. Schedule stays at rest (ops).
   function togglePlanEdit() { setEditPlanMode((v) => { if (v) { setEditingPlanId(null); setAddingPlan(false); } return !v; }); }
@@ -18640,11 +20706,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   const [sd, setSd] = useState(Math.min(today.getDate(), dim));
   const [spid, setSpid] = useState(plan[0]?.id || 0);
   const [stitle, setStitle] = useState(""); const [sTime, setSTime] = useState("");
+  // The schedule form's own length. It used to be bound to sessEdit (the EDIT form's state), so a length
+  // typed while scheduling was never sent and leaked into the next edit. Blank = no length, as before.
+  const [sDur, setSDur] = useState("");
+  const sDurMin = () => { const n = Number(sDur); return sDur === "" || !Number.isFinite(n) || n <= 0 ? null : Math.round(n); };
   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
-  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true });
+  const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true, isMeeting: false });
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
   const [sAudience, setSAudience] = useState("everyone");   // create-session audience; feeds BOTH addSession + scheduleRecurring
+  const [sMeeting, setSMeeting] = useState(false);   // create-session "This is a meeting" (is_meeting); default OFF, feeds addSession + scheduleRecurring
   const [sCounts, setSCounts] = useState(true);   // create-session "counts toward attendance rate"; default ON, feeds addSession + scheduleRecurring
   const [sOffsite, setSOffsite] = useState(false);   // off-site flag; feeds BOTH addSession + scheduleRecurring
   const [sOffLabel, setSOffLabel] = useState("");
@@ -18726,14 +20797,16 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       title,
       date: toISO(new Date(cur.y, cur.m, Number(sd))),
       start_time: sTime || null,
+      duration_min: sDurMin(),
       done: false,
       audience: sAudience,
       counts_toward_attendance: sCounts,
+      is_meeting: sAudience === "everyone" && sMeeting,   // only an everyone session carries the flag (leadership/board are meetings already)
       is_offsite: sOffsite,
       location_label: sOffsite ? (sOffLabel.trim() || null) : null,   // coordinates come later, at open-sign-in
     });
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setShowSess(false); setStitle(""); setSTime(""); loadSessions();
+    setShowSess(false); setStitle(""); setSTime(""); setSDur(""); loadSessions();
   }
   function toggleRepeat() {
     if (!repeat) {   // opening: seed pattern from the selected category's cadence, day from today
@@ -18773,7 +20846,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
-    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
+    const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, duration_min: sDurMin(), done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_meeting: sAudience === "everyone" && sMeeting, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
     const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem && dates.length) await supabase.from("training_plans").update({ starts_on: dates[0] }).eq("id", pItem.id);
@@ -18782,7 +20855,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
     const desc = rPattern === "weekly" ? `weekly on ${dow}` : rPattern === "biweekly" ? `every other week on ${dow}` : `the ${ordName} ${dow} each month`;
     const skipped = dates.length - fresh.length;
     notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} session${fresh.length === 1 ? "" : "s"} — ${desc}${skipped ? ` (${skipped} already existed)` : ""}.` });
-    setShowSess(false); setRepeat(false); setStitle(""); setSTime(""); loadSessions();
+    setShowSess(false); setRepeat(false); setStitle(""); setSTime(""); setSDur(""); loadSessions();
   }
   // "Done for the night" — does NOT lock. Opens the roll writable so the officer can
   // confirm/complete attendance BEFORE finalizing. The lock/clock-reset moves to finalizeSession.
@@ -18803,9 +20876,25 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
        proceed, never by accident. */
     const presentCount = (s.attendance || []).length;
     if (presentCount === 0) {
-      if (!window.confirm(`Nobody is marked present for "${s.title}". Finalizing locks it with an empty roll — no one earns training credit for it. Finalize anyway?`)) return;
+      if (!(await noirConfirm({ title: "Finalize with an empty roll?", body: `Nobody is marked present for “${s.title}”. Finalizing locks it with an empty roll — no one earns training credit for it.`, confirmLabel: "Finalize anyway", danger: true }))) return;
     } else {
-      if (!window.confirm(`Lock attendance for "${s.title}"? You can reopen it later if needed.`)) return;
+      // Display only: the roll the officer is about to lock, read from the session + the members already loaded.
+      const presentNames = (s.attendance || []).map((id) => members.find((m) => m.id === id)?.name).filter(Boolean);
+      const lenLabel = s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : "Not set yet";
+      const sumTile = (k, v) => <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", borderRadius: 9, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, textAlign: "left" }}><div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted }}>{k}</div><div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, ...FS.num }}>{v}</div></div>;
+      const lockBody = (
+        <div>
+          <div style={{ display: "flex", gap: 8, margin: "4px 0 10px" }}>{sumTile("Length", lenLabel)}{sumTile("Present", presentCount)}</div>
+          {presentNames.length > 0 && (
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center", marginBottom: 10 }}>
+              {presentNames.slice(0, 12).map((n) => <span key={n} style={{ fontSize: 11.5, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}
+              {presentNames.length > 12 && <span style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "2px 4px" }}>+{presentNames.length - 12} more</span>}
+            </div>
+          )}
+          <p style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, margin: 0 }}>{`“${s.title}” — you can reopen it later if needed.`}</p>
+        </div>
+      );
+      if (!(await noirConfirm({ title: "Lock attendance?", body: lockBody, confirmLabel: "Finalize & lock" }))) return;
     }
     // auto-close any open QR sign-in so no stale code lingers / no post-lock scans
     if (s.signinOpen) {
@@ -18821,8 +20910,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
        Asked only while it is still blank, so re-finalizing never nags. */
     let dur = s.durationMin ?? null;
     if (dur == null) {
-      const answer = window.prompt(
-        `How long was "${s.title}"? Minutes, e.g. 180.\n\nThis gives everyone marked present their training hours (recorded, not credited toward ISO/LOSAP).\n\nLeave blank or press Cancel — you can add it later.`, "");
+      const answer = await noirPrompt({ title: `How long was “${s.title}”?`, body: "This gives everyone marked present their training hours (recorded, not credited toward ISO/LOSAP). Leave it blank or skip — you can add it later.", label: "Length in minutes", placeholder: "e.g. 180", multiline: false, inputMode: "numeric", confirmLabel: "Save length", cancelLabel: "Skip" });
       const nMin = answer == null ? null : parseInt(String(answer).trim(), 10);
       if (Number.isFinite(nMin) && nMin >= 1 && nMin <= 1440) dur = nMin;
       else if (answer != null && String(answer).trim() !== "") {
@@ -18884,7 +20972,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
   function startEditSession(s) {
     setEditingSessionId(s.id);
-    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), durationMin: s.durationMin ?? "", planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isOffsite: !!s.isOffsite, offLabel: s.locLabel || "" });
+    setSessEdit({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), durationMin: s.durationMin ?? "", planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isMeeting: !!s.isMeeting, isOffsite: !!s.isOffsite, offLabel: s.locLabel || "" });
   }
   async function saveEditSession(id) {
     if (!sessEdit.date) { notify({ kind: "error", title: "Pick a date", text: "Choose a date for this training." }); return; }
@@ -18900,6 +20988,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           // drill, and it is what stops attendance hours being invented for a drill nobody timed.
           duration_min: sessEdit.durationMin === "" || sessEdit.durationMin == null ? null : Number(sessEdit.durationMin),
           plan_id: sessEdit.planId || null, audience: sessEdit.audience, counts_toward_attendance: sessEdit.countsAttendance,
+          is_meeting: sessEdit.audience === "everyone" && !!sessEdit.isMeeting,
         is_offsite: !!sessEdit.isOffsite,
         ...(sessEdit.isOffsite
           ? { location_label: (sessEdit.offLabel || "").trim() || null }
@@ -18933,6 +21022,11 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
   }
 
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
+  // REGISTER (plans, not attendance) — one read for the upcoming sessions + this month's open ones. Top level so
+  // the hook order never changes with the member/leader branch. Nothing below feeds it into any attendance figure.
+  const regToday = new Date(); regToday.setHours(0, 0, 0, 0);
+  const reg = useSessionRegistrations([...sessions.filter((s) => !s.done && sessDate(s) >= regToday).sort(sessSort).slice(0, 40), ...monthSessions.filter((s) => !s.done)].map((s) => s.id), notify);
+  const regNameById = new Map((members || []).map((m) => [m.id, m.name]));
 
   // ============================ MEMBER VIEW (presentational reskin) ============================
   // Reuses existing reads only (sessions/plan/members/monthSessions, dueInfo helpers). No queries,
@@ -18966,77 +21060,183 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
     };
 
-    const card = { ...FS.card, padding: 18, marginBottom: 14 };   // base + member padding/margin (identical)
-    const kick = FS.kicker;
     const num = FS.num;
+    // Roster rule for attendance: ≥90 green · 70–89 amber · <70 red. A low number never wears green.
+    const tone = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.greenText : p >= 70 ? FIRE.amberText : FIRE.redText);
+    const toneFill = (p) => (p == null ? FIRE.textMuted2 : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redBright);
+    const sessColor = (s) => s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (catOf(s)?.color || FIRE.catBlue);   // saved category colour
+    const dowTime = (s) => [sessDate(s).toLocaleDateString("en-US", { weekday: "short" }), s.startTime ? fmtTime(s.startTime) : null, s.isOffsite && s.locLabel ? s.locLabel : null].filter(Boolean).join(" · ");
+    // UP NEXT — the member's own upcoming sessions (restricted events only if they're on that roll), soonest first.
+    const upcoming = sessions.filter((s) => !s.done && sessDate(s) >= t0 && (!isRestrictedEvent(s) || rollFor(s, me))).sort((x, y) => sessDate(x) - sessDate(y)).slice(0, 3);
+    // Month trend — the same "recorded" rule as the 90-day figure, bucketed by month (last 8 months, from loaded sessions).
+    const trend = Array.from({ length: 8 }, (_, i) => {
+      const d = new Date(t0.getFullYear(), t0.getMonth() - 7 + i, 1);
+      const rec = sessions.filter((s) => s.done && (s.attendance || []).length > 0 && s.y === d.getFullYear() && s.m === d.getMonth() && countsTowardRate(s) && expectedAfterJoin(me, s));
+      const hit = rec.filter((s) => (s.attendance || []).includes(me?.id)).length;
+      return { label: d.toLocaleDateString("en-US", { month: "short" }), pct: rec.length ? Math.round((hit / rec.length) * 100) : null };
+    });
+    const card = { ...FS.cardNoir, padding: "15px 16px", marginBottom: 14 };
+    const cubtn = { fontSize: 11, fontWeight: 700, color: FIRE.redText, border: "1px solid rgba(224,58,68,.35)", background: "rgba(224,58,68,.06)", borderRadius: 7, padding: "6px 12px", flexShrink: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" };
+    const shownMissed = showAllMissed ? missed : missed.slice(0, 3);
+    const viewSession = (s) => { setCur({ y: s.y, m: s.m }); setTimeout(() => document.getElementById("mt-upcoming")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+    const R = 58, C = 2 * Math.PI * R;
 
     return (
-      <PageShell above={mounts} kicker="MY TRAINING" title="Your training calendar"
-        sub="See what's scheduled, what you've missed, and where your attendance stands.">
+      <PageShell band watermark="TRAIN" above={<>{sessionsErr && <OfflineNotice onRetry={loadSessions} what="trainings" />}{mounts}</>} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
+        sub="What's coming up, where you stand, and what to catch up on."
+        actions={totalRecorded > 0 ? (
+          <div style={{ textAlign: "right", flexShrink: 0, position: "relative" }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: tone(pct), ...num }}>{pct}%</div>
+            <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 4, letterSpacing: ".02em" }}>attended · last 90 days</div>
+          </div>) : null}>
       <NoirSkin>
 
-        {/* 2 — attendance progress */}
-        <div style={card}>
-          <CardHead icon={CalendarCheck} title="My attendance · last 90 days" style={{ marginBottom: 0 }} />
-          {totalRecorded === 0 ? (
-            <div style={{ marginTop: 12, fontSize: 13.5, color: FIRE.textMuted }}>No sessions recorded yet.</div>
-          ) : (<>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "12px 0 8px" }}>
-              <span style={{ fontSize: 13.5, color: FIRE.textSecondary, ...num }}>{attendedCount} of {totalRecorded} sessions attended</span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: FIRE.greenText, ...num }}>{pct}%</span>
+        {/* 1 — WHAT'S COMING UP: the month calendar (saved category colours) + the member's next three sessions. */}
+        <div id="mt-upcoming" style={card}>
+          <CardHead icon={CalendarCheck} title="What's coming up" />
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div style={{ flex: "1 1 420px", minWidth: 0 }}>
+              <MonthCalendar cur={cur} setCur={setCur} dark tiles compact items={monthSessions} renderChip={renderChip} todayColor={FIRE.red} monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`} />
             </div>
-            <div style={{ height: 8, borderRadius: 999, background: FIRE.track, overflow: "hidden" }}>
-              <div style={{ width: `${pct}%`, height: "100%", background: FIRE.green, borderRadius: 999 }} />
+            <div style={{ flex: "1 1 260px", maxWidth: 360, minWidth: 0, display: "flex", flexDirection: "column", gap: 9 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.textMuted }}>Up next for you</div>
+              {upcoming.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Nothing scheduled for you yet.</div> : upcoming.map((s, i) => {
+                const col = sessColor(s); const open = upOpen === s.id; const cat = catOf(s);
+                return (
+                  <div key={s.id} style={{ background: i === 0 ? "linear-gradient(180deg, rgba(224,58,68,.07), transparent)" : FIRE.card2Noir, border: `1px solid ${i === 0 ? "rgba(224,58,68,.4)" : FIRE.lineNoir}`, borderRadius: 10, padding: "10px 11px" }}>
+                    <div style={{ display: "flex", gap: 11, alignItems: "flex-start" }}>
+                      <div style={{ textAlign: "center", width: 38, flexShrink: 0 }}>
+                        <div style={{ fontSize: 9, color: FIRE.redText, fontWeight: 700, letterSpacing: ".08em" }}>{TRAIN_MONTHS[s.m].slice(0, 3).toUpperCase()}</div>
+                        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1, color: FIRE.textPrimary, ...num }}>{s.d}</div>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{s.title}</div>
+                        <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...num }}>{dowTime(s)}</div>
+                        <span style={{ display: "inline-block", marginTop: 5, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", borderRadius: 4, padding: "2px 7px", background: `${col}29`, color: col }}>{s.audience === "board" ? "Board only" : s.audience === "leadership" ? "Leadership only" : (cat?.name || "One-off")}</span>
+                      </div>
+                      {/* Details expands what we know about the session (unchanged). Register — the plan — sits below. */}
+                      <button onClick={() => setUpOpen(open ? null : s.id)} aria-expanded={open} style={{ ...cubtn, padding: "5px 10px", alignSelf: "center" }}>{open ? "Close" : "Details"}</button>
+                    </div>
+                    {/* REGISTER — the member's own plan (never a count). A heads-up, not attendance. */}
+                    <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px dashed ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Register</span>
+                      <RegisterControl compact value={reg.mine(s.id, meId)} busy={reg.busyId === s.id || reg.rows === null} onPick={(k) => reg.setMine(s.id, k)} />
+                    </div>
+                    {i === 0 && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 6, lineHeight: 1.4 }}>Give whoever's running this training a heads-up if you're planning to come. This is a plan, not attendance — you'll still check in when you're there.</div>}
+                    {open && (
+                      <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}`, fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.55 }}>
+                        <div>{sessDate(s).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}</div>
+                        <div>{s.planId ? `Part of ${cat?.name || "a category"}` : "One-off session"}{s.isOffsite ? ` · off-site${s.locLabel ? ` (${s.locLabel})` : ""}` : ""}{s.countsAttendance === false ? " · optional" : ""}</div>
+                        {(s.plans || []).length > 0 && <button onClick={() => openSessionPlans(s)} style={{ ...cubtn, marginTop: 7, padding: "5px 10px" }}><FileText size={13} /> View plan</button>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </>)}
+          </div>
         </div>
 
-        {/* 3 — missed / catch up (hidden entirely when no real missed records) */}
+        {/* 2 — WHERE YOU STAND: ring + line + month trend, every number coloured by the roster rule. */}
+        <div style={card}>
+          <CardHead icon={BarChart3} title="Where you stand" />
+          {totalRecorded === 0 ? (
+            <div style={{ fontSize: 13, color: FIRE.textMuted }}>No sessions recorded yet.</div>
+          ) : (
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ position: "relative", width: 132, height: 132, margin: "4px auto", flexShrink: 0 }}>
+                <svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
+                  <circle cx="66" cy="66" r={R} fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="10" />
+                  <circle cx="66" cy="66" r={R} fill="none" stroke={toneFill(pct)} strokeWidth="10" strokeLinecap="round" strokeDasharray={`${(pct / 100) * C} ${C}`} transform="rotate(-90 66 66)" />
+                </svg>
+                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1, color: tone(pct), ...num }}>{pct}%</div>
+                  <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 3, letterSpacing: ".04em" }}>last 90 days</div>
+                </div>
+              </div>
+              <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 12, ...num }}><b style={{ color: FIRE.textPrimary }}>{attendedCount} of {totalRecorded}</b> sessions attended in the last 90 days{missed.length ? <> · <b style={{ color: FIRE.textPrimary }}>{missed.length} missed</b></> : null}</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 66 }}>
+                  {trend.map((t) => <div key={t.label} title={t.pct == null ? `${t.label}: no recorded sessions` : `${t.label}: ${t.pct}%`} style={{ flex: 1, height: t.pct == null ? 3 : `${Math.max(t.pct, 4)}%`, borderRadius: "3px 3px 0 0", background: t.pct == null ? "rgba(255,255,255,.07)" : `linear-gradient(180deg, ${toneFill(t.pct)}, ${toneFill(t.pct)}33)` }} />)}
+                </div>
+                <div style={{ display: "flex", gap: 5, marginTop: 6 }}>{trend.map((t) => <span key={t.label} style={{ flex: 1, textAlign: "center", fontSize: 9, color: FIRE.textMuted, fontWeight: 600 }}>{t.label}</span>)}</div>
+                {pct < 70 && <div style={{ fontSize: 11, color: FIRE.amberText, marginTop: 12, display: "flex", alignItems: "center", gap: 7 }}><AlertTriangle size={14} style={{ flexShrink: 0 }} />You're under 70% — catch up below to bring it back up.</div>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 3 — CATCH UP: latest three, then Show all. Review notes only where a real plan exists; otherwise the
+            session itself (its day on the calendar). No fake catch-up content. */}
         {missed.length > 0 && (
           <div style={card}>
-            <div style={kick}>TRAINING YOU MISSED · CATCH UP</div>
-            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
-              {missed.map((s) => { const cat = catOf(s); return (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 999, background: cat?.color || FIRE.catBlue, flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
-                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>Missed {fmtSess(s)} · {cat?.name || "One-off"}</div>
-                  </div>
+            <CardHead icon={RotateCcw} title="Catch up on what you missed" right={<span style={{ ...num }}>{missed.length} missed</span>} />
+            {shownMissed.map((s, i) => { const has = (s.plans || []).length > 0; return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 2px", borderBottom: i === shownMissed.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: sessColor(s), flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                  <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...num }}>{fmtSess(s)} · {catOf(s)?.name || "One-off"}</div>
                 </div>
-              ); })}
-            </div>
+                {has
+                  ? <button onClick={() => openSessionPlans(s)} style={cubtn}><FileText size={13} /> Review notes</button>
+                  : <button onClick={() => viewSession(s)} style={cubtn}><Calendar size={13} /> View session</button>}
+              </div>
+            ); })}
+            {missed.length > 3 && (
+              <div style={{ marginTop: 11, textAlign: "center" }}>
+                <button onClick={() => setShowAllMissed((v) => !v)} style={{ fontSize: 11.5, fontWeight: 600, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontFamily: "inherit" }}>{showAllMissed ? "Show fewer" : `Show all ${missed.length} missed`}</button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* 4 — training calendar (MonthCalendar + chip logic unchanged; dark calendar in dark card) */}
-        <div style={card}>
-          <div style={{ ...kick, marginBottom: 12 }}>TRAINING CALENDAR</div>
-          <div style={{ marginBottom: -10 }}>{/* cancels MonthCalendar's built-in 10px bottom margin → even inset framing */}
-            <MonthCalendar
-              cur={cur} setCur={setCur} dark
-              items={monthSessions}
-              renderChip={renderChip}
-              todayColor={FIRE.red}
-              monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
-            />
-          </div>
-        </div>
+        </NoirSkin>
+    </PageShell>
+    );
+  }
 
-        {/* 5 — this month's sessions */}
-        <div style={card}>
-          {/* TOUCHPOINT 3 — BACKFILL. Finished drills with no recorded length produce no attendance
-              hours at all, and that absence is invisible unless something names it: the hours simply
-              never appear and nobody knows to look. Listed here, in Training, because this is where
-              drills are owned; Station Hours shows the same count so the gap is noticed where the
-              missing hours would have shown up. Set the length from the session's own Edit — one
-              place to change it, not two. */}
+  // ---------- leader view: FIRE-palette styles + derived reads (presentational only) ----------
+  const Lcard = { ...FS.cardNoir, padding: 14 };                                  // base + leader padding (borderRadius FIRE.cardRadius == 16)
+  const Lkick = { ...FS.kicker, display: "flex", alignItems: "center", gap: 6 };
+  const Lnum = FS.num;
+  const Lbtn = FS.btn;                                                        // FIRE.card2Noir/.btnBorder/.btnText == prior literals
+  const LbtnIcon = FIRE.btnIcon;                                             // == "#9AA1AC"
+  const Lfield = { display: "flex", flexDirection: "column", gap: 6 };       // unchanged (not in the consolidation set)
+  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }; // unchanged (not in the consolidation set)
+  const Linput = FS.input;                                                    // FIRE.inputBorder/.btnBg/.name == prior literals
+  const LprimaryBtn = FS.btnPrimary;                                          // FIRE.white == "#fff"
+  const Lrow = FS.row;
+  // Session-row buttons (the training mock's .sbtn): 11px/600 on card2, hairline border, radius 7.
+  const Sbtn = { ...FS.btn, fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 7, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.card2Noir, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6 };                                                        // FIRE.hairline == "rgba(255,255,255,.05)"
+  // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
+  const statusColor = (label) => (label === "On track" || label === "Done") ? FIRE.greenText : label === "Due soon" ? FIRE.amberText : FIRE.redText;
+  // Card 1 — most recent done session's attendance (empty until persistence lands)
+  const doneTraining = sessions.filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a));   // completed TRAINING, newest first (leadership EVENTS excluded)
+  const lastDone = doneTraining[0];   // most recent TRAINING — leadership EVENTS excluded
+  const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
+  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
+  const totalMembers = cm.length;
+  const hasAtt = !!lastDone && lastAtt > 0;
+  const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
+  // Card 3 — next not-done session from today forward (pure read)
+  const t0n = new Date(today); t0n.setHours(0, 0, 0, 0);
+  const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort(sessSort)[0];
+  const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
+
+  return (
+    <PageShell band kicker={dept?.name ? `TRAINING · ${dept.name}` : "TRAINING"} title="Keep training on schedule"
+      watermark="TRAIN" above={sessionsErr ? <OfflineNotice onRetry={loadSessions} what="trainings" /> : null}
+      sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
+      <NoirSkin>
+      {/* Moved from the member view (2026-10-13): it addresses officers ("open a session and set its length"),
+          but sat in the members-only branch — members saw an instruction they can't act on, officers never saw it. */}
           {(() => {
             const noLen = (sessions || []).filter((x) => x.done && x.durationMin == null
               && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0);
             if (!noLen.length) return null;
             return (
-              <div style={{ ...FS.card, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
+              <div style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
                 <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
                   <Clock size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -19055,71 +21255,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               </div>
             );
           })()}
-          <div style={kick}>THIS MONTH'S SESSIONS</div>
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 9 }}>
-            {monthSessions.length === 0 ? (
-              <div style={{ fontSize: 13, color: FIRE.textMuted }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div>
-            ) : monthSessions.map((s) => {
-              const cat = catOf(s); const att = s.attendance || []; const hasRecord = att.length > 0; const present = att.includes(me?.id);
-              return (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                  <CalendarCheck size={15} color={cat?.color || FIRE.catBlue} style={{ flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center" }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /></div>
-                    <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""} · {s.planId ? `part of ${cat?.name || "a category"}` : "one-off (no category)"}</div>
-                  </div>
-                  {!s.done ? (
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.textMuted2, textTransform: "uppercase", letterSpacing: ".08em" }}>Scheduled</span>
-                  ) : hasRecord ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                      <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: present ? FIRE.greenText : FIRE.redText }}>{present ? "You came" : "You missed"}</span>
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 11.5, color: FIRE.textMuted, ...num }}>{att.length} attended</span>
-                  )}
-                  {s.plan && <button onClick={() => openSessionPlans(s)} style={{ fontSize: 11.5, fontWeight: 600, color: "#C7CDD6", background: "rgba(255,255,255,.04)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", flexShrink: 0 }}>Open plan</button>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        </NoirSkin>
-    </PageShell>
-    );
-  }
-
-  // ---------- leader view: FIRE-palette styles + derived reads (presentational only) ----------
-  const Lcard = { ...FS.cardNoir, padding: 14 };                                  // base + leader padding (borderRadius FIRE.cardRadius == 16)
-  const Lkick = { ...FS.kicker, display: "flex", alignItems: "center", gap: 6 };
-  const Lnum = FS.num;
-  const Lbtn = FS.btn;                                                        // FIRE.btnBg/.btnBorder/.btnText == prior literals
-  const LbtnIcon = FIRE.btnIcon;                                             // == "#9AA1AC"
-  const Lfield = { display: "flex", flexDirection: "column", gap: 6 };       // unchanged (not in the consolidation set)
-  const LfieldLabel = { fontSize: 12.5, fontWeight: 600, color: FIRE.textSecondary }; // unchanged (not in the consolidation set)
-  const Linput = FS.input;                                                    // FIRE.inputBorder/.btnBg/.name == prior literals
-  const LprimaryBtn = FS.btnPrimary;                                          // FIRE.white == "#fff"
-  const Lrow = FS.row;                                                        // FIRE.hairline == "rgba(255,255,255,.05)"
-  // map dueInfo's (unchanged) status to lighter FIRE status colors for dark bg — presentational, dueInfo untouched
-  const statusColor = (label) => (label === "On track" || label === "Done") ? FIRE.greenText : label === "Due soon" ? FIRE.amberText : FIRE.redText;
-  // Card 1 — most recent done session's attendance (empty until persistence lands)
-  const doneTraining = sessions.filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a));   // completed TRAINING, newest first (leadership EVENTS excluded)
-  const lastDone = doneTraining[0];   // most recent TRAINING — leadership EVENTS excluded
-  const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
-  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
-  const totalMembers = cm.length;
-  const hasAtt = !!lastDone && lastAtt > 0;
-  const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
-  // Card 3 — next not-done session from today forward (pure read)
-  const t0n = new Date(today); t0n.setHours(0, 0, 0, 0);
-  const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort(sessSort)[0];
-  const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
-
-  return (
-    <PageShell band kicker={dept?.name ? `TRAINING · ${dept.name}` : "TRAINING"} title="Keep training on schedule"
-      bandMark={<div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 26, top: "50%", transform: "translateY(-50%)", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 110, color: FIRE.textPrimary, opacity: 0.045, pointerEvents: "none", userSelect: "none" }}>TRAIN</div>}
-      sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
-      <NoirSkin>
 
       {/* UP NEXT — the command hero: the next session as the feature (countdown, title, when/where, attached plan,
           inline actions), the Training-Ready ring and three stats. Every value comes from sessions/plan already loaded;
@@ -19142,13 +21277,19 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         const small = (t) => <span style={{ fontSize: 13, color: FIRE.textMuted }}>{t}</span>;
         return (
           <section className="tr-hero" style={{ position: "relative", overflow: "hidden", border: `1px solid ${FIRE.lineNoir}`, borderRadius: 16, background: "radial-gradient(120% 150% at 88% 0%, rgba(200,50,58,.34), rgba(200,50,58,0) 46%), linear-gradient(105deg, #05070A, #0B0E13 55%, #140A0D)", padding: "22px 26px", marginBottom: 12, display: "flex", gap: 24, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", boxShadow: FIRE.cardShadowNoir }}>
-            <div aria-hidden="true" className="noir-emblem" style={{ position: "absolute", right: 20, bottom: -24, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 118, letterSpacing: "-.02em", color: FIRE.textPrimary, opacity: 0.04, pointerEvents: "none" }}>TRAIN</div>
             <div style={{ position: "relative", flex: "1 1 340px", minWidth: 0 }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 11, fontWeight: 700, letterSpacing: ".09em", color: FIRE.redText, textTransform: "uppercase" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.redBright, boxShadow: "0 0 0 4px rgba(200,50,58,.2)" }} />
                 {nextSession ? `Next training · ${daysToNext <= 0 ? "today" : daysToNext === 1 ? "tomorrow" : `in ${daysToNext} days`}` : "Next training"}
               </span>
               <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 30, lineHeight: 1.04, margin: "11px 0 9px", color: FIRE.textPrimary }}>{nextSession ? nextSession.title : "Nothing scheduled yet"}</div>
+              {nextSession && !nextSession.done && (
+                /* REGISTER — leaders' heads-up only: plans, not attendance (the roll is still taken at the session). */
+                <div style={{ marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "6px 11px", borderRadius: 9, background: "rgba(0,0,0,.22)", border: `1px dashed ${FIRE.line2Noir}` }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted }}>Plans so far</span>
+                  <PlanSummary compact regs={reg.forSession(nextSession.id)} />
+                </div>
+              )}
               {nextSession && (
                 <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", gap: 16, flexWrap: "wrap" }}>
                   <span><b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{sessDate(nextSession).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</b>{nextSession.startTime ? ` · ${fmtTime(nextSession.startTime)}` : ""}</span>
@@ -19160,8 +21301,15 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                 {nextSession && canRunSignin && !nextSession.done && <button style={thbtn} onClick={() => goToNext(() => setOpenSignin(nextSession.id))}><QrCode size={14} color={FIRE.redText} /> QR sign-in</button>}
                 {nextSession && nextPlans.length > 0 && <button style={thbtn} onClick={() => openSessionPlans(nextSession)}><FileText size={14} color={FIRE.textMuted} /> View plan</button>}
                 {canPlanAI && <button style={thbtn} onClick={() => setDraftOpen((v) => !v)}><Sparkles size={14} color={FIRE.redText} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
-                {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
+                {nextSession && !nextSession.done && <button style={thbtn} aria-expanded={plansOpen === "hero"} onClick={() => setPlansOpen(plansOpen === "hero" ? null : "hero")}><Users size={14} color={FIRE.textMuted} /> {plansOpen === "hero" ? "Hide plans" : "Who's planning to come"}</button>}
+                {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
               </div>
+              {nextSession && !nextSession.done && plansOpen === "hero" && (
+                <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(0,0,0,.25)", border: `1px solid ${FIRE.lineNoir}`, maxWidth: 560 }}>
+                  <PlanSummary regs={reg.forSession(nextSession.id)} nameById={regNameById} />
+                  <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 7 }}>A heads-up, not attendance — take the roll at the session as usual.</div>
+                </div>
+              )}
             </div>
             <div className="tr-hero-r" style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "center", gap: 20, paddingLeft: 24, borderLeft: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ position: "relative", width: 116, height: 116 }} title="Average attendance over the last 8 completed training sessions">
@@ -19194,23 +21342,22 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
-        <div style={{ display: "flex", gap: 9, alignItems: "center", background: FIRE.btnBg, border: `1px solid ${FIRE.redText}55`, borderLeft: `3px solid ${FIRE.redText}`, color: FIRE.redText, borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 9, alignItems: "center", background: FIRE.card2Noir, border: `1px solid ${FIRE.redText}55`, borderLeft: `3px solid ${FIRE.redText}`, color: FIRE.redText, borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
           <AlertTriangle size={16} style={{ flexShrink: 0 }} />
           <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
         </div>
       )}
 
-      {/* TRAINING CATEGORIES */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <CardHead icon={GraduationCap} title="Training categories" style={{ marginBottom: 0, width: "auto" }} />
-        {canManage && planView.length > 0 && (
-          <button onClick={togglePlanEdit} style={{ ...Lbtn, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
+      {/* TRAINING CATEGORIES — one card: head (Edit trainings on the right, the mock's .chead .right), then the add
+          form when open, then the category grid. */}
+      <div style={{ ...Lcard, padding: "12px 14px", marginBottom: 12 }}>
+      <CardHead icon={GraduationCap} title="Training categories"
+        right={canManage && planView.length > 0 ? (
+          <button onClick={togglePlanEdit} style={{ ...Lbtn, display: "inline-flex", alignItems: "center", gap: 5 }}>
             {editPlanMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit trainings</>}
-          </button>
-        )}
-      </div>
+          </button>) : null} />
       {canManage && (editPlanMode || planView.length === 0) && (addingPlan ? (
-        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
           <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
@@ -19225,7 +21372,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
           <button style={Lbtn} onClick={() => setAddingPlan(false)}>Cancel</button>
         </div>
       ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={LbtnIcon} /> Add a training</button>)}
-      <div style={{ ...Lcard, padding: "12px 14px", marginBottom: 12 }}>
         {planView.length === 0 ? (
           <div style={{ fontSize: 13, color: FIRE.textMuted2, padding: "6px 0" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
         ) : (
@@ -19259,7 +21405,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color || FIRE.catBlue, flexShrink: 0 }} />
                 <span style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                <span style={{ marginLeft: "auto", flexShrink: 0 }}><Pill S={S} color={statusColor(info.label)}>{info.label.toUpperCase()}</Pill></span>
+                <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 9px", borderRadius: 999, color: statusColor(info.label), background: `${statusColor(info.label)}1A`, border: `1px solid ${statusColor(info.label)}66` }}>{info.label.charAt(0).toUpperCase() + info.label.slice(1).toLowerCase()}</span>
               </div>
               <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "9px 0 10px", ...Lnum }}>
                 {p.cadence} · Last <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "never"}</b> · <span style={{ color: statusColor(info.label) }}>{info.rel}</span>
@@ -19305,28 +21451,33 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
         );
       })()}
 
-      {/* TRAINING CALENDAR */}
+      {/* TRAINING CALENDAR — one card (the mock's .calhead + .cal tiles): month header with Schedule a session on the
+          right; the schedule form opens inside the card, under the header. Same form, same handlers. */}
       <div id="tr-schedule" />
-      <CardHead icon={Calendar} title="Training calendar" style={{ marginTop: 14 }} />
-      {canManage && (showSess ? (
-        <div style={{ ...Lcard, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ ...Lcard, marginBottom: 12 }}>
+          <MonthCalendar
+            cur={cur} setCur={setCur} dark tiles
+            headerExtra={canManage && !showSess ? <button style={{ ...Lbtn, padding: "6px 11px", fontSize: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); }}><Plus size={14} color={LbtnIcon} /> Schedule a session</button> : null}
+            belowHeader={canManage && showSess ? (
+        <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           {!repeat && <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>}
           <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sTime} onChange={(e) => setSTime(e.target.value)} /></label>
                       {/* TOUCHPOINT 1 — set the length here. Optional and permanently so: a blank
                           length is valid and simply produces no attendance hours. It is NOT a
                           required field, because forcing a number would get a guess typed in, and a
                           guessed length becomes hours on an ISO/LOSAP-adjacent report. */}
-                      <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sessEdit.durationMin} onChange={(e) => setSessEdit((b) => ({ ...b, durationMin: e.target.value }))} /></label>
+                      <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sDur} onChange={(e) => setSDur(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
-            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}` }}>
               {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                 const on = sAudience === val;
-                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
+                return <button key={val} type="button" onClick={() => setSAudience(val)} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
               })}
             </div></label>
           <CountsAttendanceCheckbox checked={sCounts} onChange={setSCounts} fieldStyle={Lfield} labelStyle={LfieldLabel} />
+          {sAudience === "everyone" && <MeetingCheckbox checked={sMeeting} onChange={setSMeeting} fieldStyle={Lfield} labelStyle={LfieldLabel} />}
           <OffsiteCheckbox checked={sOffsite} onChange={setSOffsite} label={sOffLabel} onLabelChange={setSOffLabel} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
           <label style={{ ...Lfield, minWidth: 120 }}><span style={LfieldLabel}>Repeat</span>
             <button onClick={toggleRepeat} style={{ ...Linput, cursor: "pointer", textAlign: "left", color: repeat ? FIRE.name : FIRE.textMuted2 }}>{repeat ? "Recurring ✓" : "One session"}</button></label>
@@ -19342,13 +21493,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             : <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>}
           <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
         </div>
-      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setShowSess(true); }}><Plus size={15} color={LbtnIcon} /> Schedule a session</button>)}
-
-      {/* calendar wrapped in dark card; dark calendar in dark card; red today marker */}
-      <div style={{ ...Lcard, marginBottom: 16 }}>
-        <div style={{ marginBottom: -10 }}>
-          <MonthCalendar
-            cur={cur} setCur={setCur} dark
+            ) : null}
             items={monthSessions}
             renderChip={(s) => {
               // base color = linked category's live color, or fallback blue for one-off / deleted category
@@ -19368,7 +21513,6 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
             todayColor={FIRE.red}
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
           />
-        </div>
       </div>
 
       {/* SESSIONS — the month's full session list in its own card; every control below is unchanged. */}
@@ -19392,28 +21536,35 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
               const locked = s.done || s.signinOpen || (s.attendance?.length > 0);   // editable only BEFORE QR sign-in starts / any check-in / done
               return (
                 <div key={s.id} id={`ts-${s.id}`}>
-                  <div style={Lrow}>
+                  <div style={{ ...Lrow, padding: "12px 2px", gap: 13, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ width: 42, textAlign: "center", flexShrink: 0 }}>
                       <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".06em", color: plan.find((p) => String(p.id) === String(s.planId))?.color || FIRE.catBlue }}>{TRAIN_MONTHS[cur.m].slice(0, 3).toUpperCase()}</div>
                       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: FIRE.textPrimary, ...Lnum }}>{s.d}</div>
                     </div>
                     <div style={FS.rowTitle}>
-                      <span style={{ fontWeight: 600, color: FIRE.name }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} /></span>
-                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: FIRE.textPrimary }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} />
+                        {/* the mock's .spill.done — the status sits with the title, not in the button cluster */}
+                        {s.done && <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", padding: "2px 8px", borderRadius: 999, color: FIRE.greenText, background: "rgba(47,168,105,.10)", border: "1px solid rgba(47,168,105,.4)", verticalAlign: "1px" }}>Done</span>}
+                      </span>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
-                    <div style={FS.rowActions}>
-                      <button style={Lbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
-                      {s.plans.length > 0 && <button style={Lbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
-                      {canRunSignin && !s.done && <button style={{ ...Lbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : LbtnIcon} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                    <div style={{ ...FS.rowActions, gap: 6 }}>
+                      <button style={Sbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
+                      {/* REGISTER — plans (not attendance), leaders' heads-up; separate from the roll above */}
+                      {!s.done && (() => { const n = reg.forSession(s.id).filter((r) => r.status === "coming").length; return (
+                        <button style={{ ...Sbtn, borderStyle: "dashed" }} aria-expanded={plansOpen === s.id} onClick={() => setPlansOpen(plansOpen === s.id ? null : s.id)}><CalendarCheck size={14} color={LbtnIcon} /> Plans{n ? ` · ${n} coming` : ""}</button>
+                      ); })()}
+                      {s.plans.length > 0 && <button style={Sbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
+                      {canRunSignin && !s.done && <button style={{ ...Sbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : FIRE.redText} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
                       {canManage && (
-                        <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Lbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} /><input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
+                        <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Sbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} />Attach plan<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                       )}
-                      {isRestrictedEvent(s) && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} /></button>}
+                      {isRestrictedEvent(s) && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} />Agenda</button>}
                       {s.done
-                        ? <><Pill S={S} color={FIRE.greenText}>DONE</Pill>{canManage && <button style={Lbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
-                        : canManage && <button style={Lbtn} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color={LbtnIcon} /> Complete</button>}
-                      {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
+                        ? <>{canManage && <button style={Sbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
+                        : canManage && <button style={{ ...Sbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" }} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color="#fff" /> Complete</button>}
+                      {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
                       {/* Remove survives only while the session is UNCLOSED and EMPTY. A closed drill is an
                           attendance record; so is an open one somebody has already checked into, and deleting
                           either cascades the roster away. Mirrors the RLS policy term for term
@@ -19422,30 +21573,40 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                           Deliberately NOT reusing `locked`, which also covers signinOpen: an open QR sign-in
                           nobody has used yet is still an empty session and still cleanup-able. Reopen renders
                           in the done branch above, so a closed session shows the right action instead. */}
-                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Lbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                     </div>
                   </div>
+                  {!s.done && plansOpen === s.id && (
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, borderStyle: "dashed" }}>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans — a heads-up, not attendance</div>
+                      <PlanSummary regs={reg.forSession(s.id)} nameById={regNameById} />
+                    </div>
+                  )}
                   {editingSessionId === s.id && (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                       <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title</span><input style={Linput} value={sessEdit.title} onChange={(e) => setSessEdit((b) => ({ ...b, title: e.target.value }))} /></label>
                       <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Date</span><input type="date" style={Linput} value={sessEdit.date} onChange={(e) => setSessEdit((b) => ({ ...b, date: e.target.value }))} /></label>
                       <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sessEdit.startTime} onChange={(e) => setSessEdit((b) => ({ ...b, startTime: e.target.value }))} /></label>
+                      {/* The edit form's Length — the one the "no length recorded" notice sends officers to. The save already
+                          sends sessEdit.durationMin; the field just wasn't on this form. Blank = no length (no hours). */}
+                      <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sessEdit.durationMin} onChange={(e) => setSessEdit((b) => ({ ...b, durationMin: e.target.value }))} /></label>
                       <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category</span><select style={Linput} value={sessEdit.planId} onChange={(e) => setSessEdit((b) => ({ ...b, planId: e.target.value }))}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="">One-off (no category)</option></select></label>
                       <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
-                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.btnBorder}` }}>
+                        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}` }}>
                           {[["everyone", "Everyone"], ["leadership", "Leadership only"], ["board", "Board only"]].map(([val, lbl], i) => {
                             const on = sessEdit.audience === val;
-                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.btnBorder}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
+                            return <button key={val} type="button" onClick={() => setSessEdit((b) => ({ ...b, audience: val }))} style={{ flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: on ? "rgba(255,255,255,.10)" : "transparent", color: on ? (val === "board" ? FIRE.blueText : val === "leadership" ? FIRE.amberText : FIRE.name) : FIRE.textMuted2 }}>{lbl}</button>;
                           })}
                         </div></label>
                       <CountsAttendanceCheckbox checked={sessEdit.countsAttendance} onChange={(v) => setSessEdit((b) => ({ ...b, countsAttendance: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />
+                      {sessEdit.audience === "everyone" && <MeetingCheckbox checked={!!sessEdit.isMeeting} onChange={(v) => setSessEdit((b) => ({ ...b, isMeeting: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />}
                       <OffsiteCheckbox checked={!!sessEdit.isOffsite} onChange={(v) => setSessEdit((b) => ({ ...b, isOffsite: v }))} label={sessEdit.offLabel} onLabelChange={(v) => setSessEdit((b) => ({ ...b, offLabel: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
                       <button style={LprimaryBtn} onClick={() => saveEditSession(s.id)}><CheckCircle2 size={15} /> Save</button>
                       <button style={Lbtn} onClick={() => setEditingSessionId(null)}>Cancel</button>
                     </div>
                   )}
                   {s.plans.length > 0 && openPlans === s.id && (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12 }}>
                       <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
                       {s.plans.map((p) => (
                         <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
@@ -19460,23 +21621,34 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     </div>
                   )}
                   {open && (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 12 }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, ...(s.done ? { borderColor: "rgba(47,168,105,.35)" } : { borderColor: `${FIRE.redBright}55` }) }}>
+                      {/* Closeout summary (display only) — the same counts the Attendance button shows. */}
+                      {(
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                          {s.done
+                            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.greenText }}><Lock size={13} /> Locked</span>
+                            : <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.redText }}>Not locked yet</span>}
+                          <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}><b style={{ color: FIRE.textPrimary }}>{attCount}</b> of {expCount} present{expCount - attCount > 0 ? ` · ${expCount - attCount} absent` : ""}</span>
+                          <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Length <b style={{ color: FIRE.textPrimary }}>{s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : "not set"}</b></span>
+                        </div>
+                      )}
                       <div style={{ fontSize: 12, color: FIRE.textMuted2, marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
                       {roll.map((m) => {
                         const present = att.includes(m.id);
                         return (
-                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "0.5px solid rgba(255,255,255,.05)" }}>
+                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                             {canManage && !s.done
                               ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color={FIRE.greenText} /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
-                              : (present ? <CheckCircle2 size={18} color={FIRE.greenText} /> : <X size={16} color={FIRE.redText} />)}
+                              : <CheckMark state={present ? "pass" : "fail"} size={18} />}
                             <span style={{ flex: 1, fontSize: 13.5, color: present ? FIRE.name : FIRE.textMuted2 }}>{m.name}{m.id === meId ? " (you)" : ""}{restricted && !rollFor(s, m) ? <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: present ? FIRE.greenText : FIRE.redText }}>{present ? "PRESENT" : "ABSENT"}</span>
+                            <ResultBadge pass={present}>{present ? "PRESENT" : "ABSENT"}</ResultBadge>
                           </div>
                         );
                       })}
                       {canManage && !s.done && (
-                        <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                          <button style={LprimaryBtn} onClick={() => finalizeSession(s)}><ClipboardCheck size={15} /> Finalize &amp; lock attendance</button>
+                        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                          <span style={{ flex: 1, minWidth: 180, fontSize: 12, color: FIRE.textMuted, lineHeight: 1.45 }}>Locking sets attendance and training credit. You can reopen it later if something's wrong.</span>
+                          <button style={LprimaryBtn} onClick={() => finalizeSession(s)}><Lock size={15} /> Finalize &amp; lock attendance</button>
                         </div>
                       )}
                     </div>
@@ -19485,7 +21657,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                     const liveToken = signinTokens[s.id];
                     const needsLoc = s.isOffsite && (s.locLat == null || s.locLng == null);   // off-site with nowhere to verify against
                     return (
-                    <div style={{ ...Lcard, margin: "2px 0 10px", padding: 14 }}>
+                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 14 }}>
                       {/* WHERE THIS DRILL VERIFIES — shown ONLY for a drill flagged off-site at
                           planning. A station drill needs no strip: "At the station" on every card was
                           noise on the 100% case. Rendered in both branches (before opening AND while
@@ -19639,75 +21811,98 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
   const swatch = (k, label) => (
     <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 8, background: FIRE.btnBg, padding: 2, cursor: canManage ? "pointer" : "default" }} />
+        <input type="color" value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} style={{ width: 42, height: 38, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, background: FIRE.card2Noir, padding: 2, cursor: canManage ? "pointer" : "default" }} />
         <input style={{ ...FS.input, width: 110 }} value={brand[k]} disabled={!canManage} onChange={(e) => set(k, e.target.value)} />
       </div>
     </label>
   );
+  const field = (label, child, style) => <label style={{ ...S.field, ...style }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>{child}</label>;
   return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={FS.kicker}>MEDIA BUILDER</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Build on-brand media</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too.</div>
-      </div>
-      {!canManage && <div style={{ ...FS.card, padding: 14, marginBottom: 14, fontSize: 13, color: FIRE.textMuted }}>You can view the brand kit. Editing is limited to department admins.</div>}
-      <div style={{ ...FS.card, padding: 18 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}><Palette size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />IDENTITY</div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
-          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
-        </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
-          {swatch("primary", "Primary color")}
-          {swatch("accent", "Accent color")}
-          <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Headline font</span><select style={FS.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
-        </div>
-      </div>
-      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />LOGO</div>
-        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ width: 84, height: 84, borderRadius: 12, border: `0.5px solid ${FIRE.hairline}`, background: FIRE.btnBg, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-            {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color={FIRE.textMuted2} />}
-          </div>
-          {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ ...FS.btn, cursor: "pointer" }}><Upload size={15} color={FIRE.btnIcon} /> Upload logo<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
-            {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
-          </div>}
-        </div>
-        <p style={{ ...S.helpP, marginTop: 8, marginBottom: 0, color: FIRE.textMuted }}>PNG with a transparent background works best. Saved to your department when you tap Save — it appears on your header, sidebar, dashboard, and printed roster.</p>
-      </div>
-      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}>VOICE & TAGLINE</div>
-        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tagline</span><input style={FS.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
-        <label style={{ ...S.field, marginTop: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How the department sounds</span><textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
-        <p style={{ ...S.helpP, marginBottom: 0, color: FIRE.textMuted }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
-      </div>
-      {canManage && (
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-          <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveBrand} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
-          {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
-          {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
-          <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Saves name, station, colors, font, tagline &amp; voice. (Logo &amp; guidelines coming soon.)</span>
+    <PageShell band watermark="BRAND" kicker="BRAND KIT" title="Build on-brand media"
+      sub="Set your colors, logo, font and voice once — then make on-brand graphics. The recruitment and visibility drafters use these too.">
+      <NoirSkin>
+      {!canManage && (
+        <div style={{ ...NOIR_INSET, padding: "10px 13px", marginBottom: 12, display: "flex", alignItems: "center", gap: 9 }}>
+          <Lock size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>View only — department admins edit the brand kit. You can still make graphics below.</span>
         </div>
       )}
-      <div style={{ ...FS.card, padding: 18, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.primary }} /><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.accent }} /></div>
-        <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: FIRE.textPrimary }}>{brand.name}</div>
-        <div style={{ fontSize: 13, color: FIRE.textMuted, flex: 1, minWidth: 140 }}>{brand.tagline}</div>
+
+      {/* LIVE PREVIEW — reads the same brand state the fields edit; nothing here is saved until Save. */}
+      <div style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, marginBottom: 12, background: `linear-gradient(115deg, ${brand.primary} 0%, ${brand.primary}CC 45%, #0A0D12 100%)` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", flexWrap: "wrap" }}>
+          <div style={{ width: 58, height: 58, borderRadius: 12, background: "rgba(0,0,0,.28)", border: "1px solid rgba(255,255,255,.18)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            {brand.logo ? <img src={brand.logo} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: "#fff" }}>{deptMonogram(brand.name)}</span>}
+          </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.75)" }}>Live preview{brand.station ? ` · ${brand.station}` : ""}</div>
+            <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 24, color: "#fff", lineHeight: 1.15, marginTop: 2 }}>{brand.name || "Your department"}</div>
+            {brand.tagline && <div style={{ fontSize: 13, color: "rgba(255,255,255,.85)", marginTop: 3 }}>{brand.tagline}</div>}
+          </div>
+          <div style={{ display: "flex", gap: 6 }} aria-label="Brand colors">
+            <span title={`Primary ${brand.primary}`} style={{ width: 26, height: 26, borderRadius: 7, background: brand.primary, border: "1px solid rgba(255,255,255,.4)" }} />
+            <span title={`Accent ${brand.accent}`} style={{ width: 26, height: 26, borderRadius: 7, background: brand.accent, border: "1px solid rgba(255,255,255,.4)" }} />
+          </div>
+        </div>
+        <div style={{ height: 4, background: brand.accent }} />
       </div>
 
-      <div style={{ ...FS.card, padding: 18, marginTop: 12 }}>
-        <div style={{ ...FS.kicker, marginBottom: 8 }}><FileText size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />DEPARTMENT GUIDELINES</div>
-        <p style={{ ...S.helpP, marginTop: 0, color: FIRE.textMuted }}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 12 }}>
+        <div style={{ ...FS.cardNoir, padding: 18 }}>
+          <CardHead icon={Palette} title="Identity" />
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {field("Department name", <input style={FS.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} />, { flex: 1, minWidth: 180 })}
+            {field("Station", <input style={FS.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} />, { minWidth: 120 })}
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+            {swatch("primary", "Primary color")}
+            {swatch("accent", "Accent color")}
+          </div>
+          {field("Headline font", <select style={{ ...FS.input, fontFamily: FONT_STACKS[brand.font] }} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select>, { marginTop: 8 })}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ ...FS.cardNoir, padding: 18 }}>
+            <CardHead icon={ImageIcon} title="Logo" />
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ width: 84, height: 84, borderRadius: 12, border: `1px dashed ${FIRE.line2Noir}`, background: FIRE.insetNoir, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                {brand.logo ? <img src={brand.logo} alt="Department logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color={FIRE.textMuted2} />}
+              </div>
+              {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label style={{ ...FS.btn, cursor: "pointer" }}><Upload size={15} color={FIRE.btnIcon} /> {brand.logo ? "Replace logo" : "Upload logo"}<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
+                {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
+              </div>}
+            </div>
+            <p style={{ ...NOIR_HELP, marginTop: 8, marginBottom: 0 }}>PNG with a transparent background works best — resized to 512px. Shows on your header, sidebar, dashboard and printouts after you Save.</p>
+          </div>
+          <div style={{ ...FS.cardNoir, padding: 18 }}>
+            <CardHead icon={MessageSquare} title="Voice & tagline" />
+            {field("Tagline", <input style={FS.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} />)}
+            {field("How the department sounds", <textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} />, { marginTop: 8 })}
+            <p style={{ ...NOIR_HELP, marginBottom: 0 }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
+          </div>
+        </div>
+      </div>
+
+      {canManage && (
+        <div style={{ ...NOIR_INSET, display: "flex", alignItems: "center", gap: 12, marginTop: 12, padding: "11px 14px", flexWrap: "wrap" }}>
+          <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveBrand} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save brand kit</>}</button>
+          {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
+          {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
+          <span style={{ fontSize: 11.5, color: FIRE.textMuted, flex: 1, minWidth: 200 }}>Saves name, station, colors, font, logo, tagline &amp; voice. Guidelines aren't saved yet.</span>
+        </div>
+      )}
+
+      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}>
+        <CardHead icon={FileText} title="Department guidelines" />
+        <p style={NOIR_HELP}>Your brand or style guidelines (PDF, image, or doc), listed here for whoever is building media. <b style={{ color: FIRE.amberText }}>Not saved yet</b> — the list lasts for this visit only.</p>
         {canManage && (
-          <label style={{ ...FS.btn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} color={FIRE.btnIcon} /> Upload guideline
+          <label style={{ ...FS.btn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} color={FIRE.btnIcon} /> Add a guideline
             <input type="file" accept=".pdf,.doc,.docx,image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; set("guidelines", [...(brand.guidelines || []), { id: Date.now(), name: f.name }]); e.target.value = ""; }} /></label>
         )}
         <div style={{ marginTop: 10 }}>
-          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No guidelines uploaded yet.</div> :
+          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No guidelines added.</div> :
             (brand.guidelines || []).map((g) => (
-              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
                 <span style={{ flex: 1, fontSize: 13.5, color: FIRE.textPrimary }}>{g.name}</span>
                 {canManage && <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => set("guidelines", (brand.guidelines || []).filter((x) => x.id !== g.id))}><X size={13} color={FIRE.deleteRed} /></button>}
@@ -19717,7 +21912,8 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
       </div>
 
       <div style={{ marginTop: 18 }}><GraphicStudio S={S} brand={brand} /></div>
-    </div>
+      </NoirSkin>
+    </PageShell>
   );
 }
 
@@ -19855,6 +22051,7 @@ const GFX_TEMPLATES = [
   { key: "stat", name: "Stat card", labels: ["Eyebrow", "Big number", "What it measures", "Call to action"], def: { l1: "Last month", l2: "41", l3: "calls answered by your volunteers", l4: "Your neighbors need you. Join the crew." } },
 ];
 function GraphicStudio({ S, brand }) {
+  const GS_ON = { background: "rgba(200,50,58,.14)", borderColor: FIRE.redBright, color: FIRE.textPrimary };   // was S.segBtnOn (purple-grey, off-palette)
   const [tk, setTk] = useState("flyer");
   const tmpl = GFX_TEMPLATES.find((t) => t.key === tk);
   const [f, setF] = useState(tmpl.def);
@@ -19886,26 +22083,26 @@ function GraphicStudio({ S, brand }) {
   }
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={S.cardEyebrow}><ImageIcon size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />MAKE A GRAPHIC</div>
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
+      <CardHead icon={ImageIcon} title="Make a graphic" />
+      <p style={NOIR_HELP}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {GFX_TEMPLATES.map((t) => (
-          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(tk === t.key ? S.segBtnOn : {}) }}>{t.name}</button>
+          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(tk === t.key ? GS_ON : {}) }}>{t.name}</button>
         ))}
       </div>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
+        <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {GFX_SIZES.map((sz) => (
-            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(sizeKey === sz.key ? S.segBtnOn : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
+            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(sizeKey === sz.key ? GS_ON : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
           ))}
         </div>
       </div>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: FIRE.textMuted, letterSpacing: 0.4, marginBottom: 6 }}>STYLE</div>
+        <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>STYLE</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
           {STYLES.map((sy) => (
-            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, ...(styleKey === sy.key ? S.segBtnOn : {}) }}>{sy.name}</button>
+            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(styleKey === sy.key ? GS_ON : {}) }}>{sy.name}</button>
           ))}
         </div>
       </div>
@@ -19919,20 +22116,20 @@ function GraphicStudio({ S, brand }) {
             );
           })}
           {tk === "spotlight" && (
-            <label style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
+            <label style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
           )}
-          <div style={{ marginTop: 14, padding: 12, border: `1px dashed ${FIRE.btnBorder}`, borderRadius: 10, background: FIRE.btnBg }}>
+          <div style={{ marginTop: 14, padding: 12, border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 10, background: FIRE.card2Noir }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ImageIcon size={14} /> BACKGROUND IMAGE</div>
             <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Add a photo behind your text — your text stays readable over it. Optional.</p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
+              <label style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
               {bg && <label style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use it</label>}
-              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.btnBg, color: FIRE.redText, borderColor: FIRE.btnBorder }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
+              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.card2Noir, color: FIRE.redText, borderColor: FIRE.line2Noir }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
             </div>
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.hairline}` }}>
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted, display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: FIRE.btnBg, color: FIRE.textMuted, padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
-                <button style={{ ...S.ghostBtn, background: FIRE.btnBg, borderColor: FIRE.btnBorder, color: FIRE.textSecondary, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
+                <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted, display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: FIRE.card2Noir, color: FIRE.textMuted, padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
+                <button style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
               </div>
               {aiOpen && <div style={{ marginTop: 10 }}>
                 <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
@@ -19940,13 +22137,13 @@ function GraphicStudio({ S, brand }) {
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
                   <button style={{ ...FS.btnPrimary, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
                 </div>
-                {aiErr && <div style={{ ...S.errBox, marginTop: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.redText }}>{aiErr}</div>}
+                {aiErr && <div style={{ ...NOIR_ERR, marginTop: 8 }}>{aiErr}</div>}
               </div>}
             </div>
           </div>
         </div>
         <div style={{ width: 300, maxWidth: "100%" }}>
-          <div style={{ display: "flex", justifyContent: "center", background: FIRE.btnBg, borderRadius: 12, border: `1px solid ${FIRE.hairline}`, padding: 10 }}>
+          <div style={{ display: "flex", justifyContent: "center", background: FIRE.card2Noir, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, padding: 10 }}>
             <img src={dataUrl} alt="graphic preview" style={{ maxWidth: "100%", maxHeight: 420, borderRadius: 6, display: "block" }} />
           </div>
           <button style={{ ...FS.btnPrimary, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
@@ -19958,6 +22155,20 @@ function GraphicStudio({ S, brand }) {
 
 /* ---------------- Station Duties ---------------- */
 const DUTY_CATEGORIES = ["Cleanup", "Station", "Equipment", "Apparatus", "EMS", "Admin"];
+// Station Duties category look (b4c_stationduties_richer_noir.html): a colour + icon per category. Identity only —
+// not a status colour. Categories are free text, so anything unmapped takes a steady colour from the palette by name.
+const DUTY_CAT_LOOK = {
+  cleanup: ["#4F90D6", Sparkles], station: ["#E03A44", Building2], kitchen: ["#CC9E52", UtensilsCrossed],
+  equipment: ["#CC9E52", HardHat], apparatus: ["#E03A44", Truck], ems: ["#2FA869", HeartPulse],
+  admin: ["#8E7CC3", ClipboardList], facility: ["#4F90D6", Wrench], fundraising: ["#CC9E52", DollarSign],
+};
+const DUTY_CAT_PALETTE = ["#4F90D6", "#E03A44", "#CC9E52", "#2FA869", "#8E7CC3"];
+const dutyCatLook = (cat) => {
+  const k = String(cat || "").trim().toLowerCase();
+  if (DUTY_CAT_LOOK[k]) return DUTY_CAT_LOOK[k];
+  const h = [...k].reduce((t, ch) => (t * 31 + ch.charCodeAt(0)) >>> 0, 0);
+  return [DUTY_CAT_PALETTE[h % DUTY_CAT_PALETTE.length], ClipboardCheck];
+};
 const RECUR = ["Weekly", "Monthly", "Quarterly", "One-time"];
 const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /* weekStartOf / monthKey / quarterKey / isDoneThisPeriod now live in shared/duty-period.js, which
@@ -20175,7 +22386,7 @@ function StationDuties({ S, role, members, meId, notify }) {
   async function clearAllCheckmarks() {
     const targets = duties.filter((d) => isDoneThisPeriod(d, weekStartDay));
     if (!targets.length) { notify({ kind: "error", title: "Nothing to clear", text: "No duties are checked off right now." }); return; }
-    if (!window.confirm(`Clear ${targets.length} checkmark${targets.length === 1 ? "" : "s"}? The duties stay on the list, and past completions stay in the log.`)) return;
+    if (!(await noirConfirm({ title: `Clear ${targets.length} checkmark${targets.length === 1 ? "" : "s"}?`, body: "The duties stay on the list, and past completions stay in the log.", confirmLabel: "Clear" }))) return;
     setClearingAll(true);
     // One call per duty — uncomplete_duty is the only write primitive and it is per-duty. Fine at this
     // scale; if a station ever runs dozens of duties this wants a bulk RPC rather than N round-trips.
@@ -20302,9 +22513,17 @@ function StationDuties({ S, role, members, meId, notify }) {
       const items = dutySet.filter((d) => d.category === cat);
       if (!items.length) return null;
       const dn = items.filter((d) => d.done).length;
+      const [acc, CatIcon] = dutyCatLook(cat);
       return (
-        <div key={cat} style={{ marginBottom: 12 }}>
-          <CardHead icon={ClipboardCheck} title={cat} right={<span style={{ fontSize: 11, fontWeight: 700, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{dn}/{items.length}</span>} />
+        <div key={cat} style={{ ...FS.cardNoir, borderLeft: `3px solid ${acc}`, padding: "4px 16px 8px", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 0 10px" }}>
+            <span style={{ width: 34, height: 34, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `${acc}21`, color: acc }}><CatIcon size={17} /></span>
+            <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flex: 1, minWidth: 0 }}>{cat}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <span style={{ width: 70, height: 5, borderRadius: 99, background: FIRE.line2Noir, overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${Math.round((dn / items.length) * 100)}%`, background: dn === items.length ? FIRE.green : acc, borderRadius: 99 }} /></span>
+              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12, color: dn === items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{dn}/{items.length}</span>
+            </span>
+          </div>
           {items.map((a) => {
             const participantNames = [a.doneBy, ...(a.helperIds || [])].map((id) => nameById.get(id)).filter(Boolean).join(", ");
             return (
@@ -20323,18 +22542,27 @@ function StationDuties({ S, role, members, meId, notify }) {
                 })()}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontWeight: 600, color: a.done ? FIRE.textMuted2 : FIRE.textPrimary, textDecoration: a.done ? "line-through" : "none" }}>{a.duty}</span>
-                  {a.done && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 1 }}>✓ {participantNames || "A member"} · {fmtDoneAt(a.doneAt)}</div>}
+                  {a.done && (() => {
+                    const who = nameById.get(a.doneBy) || "";
+                    const ini = who.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "✓";
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: FIRE.greenText, marginTop: 3 }}>
+                        <span aria-hidden="true" style={{ width: 17, height: 17, borderRadius: "50%", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 8, color: FIRE.greenText, flexShrink: 0 }}>{ini}</span>
+                        <span>done by {participantNames || "a member"} · {fmtDoneAt(a.doneAt)}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
-                {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
+                {a.assignedTo && <span style={{ fontSize: 10.5, fontWeight: 700, color: FIRE.btnText, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>Assigned: {nameById.get(a.assignedTo) ?? "Member"}</span>}
                 {a.dueDate && (canManage || a.assignedTo === me?.id) && (() => {
                   const d = new Date(a.dueDate + "T00:00:00");
                   const t = new Date(); t.setHours(0, 0, 0, 0);
                   const days = Math.round((d - t) / 86400000);
                   const tone = days < 0 ? FIRE.redText : days <= 7 ? FIRE.amberText : FIRE.textMuted2;   // overdue red, ≤7d amber, else muted
                   const dl = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                  return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.btnBg, border: `0.5px solid ${FIRE.btnBorder}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
+                  return <span style={{ fontSize: 10.5, fontWeight: 700, color: tone, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{days < 0 ? `Overdue ${dl}` : `Due ${dl}`}</span>;
                 })()}
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: FIRE.navLabel, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{(a.recurrence || "Weekly").toUpperCase()}</span>
                 {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => startEditDuty(a)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
                 {canManage && editMode && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeDuty(a.id, a.duty)}><X size={14} color={FIRE.deleteRed} /></button>}
               </div>
@@ -20387,14 +22615,14 @@ function StationDuties({ S, role, members, meId, notify }) {
     });
   };
   return (
-    <PageShell above={loadErr && <OfflineNotice onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />} kicker="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own.">
+    <PageShell band watermark="DUTIES" above={loadErr && <OfflineNotice onRetry={() => { setLoadErr(false); loadDuties(); loadStationLog(); }} what="station duties" />} kicker="STATION DUTIES" title="Everyone pitches in" sub="The station's duties, grouped into your own categories. Tap the check when something's done — it logs who and when — and recurring duties come back on their own.">
       <NoirSkin>
 
       {canManage && (
         <div style={{ display: "inline-flex", gap: 6, marginBottom: 14 }}>
           {[["checklist", "Checklist"], ["history", "History"]].map(([k, l]) => {
             const on = view === k;
-            return <button key={k} onClick={() => setView(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 14px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.btnBg : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? FIRE.red : FIRE.btnBorder}` }}>{l}</button>;
+            return <button key={k} onClick={() => setView(k)} style={{ cursor: "pointer", borderRadius: 999, padding: "6px 14px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: on ? FIRE.card2Noir : "transparent", color: on ? FIRE.textPrimary : FIRE.navLabel, border: `0.5px solid ${on ? FIRE.red : FIRE.line2Noir}` }}>{l}</button>;
           })}
         </div>
       )}
@@ -20402,18 +22630,41 @@ function StationDuties({ S, role, members, meId, notify }) {
       {view === "checklist" && (<>
       <Card padding="14px 16px" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          {(() => {
+            /* Week ring — the same done / total the bar beside it always used. */
+            const tot = duties.length, pct = tot ? doneCount / tot : 0, R = 28, C = 2 * Math.PI * R;
+            return (
+              <div style={{ width: 66, height: 66, flexShrink: 0, position: "relative" }}>
+                <svg width="66" height="66" viewBox="0 0 66 66" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
+                  <circle cx="33" cy="33" r={R} fill="none" stroke={FIRE.line2Noir} strokeWidth="6" />
+                  <circle cx="33" cy="33" r={R} fill="none" stroke={FIRE.green} strokeWidth="6" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} />
+                </svg>
+                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{doneCount}/{tot}</div>
+                  <div style={{ fontSize: 9, color: FIRE.textMuted, letterSpacing: ".03em" }}>DONE</div>
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 4, ...FS.num }}><span>Week of {fmtWeek(weekLabel)}</span><span><b style={{ color: FIRE.textPrimary }}>{doneCount}</b> of {duties.length} done</span></div>
-            <Bar S={S} pct={duties.length ? Math.round((doneCount / duties.length) * 100) : 0} color={FIRE.green} track={FIRE.track} />
+            {(() => {
+              /* "Who cleared the first one" — the earliest doneAt among this period's done duties (data already loaded). */
+              const first = periodDuties.filter((d) => d.done && d.doneAt).sort((x, y) => String(x.doneAt).localeCompare(String(y.doneAt)))[0];
+              const who = first ? nameById.get(first.doneBy) : null;
+              return (<>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>Week of {fmtWeek(weekLabel)}</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{who ? <><b style={{ color: FIRE.textSecondary }}>{who}</b> cleared the first one · </> : (first ? "First one's cleared · " : "Nothing cleared yet · ")}resets {DOW[weekStartDay]}</div>
+              </>);
+            })()}
           </div>
           {/* Hidden in all-houses mode: it is a read/scan view, and create_duty() cannot take a
               station — a duty added here would land in the STORED house, silently and wrongly.
               "Go to this station" is the way in. */}
           {canManage && !allMode && <button disabled={clearingAll} style={{ ...FS.btn, opacity: clearingAll ? 0.6 : 1 }} onClick={clearAllCheckmarks}>{clearingAll ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} color={FIRE.btnIcon} />} Clear all checkmarks now</button>}
-          {(canManage || canCreate) && !allMode && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.red, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
+          {(canManage || canCreate) && !allMode && duties.length > 0 && <button onClick={toggleEditMode} style={{ ...FS.btn, display: "inline-flex", alignItems: "center", gap: 5, ...(editMode ? { borderColor: FIRE.redBright, color: FIRE.textPrimary } : {}) }}>{editMode ? <><CheckCircle2 size={14} color={FIRE.green} /> Done</> : <><Pencil size={14} color={FIRE.btnIcon} /> Edit duties</>}</button>}
           {canCreate && !allMode && (editMode || duties.length === 0) && <button style={FS.btn} onClick={() => setAddingA(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a duty</button>}
         </div>
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `0.5px solid ${FIRE.hairline}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textMuted }}>
           <RefreshCw size={13} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
           <span>Recurring duties roll over on their own — weekly, monthly, or quarterly. One-time duties stay until done.</span>
           {isDeptAdmin(role)
@@ -20436,7 +22687,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           <button style={FS.btn} onClick={() => setAddingA(false)}>Cancel</button>
         </Card>
       )}
-      {canCreate && <p style={{ ...S.helpP, marginTop: -2, color: FIRE.textMuted }}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
+      {canCreate && <p style={NOIR_HELP}>Type a new category name to create one (e.g. “Apparatus,” “Facility,” “Fundraising”). Set a duty to <b>Weekly/Monthly/Quarterly</b> to make it part of your recurring core set, or <b>One-time</b> for a one-off.</p>}
 
       {dutiesGrouped ? (
         /* One section per house. A house with no duties still gets its heading — the point of the
@@ -20451,11 +22702,12 @@ function StationDuties({ S, role, members, meId, notify }) {
         ))
       ) : renderDutyCategories(periodDuties)}
 
-      <CardHead icon={CheckCircle2} title="Other work logged" style={{ marginTop: 14 }} />
-      <p style={{ ...S.helpP, color: FIRE.textMuted }}>{allMode ? "Work logged across every house. Go to a station to add an entry." : "Did something that isn't on the checklist? Log it here so it's on the record — anyone can add."}</p>
+      <div style={{ ...FS.cardNoir, padding: "13px 16px", marginTop: 4 }}>
+      <CardHead icon={CheckCircle2} title="Other work logged" style={{ marginBottom: 4 }} />
+      <p style={NOIR_HELP}>{allMode ? "Work logged across every house. Go to a station to add an entry." : "Did something that isn't on the checklist? Log it here so it's on the record — anyone can add."}</p>
       {/* The log form stamps the STORED station, so in all-houses mode it would file the entry
           under whichever house happened to be active — hide it and label the rows instead. */}
-      <Card padding={16} style={{ marginBottom: 12, display: allMode ? "none" : "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ ...NOIR_INSET, padding: 14, marginBottom: 12, display: allMode ? "none" : "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>What got done</span><input style={FS.input} value={lw} placeholder="e.g. Tested all hose, logged results" onChange={(e) => setLw(e.target.value)} /></label>
         <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Who</span>
           <select style={FS.input} value={lwhoId} onChange={(e) => setLwhoId(e.target.value)}>
@@ -20469,7 +22721,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name</span><input autoFocus style={FS.input} value={lwho} placeholder="e.g. Ladies Auxiliary" onChange={(e) => setLwho(e.target.value)} /></label>
         )}
         <button style={FS.btnPrimary} onClick={addLog}><Plus size={15} /> Log it</button>
-      </Card>
+      </div>
       <div>
         {currentOtherWork.length === 0 && (
           <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>Nothing logged this week yet. Earlier entries are in History.</div>
@@ -20484,6 +22736,7 @@ function StationDuties({ S, role, members, meId, notify }) {
             {canManage && canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => removeLog(e)}><X size={14} color={FIRE.deleteRed} /></button>}
           </div>
         ))}
+      </div>
       </div>
       </>)}
 
@@ -20537,32 +22790,32 @@ function StationDuties({ S, role, members, meId, notify }) {
 }
 
 /* ---------------- Request ---------------- */
-function RequestForm({ S, requests, setRequests }) {
+function RequestForm({ S, requests, setRequests, extra, embedded }) {   // extra: a card rendered inside the Noir skin; embedded: the Support screen hosts it (no page shell of its own)
   const [topic, setTopic] = useState(""); const [notes, setNotes] = useState(""); const [done, setDone] = useState(false);
   function submit() {
     if (!topic.trim()) return;
     setRequests([{ topic, notes, when: "Just now" }, ...requests]); setTopic(""); setNotes(""); setDone(true); setTimeout(() => setDone(false), 2500);
   }
-  return (
-    <div style={{ background: FIRE.pageBg, borderRadius: 20, padding: "22px 20px", margin: "-6px -2px 0" }}>
-      {/* header (inline FS — shared PageHead not used/mutated) */}
-      <div style={{ marginBottom: 18 }}>
-        <div style={FS.kicker}>CUSTOM TRAINING</div>
-        <h1 style={{ fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 30, fontWeight: 700, color: FIRE.textPrimary, margin: "7px 0 6px", letterSpacing: "-0.01em" }}>Request a custom packet</h1>
-        <div style={{ fontSize: 14, color: FIRE.textSecondary, lineHeight: 1.5 }}>Tell us what your crew needs. We build it into the next monthly drop.</div>
-      </div>
-      <div style={{ ...FS.card, padding: 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 620 }}>
+  const body = (<>
+      {embedded && <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px" }}>Tell us what your crew needs. We build it into the next monthly drop.</div>}
+      <div style={{ ...FS.cardNoir, padding: embedded ? 18 : 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 620 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Topic or scenario</span><input style={FS.input} placeholder="e.g. Rural water shuttle with one tender" value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Anything specific to your department?</span><textarea style={{ ...FS.input, minHeight: 88, resize: "vertical" }} placeholder="Apparatus, member count, local hazards, constraints…" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
         <button style={FS.btnPrimary} onClick={submit}><Send size={16} /> Submit request</button>
-        {done && <div style={{ display: "flex", alignItems: "center", gap: 8, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText, borderRadius: 8, padding: "10px 12px", fontSize: 13.5 }}><CheckCircle2 size={16} color={FIRE.green} /> Request received. We'll confirm by email.</div>}
+        {done && <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(47,168,105,.08)", border: "1px solid rgba(47,168,105,.3)", color: FIRE.greenText, borderRadius: 8, padding: "10px 12px", fontSize: 13.5 }}><CheckCircle2 size={16} color={FIRE.green} /> Request received. We'll confirm by email.</div>}
       </div>
       {requests.length > 0 && (
-        <div style={{ marginTop: 24 }}><div style={{ ...FS.kicker, marginBottom: 8 }}>YOUR REQUESTS</div>
-          {requests.map((r, i) => <div key={i} style={{ ...FS.card, padding: "14px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14 }}><div><strong style={{ color: FIRE.textPrimary }}>{r.topic}</strong>{r.notes ? <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 3 }}>{r.notes}</div> : null}</div><span style={{ fontSize: 11.5, color: FIRE.textMuted2, flexShrink: 0, ...FS.num }}>{r.when}</span></div>)}
+        <div style={{ marginTop: 24 }}><SectionBar icon={Send} label="Your requests" count={requests.length} style={{ marginTop: 0 }} />
+          {requests.map((r, i) => <div key={i} style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14 }}><div><strong style={{ color: FIRE.textPrimary }}>{r.topic}</strong>{r.notes ? <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 3 }}>{r.notes}</div> : null}</div><span style={{ fontSize: 11.5, color: FIRE.textMuted2, flexShrink: 0, ...FS.num }}>{r.when}</span></div>)}
         </div>
       )}
-    </div>
+      {extra}
+  </>);
+  if (embedded) return body;
+  return (
+    <PageShell band kicker="CUSTOM TRAINING" title="Request a custom packet" sub="Tell us what your crew needs. We build it into the next monthly drop.">
+      <NoirSkin>{body}</NoirSkin>
+    </PageShell>
   );
 }
 
@@ -20578,7 +22831,7 @@ function Admin({ S, library, setLibrary, feedback }) {
     setLibrary([np, ...library]); setTitle(""); setObjective(""); setDone(true); setTimeout(() => setDone(false), 2500);
   }
   return (
-    <PageShell kicker="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately.">
+    <PageShell band kicker="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately.">
       <NoirSkin>
       <div style={{ ...S.formCard, ...FS.cardNoir, padding: "16px 18px", gap: 12 }}>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Packet title</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Tanker Shuttle Operations" /></label>
@@ -20587,8 +22840,11 @@ function Admin({ S, library, setLibrary, feedback }) {
           <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Estimated time</span><input style={FS.input} value={time} onChange={(e) => setTime(e.target.value)} /></label>
         </div>
         <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Objective</span><textarea style={{ ...FS.input, minHeight: 66, resize: "vertical" }} value={objective} onChange={(e) => setObjective(e.target.value)} /></label>
-        <button style={FS.btnPrimary} onClick={publish}><Plus size={16} /> Publish to library</button>
-        {done && <div style={{ ...S.successBox, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
+        {/* An empty title used to do nothing at all on tap (publish() returns early) — no message, no change.
+            The button now says why it can't run instead of looking broken. */}
+        <button style={{ ...FS.btnPrimary, opacity: title.trim() ? 1 : 0.55, cursor: title.trim() ? "pointer" : "not-allowed" }} onClick={publish} disabled={!title.trim()}><Plus size={16} /> Publish to library</button>
+        {!title.trim() && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: -4 }}>Add a packet title to publish.</div>}
+        {done && <div style={{ ...S.successBox, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -20709,7 +22965,7 @@ function AddDepartment({ S, role, notify, go }) {
               there is deliberately no second creation path. This just carries the PA to it with the
               form open. */}
           {created.several && (
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `0.5px solid ${FIRE.hairline}` }}>
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>
               <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>You said this department has several stations. Its first house is set up — add the others now.</div>
               <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => go?.("department", { id: created.id, name: created.name, focus: "stations" })}><Building2 size={15} color={FIRE.btnIcon} /> Add its other houses</button>
             </div>
@@ -20767,25 +23023,30 @@ function ProgramOverview({ S, role, notify, go }) {
   const needing = rows ? sorted.filter((x) => x.h === "red").length : null;
   const stuck = sum("open_long_shifts_count"), expired = sum("expired_certs_count"), expiring = sum("expiring_certs_count");
 
+  const deptsWith = (k) => (rows ? rows.filter((d) => radarNum(d[k]) > 0) : []);
+  const whereSub = (k, none) => { const w = deptsWith(k); return !rows ? undefined : w.length === 0 ? none : w.length === 1 ? `all ${w[0].department_name}` : `${w.length} departments`; };
+  const active30 = sum("active_members_30d");
+
   return (
-    <PageShell band kicker="PROGRAM OVERSIGHT" title="All departments" fitToScreen actions={<HeroAside />}
-      sub="Issues to act on across your departments — surfaced from live data, so you can catch problems before anyone reports them.">
+    <PageShell band watermark="RADAR" kicker="PROGRAM OVERSIGHT" title="Every department, at a glance" fitToScreen actions={<HeroAside />}
+      sub="Health across all departments — who needs attention, and why. Surfaced from live data, so you can catch problems before anyone reports them.">
       {/* Noir skin, as on the dashboards: icon tiles, CardHead headers and the gradient card face throughout. */}
       <NoirSkin>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 10 }}>
-        <StatTile icon={Building2} value={show(rows ? rows.length : null)} label="Departments" />
-        <StatTile icon={Users} value={show(sum("member_count"))} label="Total members" />
-        <StatTile icon={AlertTriangle} value={show(needing)} tone={problem(needing, "red")} label="Needing attention" />
-        <StatTile icon={Clock} value={show(stuck)} tone={problem(stuck, "red")} label="Open stuck shifts" sub="open > 24h" />
-        <StatTile icon={Award} value={show(expired)} tone={problem(expired, "red")} label="Expired certs" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(128px, 100%), 1fr))", gap: 8, marginBottom: 12 }}>
+        <StatTile icon={Building2} value={show(rows ? rows.length : null)} label="Departments" sub={needing == null ? undefined : needing ? `${needing} need${needing === 1 ? "s" : ""} attention` : "all healthy"} tone={problem(needing, "red")} />
+        <StatTile icon={Users} value={show(sum("member_count"))} label="Members" sub="across all depts" />
+        <StatTile icon={Clock} value={show(stuck)} tone={problem(stuck, "red")} label="Open 24h+ shifts" sub={whereSub("open_long_shifts_count", "none open")} />
+        <StatTile icon={Award} value={show(expired)} tone={problem(expired, "red")} label="Expired certs" sub={whereSub("expired_certs_count", "none")} />
         <StatTile icon={CalendarCheck} value={show(expiring)} tone={problem(expiring, "amber")} label="Expiring certs" sub="within 3 months" />
+        <StatTile icon={TrendingUp} value={show(active30)} label="Active (30 days)" sub="members, all depts" />
       </div>
 
       {err && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.red}`, color: FIRE.redText, marginBottom: 12 }}>Couldn't load the overview: {err} <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={load}>Retry</button></Card>}
       {rows === null && !err && <Card padding={24} style={{ color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading program data…</Card>}
       {rows !== null && rows.length === 0 && <Card padding={24} style={{ color: FIRE.textMuted }}>No departments found.</Card>}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {rows !== null && rows.length > 0 && <SectionBar icon={Building2} label="Departments" count={rows.length} right="Sorted: needs attention first" style={{ margin: "4px 0 10px" }} />}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(360px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
         {sorted.map(({ d, h }) => <ProgramDeptCard key={d.department_id} S={S} d={d} health={h} notify={notify} refresh={load} go={go} />)}
       </div>
       </NoirSkin>
@@ -20816,61 +23077,67 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
   const toneBar = (t) => (t === "red" ? FIRE.red : FIRE.amberText);
   const flagNum = (f) => <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: f.lead ? 30 : 26, lineHeight: 1, color: TONE[f.tone], ...FS.num }}>{f.n}</span>;
 
+  const [showDetails, setShowDetails] = useState(false);
+  // "Today" / "Yesterday" / a date — from days_since_activity, the same field lastActiveLabel reads.
+  const lastShort = d.days_since_activity == null ? "Never"
+    : d.days_since_activity === 0 ? "Today" : d.days_since_activity === 1 ? "Yesterday"
+    : new Date(Date.now() - d.days_since_activity * 86400000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // Good-news chips, only from the same columns (never a claim the radar can't back).
+  const goods = [];
+  if (n("open_long_shifts_count") === 0) goods.push("No stuck shifts");
+  if (n("expired_certs_count") === 0 && n("expiring_certs_count") === 0) goods.push("Certs current");
+  const chipFor = (tone) => ({ fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "3px 9px", color: TONE[tone], background: `${TONE[tone]}14`, border: `1px solid ${TONE[tone]}44`, display: "inline-flex", alignItems: "center", gap: 5, fontFamily: "inherit" });
+  const flagText = (f) => f.lead ? `${f.n} shift${f.n === 1 ? "" : "s"} open 24h+` : typeof f.n === "number" ? `${f.n} ${f.label}` : f.label;
+  const stat = (v, l, tone) => (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1.1, color: tone ? TONE[tone] : FIRE.textPrimary, ...FS.num }}>{v}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted, marginTop: 3 }}>{l}</div>
+    </div>
+  );
+
   return (
-    <Card padding="14px 16px">
-      {/* Header: crest + health dot + department; admin support underneath */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+    <Card padding="14px 16px" style={{ borderTop: `3px solid ${TONE[health]}` }}>
+      {/* Header: crest + department + admin · station; the health pill on the right */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
         <DeptCrest dept={{ name: d.department_name }} />
-        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <HealthDot tone={health} size={12} style={{ boxShadow: `0 0 0 4px ${TONE[health]}22` }} />
-            <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", overflowWrap: "anywhere" }}>{d.department_name}</h2>
-            {(d.station || d.city) && <span style={{ fontSize: 12.5, color: FIRE.textMuted }}>{[d.station, d.city].filter(Boolean).join(" · ")}</span>}
-          </div>
-          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>{lastActiveLabel(d)}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", overflowWrap: "anywhere" }}>{d.department_name}</h2>
+          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[d.admin_name ? `Admin: ${d.admin_name}` : "No admin with an email", d.station, d.city].filter(Boolean).join(" · ")}</div>
         </div>
-        <span style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: TONE[health] }}>{RADAR_LABEL[health]}</span>
+        <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: TONE[health], background: `${TONE[health]}18`, border: `1px solid ${TONE[health]}55`, borderRadius: 999, padding: "4px 9px", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <HealthDot tone={health} size={7} />{RADAR_LABEL[health]}
+        </span>
       </div>
-      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 12, padding: "10px 12px", borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}` }}>
+        {stat(n("member_count"), "Members")}
+        {stat(n("active_members_30d"), "Active 30d", n("active_members_30d") <= 1 ? "amber" : undefined)}
+        {stat(lastShort, "Last active", d.days_since_activity == null || d.days_since_activity > 30 ? "red" : d.days_since_activity >= 14 ? "amber" : undefined)}
+      </div>
+
+      {/* Flags (worst first) as chips; the no-email one opens its fix. Then the good news. */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+        {flags.map((f, i) => f.action === "noemail"
+          ? <button key={i} type="button" onClick={() => setShowNoEmail((v) => !v)} style={{ ...chipFor(f.tone), cursor: "pointer" }}>{flagText(f)} <span style={{ fontWeight: 700 }}>{showNoEmail ? "· close" : "· fix →"}</span></button>
+          : <span key={i} style={{ ...chipFor(f.tone), ...(f.lead ? { fontWeight: 700 } : {}) }}>{flagText(f)}</span>)}
+        {goods.map((g) => <span key={g} style={chipFor("green")}><CheckCircle2 size={12} />{g}</span>)}
+      </div>
+      {showNoEmail && n("members_no_email_count") > 0 && (
+        <div style={{ marginTop: 10 }}><NoEmailFixPanel S={S} deptId={d.department_id} notify={notify} onFixed={refresh} /></div>
+      )}
+
+      <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {go && <button onClick={() => go("department", { id: d.department_id, name: d.department_name })} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}><Building2 size={14} color={FIRE.btnIcon} /> Open department</button>}
-        {/* Support: primary admin + resend login link — ONLY when a DA with an email exists.
-            When admin_email is null, this hides and the no-email fix below is what applies. */}
-        {d.admin_email && <>
-          <span style={{ fontSize: 12, color: FIRE.textMuted }}>Admin: {d.admin_name || d.admin_email}</span>
-          <ResendLink email={d.admin_email} notify={notify} />
-        </>}
+        {/* Support: resend login link — ONLY when a DA with an email exists. When admin_email is null, the
+            no-email fix above is what applies. */}
+        {d.admin_email && <ResendLink email={d.admin_email} notify={notify} />}
+        <button type="button" onClick={() => setShowDetails((v) => !v)} aria-expanded={showDetails} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: FIRE.textSecondary, fontSize: 12, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 3 }}>
+          {showDetails ? "Hide details" : "Details"}{showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
       </div>
 
-      {/* NEEDS ATTENTION */}
-      <div style={{ marginTop: 12 }}>
-        <CardHead icon={AlertTriangle} title="Needs attention" count={flags.length} />
-        {flags.length === 0 ? (
-          <EmptyState text="All clear — nothing needs attention." />
-        ) : (
-          <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(230px, 100%), 1fr))", gap: 10 }}>
-            {flags.map((f, i) => f.action === "noemail" ? (
-              // the ONLY actionable flag → toggles the inline fix panel
-              <Card as="button" key={i} onClick={() => setShowNoEmail((v) => !v)} padding="12px 15px" style={{ borderLeft: `3px solid ${toneBar(f.tone)}`, display: "flex", alignItems: "baseline", gap: 10, cursor: "pointer", textAlign: "left", width: "100%", fontFamily: "inherit" }}>
-                {flagNum(f)}
-                <span style={{ flex: 1, fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: FIRE.btnText, whiteSpace: "nowrap" }}>{showNoEmail ? "Close" : "Fix →"}</span>
-              </Card>
-            ) : (
-              <Card key={i} padding="12px 15px" style={{ borderLeft: `3px solid ${toneBar(f.tone)}`, display: "flex", alignItems: "baseline", gap: 10 }}>
-                {flagNum(f)}
-                <span style={{ fontSize: f.lead ? 13.5 : 13, fontWeight: f.lead ? 700 : 400, color: f.lead ? FIRE.textPrimary : FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
-              </Card>
-            ))}
-          </div>
-          {showNoEmail && n("members_no_email_count") > 0 && (
-            <NoEmailFixPanel S={S} deptId={d.department_id} notify={notify} onFixed={refresh} />
-          )}
-          </>
-        )}
-      </div>
-
-      {/* ACTIVITY & SETUP */}
+      {/* ACTIVITY & SETUP — unchanged tiles, behind Details */}
+      {showDetails && (
       <div style={{ marginTop: 12 }}>
         <CardHead icon={BarChart3} title="Activity & setup" />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
@@ -20882,13 +23149,10 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
           <StatTile value={String(n("training_sessions_count"))} label="Meetings / drills" />
           <StatTile value={String(n("open_action_items_count"))} label="Open action items" />
           {canShowGaps ? (
-            // Incomplete: how many items are missing, tap for which ones. A count, not the word — "Incomplete"
-            // doesn't fit StatTile's 34px figure in a 140px tile.
             <StatTile value={String(profileMissing.length)} tone="amber" label="Dept profile"
               sub={`item${profileMissing.length === 1 ? "" : "s"} missing · ${showProfileGaps ? "hide" : "show"}`}
               onClick={() => setShowProfileGaps((v) => !v)} />
           ) : (
-          // Complete (or the radar hasn't sent profile_missing yet): a plain tile with its icon + 20px word.
           <Card padding="11px 13px">
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               {d.profile_complete ? <CheckCircle2 size={18} color={FIRE.green} /> : <AlertTriangle size={18} color={FIRE.amberText} />}
@@ -20905,6 +23169,7 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
           </div>
         )}
       </div>
+      )}
     </Card>
   );
 }
@@ -21113,7 +23378,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </div>
         )}
         {(stRows || []).map((r) => (
-          <div key={r.station_id} style={{ padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={r.station_id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             {stEditId === r.station_id ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0 6px" }}>
                 <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
@@ -21183,7 +23448,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
           </div>
         )}
         {(mbRows || []).map((m) => (
-          <div key={m.member_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `0.5px solid ${FIRE.hairline}` }}>
+          <div key={m.member_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div>
                 <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</span>
@@ -21358,7 +23623,7 @@ function NoEmailFixPanel({ S, deptId, notify, onFixed }) {
     onFixed?.();   // refresh the radar so the count drops
   }
   return (
-    <div style={{ ...FS.card, background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, padding: "14px 16px", marginTop: 10 }}>
+    <div style={{ ...FS.card, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, padding: "14px 16px", marginTop: 10 }}>
       <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, marginBottom: 10 }}>Add an email so these members can sign in</div>
       {list === null ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.textMuted, fontSize: 13 }}><Loader2 size={14} className="spin" /> Loading…</div>
@@ -21490,7 +23755,7 @@ function SvgTip({ x, y, text, vbW }) {
   const top = Math.max(2, y - h - 10);
   return (
     <g pointerEvents="none">
-      <rect x={left} y={top} width={w} height={h} rx={6} fill={FIRE.sidebar} stroke={FIRE.btnBorder} />
+      <rect x={left} y={top} width={w} height={h} rx={6} fill={FIRE.sidebar} stroke={FIRE.line2Noir} />
       <text x={left + w / 2} y={top + 16} textAnchor="middle" fontSize={11.5} fill={FIRE.textPrimary} style={FS.num}>{text}</text>
     </g>
   );
@@ -21556,7 +23821,7 @@ function AttendanceTrend({ series }) {
       )}
       {[100, 50, 0].map((p) => (
         <g key={p}>
-          <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? (noir ? FIRE.line2Noir : FIRE.btnBorder) : FIRE.track} strokeDasharray={noir && p !== 0 ? "3 3" : undefined} />
+          <line x1={x0} y1={yAt(p)} x2={x1} y2={yAt(p)} stroke={p === 0 ? (noir ? FIRE.line2Noir : FIRE.line2Noir) : FIRE.track} strokeDasharray={noir && p !== 0 ? "3 3" : undefined} />
           <text x={x0 - 6} y={yAt(p) + 3} textAnchor="end" fontSize={10} fill={FIRE.textMuted}>{p}%</text>
         </g>
       ))}
@@ -21741,7 +24006,7 @@ function MonthlyBars({ months, vals, tip, aria }) {
       )}
       {[niceMax, niceMax / 2, 0].map((v) => (
         <g key={v}>
-          <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? (noir ? FIRE.line2Noir : FIRE.btnBorder) : FIRE.track} strokeDasharray={noir && v !== 0 ? "3 3" : undefined} />
+          <line x1={x0} y1={base - hAt(v)} x2={x1} y2={base - hAt(v)} stroke={v === 0 ? (noir ? FIRE.line2Noir : FIRE.line2Noir) : FIRE.track} strokeDasharray={noir && v !== 0 ? "3 3" : undefined} />
           <text x={x0 - 5} y={base - hAt(v) + 3} textAnchor="end" fontSize={9.5} fill={FIRE.textMuted}>{Math.round(v)}</text>
         </g>
       ))}
@@ -21864,7 +24129,7 @@ function HoursTrend({ months, vals }) {
         </defs>
         {[niceMax, niceMax / 2, 0].map((v) => (
           <g key={v}>
-            <line x1={x0} y1={yAt(v)} x2={x1} y2={yAt(v)} stroke={v === 0 ? FIRE.btnBorder : FIRE.track} />
+            <line x1={x0} y1={yAt(v)} x2={x1} y2={yAt(v)} stroke={v === 0 ? FIRE.line2Noir : FIRE.track} />
             <text x={x0 - 5} y={yAt(v) + 3} textAnchor="end" fontSize={9.5} fill={FIRE.textMuted}>{Math.round(v)}</text>
           </g>
         ))}
@@ -22008,6 +24273,44 @@ function RosterBreakdown({ members }) {
 // two can never drift: every number is derived HERE, once, from the same honest helpers. The parent passes
 // the duties it already loads (it needs them for its own panels). `go` omitted = read-only: no tile or
 // panel links (the Board strip never had any). extraHero = dashboard-specific trailing tiles.
+/* OPEN DUTIES ON THE DASHBOARD CARD (b4c_dash_stationduties_noir.html) — leadership view, above the kept "X of Y
+   done" line: Assigned · open and Unassigned · crew, each capped with "+N more". Read-only; the rows come from the
+   same duties rows the bar is computed from (assigned_to null = station-wide / crew). Members don't get this card —
+   their dashboard's Assigned duties already shows their own, else the crew's. */
+function DutyOpenList({ duties, members, dept, cap = 3 }) {
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  const open = (duties || []).filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
+  const assigned = open.filter((d) => d.assigned_to), crew = open.filter((d) => !d.assigned_to);
+  if (!open.length) return null;
+  const ini = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  const meta = (d, who) => [d.category, who, (d.recurrence || "").toLowerCase()].filter(Boolean).join(" · ");
+  const head = (t, c) => <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: c, margin: "2px 0 6px" }}>{t}</div>;
+  const row = (d, lead) => (
+    <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0" }}>
+      {lead}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.duty || "Duty"}</div>
+        <div style={{ fontSize: 10.5, color: FIRE.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta(d, d.assigned_to ? (nameById.get(d.assigned_to) || "a member") : null)}</div>
+      </div>
+    </div>
+  );
+  const more = (n, what) => n > 0 && <div style={{ fontSize: 11, color: FIRE.textMuted, padding: "2px 0 0" }}>+{n} more {what}</div>;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      {assigned.length > 0 && (<>
+        {head("Assigned · open", FIRE.amberText)}
+        {assigned.slice(0, cap).map((d) => row(d, <span aria-hidden="true" style={{ width: 22, height: 22, borderRadius: "50%", background: FIRE.insetNoir, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 9, color: FIRE.textSecondary, flexShrink: 0 }}>{ini(nameById.get(d.assigned_to))}</span>))}
+        {more(assigned.length - cap, "assigned")}
+      </>)}
+      {crew.length > 0 && (<>
+        <div style={{ marginTop: assigned.length ? 9 : 0 }}>{head("Unassigned · crew", FIRE.textMuted)}</div>
+        {crew.slice(0, cap).map((d) => row(d, <span aria-hidden="true" style={{ width: 22, display: "inline-flex", justifyContent: "center", flexShrink: 0 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: dutyCatLook(d.category)[0] }} /></span>))}
+        {more(crew.length - cap, "unassigned")}
+      </>)}
+      <div style={{ height: 1, background: FIRE.lineNoir, margin: "10px 0 2px" }} />
+    </div>
+  );
+}
 function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero, hoursBeforeCerts, overview, actionCenter }) {
   const yr = new Date().getFullYear();
   const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
@@ -22092,6 +24395,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 8, marginTop: 8 }}>
           {certsPanel}
           <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
+            {dutiesLoaded && <DutyOpenList duties={dutyList} members={members} dept={dept} />}
             <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
               <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
             </div>
@@ -22123,6 +24427,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
             takes Station hours' old place, last. Board and Officer keep the original order. */}
         {hoursBeforeCerts ? hoursPanel : certsPanel}
         <ChartPanel icon={ClipboardCheck} title="Station duties" note="this period" onOpen={to("duties")}>
+          {dutiesLoaded && <DutyOpenList duties={dutyList} members={members} dept={dept} />}
           <div title="Duty completion is the current-week checklist snapshot — resets when checkmarks are cleared">
             <DutyBar pct={dutyCompletion} done={dutyDone} total={dutyList.length} loaded={dutiesLoaded} />
           </div>
@@ -22164,13 +24469,16 @@ function CertNote({ cov, onShowUncovered }) {
 }
 
 function Stat({ S, n, label, warn, dark, onClick, pct }) {
-  const box = dark ? { ...S.stat, ...FS.card } : S.stat;
+  // Inside <NoirSkin> a dark Stat takes the Noir tile face (cardNoir + tile shadow, Oswald figure); elsewhere unchanged.
+  const inNoir = React.useContext(NoirCtx);   // always called — hook order stays fixed
+  const noir = dark && inNoir;
+  const box = dark ? { ...S.stat, ...(noir ? { ...FS.cardNoir, boxShadow: FIRE.tileShadowNoir } : FS.card) } : S.stat;
   // pct (a percentage 0-100) → threshold color: <30 red · 30-75 amber · >75 green.
   // Falls back to the existing warn/neutral coloring when pct isn't provided (count stats + every other Stat usage).
   const numColor = pct != null
     ? (pct > 75 ? FIRE.green : pct >= 30 ? FIRE.amberText : FIRE.redText)
     : (warn ? (dark ? FIRE.redBright : "#B11E2A") : (dark ? FIRE.textPrimary : "#191C20"));
-  const num = <div style={{ ...S.statN, color: numColor }}>{n}</div>;
+  const num = <div style={{ ...S.statN, color: numColor, ...(noir ? { fontFamily: DISPLAY_FONT, fontWeight: 700, letterSpacing: "-.01em" } : null) }}>{n}</div>;
   const lbl = <div style={dark ? { ...S.statLabel, color: FIRE.textMuted } : S.statLabel}>{label}</div>;
   if (!onClick) return <div style={box}>{num}{lbl}</div>;   // unchanged for every other Stat usage
   return (
@@ -22195,7 +24503,7 @@ function Section({ S, Icon, title, children }) {
   return <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 10 }}><CardHead icon={Icon} title={title} />{children}</div>;
 }
 function Disclaimer({ S, compact, dark }) {
-  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.btnBg, border: `0.5px solid ${FIRE.hairline}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
+  return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
 }
 function Logo() {
   return <img src="/b4c-logo.png" alt="Before the Call" style={{ height: 34, width: "auto", flexShrink: 0, display: "block" }} />;
@@ -22204,7 +24512,7 @@ function Fonts() {
   return (
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
-      * { box-sizing: border-box; } body { margin: 0; }
+      * { box-sizing: border-box; } body { margin: 0; font-family: 'Public Sans', system-ui, sans-serif; }   /* portals (dialogs, viewers, modals) mount on <body>, outside the app root's font — without this they fell back to Times */
       .spin { animation: spin .9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
       .duty-pulse { animation: dutyPulse 2s ease-out infinite; }
       @keyframes dutyPulse { 0% { box-shadow: 0 0 0 0 rgba(63,184,96,.55); } 70% { box-shadow: 0 0 0 7px rgba(63,184,96,0); } 100% { box-shadow: 0 0 0 0 rgba(63,184,96,0); } }
@@ -22214,6 +24522,8 @@ function Fonts() {
       .dr-nav-on::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2.5px; border-radius: 0 2px 2px 0; background: ${FIRE.redBright}; }
       .dr-nav-on svg { color: ${FIRE.redBright}; }
       .stat-cta { transition: filter .15s ease, transform .08s ease; }
+      .rl-card { transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+      .rl-card:hover { transform: translateY(-3px); border-color: rgba(255,255,255,.13) !important; box-shadow: 0 10px 26px rgba(0,0,0,.45) !important; }
       .stat-cta:hover { filter: brightness(1.08); }
       .stat-cta:active { transform: translateY(1px); }
       @media (max-width: 900px) {
@@ -22395,7 +24705,8 @@ function baseStyles() {
     aiListHead: { display: "flex", alignItems: "center", gap: 7, fontFamily: display, fontWeight: 600, fontSize: 14.5, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 8 },
     errBox: { background: "#FCEBEC", border: "1px solid #E8A6AB", color: "#8A1620", borderRadius: 8, padding: "10px 12px", fontSize: 13 },
     field: { display: "flex", flexDirection: "column", gap: 6 },
-    fieldLabel: { fontSize: 12.5, fontWeight: 600, color: SLATE, fontFamily: body },
+    // Noir field label (the mocks' .flabel): small Oswald caps — set once here, every form picks it up.
+    fieldLabel: { fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textSecondary, fontFamily: DISPLAY_FONT },
     input: { border: `1px solid ${LINE}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: body, background: "#fff", color: INK, width: "100%" },
     twoColForm: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
     /* recruitment */

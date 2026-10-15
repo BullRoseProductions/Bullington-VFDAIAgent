@@ -1,0 +1,90 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 17fb0b4..a1a7086 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -927,24 +927,70 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
+     setCurrent(target);
+     notify({ kind: "success", text: target ? "Your person is set." : "Cleared your person." });
+   }
++  const [picking, setPicking] = useState(false);   // the crew list is open (always open when nobody is chosen)
++  const [q, setQ] = useState("");
++  const shown = options.filter((m) => !q.trim() || (m.name || "").toLowerCase().includes(q.trim().toLowerCase()));
++  const initials = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
++  const avatar = (m, size = 40, tone = FIRE.greenText) => (
++    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: 999, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: Math.round(size * 0.36), color: tone, background: `${tone}1A`, border: `1px solid ${tone}55` }}>{initials(m?.name)}</span>
++  );
++  const listOpen = current === null || picking;
+   return (
+-    <PageShell band kicker="YOUR PERSON" title="Who's your person?"
+-      sub="Optional. Pick someone on your crew you'd want to hear from in a hard moment — they'll be the first tap in “Reach out” on Your Six. This is private to you; only you can see or change it.">
++    <PageShell band watermark="PERSON" kicker="YOUR PERSON" title="Who's your person?"
++      sub="Optional. Someone on your crew you'd want to hear from in a hard moment — they become the first tap in “Reach out” on Your Six.">
+       <NoirSkin>
+-      <div style={{ ...FS.cardNoir, ...YS_CARD }}>
+-        {current === undefined ? (
+-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
+-        ) : (<>
+-          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Your person</span>
+-            <select style={FS.input} value={current || ""} disabled={saving} onChange={(e) => choose(e.target.value)}>
+-              <option value="">— None —</option>
+-              {options.map((m) => <option key={m.id} value={m.id} disabled={!m.phone}>{m.name}{m.phone ? "" : " (no number on file)"}</option>)}
+-            </select>
+-          </label>
+-          {person && <div style={{ marginTop: 12, fontSize: 13, color: FIRE.textSecondary }}>Currently: <b style={{ color: FIRE.textPrimary }}>{person.name}</b>{person.phone ? ` · ${person.phone}` : ""}</div>}
+-          {person && !person.phone && <div style={{ marginTop: 6, fontSize: 12.5, color: FIRE.amberText }}>This person has no number on file, so “Reach out” can't call them yet — pick someone with a number, or ask an officer to add theirs.</div>}
+-        </>)}
++      <div style={{ ...NOIR_INSET, padding: "10px 13px", marginBottom: 12, display: "flex", alignItems: "center", gap: 9 }}>
++        <Lock size={14} color={FIRE.greenText} style={{ flexShrink: 0 }} />
++        <span style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.4 }}><b style={{ color: FIRE.textPrimary }}>Private to you.</b> Only you can see or change this.</span>
+       </div>
++      {current === undefined ? (
++        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>
++      ) : (<>
++        {person && (
++          <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12, borderLeft: `3px solid ${FIRE.greenText}` }}>
++            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 8 }}>Your person</div>
++            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
++              {avatar(person, 46)}
++              <div style={{ flex: 1, minWidth: 140 }}>
++                <div style={{ fontSize: 16, fontWeight: 700, color: FIRE.textPrimary }}>{person.name}</div>
++                <div style={{ fontSize: 12.5, color: FIRE.textMuted, ...FS.num }}>{person.phone || "No number on file"}</div>
++              </div>
++              {person.phone && <a href={`tel:${telDigits(person.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call</a>}
++              {person.phone && <a href={`sms:${telDigits(person.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.card2Noir, color: FIRE.btnText, border: `1px solid ${FIRE.line2Noir}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
++              <button type="button" disabled={saving} onClick={() => setPicking((v) => !v)} style={{ ...YS_ACTION_BTN, background: "transparent", color: FIRE.textSecondary, border: `1px solid ${FIRE.line2Noir}`, cursor: "pointer" }}>{picking ? "Keep" : "Change"}</button>
++            </div>
++            {!person.phone && <div style={{ marginTop: 10, fontSize: 12.5, color: FIRE.amberText }}>This person has no number on file, so “Reach out” can't call them yet — pick someone with a number, or ask an officer to add theirs.</div>}
++          </div>
++        )}
++        {current && !person && (
++          <div style={{ ...NOIR_INSET, padding: "10px 13px", marginBottom: 12, fontSize: 12.5, color: FIRE.amberText }}>The person you picked is no longer on the active roster. Choose someone else, or clear it.</div>
++        )}
++        {listOpen && (
++          <div style={{ ...FS.cardNoir, padding: "12px 14px" }}>
++            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
++              <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, flex: 1 }}>Pick from your crew</span>
++              {options.length > 8 && <input style={{ ...FS.input, maxWidth: 220, padding: "7px 10px", fontSize: 13 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find someone…" aria-label="Find someone on your crew" />}
++            </div>
++            {shown.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0" }}>{options.length ? "No one matches that." : "No one else on the roster yet."}</div>}
++            {shown.map((m) => {
++              const on = m.id === current;
++              return (
++                <button key={m.id} type="button" disabled={saving || !m.phone || on} onClick={() => { setPicking(false); choose(m.id); }}
++                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "9px 6px", background: on ? FIRE.card2Noir : "transparent", border: "none", borderBottom: `1px solid ${FIRE.lineNoir}`, cursor: !m.phone || on ? "default" : "pointer", fontFamily: "inherit", textAlign: "left", opacity: m.phone ? 1 : 0.5 }}>
++                  {avatar(m, 32, m.phone ? FIRE.textSecondary : FIRE.textMuted)}
++                  <span style={{ flex: 1, minWidth: 0 }}>
++                    <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</span>
++                    {!m.phone && <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>No number on file</span>}
++                  </span>
++                  {on ? <CheckCircle2 size={16} color={FIRE.greenText} /> : m.phone ? <ChevronRight size={15} color={FIRE.btnIcon} /> : null}
++                </button>
++              );
++            })}
++            {current && <button type="button" disabled={saving} onClick={() => { setPicking(false); choose(""); }} style={{ ...FS.btn, marginTop: 10, padding: "6px 11px", fontSize: 12 }}>Clear — no person</button>}
++          </div>
++        )}
++        {saving && <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: FIRE.textMuted, marginTop: 8 }}><Loader2 size={13} className="spin" /> Saving…</div>}
++      </>)}
+       </NoirSkin>
+     </PageShell>
+   );

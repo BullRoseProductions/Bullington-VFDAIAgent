@@ -295,6 +295,32 @@ export function buildReportDoc(data) {
     } else { para("No station hours were recorded during this period.", GRAY); y += 8; }
   }
 
+  // ---------- Funding (PERIOD) — only for a money viewer, and only when every read succeeded ----------
+  // Dollars are printed exactly (no rounding). The all-time figure is labelled all-time so it is never read as
+  // the period's take. `funding` is null when gated off or when a read failed — the section is then absent.
+  const usd = (v) => `$${Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const fd = data.funding;
+  if (fd) {
+    header("Funding");
+    para(`During the period: ${usd(fd.contributions)} in contributions received and ${usd(fd.proceeds)} in proceeds from fundraisers dated in the period.`);
+    para(`${fd.activeCampaigns} active donation campaign${fd.activeCampaigns === 1 ? "" : "s"}; ${usd(fd.allTimeRaised)} raised all-time across them (an all-time figure, not the period's).`, GRAY, 8.6);
+  }
+
+  // ---------- Department Activity (PERIOD) ----------
+  // Each line is present only when its data is; a failed read is omitted, never printed as zero.
+  {
+    const lines = [];
+    const rg = data.rosterGrowth;
+    if (rg) lines.push(`New members: ${rg.n} ${rg.label}${rg.n && rg.names?.length ? ` (${rg.names.join(", ")}${rg.n > rg.names.length ? ", and others" : ""})` : ""}. Counted by join year \u2014 the roster records a year, not a date.`);
+    const bt = data.boardTurnout;
+    if (bt) lines.push(`Board / leadership meetings held: ${bt.meetings}${bt.pct != null ? `; average turnout ${bt.pct}%` : ""}.`);
+    const cc = data.checkCompliance;
+    if (cc) lines.push(`Apparatus checks completed: ${cc.checks} on ${cc.units}${cc.totalUnits != null ? ` of ${cc.totalUnits}` : ""} unit${cc.units === 1 ? "" : "s"}${cc.failed ? ` (${cc.failed} recorded a failure)` : ""}.`);
+    const ca = data.certsApproved;
+    if (ca) lines.push(`Certifications approved: ${ca.count}${ca.count && ca.list?.length ? ` \u2014 ${ca.list.map((c) => `${c.member} (${c.cert})`).join("; ")}${ca.count > ca.list.length ? "; and others" : ""}` : ""}.`);
+    if (lines.length) { header("Department Activity"); bullets(lines); y += 6; }
+  }
+
   // ---------- Recent Training ----------
   header("Recent Training");
   // Optional (off-hours/one-off) sessions are marked so a bare "4 / 25" on a printed
@@ -330,6 +356,32 @@ export function buildReportDoc(data) {
     } else { para("Every apparatus is in service and passing its last check.", GRAY); y += 8; }
   }
 
+  // ---------- Equipment Readiness (AS OF TODAY) ----------
+  const eqr = data.equipment;
+  if (eqr) {
+    header("Equipment Readiness");
+    para(`As of ${eqr.asOf}: ${eqr.openIssues} open equipment issue${eqr.openIssues === 1 ? "" : "s"}${eqr.issueKinds?.length ? ` (${eqr.issueKinds.map((k) => `${k.n} ${k.label.toLowerCase()}`).join(", ")})` : ""}; `
+      + `${eqr.agingOut} item${eqr.agingOut === 1 ? "" : "s"} of gear past or within 3 months of service life.`);
+  }
+
+  // ---------- From the Chief — the chief's own words, verbatim; NOT a figure, NOT drawn from records ----------
+  const chief = String(data.chiefNote || "");
+  if (chief.trim()) {
+    header("From the Chief");
+    doc.setFont("helvetica", "italic"); doc.setFontSize(7.6); doc.setTextColor(...GRAY);
+    ensure(12); doc.text("In the chief\u2019s own words, including any outside figures (e.g. ESO) \u2014 entered by the chief, not drawn from B4C records.", M, y + 8); y += 14;
+    const lines = [];
+    chief.replace(/\r\n?/g, "\n").split("\n").forEach((ln) => { if (!ln.trim()) lines.push(""); else doc.splitTextToSize(ln, CW - 22).forEach((w) => lines.push(w)); });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.6);
+    lines.forEach((ln) => {
+      ensure(14);
+      doc.setFillColor(...LINE); doc.rect(M, y, 3, 14, "F");   // a plain rule down the left edge — the chief's voice, set apart
+      doc.setTextColor(...SLATE); if (ln) doc.text(ln, M + 14, y + 10);
+      y += 14;
+    });
+    y += 8;
+  }
+
   // ---------- Recommended Actions ----------
   const actions = [];
   data.flaggedCerts.filter((f) => f.status === "Lapsed").slice(0, 3).forEach((f) =>
@@ -349,7 +401,8 @@ export function buildReportDoc(data) {
   const prov = doc.splitTextToSize(
     "How this report was produced. Drafted automatically from the department\u2019s roster, training, and certification "
     + "records, then reviewed and approved by a qualified officer before release \u2014 the platform\u2019s "
-    + "standing rule: the system drafts, a human approves, then it publishes.", CW - 24);
+    + "standing rule: the system drafts, a human approves, then it publishes."
+    + (chief.trim() ? " The \u201cFrom the Chief\u201d section is the chief\u2019s own statement, included as written \u2014 any figures in it (e.g. from ESO) are the chief\u2019s entries, not drawn from B4C records." : ""), CW - 24);
   /* Panel sized FROM the text, matching the Capital Plan. +1 line because the approval rule below
      is drawn INSIDE this panel, after the loop — sizing on prov.length alone would print it on the
      grey edge. This note had 4pt of headroom against its old fixed 46pt: one more sentence and the

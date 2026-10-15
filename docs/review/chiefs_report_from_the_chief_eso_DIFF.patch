@@ -1,0 +1,61 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 50dc36b..e2c186e 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -11643,7 +11643,7 @@ function ChiefNoteSection({ text, style }) {
+       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+         <MessageSquare size={15} color={FIRE.textSecondary} />
+         <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>From the Chief</span>
+-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "2px 8px" }}>Chief's own words · not from department records</span>
++        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 999, padding: "2px 8px" }}>Chief's own words &amp; figures · not from B4C records</span>
+       </div>
+       <div style={{ fontSize: 14, color: FIRE.textPrimary, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</div>
+     </div>
+@@ -12043,6 +12043,9 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+                 <button title="Clear" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => { setOut(""); setErr(""); }}><X size={14} color={FIRE.deleteRed} /></button>
+               </div>
+               <RichOutput S={S} text={out} dark />
++              {/* The chief's own section, right after the AI narrative — one report, but outside the AI block and never
++                  styled as a figure. Same component the saved report and the input card use. */}
++              <ChiefNoteSection text={chiefNote} />
+             </div>
+           )}
+         </div>
+@@ -12053,11 +12056,11 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+       {isDeptAdmin(role) && (
+         <div style={{ ...FS.cardNoir, padding: "16px 18px", marginBottom: 16 }}>
+           <CardHead icon={MessageSquare} title="From the Chief" />
+-          <label style={{ ...S.field, marginTop: 2 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From the Chief — your own words (optional)</span>
++          <label style={{ ...S.field, marginTop: 2 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>From the Chief — your own words &amp; outside numbers (optional)</span>
+             <textarea style={{ ...FS.input, minHeight: 96, resize: "vertical", lineHeight: 1.55 }} value={chiefNote} onChange={(e) => setChiefNote(e.target.value)}
+-              placeholder="A note to the council or board in your own voice — thanks, context, what's next…" /></label>
+-          <p style={{ ...NOIR_HELP, marginBottom: 0 }}>Added to the report as written, in your own voice — separate from the figures above. It isn't checked against your records and the AI never sees it.</p>
+-          <ChiefNoteSection text={chiefNote} />
++              placeholder="Notable calls, thank-yous, what's ahead — and any outside figures, e.g. “142 calls this quarter per ESO”…" /></label>
++          <p style={{ ...NOIR_HELP, marginBottom: 0 }}>Added to the report as written, in your own voice — notable calls, thank-yous, and any outside figures (e.g. ESO). Shown as your own section, separate from the figures B4C pulls from your records. The AI never sees it.</p>
++          {!out && <ChiefNoteSection text={chiefNote} />}   {/* with a draft, it previews under the draft instead — once */}
+         </div>
+       )}
+ 
+diff --git a/src/report.js b/src/report.js
+index 85940b7..ce48bfb 100644
+--- a/src/report.js
++++ b/src/report.js
+@@ -369,7 +369,7 @@ export function buildReportDoc(data) {
+   if (chief.trim()) {
+     header("From the Chief");
+     doc.setFont("helvetica", "italic"); doc.setFontSize(7.6); doc.setTextColor(...GRAY);
+-    ensure(12); doc.text("In the chief\u2019s own words \u2014 a personal statement, not a figure from department records.", M, y + 8); y += 14;
++    ensure(12); doc.text("In the chief\u2019s own words, including any outside figures (e.g. ESO) \u2014 entered by the chief, not drawn from B4C records.", M, y + 8); y += 14;
+     const lines = [];
+     chief.replace(/\r\n?/g, "\n").split("\n").forEach((ln) => { if (!ln.trim()) lines.push(""); else doc.splitTextToSize(ln, CW - 22).forEach((w) => lines.push(w)); });
+     doc.setFont("helvetica", "normal"); doc.setFontSize(9.6);
+@@ -402,7 +402,7 @@ export function buildReportDoc(data) {
+     "How this report was produced. Drafted automatically from the department\u2019s roster, training, and certification "
+     + "records, then reviewed and approved by a qualified officer before release \u2014 the platform\u2019s "
+     + "standing rule: the system drafts, a human approves, then it publishes."
+-    + (chief.trim() ? " The \u201cFrom the Chief\u201d section is the chief\u2019s own statement, included as written; it is not drawn from department records." : ""), CW - 24);
++    + (chief.trim() ? " The \u201cFrom the Chief\u201d section is the chief\u2019s own statement, included as written \u2014 any figures in it (e.g. from ESO) are the chief\u2019s entries, not drawn from B4C records." : ""), CW - 24);
+   /* Panel sized FROM the text, matching the Capital Plan. +1 line because the approval rule below
+      is drawn INSIDE this panel, after the loop — sizing on prov.length alone would print it on the
+      grey edge. This note had 4pt of headroom against its old fixed 46pt: one more sentence and the

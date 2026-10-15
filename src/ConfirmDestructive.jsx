@@ -2,6 +2,14 @@ import { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Lock, X } from "lucide-react";
 import { isDeptAdmin } from "../shared/roles.js";
+import { FIRE } from "./theme.js";
+
+// Industrial Noir dialog shell — the same look as src/NoirDialogs.jsx (b4c_dialogs_noir.html). Presentation only;
+// the typed-phrase friction below is unchanged.
+const NOIR_PANEL = { background: "linear-gradient(180deg, #0F1319, #0A0D12)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 15,
+                     boxShadow: "0 30px 80px rgba(0,0,0,.7)", fontFamily: "inherit", color: FIRE.textPrimary };
+const NOIR_TITLE = { fontFamily: "'Oswald', system-ui, sans-serif", fontSize: 18, fontWeight: 700, lineHeight: 1.25, letterSpacing: ".01em" };
+const NOIR_BTN = { background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, color: FIRE.textPrimary, borderRadius: 11, padding: "10px 17px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" };
 
 /* THE TYPED DELETE CONFIRMATION, for shared and department-level records.
 
@@ -143,28 +151,24 @@ export function DestructiveConfirmHost() {
         onMouseDown={(e) => { if (e.target === e.currentTarget) finish(false); }}
         style={{ position: "fixed", inset: 0, zIndex: 2147483646, background: "rgba(4,5,7,.72)", backdropFilter: "blur(2px)",
                  display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
-        <div style={{ width: "100%", maxWidth: 420, background: "#13161B", border: "0.5px solid rgba(255,255,255,.08)",
-                      borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,.6)", padding: "20px 20px 18px",
-                      fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif", color: "#F7F8FA" }}>
+        <div style={{ width: "100%", maxWidth: 420, ...NOIR_PANEL, padding: "20px 20px 18px" }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
-            <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 9, background: "rgba(255,255,255,.06)",
+            <div style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 11, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`,
                           display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Lock size={17} color="#9AA1AC" />
+              <Lock size={17} color={FIRE.textSecondary} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div id="b4c-confirm-title" style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.3 }}>
+              <div id="b4c-confirm-title" style={NOIR_TITLE}>
                 Only a Department Admin can delete this
               </div>
-              <div style={{ fontSize: 13.5, color: "#B6BDC8", marginTop: 4, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13.5, color: FIRE.textSecondary, marginTop: 4, lineHeight: 1.5 }}>
                 Deleting a {req.noun || "shared record"} affects the whole department, so it&rsquo;s limited to
                 Department Admins. Ask one of yours to remove{req.name ? ` “${req.name}”` : " it"}.
               </div>
             </div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button onClick={() => finish(false)}
-                    style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", color: "#E7EAEF",
-                             borderRadius: 9, padding: "9px 17px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+            <button onClick={() => finish(false)} style={NOIR_BTN}>
               OK
             </button>
           </div>
@@ -185,36 +189,34 @@ export function DestructiveConfirmHost() {
       onMouseDown={(e) => { if (e.target === e.currentTarget) finish(false); }}
       style={{ position: "fixed", inset: 0, zIndex: 2147483646, background: "rgba(4,5,7,.72)", backdropFilter: "blur(2px)",
                display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
-      <div style={{ width: "100%", maxWidth: 440, background: "#13161B", border: "0.5px solid rgba(255,255,255,.08)",
-                    borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,.6)", padding: "20px 20px 18px",
-                    fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif", color: "#F7F8FA" }}>
+      <div style={{ width: "100%", maxWidth: 440, ...NOIR_PANEL, padding: "20px 20px 18px" }}>
 
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
-          <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 9, background: "rgba(200,50,58,.14)",
+          <div style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 11, background: "rgba(200,50,58,.14)", border: "1px solid rgba(200,50,58,.4)",
                         display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <AlertTriangle size={18} color="#E58A90" />
+            <AlertTriangle size={18} color={FIRE.redText} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div id="b4c-confirm-title" style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.3 }}>
+            <div id="b4c-confirm-title" style={NOIR_TITLE}>
               Delete this {req.noun || "record"}?
             </div>
-            <div style={{ fontSize: 13.5, color: "#B6BDC8", marginTop: 3, wordBreak: "break-word" }}>{req.name}</div>
+            <div style={{ fontSize: 13.5, color: FIRE.textSecondary, marginTop: 3, wordBreak: "break-word" }}>{req.name}</div>
           </div>
           <button onClick={() => finish(false)} aria-label="Cancel"
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#7E8794", flexShrink: 0 }}>
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: FIRE.textMuted, flexShrink: 0 }}>
             <X size={17} />
           </button>
         </div>
 
         {req.impact && (
-          <div style={{ fontSize: 13, color: "#D6A95E", background: "rgba(214,169,94,.09)", border: "0.5px solid rgba(214,169,94,.2)",
+          <div style={{ fontSize: 13, color: "#D6A95E", background: "rgba(214,169,94,.09)", border: "1px solid rgba(214,169,94,.3)",
                         borderRadius: 9, padding: "9px 11px", lineHeight: 1.5, marginBottom: 13 }}>
             {req.impact}
           </div>
         )}
 
-        <div style={{ fontSize: 12.5, color: "#9AA1AC", lineHeight: 1.5, marginBottom: 7 }}>
-          This can&rsquo;t be undone. Type <strong style={{ color: "#F0F2F5", fontWeight: 700 }}>{want}</strong> to confirm.
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, marginBottom: 7 }}>
+          This can&rsquo;t be undone. Type <strong style={{ color: FIRE.textPrimary, fontWeight: 700 }}>{want}</strong> to confirm.
         </div>
 
         <input
@@ -222,20 +224,18 @@ export function DestructiveConfirmHost() {
           autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false}
           onKeyDown={(e) => { if (e.key === "Enter" && armed) finish(true); }}
           placeholder={want}
-          style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,.04)",
-                   border: `1px solid ${armed ? "#3FB860" : "rgba(255,255,255,.12)"}`, borderRadius: 9,
-                   padding: "10px 12px", fontSize: 15, color: "#F7F8FA", outline: "none", marginBottom: 15 }} />
+          style={{ width: "100%", boxSizing: "border-box", background: FIRE.card2Noir,
+                   border: `1px solid ${armed ? FIRE.green : FIRE.line2Noir}`, borderRadius: 10,
+                   padding: "10px 12px", fontSize: 15, color: FIRE.textPrimary, outline: "none", marginBottom: 15, fontFamily: "inherit" }} />
 
         <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button onClick={() => finish(false)}
-                  style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", color: "#E7EAEF",
-                           borderRadius: 9, padding: "9px 15px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+          <button onClick={() => finish(false)} style={NOIR_BTN}>
             Cancel
           </button>
           <button onClick={() => finish(true)} disabled={!armed}
-                  style={{ background: armed ? "#C8323A" : "rgba(200,50,58,.25)", border: "none",
-                           color: armed ? "#fff" : "rgba(255,255,255,.45)", borderRadius: 9, padding: "9px 17px",
-                           fontSize: 14, fontWeight: 700, cursor: armed ? "pointer" : "not-allowed" }}>
+                  style={{ background: armed ? FIRE.redBright : "rgba(200,50,58,.25)", border: `1px solid ${armed ? FIRE.redBright : "rgba(200,50,58,.3)"}`,
+                           color: armed ? "#fff" : "rgba(255,255,255,.45)", borderRadius: 11, padding: "10px 18px",
+                           fontSize: 14, fontWeight: 700, cursor: armed ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
             Delete
           </button>
         </div>
