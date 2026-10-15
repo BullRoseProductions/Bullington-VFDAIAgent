@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for station_fundraiser_DRAFT.sql. READ-ONLY IN EFFECT — run AFTER the migration, separately.
+-- RETEST for station_fundraiser_2026-10-15.sql.
+-- RAN 2026-10-15 on live: 47 passed, 0 failed, 2 skipped (Indian Harbor, Lipan, North Hood A-I all PASS; Demo + Granbury
+-- skipped). Multi-department emails: 0. READ-ONLY IN EFFECT — run AFTER the migration, separately.
 -- Builds its OWN fixtures inside the run (a test fundraiser + four tagged planning steps per department) so it never
 -- depends on real data, then signs in exactly as the app does (JWT email claim + role authenticated) and checks:
 --   A. a leader shares the fundraiser and ticks a step                     -> both writes succeed

@@ -1,6 +1,10 @@
 -- =====================================================================
 -- STATION FUNDRAISER — share a fundraiser's countdown + planning progress with the whole department.
--- DRAFT — NOT APPLIED — NOT YET REVIEWED. For the reviewing Claude, then Ashlea applies.
+-- Record: applied by hand 2026-10-15. Idempotent. State check on live: both flags boolean NOT NULL default false · 0 shared ·
+-- 0 ticked · anon false x3 · read returns only {id, name, target_date, tasks_done, tasks_total, next_steps} · 157 policies
+-- (unchanged). RETEST on live: 47 passed, 0 failed, 2 skipped; multi-department emails = 0 (the flagged role-anywhere
+-- fundraiser policy has no one to mis-scope today — the follow-up fix still stands).
+-- Review status at apply time: confirm with the reviewing Claude (send this file + the RETEST if not yet reviewed).
 -- Test script: sql/station_fundraiser_RETEST.sql (run AFTER this, separately).
 --
 -- WHAT IT IS. A leader marks a fundraiser "share with the station" and ticks which planning steps the station
