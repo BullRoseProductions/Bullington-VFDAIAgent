@@ -1,0 +1,181 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 0582356..644e253 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -22678,25 +22678,30 @@ function ProgramOverview({ S, role, notify, go }) {
+   const needing = rows ? sorted.filter((x) => x.h === "red").length : null;
+   const stuck = sum("open_long_shifts_count"), expired = sum("expired_certs_count"), expiring = sum("expiring_certs_count");
+ 
++  const deptsWith = (k) => (rows ? rows.filter((d) => radarNum(d[k]) > 0) : []);
++  const whereSub = (k, none) => { const w = deptsWith(k); return !rows ? undefined : w.length === 0 ? none : w.length === 1 ? `all ${w[0].department_name}` : `${w.length} departments`; };
++  const active30 = sum("active_members_30d");
++
+   return (
+-    <PageShell band kicker="PROGRAM OVERSIGHT" title="All departments" fitToScreen actions={<HeroAside />}
+-      sub="Issues to act on across your departments — surfaced from live data, so you can catch problems before anyone reports them.">
++    <PageShell band watermark="RADAR" kicker="PROGRAM OVERSIGHT" title="Every department, at a glance" fitToScreen actions={<HeroAside />}
++      sub="Health across all departments — who needs attention, and why. Surfaced from live data, so you can catch problems before anyone reports them.">
+       {/* Noir skin, as on the dashboards: icon tiles, CardHead headers and the gradient card face throughout. */}
+       <NoirSkin>
+-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 10 }}>
+-        <StatTile icon={Building2} value={show(rows ? rows.length : null)} label="Departments" />
+-        <StatTile icon={Users} value={show(sum("member_count"))} label="Total members" />
+-        <StatTile icon={AlertTriangle} value={show(needing)} tone={problem(needing, "red")} label="Needing attention" />
+-        <StatTile icon={Clock} value={show(stuck)} tone={problem(stuck, "red")} label="Open stuck shifts" sub="open > 24h" />
+-        <StatTile icon={Award} value={show(expired)} tone={problem(expired, "red")} label="Expired certs" />
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 12 }}>
++        <StatTile icon={Building2} value={show(rows ? rows.length : null)} label="Departments" sub={needing == null ? undefined : needing ? `${needing} need${needing === 1 ? "s" : ""} attention` : "all healthy"} tone={problem(needing, "red")} />
++        <StatTile icon={Users} value={show(sum("member_count"))} label="Members" sub="across all depts" />
++        <StatTile icon={Clock} value={show(stuck)} tone={problem(stuck, "red")} label="Open 24h+ shifts" sub={whereSub("open_long_shifts_count", "none open")} />
++        <StatTile icon={Award} value={show(expired)} tone={problem(expired, "red")} label="Expired certs" sub={whereSub("expired_certs_count", "none")} />
+         <StatTile icon={CalendarCheck} value={show(expiring)} tone={problem(expiring, "amber")} label="Expiring certs" sub="within 3 months" />
++        <StatTile icon={TrendingUp} value={show(active30)} label="Active (30 days)" sub="members, all depts" />
+       </div>
+ 
+       {err && <Card padding="12px 16px" style={{ borderLeft: `3px solid ${FIRE.red}`, color: FIRE.redText, marginBottom: 12 }}>Couldn't load the overview: {err} <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={load}>Retry</button></Card>}
+       {rows === null && !err && <Card padding={24} style={{ color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 10 }}><Loader2 size={16} className="spin" /> Loading program data…</Card>}
+       {rows !== null && rows.length === 0 && <Card padding={24} style={{ color: FIRE.textMuted }}>No departments found.</Card>}
+ 
+-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
++      {rows !== null && rows.length > 0 && <SectionBar icon={Building2} label="Departments" count={rows.length} right="Sorted: needs attention first" style={{ margin: "4px 0 10px" }} />}
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(360px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
+         {sorted.map(({ d, h }) => <ProgramDeptCard key={d.department_id} S={S} d={d} health={h} notify={notify} refresh={load} go={go} />)}
+       </div>
+       </NoirSkin>
+@@ -22727,61 +22732,67 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
+   const toneBar = (t) => (t === "red" ? FIRE.red : FIRE.amberText);
+   const flagNum = (f) => <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: f.lead ? 30 : 26, lineHeight: 1, color: TONE[f.tone], ...FS.num }}>{f.n}</span>;
+ 
++  const [showDetails, setShowDetails] = useState(false);
++  // "Today" / "Yesterday" / a date — from days_since_activity, the same field lastActiveLabel reads.
++  const lastShort = d.days_since_activity == null ? "Never"
++    : d.days_since_activity === 0 ? "Today" : d.days_since_activity === 1 ? "Yesterday"
++    : new Date(Date.now() - d.days_since_activity * 86400000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
++  // Good-news chips, only from the same columns (never a claim the radar can't back).
++  const goods = [];
++  if (n("open_long_shifts_count") === 0) goods.push("No stuck shifts");
++  if (n("expired_certs_count") === 0 && n("expiring_certs_count") === 0) goods.push("Certs current");
++  const chipFor = (tone) => ({ fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "3px 9px", color: TONE[tone], background: `${TONE[tone]}14`, border: `1px solid ${TONE[tone]}44`, display: "inline-flex", alignItems: "center", gap: 5, fontFamily: "inherit" });
++  const flagText = (f) => f.lead ? `${f.n} shift${f.n === 1 ? "" : "s"} open 24h+` : typeof f.n === "number" ? `${f.n} ${f.label}` : f.label;
++  const stat = (v, l, tone) => (
++    <div style={{ flex: 1, minWidth: 0 }}>
++      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1.1, color: tone ? TONE[tone] : FIRE.textPrimary, ...FS.num }}>{v}</div>
++      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted, marginTop: 3 }}>{l}</div>
++    </div>
++  );
++
+   return (
+-    <Card padding="14px 16px">
+-      {/* Header: crest + health dot + department; admin support underneath */}
+-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
++    <Card padding="14px 16px" style={{ borderTop: `3px solid ${TONE[health]}` }}>
++      {/* Header: crest + department + admin · station; the health pill on the right */}
++      <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
+         <DeptCrest dept={{ name: d.department_name }} />
+-        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+-            <HealthDot tone={health} size={12} style={{ boxShadow: `0 0 0 4px ${TONE[health]}22` }} />
+-            <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: 22, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", overflowWrap: "anywhere" }}>{d.department_name}</h2>
+-            {(d.station || d.city) && <span style={{ fontSize: 12.5, color: FIRE.textMuted }}>{[d.station, d.city].filter(Boolean).join(" · ")}</span>}
+-          </div>
+-          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 4 }}>{lastActiveLabel(d)}</div>
++        <div style={{ flex: 1, minWidth: 0 }}>
++          <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: 18, fontWeight: 700, color: FIRE.textPrimary, margin: 0, letterSpacing: "-0.01em", overflowWrap: "anywhere" }}>{d.department_name}</h2>
++          <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[d.admin_name ? `Admin: ${d.admin_name}` : "No admin with an email", d.station, d.city].filter(Boolean).join(" · ")}</div>
+         </div>
+-        <span style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: TONE[health] }}>{RADAR_LABEL[health]}</span>
++        <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: TONE[health], background: `${TONE[health]}18`, border: `1px solid ${TONE[health]}55`, borderRadius: 999, padding: "4px 9px", display: "inline-flex", alignItems: "center", gap: 6 }}>
++          <HealthDot tone={health} size={7} />{RADAR_LABEL[health]}
++        </span>
+       </div>
+-      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+-        {go && <button onClick={() => go("department", { id: d.department_id, name: d.department_name })} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}><Building2 size={14} color={FIRE.btnIcon} /> Open department</button>}
+-        {/* Support: primary admin + resend login link — ONLY when a DA with an email exists.
+-            When admin_email is null, this hides and the no-email fix below is what applies. */}
+-        {d.admin_email && <>
+-          <span style={{ fontSize: 12, color: FIRE.textMuted }}>Admin: {d.admin_name || d.admin_email}</span>
+-          <ResendLink email={d.admin_email} notify={notify} />
+-        </>}
++
++      <div style={{ display: "flex", gap: 10, marginTop: 12, padding: "10px 12px", borderRadius: 10, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}` }}>
++        {stat(n("member_count"), "Members")}
++        {stat(n("active_members_30d"), "Active 30d", n("active_members_30d") <= 1 ? "amber" : undefined)}
++        {stat(lastShort, "Last active", d.days_since_activity == null || d.days_since_activity > 30 ? "red" : d.days_since_activity >= 14 ? "amber" : undefined)}
+       </div>
+ 
+-      {/* NEEDS ATTENTION */}
+-      <div style={{ marginTop: 12 }}>
+-        <CardHead icon={AlertTriangle} title="Needs attention" count={flags.length} />
+-        {flags.length === 0 ? (
+-          <EmptyState text="All clear — nothing needs attention." />
+-        ) : (
+-          <>
+-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(230px, 100%), 1fr))", gap: 10 }}>
+-            {flags.map((f, i) => f.action === "noemail" ? (
+-              // the ONLY actionable flag → toggles the inline fix panel
+-              <Card as="button" key={i} onClick={() => setShowNoEmail((v) => !v)} padding="12px 15px" style={{ borderLeft: `3px solid ${toneBar(f.tone)}`, display: "flex", alignItems: "baseline", gap: 10, cursor: "pointer", textAlign: "left", width: "100%", fontFamily: "inherit" }}>
+-                {flagNum(f)}
+-                <span style={{ flex: 1, fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
+-                <span style={{ fontSize: 11.5, fontWeight: 700, color: FIRE.btnText, whiteSpace: "nowrap" }}>{showNoEmail ? "Close" : "Fix →"}</span>
+-              </Card>
+-            ) : (
+-              <Card key={i} padding="12px 15px" style={{ borderLeft: `3px solid ${toneBar(f.tone)}`, display: "flex", alignItems: "baseline", gap: 10 }}>
+-                {flagNum(f)}
+-                <span style={{ fontSize: f.lead ? 13.5 : 13, fontWeight: f.lead ? 700 : 400, color: f.lead ? FIRE.textPrimary : FIRE.textSecondary, lineHeight: 1.35 }}>{f.label}</span>
+-              </Card>
+-            ))}
+-          </div>
+-          {showNoEmail && n("members_no_email_count") > 0 && (
+-            <NoEmailFixPanel S={S} deptId={d.department_id} notify={notify} onFixed={refresh} />
+-          )}
+-          </>
+-        )}
++      {/* Flags (worst first) as chips; the no-email one opens its fix. Then the good news. */}
++      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
++        {flags.map((f, i) => f.action === "noemail"
++          ? <button key={i} type="button" onClick={() => setShowNoEmail((v) => !v)} style={{ ...chipFor(f.tone), cursor: "pointer" }}>{flagText(f)} <span style={{ fontWeight: 700 }}>{showNoEmail ? "· close" : "· fix →"}</span></button>
++          : <span key={i} style={{ ...chipFor(f.tone), ...(f.lead ? { fontWeight: 700 } : {}) }}>{flagText(f)}</span>)}
++        {goods.map((g) => <span key={g} style={chipFor("green")}><CheckCircle2 size={12} />{g}</span>)}
++      </div>
++      {showNoEmail && n("members_no_email_count") > 0 && (
++        <div style={{ marginTop: 10 }}><NoEmailFixPanel S={S} deptId={d.department_id} notify={notify} onFixed={refresh} /></div>
++      )}
++
++      <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
++        {go && <button onClick={() => go("department", { id: d.department_id, name: d.department_name })} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}><Building2 size={14} color={FIRE.btnIcon} /> Open department</button>}
++        {/* Support: resend login link — ONLY when a DA with an email exists. When admin_email is null, the
++            no-email fix above is what applies. */}
++        {d.admin_email && <ResendLink email={d.admin_email} notify={notify} />}
++        <button type="button" onClick={() => setShowDetails((v) => !v)} aria-expanded={showDetails} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: FIRE.textSecondary, fontSize: 12, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 3 }}>
++          {showDetails ? "Hide details" : "Details"}{showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
++        </button>
+       </div>
+ 
+-      {/* ACTIVITY & SETUP */}
++      {/* ACTIVITY & SETUP — unchanged tiles, behind Details */}
++      {showDetails && (
+       <div style={{ marginTop: 12 }}>
+         <CardHead icon={BarChart3} title="Activity & setup" />
+         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+@@ -22793,13 +22804,10 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
+           <StatTile value={String(n("training_sessions_count"))} label="Meetings / drills" />
+           <StatTile value={String(n("open_action_items_count"))} label="Open action items" />
+           {canShowGaps ? (
+-            // Incomplete: how many items are missing, tap for which ones. A count, not the word — "Incomplete"
+-            // doesn't fit StatTile's 34px figure in a 140px tile.
+             <StatTile value={String(profileMissing.length)} tone="amber" label="Dept profile"
+               sub={`item${profileMissing.length === 1 ? "" : "s"} missing · ${showProfileGaps ? "hide" : "show"}`}
+               onClick={() => setShowProfileGaps((v) => !v)} />
+           ) : (
+-          // Complete (or the radar hasn't sent profile_missing yet): a plain tile with its icon + 20px word.
+           <Card padding="11px 13px">
+             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+               {d.profile_complete ? <CheckCircle2 size={18} color={FIRE.green} /> : <AlertTriangle size={18} color={FIRE.amberText} />}
+@@ -22816,6 +22824,7 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
+           </div>
+         )}
+       </div>
++      )}
+     </Card>
+   );
+ }
