@@ -1,0 +1,60 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index bc44298..3c18354 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -20622,7 +20622,23 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+     if (presentCount === 0) {
+       if (!(await noirConfirm({ title: "Finalize with an empty roll?", body: `Nobody is marked present for “${s.title}”. Finalizing locks it with an empty roll — no one earns training credit for it.`, confirmLabel: "Finalize anyway", danger: true }))) return;
+     } else {
+-      if (!(await noirConfirm({ title: "Lock attendance?", body: `“${s.title}” — you can reopen it later if needed.`, confirmLabel: "Finalize & lock" }))) return;
++      // Display only: the roll the officer is about to lock, read from the session + the members already loaded.
++      const presentNames = (s.attendance || []).map((id) => members.find((m) => m.id === id)?.name).filter(Boolean);
++      const lenLabel = s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : "Not set yet";
++      const sumTile = (k, v) => <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", borderRadius: 9, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, textAlign: "left" }}><div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted }}>{k}</div><div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, ...FS.num }}>{v}</div></div>;
++      const lockBody = (
++        <div>
++          <div style={{ display: "flex", gap: 8, margin: "4px 0 10px" }}>{sumTile("Length", lenLabel)}{sumTile("Present", presentCount)}</div>
++          {presentNames.length > 0 && (
++            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center", marginBottom: 10 }}>
++              {presentNames.slice(0, 12).map((n) => <span key={n} style={{ fontSize: 11.5, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}
++              {presentNames.length > 12 && <span style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "2px 4px" }}>+{presentNames.length - 12} more</span>}
++            </div>
++          )}
++          <p style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, margin: 0 }}>{`“${s.title}” — you can reopen it later if needed.`}</p>
++        </div>
++      );
++      if (!(await noirConfirm({ title: "Lock attendance?", body: lockBody, confirmLabel: "Finalize & lock" }))) return;
+     }
+     // auto-close any open QR sign-in so no stale code lingers / no post-lock scans
+     if (s.signinOpen) {
+@@ -21316,7 +21332,17 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+                     </div>
+                   )}
+                   {open && (
+-                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12 }}>
++                    <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, ...(s.done ? { borderColor: "rgba(47,168,105,.35)" } : { borderColor: `${FIRE.redBright}55` }) }}>
++                      {/* Closeout summary (display only) — the same counts the Attendance button shows. */}
++                      {(
++                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
++                          {s.done
++                            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.greenText }}><Lock size={13} /> Locked</span>
++                            : <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.redText }}>Not locked yet</span>}
++                          <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}><b style={{ color: FIRE.textPrimary }}>{attCount}</b> of {expCount} present{expCount - attCount > 0 ? ` · ${expCount - attCount} absent` : ""}</span>
++                          <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Length <b style={{ color: FIRE.textPrimary }}>{s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : "not set"}</b></span>
++                        </div>
++                      )}
+                       <div style={{ fontSize: 12, color: FIRE.textMuted2, marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
+                       {roll.map((m) => {
+                         const present = att.includes(m.id);
+@@ -21331,8 +21357,9 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+                         );
+                       })}
+                       {canManage && !s.done && (
+-                        <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+-                          <button style={LprimaryBtn} onClick={() => finalizeSession(s)}><ClipboardCheck size={15} /> Finalize &amp; lock attendance</button>
++                        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
++                          <span style={{ flex: 1, minWidth: 180, fontSize: 12, color: FIRE.textMuted, lineHeight: 1.45 }}>Locking sets attendance and training credit. You can reopen it later if something's wrong.</span>
++                          <button style={LprimaryBtn} onClick={() => finalizeSession(s)}><Lock size={15} /> Finalize &amp; lock attendance</button>
+                         </div>
+                       )}
+                     </div>
