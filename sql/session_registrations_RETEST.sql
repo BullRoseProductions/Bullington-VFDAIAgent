@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for session_registrations_DRAFT.sql. READ-ONLY IN EFFECT — run AFTER the migration, separately.
+-- RETEST for session_registrations_2026-10-15.sql.
+-- RAN 2026-10-15 on live: 33 passed, 0 failed, 6 skipped (Indian Harbor, Lipan, North Hood A-K; Demo + Granbury skipped —
+-- no non-leader/leader/open-session trio; E/F skipped where no open board/leadership session). READ-ONLY IN EFFECT — run AFTER the migration, separately.
 -- Once: anon can't run the RPC or read the table; authenticated can't write it directly.
 -- For each department that has a non-leader member, a leader, and an open (not finalized) everyone session,
 -- sign in exactly as the app does (JWT email claim + role authenticated) and check:

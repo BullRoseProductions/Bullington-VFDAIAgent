@@ -1,5 +1,8 @@
 -- =====================================================================
--- session_registrations — "Register" (plan-to-attend heads-up). DRAFT — NOT APPLIED. For review.
+-- session_registrations — "Register" (plan-to-attend heads-up).
+-- Record: applied by hand 2026-10-15. Idempotent. State check on live: RLS on · the two SELECT policies · 0 rows ·
+-- anon_select false · anon_execute false · auth_insert false · 155 policies on other tables (unchanged by design).
+-- RETEST on live 2026-10-15: 33 passed, 0 failed, 6 skipped.
 -- Test script: sql/session_registrations_RETEST.sql (run AFTER this, separately).
 --
 -- WHAT IT IS. A member's PLAN for an upcoming training — Coming / Maybe / Not coming — so whoever runs it gets
