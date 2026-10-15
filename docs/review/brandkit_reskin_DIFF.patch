@@ -1,0 +1,135 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index a1a7086..5797af3 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -21418,65 +21418,91 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
+       </div>
+     </label>
+   );
++  const field = (label, child, style) => <label style={{ ...S.field, ...style }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{label}</span>{child}</label>;
+   return (
+-    <PageShell band kicker="MEDIA BUILDER" title="Build on-brand media"
+-      sub="Set your colors, logo, font, voice, and department guidelines once — then make on-brand graphics. The recruitment and visibility drafters use these too.">
++    <PageShell band watermark="BRAND" kicker="BRAND KIT" title="Build on-brand media"
++      sub="Set your colors, logo, font and voice once — then make on-brand graphics. The recruitment and visibility drafters use these too.">
+       <NoirSkin>
+-      {!canManage && <div style={{ ...FS.cardNoir, padding: 14, marginBottom: 14, fontSize: 13, color: FIRE.textMuted }}>You can view the brand kit. Editing is limited to department admins.</div>}
+-      <div style={{ ...FS.cardNoir, padding: 18 }}>
+-        <CardHead icon={Palette} title="Identity" />
+-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+-          <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Department name</span><input style={FS.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} /></label>
+-          <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Station</span><input style={FS.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} /></label>
++      {!canManage && (
++        <div style={{ ...NOIR_INSET, padding: "10px 13px", marginBottom: 12, display: "flex", alignItems: "center", gap: 9 }}>
++          <Lock size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
++          <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>View only — department admins edit the brand kit. You can still make graphics below.</span>
+         </div>
+-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+-          {swatch("primary", "Primary color")}
+-          {swatch("accent", "Accent color")}
+-          <label style={{ ...S.field, minWidth: 170 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Headline font</span><select style={FS.input} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
++      )}
++
++      {/* LIVE PREVIEW — reads the same brand state the fields edit; nothing here is saved until Save. */}
++      <div style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}`, marginBottom: 12, background: `linear-gradient(115deg, ${brand.primary} 0%, ${brand.primary}CC 45%, #0A0D12 100%)` }}>
++        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", flexWrap: "wrap" }}>
++          <div style={{ width: 58, height: 58, borderRadius: 12, background: "rgba(0,0,0,.28)", border: "1px solid rgba(255,255,255,.18)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
++            {brand.logo ? <img src={brand.logo} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, color: "#fff" }}>{deptMonogram(brand.name)}</span>}
++          </div>
++          <div style={{ flex: 1, minWidth: 180 }}>
++            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.75)" }}>Live preview{brand.station ? ` · ${brand.station}` : ""}</div>
++            <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 24, color: "#fff", lineHeight: 1.15, marginTop: 2 }}>{brand.name || "Your department"}</div>
++            {brand.tagline && <div style={{ fontSize: 13, color: "rgba(255,255,255,.85)", marginTop: 3 }}>{brand.tagline}</div>}
++          </div>
++          <div style={{ display: "flex", gap: 6 }} aria-label="Brand colors">
++            <span title={`Primary ${brand.primary}`} style={{ width: 26, height: 26, borderRadius: 7, background: brand.primary, border: "1px solid rgba(255,255,255,.4)" }} />
++            <span title={`Accent ${brand.accent}`} style={{ width: 26, height: 26, borderRadius: 7, background: brand.accent, border: "1px solid rgba(255,255,255,.4)" }} />
++          </div>
+         </div>
++        <div style={{ height: 4, background: brand.accent }} />
+       </div>
+-      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}>
+-        <CardHead icon={ImageIcon} title="Logo" />
+-        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+-          <div style={{ width: 84, height: 84, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+-            {brand.logo ? <img src={brand.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color={FIRE.textMuted2} />}
++
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 12 }}>
++        <div style={{ ...FS.cardNoir, padding: 18 }}>
++          <CardHead icon={Palette} title="Identity" />
++          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
++            {field("Department name", <input style={FS.input} value={brand.name} disabled={!canManage} onChange={(e) => set("name", e.target.value)} />, { flex: 1, minWidth: 180 })}
++            {field("Station", <input style={FS.input} value={brand.station} disabled={!canManage} onChange={(e) => set("station", e.target.value)} />, { minWidth: 120 })}
++          </div>
++          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
++            {swatch("primary", "Primary color")}
++            {swatch("accent", "Accent color")}
++          </div>
++          {field("Headline font", <select style={{ ...FS.input, fontFamily: FONT_STACKS[brand.font] }} value={brand.font} disabled={!canManage} onChange={(e) => set("font", e.target.value)}>{Object.keys(FONT_STACKS).map((k) => <option key={k}>{k}</option>)}</select>, { marginTop: 8 })}
++        </div>
++        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
++          <div style={{ ...FS.cardNoir, padding: 18 }}>
++            <CardHead icon={ImageIcon} title="Logo" />
++            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
++              <div style={{ width: 84, height: 84, borderRadius: 12, border: `1px dashed ${FIRE.line2Noir}`, background: FIRE.insetNoir, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
++                {brand.logo ? <img src={brand.logo} alt="Department logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={26} color={FIRE.textMuted2} />}
++              </div>
++              {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
++                <label style={{ ...FS.btn, cursor: "pointer" }}><Upload size={15} color={FIRE.btnIcon} /> {brand.logo ? "Replace logo" : "Upload logo"}<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
++                {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
++              </div>}
++            </div>
++            <p style={{ ...NOIR_HELP, marginTop: 8, marginBottom: 0 }}>PNG with a transparent background works best — resized to 512px. Shows on your header, sidebar, dashboard and printouts after you Save.</p>
++          </div>
++          <div style={{ ...FS.cardNoir, padding: 18 }}>
++            <CardHead icon={MessageSquare} title="Voice & tagline" />
++            {field("Tagline", <input style={FS.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} />)}
++            {field("How the department sounds", <textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} />, { marginTop: 8 })}
++            <p style={{ ...NOIR_HELP, marginBottom: 0 }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
+           </div>
+-          {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+-            <label style={{ ...FS.btn, cursor: "pointer" }}><Upload size={15} color={FIRE.btnIcon} /> Upload logo<input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} /></label>
+-            {brand.logo && <button style={FS.btn} onClick={() => set("logo", null)}><X size={14} color={FIRE.deleteRed} /> Remove</button>}
+-          </div>}
+         </div>
+-        <p style={{ ...NOIR_HELP, marginTop: 8, marginBottom: 0 }}>PNG with a transparent background works best. Saved to your department when you tap Save — it appears on your header, sidebar, dashboard, and printed roster.</p>
+-      </div>
+-      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}>
+-        <CardHead icon={MessageSquare} title="Voice & tagline" />
+-        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Tagline</span><input style={FS.input} value={brand.tagline} disabled={!canManage} onChange={(e) => set("tagline", e.target.value)} /></label>
+-        <label style={{ ...S.field, marginTop: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>How the department sounds</span><textarea style={{ ...FS.input, minHeight: 70, resize: "vertical", lineHeight: 1.5 }} value={brand.voice} disabled={!canManage} onChange={(e) => set("voice", e.target.value)} /></label>
+-        <p style={{ ...NOIR_HELP, marginBottom: 0 }}>The AI drafters use this so recruitment posts and captions sound like you.</p>
+       </div>
++
+       {canManage && (
+-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+-          <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveBrand} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save changes</>}</button>
++        <div style={{ ...NOIR_INSET, display: "flex", alignItems: "center", gap: 12, marginTop: 12, padding: "11px 14px", flexWrap: "wrap" }}>
++          <button style={{ ...FS.btnPrimary, opacity: saving ? 0.7 : 1 }} onClick={saveBrand} disabled={saving}>{saving ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save brand kit</>}</button>
+           {saveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
+           {saveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
+-          <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Saves name, station, colors, font, tagline &amp; voice. (Logo &amp; guidelines coming soon.)</span>
++          <span style={{ fontSize: 11.5, color: FIRE.textMuted, flex: 1, minWidth: 200 }}>Saves name, station, colors, font, logo, tagline &amp; voice. Guidelines aren't saved yet.</span>
+         </div>
+       )}
+-      <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+-        <div style={{ display: "flex", gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.primary }} /><span style={{ width: 28, height: 28, borderRadius: 6, background: brand.accent }} /></div>
+-        <div style={{ fontFamily: FONT_STACKS[brand.font], fontWeight: 800, fontSize: 22, color: FIRE.textPrimary }}>{brand.name}</div>
+-        <div style={{ fontSize: 13, color: FIRE.textMuted, flex: 1, minWidth: 140 }}>{brand.tagline}</div>
+-      </div>
+ 
+       <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}>
+         <CardHead icon={FileText} title="Department guidelines" />
+-        <p style={NOIR_HELP}>Upload your department's brand or style guidelines (PDF, image, or doc). They're kept on file here so everyone builds media the way your department needs.</p>
++        <p style={NOIR_HELP}>Your brand or style guidelines (PDF, image, or doc), listed here for whoever is building media. <b style={{ color: FIRE.amberText }}>Not saved yet</b> — the list lasts for this visit only.</p>
+         {canManage && (
+-          <label style={{ ...FS.btn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} color={FIRE.btnIcon} /> Upload guideline
++          <label style={{ ...FS.btn, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} color={FIRE.btnIcon} /> Add a guideline
+             <input type="file" accept=".pdf,.doc,.docx,image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; set("guidelines", [...(brand.guidelines || []), { id: Date.now(), name: f.name }]); e.target.value = ""; }} /></label>
+         )}
+         <div style={{ marginTop: 10 }}>
+-          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No guidelines uploaded yet.</div> :
++          {(brand.guidelines || []).length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No guidelines added.</div> :
+             (brand.guidelines || []).map((g) => (
+               <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                 <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
