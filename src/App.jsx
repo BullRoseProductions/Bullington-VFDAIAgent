@@ -2287,7 +2287,7 @@ export default function App() {
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label, is_meeting"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -2321,7 +2321,7 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
+        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, isMeeting: !!r.is_meeting, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
           // off-site location: null lat/lng = at the station (every existing drill, and the default)
           isOffsite: !!r.is_offsite, locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
@@ -18218,6 +18218,13 @@ function Equipment({ S, role, members, meId, notify }) {
     </PageShell>
   );
 }
+/* MINUTES ONLY — which sessions can hold minutes: a leadership/board session, or one a leader ticked "This is a
+   meeting" on (training_sessions.is_meeting — e.g. an everyone-audience business meeting). Mirrors the DB guard on
+   ai_outputs.session_id. A SEPARATE helper on purpose: the restricted-event test drives attendance eligibility, the rate,
+   rosters and board accountability, and must not widen. Never use isMeeting in an attendance path. */
+const isMeeting = (s) => isRestrictedEvent(s) || !!s?.isMeeting;
+const meetingKind = (s) => s?.audience === "board" ? "Board" : s?.audience === "leadership" ? "Leadership" : "Business meeting";   // picker label
+const meetingBucket = (s) => s?.audience === "board" ? "Board" : "Business";   // saved-minutes grouping: every non-board meeting is Business
 function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }) {
   const [mode, setMode] = useState(() => (initialMode === "agenda" || initialMode === "minutes" || initialMode === "action-items") ? (initialMode === "action-items" ? "minutes" : initialMode) : "agenda");   // role-guarded deep-link seed (via go("minutes", mode)); "action-items" opens the Minutes tab
   const scrollToActions = initialMode === "action-items";
@@ -18286,7 +18293,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
      below, and the saved minutes list. "Carried" = open items that were extracted from the most recent
      minutes saved BEFORE this meeting's date (action_items.source_output_id), i.e. what the last meeting
      left open. The agenda is what was PLANNED — the prompt is told never to treat it as what happened. */
-  const meetings = (sessions || []).filter(isRestrictedEvent).sort((a, b) => sessSort(b, a));   // newest first
+  const meetings = (sessions || []).filter(isMeeting).sort((a, b) => sessSort(b, a));   // newest first — the Minutes-only helper, never the attendance one
   // Minutes are written AFTER a meeting, so the picker leads with meetings already held (most recent first);
   // upcoming ones (recurring series run far ahead) follow, soonest first.
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -18301,12 +18308,16 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   // Best: the minutes ASSIGNED to the most recent earlier meeting of the same audience (ai_outputs.session_id).
   // Otherwise the title-based guess below, for minutes nobody has assigned yet.
   const sessionById = new Map((sessions || []).map((x) => [String(x.id), x]));
+  // Board or Business for a saved minutes record: its ASSIGNED meeting wins; unassigned rows fall back to the title.
+  const minutesBucket = (d) => { const m = d.session_id ? sessionById.get(String(d.session_id)) : null;
+    if (m) return meetingBucket(m);
+    return /board/i.test(d.title || "") ? "Board" : /business/i.test(d.title || "") ? "Business" : "Other"; };
   const assignedPrior = mtg ? drafts
     .map((d) => ({ d, s: d.session_id ? sessionById.get(String(d.session_id)) : null }))
-    .filter(({ s }) => s && s.audience === mtg.audience && sessDate(s) < sessDate(mtg))
+    .filter(({ s }) => s && meetingBucket(s) === meetingBucket(mtg) && sessDate(s) < sessDate(mtg))
     .sort((a, b) => sessSort(b.s, a.s))[0]?.d || null : null;
   const priorMinutes = mtg ? drafts.filter((d) => new Date(d.created_at) < sessDate(mtg) && String(d.session_id || "") !== String(mtg.id)).sort((a, b) => b.created_at.localeCompare(a.created_at)) : [];
-  const sameKind = (d) => (/board/i.test(d.title || "")) === (mtg?.audience === "board");
+  const sameKind = (d) => mtg && minutesBucket(d) === meetingBucket(mtg);   // Board carries from Board, Business from Business
   const lastMinutes = assignedPrior || priorMinutes.find(sameKind) || priorMinutes[0] || null;
   const carried = lastMinutes ? openItems.filter((i) => i.source_output_id === lastMinutes.id) : [];
   const otherOpenItems = openItems.filter((i) => !carried.includes(i));
@@ -18583,7 +18594,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
                 <option value="">Not on the calendar — type it below</option>
                 {[["Held", heldMeetings], ["Upcoming", upcomingMeetings]].map(([label, list]) => list.length > 0 && (
                   <optgroup key={label} label={label}>
-                    {list.map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)} · {s.audience === "board" ? "Board" : "Leadership"}</option>)}
+                    {list.map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)} · {meetingKind(s)}</option>)}
                   </optgroup>
                 ))}
               </select></label>
@@ -18743,10 +18754,9 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
            heuristic on free text until a minutes record can be assigned to a meeting, whose audience is the
            reliable source. YEAR is the year it was saved (created_at). This year's groups open; earlier years
            sit under one collapsed "Earlier" disclosure. */
-        // An ASSIGNED meeting wins: board audience -> Board, leadership -> Business. Unassigned rows fall back to the title.
+        // An ASSIGNED meeting wins (board -> Board; leadership or a flagged business meeting -> Business); unassigned rows use the title.
         const mtgOf = (d) => d.session_id ? sessionById.get(String(d.session_id)) || null : null;
-        const typeOf = (d) => { const m = mtgOf(d); if (m) return m.audience === "board" ? "Board" : "Business";
-          return /board/i.test(d.title || "") ? "Board" : /business/i.test(d.title || "") ? "Business" : "Other"; };
+        const typeOf = minutesBucket;
         const accent = { Board: FIRE.redBright, Business: "#8C9AAB", Other: FIRE.line2Noir };
         const yearOf = (d) => new Date(d.created_at).getFullYear();
         const thisYear = new Date().getFullYear();
@@ -18839,7 +18849,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
                           <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: x.audience === "board" ? FIRE.redBright : "#8C9AAB" }} />
                           <span style={{ flex: 1, minWidth: 0 }}>
                             <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{x.title}</span>
-                            <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>{fmtSess(x)} · {x.audience === "board" ? "Board" : "Leadership"}</span>
+                            <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted }}>{fmtSess(x)} · {meetingKind(x)}</span>
                           </span>
                           {on && <span style={{ fontSize: 11, fontWeight: 700, color: FIRE.greenText }}>Assigned</span>}
                         </button>
