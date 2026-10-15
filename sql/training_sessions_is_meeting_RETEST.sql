@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for training_sessions_is_meeting_DRAFT.sql. READ-ONLY IN EFFECT — run AFTER the migration, separately.
+-- RETEST for training_sessions_is_meeting_2026-10-15.sql.
+-- RAN 2026-10-15 on live: 14 passed, 0 failed, 3 skipped — North Hood and Lipan A-F all PASS; Granbury, Indian
+-- Harbor, Demo skipped (no live minutes). READ-ONLY IN EFFECT — run AFTER the migration, separately.
 -- For each department with a leader, a live minutes record and an EVERYONE session, sign in as that leader
 -- exactly as the app does (JWT email claim + role authenticated) and:
 --   A. flag an everyone session is_meeting (as the owner, inside the sub-block) -> assigning minutes WORKS

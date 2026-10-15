@@ -1,5 +1,8 @@
 -- =====================================================================
--- training_sessions.is_meeting + the minutes guard accepts flagged meetings. DRAFT — NOT APPLIED. For review.
+-- training_sessions.is_meeting + the minutes guard accepts flagged meetings.
+-- Record: applied by hand 2026-10-15. Idempotent (safe if re-run). State check on live: boolean NOT NULL default
+-- false · 0 flagged · new rule present · trigger 1 · anon false · ai_outputs 4 / training_sessions 4 policies.
+-- RETEST on live 2026-10-15: 14 passed, 0 failed, 3 skipped (Granbury, Indian Harbor, Demo: no minutes).
 -- Migration 2 of "assign minutes to a meeting". Builds on sql/ai_outputs_session_id_2026-10-15.sql (applied).
 -- Test script: sql/training_sessions_is_meeting_RETEST.sql (run AFTER this, separately).
 --
