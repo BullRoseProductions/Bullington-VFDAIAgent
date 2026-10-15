@@ -13558,7 +13558,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             if (r.autoClosed) return ["Not credited · auto-closed", FIRE.amberText];   // the rule's first branch
             if (r.vTrue) return ["Verified", FIRE.greenText];
             if (r.oTrue) return ["Officer", "#7FB2E6"];
-            return ["Not credited", FIRE.amberText];
+            return ["Not credited · location not confirmed", FIRE.amberText];
           };
           const tile = (label, v, c) => (
             <div style={{ ...NOIR_INSET, padding: "10px 12px", minWidth: 0 }}>
