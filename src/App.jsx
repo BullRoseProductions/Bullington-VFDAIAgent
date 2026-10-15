@@ -18244,6 +18244,8 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
   const [editing, setEditing] = useState(false); const [editBuf, setEditBuf] = useState(""); const [savingEdit, setSavingEdit] = useState(false);
   const [review, setReview] = useState([]); const [creating, setCreating] = useState(false);
   const [showDone, setShowDone] = useState(false);   // Completed section — collapsed by default
+  const [minGroupOpen, setMinGroupOpen] = useState({});   // saved-minutes groups the user opened/closed ("year-Type" -> bool); default = this year open
+  const [showEarlierMinutes, setShowEarlierMinutes] = useState(false);   // earlier years of saved minutes — collapsed by default
   const canManage = hasAny(role, CANMANAGE_ROLES);   // create action_items + save minutes → CANMANAGE (is_canmanage(): Board/DA/Officer)
   const canManageOps = hasAny(role, CANMANAGE_OPS_ROLES);   // file UPLOAD to station-documents is ops-only (DA/Officer) per station_docs_insert_leadership RLS; Board can still paste
   // Import minutes written OUTSIDE B4C (Firefly/Word/typed elsewhere). Stored source='imported' — never as AI-drafted.
@@ -18637,13 +18639,23 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
       )}
 
       <CardHead icon={FileText} title="Saved minutes" style={{ marginTop: 14 }} />
-      <Card padding="4px 16px" style={{ marginBottom: 22 }}>
-        {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved minutes yet.</div> : drafts.map((d) => {
+      {(() => {
+        /* Grouped + collapsible — the same rows from the one ai_outputs read above, nothing new fetched.
+           TYPE IS TITLE-BASED (v1): "board" in the title -> Board, "business" -> Business, else Other. It is a
+           heuristic on free text until a minutes record can be assigned to a meeting, whose audience is the
+           reliable source. YEAR is the year it was saved (created_at). This year's groups open; earlier years
+           sit under one collapsed "Earlier" disclosure. */
+        const typeOf = (d) => /board/i.test(d.title || "") ? "Board" : /business/i.test(d.title || "") ? "Business" : "Other";
+        const accent = { Board: FIRE.redBright, Business: "#8C9AAB", Other: FIRE.line2Noir };
+        const yearOf = (d) => new Date(d.created_at).getFullYear();
+        const thisYear = new Date().getFullYear();
+        const fmt = (iso, withYear) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(withYear ? { year: "numeric" } : {}) });
+        const row = (d) => {
           const cName = members.find((m) => m.id === d.created_by)?.name || "Unknown";
           const eName = d.edited_by ? (members.find((m) => m.id === d.edited_by)?.name || "Unknown") : null;
-          const when = new Date(d.edited_at || d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          const when = fmt(d.edited_at || d.created_at, yearOf(d) !== thisYear);
           return (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0 9px 10px", borderBottom: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${accent[typeOf(d)]}` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{d.title || "Untitled minutes"}{d.source === "imported" && <span style={IMPORTED_BADGE}>Imported · not AI</span>}</div>
                 <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{cName} · {when}{eName ? ` · edited by ${eName}` : ""}</div>
@@ -18652,8 +18664,49 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               {isDeptAdmin(role) && <button title="Delete" disabled={deletingId === d.id} style={{ ...FS.btn, padding: "5px 8px", fontSize: 11.5 }} onClick={() => softDelete(d)}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
           );
-        })}
-      </Card>
+        };
+        const TYPES = ["Board", "Business", "Other"];
+        const groupsFor = (rows, year) => TYPES.map((t) => {
+          const list = rows.filter((d) => typeOf(d) === t);
+          if (!list.length) return null;
+          const key = `${year}-${t}`;
+          const isOpen = key in minGroupOpen ? minGroupOpen[key] : year === thisYear;
+          return (
+            <div key={key}>
+              <SectionBar label={`${t}${year === thisYear ? "" : ` · ${year}`}`} count={list.length} open={isOpen} onToggle={() => setMinGroupOpen((g) => ({ ...g, [key]: !isOpen }))} style={{ margin: "12px 0 4px" }} />
+              {isOpen && list.map(row)}
+            </div>
+          );
+        });
+        const current = drafts.filter((d) => yearOf(d) === thisYear);
+        const earlierYears = [...new Set(drafts.filter((d) => yearOf(d) !== thisYear).map(yearOf))].sort((a, b) => b - a);
+        const nBoard = drafts.filter((d) => typeOf(d) === "Board").length, nBiz = drafts.filter((d) => typeOf(d) === "Business").length;
+        return (<>
+          {drafts.length > 0 && (
+            <div style={{ fontSize: 12, color: FIRE.textSecondary, margin: "-4px 0 8px", ...FS.num }}>
+              {drafts.length} saved · last {fmt(drafts[0].edited_at || drafts[0].created_at, true)} · {nBoard} board · {nBiz} business
+            </div>
+          )}
+          <Card padding="4px 16px 8px" style={{ marginBottom: earlierYears.length ? 10 : 22 }}>
+            {drafts.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No saved minutes yet.</div>
+              : current.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>Nothing saved yet in {thisYear}.</div>
+              : groupsFor(current, thisYear)}
+          </Card>
+          {earlierYears.length > 0 && (
+            <div style={{ marginBottom: 22 }}>
+              <button onClick={() => setShowEarlierMinutes((v) => !v)} aria-expanded={showEarlierMinutes} style={{ ...FS.btn, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span>Earlier — {earlierYears.map((y) => `${y} (${drafts.filter((d) => yearOf(d) === y).length})`).join(" & ")}</span>
+                {showEarlierMinutes ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+              {showEarlierMinutes && (
+                <Card padding="4px 16px 8px" style={{ marginTop: 8 }}>
+                  {earlierYears.map((y) => groupsFor(drafts.filter((d) => yearOf(d) === y), y))}
+                </Card>
+              )}
+            </div>
+          )}
+        </>);
+      })()}
       {openDraft && (
         <div onClick={closeDraft} style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, maxWidth: 720, width: "100%", padding: "18px 20px", background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}` }}>
