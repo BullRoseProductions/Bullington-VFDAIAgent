@@ -1,0 +1,78 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 644e253..bc44298 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -11348,27 +11348,56 @@ function RosterPending({ S, members, notify }) {
+     setViewerProof({ url: data.signedUrl, name: (row.proof_path || "").split("/").pop() });   // inline image (most proofs) or PDF; Download opens the original
+   }
+ 
+-  if (loading && rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>Loading…</div>;
++  // Presentation only below. The read, approve_cert_submission, the reject reason prompt and the proof viewer are above, unchanged.
++  const scopeNote = (
++    <div style={{ ...NOIR_INSET, padding: "9px 12px", marginBottom: 10, display: "flex", alignItems: "center", gap: 9 }}>
++      <Lock size={14} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
++      <span style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.4 }}>Your department only — you can't see or act on another department's submissions.</span>
++    </div>
++  );
++  if (loading && rows.length === 0) return <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}><Loader2 size={14} className="spin" /> Loading pending certifications…</div>;
+   if (rows.length === 0 && loadErr) return <OfflineNotice onRetry={loadPending} what="pending items" />;
+-  if (rows.length === 0) return <div style={{ fontSize: 13.5, color: FIRE.textMuted, marginTop: 4 }}>No pending items.</div>;
++  if (rows.length === 0) return (
++    <div style={{ marginTop: 4 }}>
++      {scopeNote}
++      <div style={{ ...FS.cardNoir, padding: "16px 18px", display: "flex", alignItems: "center", gap: 10 }}>
++        <CheckCircle2 size={18} color={FIRE.greenText} style={{ flexShrink: 0 }} />
++        <span style={{ fontSize: 13.5, color: FIRE.textSecondary }}>Nothing waiting — every proposed certification has been reviewed.</span>
++      </div>
++    </div>
++  );
++  const initials = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
++  const proposed = (r) => r.created_at ? new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+   return (
+     <div style={{ marginTop: 4 }}>
+-      {rows.map((r) => (
+-        <div key={r.id} style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+-          <Award size={15} color={FIRE.amberText} style={{ flexShrink: 0 }} />
+-          <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
+-            <span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {nameFor(r.member_id)}</span>
+-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 1 }}>{r.exp ? expPhrase(r.exp) : "No expiration"} · {r.source}{r.note ? ` · ${r.note}` : ""}</div>
+-          </div>
+-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
+-            {r.proof_path
+-              ? <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === r.id} onClick={() => viewProof(r)}>View proof</button>
+-              : <span style={{ fontSize: 11.5, color: FIRE.textMuted, alignSelf: "center" }}>no proof</span>}
+-            <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.green }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
+-            <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
++      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
++        <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Review &amp; approve</span>
++        <span style={{ fontSize: 12.5, color: FIRE.amberText, fontWeight: 600, ...FS.num }}>{rows.length} waiting</span>
++        <span style={{ fontSize: 12, color: FIRE.textMuted, flexBasis: "100%" }}>Members proposed these with proof. Approve to add them, or reject with a reason.</span>
++      </div>
++      {scopeNote}
++      {rows.map((r) => {
++        const who = nameFor(r.member_id), busy = busyId === r.id;
++        return (
++          <div key={r.id} style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 8, borderLeft: `3px solid ${FIRE.amberText}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", opacity: busy ? 0.7 : 1 }}>
++            <span aria-hidden="true" style={{ width: 38, height: 38, borderRadius: 999, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13.5, color: FIRE.amberText, background: `${FIRE.amberText}1A`, border: `1px solid ${FIRE.amberText}55` }}>{initials(who)}</span>
++            <div style={{ flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
++              <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{who}</div>
++              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 1 }}>{r.name} · {r.exp ? expPhrase(r.exp) : "no expiry"}</div>
++              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
++                {r.proof_path
++                  ? <button type="button" disabled={busy} onClick={() => viewProof(r)} title="View proof" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: FIRE.blueText, background: "rgba(91,155,213,.1)", border: "1px solid rgba(91,155,213,.35)", borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: "inherit", maxWidth: 220 }}><FileText size={12} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.proof_path || "").split("/").pop()}</span></button>
++                  : <span style={{ fontSize: 11.5, color: FIRE.amberText, border: `1px solid ${FIRE.amberText}44`, borderRadius: 999, padding: "2px 9px" }}>No proof attached</span>}
++                <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{[proposed(r) && `proposed ${proposed(r)}`, r.source, r.note].filter(Boolean).join(" · ")}</span>
++              </div>
++            </div>
++            <div style={{ display: "flex", gap: 8, flexShrink: 0, maxWidth: "100%" }}>
++              <button style={{ ...FS.btnPrimary, background: FIRE.green, borderColor: FIRE.green, padding: "8px 14px", fontSize: 13 }} disabled={busy} onClick={() => approve(r)}>{busy ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />} Approve</button>
++              <button style={{ ...FS.btn, padding: "8px 13px", fontSize: 13, color: FIRE.deleteRed, borderColor: "rgba(200,50,58,.45)" }} disabled={busy} onClick={() => reject(r)}><X size={14} color={FIRE.deleteRed} /> Reject</button>
++            </div>
+           </div>
+-        </div>
+-      ))}
++        );
++      })}
+       {viewerProof && <DocViewer url={viewerProof.url} name={viewerProof.name} onClose={() => setViewerProof(null)} />}
+     </div>
+   );
