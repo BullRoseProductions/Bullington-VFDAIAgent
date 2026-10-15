@@ -1,5 +1,6 @@
 -- =====================================================================
--- ai_outputs.session_id — ASSIGN MINUTES TO A MEETING. DRAFT — NOT APPLIED. For review.
+-- ai_outputs.session_id — ASSIGN MINUTES TO A MEETING. DRAFT v2 — NOT APPLIED. For review.
+-- v2 (2026-10-15): one DO block. v1 failed in the Supabase editor (temp table gone between statements).
 -- Test script: sql/ai_outputs_session_id_RETEST.sql (run AFTER this, separately).
 --
 -- WHY. Part B of the Meetings batch: link a saved minutes record to the leadership/board meeting it
@@ -23,7 +24,7 @@
 --
 -- READ SCOPE — UNCHANGED. No policy on ai_outputs or any other table is created, altered or dropped.
 -- Who can read minutes is exactly what it is today. A post-condition below captures every ai_outputs
--- policy before the change and proves the set is identical after it (any difference rolls back).
+-- policy before the change and proves the set is identical after it (any difference undoes the block).
 --
 -- WRITE PERMISSION (the gate) — the RPC, all in one place:
 --   * Caller must be a leader IN THEIR OWN DEPARTMENT: a members row matching auth.email() with
@@ -47,15 +48,25 @@
 --   * mutation checks: without the guard trigger the RETEST FAILS C, D, G; a widened read policy inside
 --     the migration and an open anon grant each trip a post-condition and roll back; the minutes-only
 --     CHECK refuses an agenda row; deleting a meeting un-assigns its minutes (ON DELETE SET NULL).
+--   * v2 (single DO block): same results, plus — run over a half-applied v1 state (column + CHECK + index
+--     present, no trigger/RPC) it completes cleanly and RETEST passes 16/0/1; a block that fails a
+--     post-condition leaves NOTHING behind (state check all false afterwards).
 -- The live run is still the real test — the live policies / helper bodies may differ from the snapshot.
 -- BEFORE RUNNING — compare the live role set, and stop if it differs from the list above:
 --   SELECT pg_get_functiondef('public.is_canmanage()'::regprocedure);
 -- =====================================================================
-BEGIN;
-
--- 0. preconditions + capture the ai_outputs policies as they are now (compared at the end)
-DO $pre$
+-- ONE STATEMENT. The whole migration is a single DO block, so it is all-or-nothing in any SQL editor —
+-- any failure (a precondition, a post-condition, an error mid-way) undoes every step. v1 used
+-- BEGIN/COMMIT around separate statements plus a temp table; the Supabase editor ran the statements
+-- without that transaction, so the temp table was gone before the check that read it.
+DO $migrate$
+DECLARE
+  v_pol_before text; v_pol_after text;
+  pol_sql constant text := $q$
+    SELECT coalesce(string_agg(format('%s|%s|%s|%s|%s', policyname, cmd, roles::text, qual, with_check), E'\n' ORDER BY policyname, cmd), '')
+      FROM pg_policies WHERE schemaname = 'public' AND tablename = 'ai_outputs'$q$;
 BEGIN
+  -- 0. preconditions + the ai_outputs policies as they are now (compared at the end)
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'training_sessions' AND column_name = 'audience') THEN
     RAISE EXCEPTION 'Precondition failed: training_sessions.audience does not exist.';
@@ -63,23 +74,19 @@ BEGIN
   IF to_regprocedure('public.my_department_id()') IS NULL OR to_regprocedure('public.my_member_id()') IS NULL THEN
     RAISE EXCEPTION 'Precondition failed: my_department_id() / my_member_id() missing.';
   END IF;
-END
-$pre$;
+  EXECUTE pol_sql INTO v_pol_before;
 
-CREATE TEMP TABLE _ai_outputs_policies_before ON COMMIT DROP AS
-  SELECT policyname, cmd, roles::text AS roles, qual, with_check
-    FROM pg_policies WHERE schemaname = 'public' AND tablename = 'ai_outputs';
+  -- 1. the column
+  ALTER TABLE public.ai_outputs
+    ADD COLUMN IF NOT EXISTS session_id uuid REFERENCES public.training_sessions(id) ON DELETE SET NULL;
 
--- 1. the column
-ALTER TABLE public.ai_outputs
-  ADD COLUMN IF NOT EXISTS session_id uuid REFERENCES public.training_sessions(id) ON DELETE SET NULL;
+  -- 2. only minutes can be assigned
+  ALTER TABLE public.ai_outputs DROP CONSTRAINT IF EXISTS ai_outputs_session_id_minutes_only;
+  ALTER TABLE public.ai_outputs
+    ADD CONSTRAINT ai_outputs_session_id_minutes_only CHECK (session_id IS NULL OR feature = 'minutes');
 
--- 2. only minutes can be assigned
-ALTER TABLE public.ai_outputs DROP CONSTRAINT IF EXISTS ai_outputs_session_id_minutes_only;
-ALTER TABLE public.ai_outputs
-  ADD CONSTRAINT ai_outputs_session_id_minutes_only CHECK (session_id IS NULL OR feature = 'minutes');
-
--- 3. the meeting must be a leadership/board session in the same department — on every write path
+  -- 3. the meeting must be a leadership/board session in the same department — on every write path
+  EXECUTE $ddl$
 CREATE OR REPLACE FUNCTION public.guard_ai_outputs_session_id()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -101,13 +108,15 @@ begin
   end if;
   return new;
 end;
-$function$;
+$function$
+$ddl$;
 
-DROP TRIGGER IF EXISTS trg_guard_ai_outputs_session_id ON public.ai_outputs;
-CREATE TRIGGER trg_guard_ai_outputs_session_id BEFORE INSERT OR UPDATE OF session_id ON public.ai_outputs
-  FOR EACH ROW EXECUTE FUNCTION public.guard_ai_outputs_session_id();
+  DROP TRIGGER IF EXISTS trg_guard_ai_outputs_session_id ON public.ai_outputs;
+  CREATE TRIGGER trg_guard_ai_outputs_session_id BEFORE INSERT OR UPDATE OF session_id ON public.ai_outputs
+    FOR EACH ROW EXECUTE FUNCTION public.guard_ai_outputs_session_id();
 
--- 4. the assign / un-assign RPC
+  -- 4. the assign / un-assign RPC
+  EXECUTE $ddl$
 CREATE OR REPLACE FUNCTION public.assign_minutes_to_session(p_output_id uuid, p_session_id uuid)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -141,20 +150,18 @@ begin
   update public.ai_outputs set session_id = p_session_id where id = p_output_id;   -- the trigger checks the meeting
   return p_session_id;
 end;
-$function$;
+$function$
+$ddl$;
 
--- 5. index
-CREATE INDEX IF NOT EXISTS ai_outputs_session_id_idx ON public.ai_outputs (session_id) WHERE session_id IS NOT NULL;
+  -- 5. index
+  CREATE INDEX IF NOT EXISTS ai_outputs_session_id_idx ON public.ai_outputs (session_id) WHERE session_id IS NOT NULL;
 
--- 6. grants
-REVOKE EXECUTE ON FUNCTION public.assign_minutes_to_session(uuid, uuid) FROM anon, public;
-GRANT  EXECUTE ON FUNCTION public.assign_minutes_to_session(uuid, uuid) TO authenticated;
-REVOKE EXECUTE ON FUNCTION public.guard_ai_outputs_session_id() FROM anon, public;
+  -- 6. grants
+  REVOKE EXECUTE ON FUNCTION public.assign_minutes_to_session(uuid, uuid) FROM anon, public;
+  GRANT  EXECUTE ON FUNCTION public.assign_minutes_to_session(uuid, uuid) TO authenticated;
+  REVOKE EXECUTE ON FUNCTION public.guard_ai_outputs_session_id() FROM anon, public;
 
--- 7. post-conditions — any failure rolls everything back
-DO $post$
-DECLARE v_diff int;
-BEGIN
+  -- 7. post-conditions — any failure undoes the whole block
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'ai_outputs' AND column_name = 'session_id' AND is_nullable = 'YES') THEN
     RAISE EXCEPTION 'Post-condition failed: ai_outputs.session_id missing or NOT NULL. Rolling back.';
@@ -165,25 +172,15 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_guard_ai_outputs_session_id' AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'Post-condition failed: guard trigger missing. Rolling back.';
   END IF;
-  IF EXISTS (SELECT 1 FROM public.ai_outputs WHERE session_id IS NOT NULL) THEN
-    RAISE EXCEPTION 'Post-condition failed: rows already assigned (expected none on a fresh column). Rolling back.';
-  END IF;
-  -- READ SCOPE UNCHANGED: the ai_outputs policy set is identical, both directions
-  SELECT count(*) INTO v_diff FROM (
-    (SELECT policyname, cmd, roles::text, qual, with_check FROM pg_policies WHERE schemaname = 'public' AND tablename = 'ai_outputs'
-     EXCEPT SELECT * FROM _ai_outputs_policies_before)
-    UNION ALL
-    (SELECT * FROM _ai_outputs_policies_before
-     EXCEPT SELECT policyname, cmd, roles::text, qual, with_check FROM pg_policies WHERE schemaname = 'public' AND tablename = 'ai_outputs')
-  ) d;
-  IF v_diff <> 0 THEN
-    RAISE EXCEPTION 'Post-condition failed: ai_outputs policies changed (% differences). Rolling back.', v_diff;
+  -- READ SCOPE UNCHANGED: the ai_outputs policy set is identical, character for character
+  EXECUTE pol_sql INTO v_pol_after;
+  IF v_pol_after IS DISTINCT FROM v_pol_before THEN
+    RAISE EXCEPTION 'Post-condition failed: ai_outputs policies changed. Rolling back.';
   END IF;
 END
-$post$;
+$migrate$;
 
 NOTIFY pgrst, 'reload schema';
-COMMIT;
 
 -- state check (read-only) — expect: session_id uuid YES · the CHECK · the trigger · anon_can_execute = false
 SELECT (SELECT data_type || ' nullable=' || is_nullable FROM information_schema.columns
