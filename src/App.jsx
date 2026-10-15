@@ -18285,6 +18285,11 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
      minutes saved BEFORE this meeting's date (action_items.source_output_id), i.e. what the last meeting
      left open. The agenda is what was PLANNED — the prompt is told never to treat it as what happened. */
   const meetings = (sessions || []).filter(isRestrictedEvent).sort((a, b) => sessSort(b, a));   // newest first
+  // Minutes are written AFTER a meeting, so the picker leads with meetings already held (most recent first);
+  // upcoming ones (recurring series run far ahead) follow, soonest first.
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const heldMeetings = meetings.filter((s) => sessDate(s) <= todayStart);
+  const upcomingMeetings = meetings.filter((s) => sessDate(s) > todayStart).reverse();
   const mtg = meetings.find((s) => String(s.id) === String(mtgId)) || null;
   const mtgAgendas = mtg ? (mtg.plans || []).filter((p) => p.kind === "ai" && (p.ai_text || "").trim()) : [];
   const mtgFiles = mtg ? (mtg.plans || []).filter((p) => p.kind === "file") : [];
@@ -18547,7 +18552,11 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
             <label style={{ ...S.field, flex: 1, minWidth: 220 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Meeting</span>
               <select style={FS.input} value={mtgId} onChange={(e) => pickMeeting(e.target.value)}>
                 <option value="">Not on the calendar — type it below</option>
-                {meetings.map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)} · {s.audience === "board" ? "Board" : "Leadership"}</option>)}
+                {[["Held", heldMeetings], ["Upcoming", upcomingMeetings]].map(([label, list]) => list.length > 0 && (
+                  <optgroup key={label} label={label}>
+                    {list.map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)} · {s.audience === "board" ? "Board" : "Leadership"}</option>)}
+                  </optgroup>
+                ))}
               </select></label>
             <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Date</span><input style={FS.input} value={date} placeholder="e.g. Jul 8, 2026" onChange={(e) => setDate(e.target.value)} /></label>
           </div>
