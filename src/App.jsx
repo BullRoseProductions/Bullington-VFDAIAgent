@@ -12895,6 +12895,46 @@ function CapitalPlanReport({ S, dept, back }) {
             </table>
           </div>
         )}
+        {/* DEPRECIATION — ESTIMATE, fenced off from every entered/computed dollar above. Not an appraisal. */}
+        {rigs.length > 0 && (() => {
+          const rows = rigs.map((r) => ({ r, d: depreciationOf(r, thisYear) }));
+          const est = rows.filter((x) => x.d);
+          const fleetValue = est.reduce((t, x) => t + x.d.value, 0);
+          const lifeText = CAPITAL_DEFAULT_LIFE.map(([re, y]) => `${String(re.source).split("|")[0].replace(/^\w/, (c) => c.toUpperCase())} ${y}`).join(" · ");
+          return (
+            <div style={{ ...FS.cardNoir, padding: "14px 16px", marginTop: 14, border: `1px dashed ${FIRE.line2Noir}` }}>
+              <CardHead icon={BarChart3} title="Depreciation estimate" right={<span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", color: FIRE.amberText, border: `1px solid ${FIRE.amberText}66`, borderRadius: 5, padding: "2px 7px" }}>ESTIMATE · NOT AN APPRAISAL</span>} />
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ ...NOIR_INSET, padding: "12px 14px", minWidth: 220 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 6 }}>Est. current fleet value</div>
+                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{est.length ? money(fleetValue) : "—"}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 5 }}>covers {est.length} of {rigs.length} unit{rigs.length === 1 ? "" : "s"}{est.length < rigs.length ? " — the rest need a purchase cost and year" : ""}</div>
+                </div>
+                <div style={{ flex: "1 1 260px", fontSize: 11.5, color: FIRE.textMuted, lineHeight: 1.5 }}>
+                  Straight-line to a $0 residual over each unit's service life — an estimate for planning, not an appraisal, book value or resale price, and never part of the replacement totals above. Life comes from the unit's planned replacement year when set, otherwise a default by type ({lifeText}; others {CAPITAL_DEFAULT_LIFE_FALLBACK} yrs).
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+                  <thead><tr><th style={TH}>Apparatus</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={TH}>Service life</th><th style={{ ...TH, minWidth: 120 }}>Age of life</th><th style={{ ...TH, textAlign: "right" }}>Depreciated</th><th style={{ ...TH, textAlign: "right" }}>Est. value today</th></tr></thead>
+                  <tbody>
+                    {rows.map(({ r, d }) => (
+                      <tr key={r.id} style={{ borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                        <td style={{ ...TD, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}{r.type ? <span style={{ color: FIRE.textMuted, fontWeight: 400 }}> · {r.type}</span> : null}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num }}>{r.purchaseYear ?? "—"}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num }}>{money(r.purchaseCost)}</td>
+                        <td style={TD}>{d ? <>{d.life} yrs <span style={{ color: FIRE.textMuted }}>· {d.fromPlan ? "plan" : "default"}</span></> : "—"}</td>
+                        <td style={TD}>{d ? <span style={{ display: "block", height: 6, borderRadius: 99, background: FIRE.line2Noir, overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${Math.round(d.ageFrac * 100)}%`, background: d.ageFrac >= 1 ? FIRE.redBright : d.ageFrac >= 0.75 ? FIRE.amberText : FIRE.textSecondary }} /></span> : "—"}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num }}>{d ? `${d.pctDepreciated}%` : "—"}</td>
+                        <td style={{ ...TD, textAlign: "right", ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{d ? money(d.value) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
       </>)}
       </NoirSkin>
     </PageShell>
@@ -14134,6 +14174,26 @@ const APPARATUS_TYPES = ["Pumper", "Tender / Tanker", "Brush truck", "Rescue", "
    when the field is genuinely blank. Note that rules out `rate || CAPITAL_DEFAULT_RATE`, which
    would silently turn an explicit 0 into 3. */
 const CAPITAL_DEFAULT_RATE = 3;
+/* DEFAULT SERVICE LIFE (years) for the depreciation ESTIMATE only, by apparatus type — used when a rig has no
+   usable replacement year. Code constants in v1 (same shape as CAPITAL_DEFAULT_RATE); making them editable per
+   department needs a persisted store = schema + a write, which is a reviewed Phase 2, not this. */
+const CAPITAL_DEFAULT_LIFE = [[/aerial|ladder|quint|tower/i, 25], [/pumper|engine/i, 20], [/tender|tanker/i, 20], [/brush/i, 15], [/rescue|squad/i, 15]];
+const CAPITAL_DEFAULT_LIFE_FALLBACK = 20;
+const defaultLifeFor = (type) => (CAPITAL_DEFAULT_LIFE.find(([re]) => re.test(type || "")) || [null, CAPITAL_DEFAULT_LIFE_FALLBACK])[1];
+/* Straight-line value today, to a $0 residual. Needs BOTH purchase cost and purchase year — otherwise null ("—"),
+   never a 0 or a guess. Life = the department's own plan (replace_year − purchase_year) when that is positive,
+   else the type default. Floors at $0 once past its life; capped at the purchase cost. DISPLAY ESTIMATE ONLY:
+   it must never feed grandTotal, recommendedAnnual, the Chief's Report funding figures or any entered-money path. */
+const depreciationOf = (r, thisYear) => {
+  const cost = r.purchaseCost == null || r.purchaseCost === "" ? null : Number(r.purchaseCost);
+  const py = r.purchaseYear == null || r.purchaseYear === "" ? null : Number(r.purchaseYear);
+  if (cost == null || !Number.isFinite(cost) || cost < 0 || py == null || !Number.isFinite(py)) return null;
+  const ry = r.replaceYear == null || r.replaceYear === "" ? null : Number(r.replaceYear);
+  const fromPlan = ry != null && Number.isFinite(ry) && ry > py;
+  const life = fromPlan ? ry - py : defaultLifeFor(r.type);
+  const frac = Math.min(1, Math.max(0, (py + life - thisYear) / life));
+  return { life, fromPlan, value: cost * frac, pctDepreciated: Math.round((1 - frac) * 100), ageFrac: Math.min(1, Math.max(0, (thisYear - py) / life)) };
+};
 const projectCost = (currentCost, rate, replaceYear, thisYear) => {
   // Explicit null/blank checks BEFORE Number(): Number(null) is 0 and Number("") is 0, both of
   // which pass Number.isFinite. Without this a rig with a cost and no replacement year projects
