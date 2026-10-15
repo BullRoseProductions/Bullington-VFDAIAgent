@@ -12228,6 +12228,8 @@ function ApparatusChecksReport({ S, dept, back }) {
   const [err, setErr] = useState("");            // a failed read is not "no apparatus" — never show empty as fact
   const [selected, setSelected] = useState(() => new Set());   // rig ids ticked for Combined / Separate PDFs
   const [expanded, setExpanded] = useState("");                // the one rig whose finalized checks are listed
+  const [searchText, setSearchText] = useState("");   // narrows what's SHOWN only — never changes `selected`
+  const [typeFilter, setTypeFilter] = useState("all");
   const [range, setRange] = useState(() => presetRange("month"));
   const [presetKey, setPresetKey] = useState("month");
   const [fleetBusy, setFleetBusy] = useState(false);
@@ -12388,18 +12390,51 @@ function ApparatusChecksReport({ S, dept, back }) {
         </div>
       )}
 
-      {/* TRUCK LIST (b4c_reports_apparatus_noir.html): tick the trucks, pick the window, then one Combined PDF or a
-          Separate PDF per truck. Expanding a row still lists that truck's finalized checks with the per-check
-          County report — the single-check path, unchanged. */}
+      {/* TRUCK PICKER (scales to any fleet): search + type chips narrow what's SHOWN; `selected` is the single source of
+          truth and is never changed by filtering — a ticked truck that's filtered out stays ticked and stays in the
+          report. Groups by type with a per-group 'Select all N' (adds only). A sticky bar keeps the count (of ALL
+          trucks), Clear and the two report buttons in reach. Expanding a row still lists that truck's checks with
+          the per-check County report — unchanged. */}
       {loaded && !err && rigs.length > 0 && (() => {
-        const ids = rigs.filter((r) => selected.has(r.id)).map((r) => r.id);
-        const allOn = ids.length === rigs.length;
+        const ids = rigs.filter((r) => selected.has(r.id)).map((r) => r.id);   // report ids: ALL ticked trucks, filtered or not
+        const BUCKETS = [["Pumper", /pumper|engine/i], ["Tender / Tanker", /tender|tanker/i], ["Brush", /brush/i], ["Rescue", /rescue/i],
+          ["Ladder / Aerial", /ladder|aerial|quint|tower/i], ["Squad", /squad/i], ["Command", /command|chief|utility/i], ["Ambulance", /ambulance|medic|ems/i]];
+        const bucketOf = (r) => (BUCKETS.find(([, re]) => re.test(r.type || "")) || ["Other"])[0];
+        const q = searchText.trim().toLowerCase();
+        const matchesSearch = (r) => !q || String(r.name || "").toLowerCase().includes(q);
+        const counts = {}; rigs.filter(matchesSearch).forEach((r) => { const k = bucketOf(r); counts[k] = (counts[k] || 0) + 1; });
+        const shown = rigs.filter((r) => matchesSearch(r) && (typeFilter === "all" || bucketOf(r) === typeFilter));
+        const groups = [...BUCKETS.map(([k]) => k), "Other"].map((k) => [k, shown.filter((r) => bucketOf(r) === k)]).filter(([, l]) => l.length);
+        const shownOn = shown.filter((r) => selected.has(r.id)).length;
+        const master = !shown.length ? "none" : shownOn === shown.length ? "all" : shownOn ? "some" : "none";
+        const addAll = (list) => setSelected((cur) => { const n = new Set(cur); list.forEach((r) => n.add(r.id)); return n; });
+        const toggleShown = () => setSelected((cur) => { const n = new Set(cur); if (master === "all") shown.forEach((r) => n.delete(r.id)); else shown.forEach((r) => n.add(r.id)); return n; });
         const toggle = (id) => setSelected((cur) => { const n = new Set(cur); n.has(id) ? n.delete(id) : n.add(id); return n; });
         const box = (on) => ({ width: 18, height: 18, borderRadius: 5, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${on ? FIRE.redBright : FIRE.line2Noir}`, background: on ? FIRE.redBright : "transparent" });
         const fmtDay = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
+        const chip = (k, label, n) => {
+          const on = typeFilter === k;
+          return <button key={k} type="button" onClick={() => setTypeFilter(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 10px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? FIRE.redBright : FIRE.line2Noir}`, background: on ? "rgba(200,50,58,.14)" : FIRE.card2Noir, color: on ? FIRE.textPrimary : FIRE.textSecondary }}>{label} <span style={{ opacity: 0.7 }}>{n}</span></button>;
+        };
         return (<>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
             <DateRangePicker S={S} range={range} setRange={setRange} presetKey={presetKey} setPresetKey={setPresetKey} />
+          </div>
+          <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "0 2px 10px", lineHeight: 1.45 }}>Reports cover the ticked trucks' completed checks between the selected dates. Combined: a fleet summary, then each truck. Failed checks are expanded item by item.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ position: "relative", flex: "1 1 200px", maxWidth: 320 }}>
+              <Search size={14} color={FIRE.textMuted} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }} />
+              <input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Find a truck…" aria-label="Find a truck" style={{ ...FS.input, paddingLeft: 32 }} />
+            </div>
+            {chip("all", "All", rigs.filter(matchesSearch).length)}
+            {[...BUCKETS.map(([k]) => k), "Other"].filter((k) => counts[k]).map((k) => chip(k, k, counts[k]))}
+          </div>
+          <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", marginBottom: 8, borderRadius: 11, border: `1px solid ${FIRE.line2Noir}`, background: "rgba(14,17,22,.96)", backdropFilter: "blur(4px)" }}>
+            <button onClick={toggleShown} disabled={!shown.length} aria-label={master === "all" ? "Untick the trucks shown" : "Tick the trucks shown"} title={master === "all" ? "Untick the trucks shown" : "Tick the trucks shown"} style={{ ...box(master !== "none"), cursor: shown.length ? "pointer" : "default", padding: 0 }}>
+              {master === "all" ? <Check size={12} color="#fff" strokeWidth={3} /> : master === "some" ? <span style={{ width: 8, height: 2, background: "#fff", borderRadius: 1 }} /> : null}
+            </button>
+            <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}><b style={{ color: FIRE.textPrimary }}>{ids.length}</b> of {rigs.length} truck{rigs.length === 1 ? "" : "s"} selected</span>
+            {ids.length > 0 && <button onClick={() => setSelected(new Set())} style={{ ...FS.btn, padding: "4px 10px", fontSize: 11.5 }}>Clear</button>}
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button disabled={!!fleetBusy || !ids.length} onClick={() => downloadFleet(ids)} style={{ ...FS.btnPrimary, opacity: (fleetBusy || !ids.length) ? 0.6 : 1 }}>
                 {fleetBusy === true ? <><Loader2 size={14} className="spin" /> Building…</> : <><Download size={15} /> Combined report ({ids.length})</>}
@@ -12409,40 +12444,42 @@ function ApparatusChecksReport({ S, dept, back }) {
               </button>
             </div>
           </div>
-          <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "-4px 2px 10px", lineHeight: 1.45 }}>Reports cover the ticked trucks' completed checks between the selected dates. Combined: a fleet summary, then each truck. Failed checks are expanded item by item.</div>
           {fleetErr && (
-            <div style={{ ...NOIR_ERR, display: "flex", alignItems: "center", gap: 9, margin: "0 0 12px" }}>
+            <div style={{ ...NOIR_ERR, display: "flex", alignItems: "center", gap: 9, margin: "0 0 10px" }}>
               <AlertTriangle size={15} color={FIRE.redText} style={{ flexShrink: 0 }} />
               <span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{fleetErr}</span>
             </div>
           )}
-          <div style={{ ...FS.cardNoir, padding: "4px 14px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>
-              <button onClick={() => setSelected(allOn ? new Set() : new Set(rigs.map((r) => r.id)))} aria-pressed={allOn} title={allOn ? "Clear all" : "Select all"} style={{ ...box(allOn), cursor: "pointer", padding: 0 }}>{allOn && <Check size={12} color="#fff" strokeWidth={3} />}</button>
-              <span style={{ flex: 1 }}>{allOn ? "All trucks" : `${ids.length} of ${rigs.length} selected`}</span>
-              <span style={{ width: 150, textAlign: "right" }}>Last check</span>
-              <span style={{ width: 60, textAlign: "right" }}>Checks</span>
-              <span style={{ width: 22 }} />
-            </div>
-            {summaryErr && <ReadRetry what="the last-check summary" onRetry={loadSummary} />}
-            {rigs.map((r, i) => {
-              const sm = summary ? summary[r.id] : undefined, on = selected.has(r.id), open = expanded === r.id;
-              return (
-                <div key={r.id} style={{ borderBottom: i === rigs.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
-                    <button onClick={() => toggle(r.id)} aria-pressed={on} aria-label={`${on ? "Untick" : "Tick"} ${r.name}`} style={{ ...box(on), cursor: "pointer", padding: 0 }}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</button>
-                    <button onClick={() => setExpanded(open ? "" : r.id)} style={{ flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
-                      {r.type && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.type}</div>}
-                    </button>
-                    <span style={{ width: 150, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, whiteSpace: "nowrap" }}>
-                      {summary === null ? <span style={{ fontSize: 12, color: FIRE.textMuted }}>—</span>
-                        : sm ? <><span style={{ fontSize: 11.5, color: FIRE.textSecondary }}>{fmtDay(sm.last)}</span><ResultBadge pass={sm.outcome !== "fail"}>{sm.outcome === "fail" ? "FAIL" : "PASS"}</ResultBadge></>
-                        : <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Never checked</span>}
-                    </span>
-                    <span style={{ width: 60, textAlign: "right", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, ...FS.num }}>{summary === null ? "—" : (sm ? sm.n : 0)}</span>
-                    <button onClick={() => setExpanded(open ? "" : r.id)} aria-expanded={open} title={open ? "Hide checks" : "Show checks"} style={{ width: 22, background: "none", border: "none", padding: 0, cursor: "pointer", color: FIRE.textMuted, display: "inline-flex", justifyContent: "center" }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
-                  </div>
+          {summaryErr && <ReadRetry what="the last-check summary" onRetry={loadSummary} />}
+          {shown.length === 0 && <div style={{ ...FS.cardNoir, padding: "18px 16px", fontSize: 13, color: FIRE.textMuted }}>No trucks match — clear the search or pick another type. Ticked trucks stay ticked.</div>}
+          {groups.map(([gk, list]) => {
+            const allIn = list.every((r) => selected.has(r.id));
+            return (
+              <div key={gk} style={{ ...FS.cardNoir, padding: "2px 14px", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                  <span style={{ flex: 1, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>{gk} · {list.length}</span>
+                  <span style={{ width: 150, textAlign: "right", fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Last check</span>
+                  <span style={{ width: 60, textAlign: "right", fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Checks</span>
+                  <button onClick={() => addAll(list)} disabled={allIn} style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, opacity: allIn ? 0.5 : 1 }}>{allIn ? "All selected" : `Select all ${list.length}`}</button>
+                </div>
+                {list.map((r, i) => {
+                  const sm = summary ? summary[r.id] : undefined, on = selected.has(r.id), open = expanded === r.id;
+                  return (
+                    <div key={r.id} style={{ borderBottom: i === list.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
+                        <button onClick={() => toggle(r.id)} aria-pressed={on} aria-label={`${on ? "Untick" : "Tick"} ${r.name}`} style={{ ...box(on), cursor: "pointer", padding: 0 }}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</button>
+                        <button onClick={() => setExpanded(open ? "" : r.id)} style={{ flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
+                          {r.type && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{r.type}</div>}
+                        </button>
+                        <span style={{ width: 150, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, whiteSpace: "nowrap" }}>
+                          {summary === null ? <span style={{ fontSize: 12, color: FIRE.textMuted }}>—</span>
+                            : sm ? <><span style={{ fontSize: 11.5, color: FIRE.textSecondary }}>{fmtDay(sm.last)}</span><ResultBadge pass={sm.outcome !== "fail"}>{sm.outcome === "fail" ? "FAIL" : "PASS"}</ResultBadge></>
+                            : <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Never checked</span>}
+                        </span>
+                        <span style={{ width: 60, textAlign: "right", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, ...FS.num }}>{summary === null ? "—" : (sm ? sm.n : 0)}</span>
+                        <button onClick={() => setExpanded(open ? "" : r.id)} aria-expanded={open} title={open ? "Hide checks" : "Show checks"} style={{ width: 22, background: "none", border: "none", padding: 0, cursor: "pointer", color: FIRE.textMuted, display: "inline-flex", justifyContent: "center" }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+                      </div>
                   {open && (
                     <div style={{ padding: "0 0 12px 28px" }}>
                       {checksErr && (
@@ -12474,10 +12511,12 @@ function ApparatusChecksReport({ S, dept, back }) {
                       })}
                     </div>
                   )}
-                </div>
-              );
-            })}
-          </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </>);
       })()}
       {loaded && !err && rigs.length === 0 && (
