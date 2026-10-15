@@ -1,5 +1,6 @@
 -- =====================================================================
--- RETEST for ai_outputs_session_id_2026-10-15.sql.
+-- RETEST for ai_outputs_session_id_2026-10-15.sql. (2026-10-15: C/G accept migration 2's message too, and pick an
+-- UNflagged everyone session, so this stays a valid regression test after training_sessions_is_meeting.)
 -- RAN 2026-10-15 on live: 16 passed, 0 failed, 4 skipped. North Hood A-H all PASS; Lipan A-E, G, H PASS (F skipped,
 -- no agenda). INFO I: a non-leader reads every minutes row of their department via RLS (North Hood 15 of 15) —
 -- the existing department-wide read, unchanged by this migration. READ-ONLY IN EFFECT — run AFTER the migration, separately.
@@ -58,7 +59,8 @@ BEGIN
     -- fixtures, read as the table owner
     SELECT id INTO v_minutes  FROM public.ai_outputs WHERE department_id = rec.department_id AND feature = 'minutes' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1;
     SELECT id INTO v_mtg      FROM public.training_sessions WHERE department_id = rec.department_id AND audience IN ('leadership', 'board') ORDER BY date DESC LIMIT 1;
-    SELECT id INTO v_everyone FROM public.training_sessions WHERE department_id = rec.department_id AND (audience IS NULL OR audience NOT IN ('leadership', 'board')) ORDER BY date DESC LIMIT 1;
+    SELECT ts.id INTO v_everyone FROM public.training_sessions ts WHERE ts.department_id = rec.department_id AND (ts.audience IS NULL OR ts.audience NOT IN ('leadership', 'board'))
+       AND NOT coalesce((to_jsonb(ts) ->> 'is_meeting')::boolean, false) ORDER BY ts.date DESC LIMIT 1;   -- an UNflagged session (works before and after migration 2)
     SELECT id INTO v_other_mtg FROM public.training_sessions WHERE department_id <> rec.department_id AND audience IN ('leadership', 'board') ORDER BY date DESC LIMIT 1;
     SELECT id INTO v_other_min FROM public.ai_outputs WHERE department_id <> rec.department_id AND feature = 'minutes' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1;
     SELECT id INTO v_agenda   FROM public.ai_outputs WHERE department_id = rec.department_id AND feature = 'agenda' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1;
@@ -117,7 +119,7 @@ BEGIN
       EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
       END;
       n := n + 1;
-      IF v_err = 'Only a leadership or board meeting can hold minutes' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  C training session refused%s', chr(10));
+      IF v_err IN ('Only a leadership or board meeting can hold minutes', 'Only a meeting can hold minutes') THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  C training session refused%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  C training session -> "%s"%s', v_err, chr(10)); END IF;
     END IF;
 
@@ -177,7 +179,7 @@ BEGIN
       EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
       END;
       n := n + 1;
-      IF v_err = 'Only a leadership or board meeting can hold minutes' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  G direct UPDATE refused by the trigger%s', chr(10));
+      IF v_err IN ('Only a leadership or board meeting can hold minutes', 'Only a meeting can hold minutes') THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  G direct UPDATE refused by the trigger%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  G direct UPDATE -> "%s"%s', v_err, chr(10)); END IF;
     END IF;
 
