@@ -29,6 +29,7 @@ import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
+import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView } from "./appUpdate";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -1631,7 +1632,7 @@ function FormerMembers({ S, members, setMembers, meId, notify }) {
   );
 }
 function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests, members, setMembers, meId, notify }) {
-  const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
+  const [view, setView] = useRestorableView("settings", null);   // null = hub cards; else a sub-screen key (survives an app-update reload)
   const isDA = isDeptAdmin(role);
   const isDeptAdminOnly = hasAny(role, ["Department Admin"]);   // the Admin section is a Department Admin's alone — not Project Admin
   const back = () => setView(null);
@@ -2337,10 +2338,24 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState(null);
   const [myMemberId, setMyMemberId] = useState(null);
   const [identityChecked, setIdentityChecked] = useState(false);
-  const [screen, setScreen] = useState("dashboard");
+  /* WHERE THEY WERE before an app-update reload (src/appUpdate.js) — read once, then the key is gone. A deep link in
+     the URL wins (routeDeepLink below still owns routing for it), and the one-shot check-in / handoff screens are never
+     restored: they need the pending state that came with the scan. */
+  const bootPlace = () => {
+    const deepLink = typeof window !== "undefined" && ["checkin", "handoff"].some((k) => new URLSearchParams(window.location.search).has(k));
+    const r = takeRestoredPlace();
+    return deepLink || !r || !r.screen || r.screen === "checkin" || r.screen === "handoff" ? null : r;
+  };
+  const [screen, setScreen] = useState(() => bootPlace()?.screen || "dashboard");
   useEffect(() => { if (screen === "ai") setScreen("training"); }, [screen]);   // retired AI Training page → redirect any stale deep-link
-  const [packetId, setPacketId] = useState(null);
-  const [navArg, setNavArg] = useState(null);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
+  const [packetId, setPacketId] = useState(() => bootPlace()?.packetId ?? null);
+  const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
+  // What a reload (app update or manual refresh) carries. A ref kept current every render, registered by an effect so
+  // StrictMode's mount/unmount/mount can't leave it cleared; unmount (sign-out) clears it so a refresh on the login
+  // screen never carries the old screen.
+  const placeRef = useRef(null);
+  placeRef.current = { screen, packetId, navArg };
+  useEffect(() => { registerPlaceGetter(() => placeRef.current); return clearPlaceGetter; }, []);
   const [drawer, setDrawer] = useState(false);
   const [library, setLibrary] = useState(SEED);
   const [requests, setRequests] = useState([]);
@@ -2765,7 +2780,12 @@ export default function App() {
   }, [role]);
   const S = baseStyles();
 
-  function go(k, arg) { setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null); }
+  function go(k, arg) {
+    // A newer build is waiting and nothing is unsaved or in flight: they're leaving this view anyway, so reload
+    // straight onto the screen they're heading to (src/appUpdate.js). Otherwise navigate as always.
+    if (applyAtBoundary({ screen: k, navArg: arg ?? null, packetId: null })) return;
+    setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null);
+  }
   // Native push registration — once we know which member is signed in, so the device token is filed
   // against the right person. No-op on web and while VITE_PUSH_ENABLED is off. Tapping a push opens
   // the inbox rather than deep-linking to the subject: the inbox is the one destination we control.
@@ -9292,7 +9312,7 @@ function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open
    NO GRANTS TILE. A tile that opens nothing teaches people the app is broken. When grants exist it
    is one more `if (view === ...)` line and one more card. */
 function Funding({ S, role, notify, dept, meId, members }) {
-  const [view, setView] = useState(null);   // null = hub tiles
+  const [view, setView] = useRestorableView("funding", null);   // null = hub tiles (survives an app-update reload)
 
   /* MONEY RAISED — a headline total, and the two dated figures it is made of.
 
@@ -12394,7 +12414,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
 /* ---------------- Reports (leadership reporting hub) ---------------- */
 // Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
 function Reports({ S, role, members, sessions, dept, meId, notify }) {
-  const [view, setView] = useState(null);   // null = hub cards; "attendance" | "chief"
+  const [view, setView] = useRestorableView("reports", null);   // null = hub cards; "attendance" | "chief" (survives an app-update reload)
   const [openReport, setOpenReport] = useState(null);   // a saved report picked from the hub's peek opens straight into its viewer
   if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
   if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} initialReport={openReport} back={() => { setOpenReport(null); setView(null); }} />;

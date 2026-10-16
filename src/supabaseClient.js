@@ -30,7 +30,18 @@ export const setOnSessionExpired = (fn) => { onSessionExpired = fn; };
 // a double write. We do not touch 5xx/network errors (those may have applied). If the refresh itself
 // fails, the session is truly dead → hand off to the app to prompt a re-login.
 let refreshInFlight = null;
+// WRITES IN FLIGHT — counted here, at the one chokepoint, so the app-update watcher (src/appUpdate.js) never
+// reloads under a save, an RPC or a station clock-in/out. Any non-GET/HEAD counts (RPCs are POST, reads included —
+// the conservative side). Counting only; nothing about the request changes.
+let inFlightWrites = 0;
+export const writesInFlight = () => inFlightWrites;
 function authFetch(input, init = {}) {
+  const method = String(init.method || (input && input.method) || "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") return authFetchInner(input, init);
+  inFlightWrites += 1;
+  return authFetchInner(input, init).finally(() => { inFlightWrites = Math.max(0, inFlightWrites - 1); });
+}
+function authFetchInner(input, init = {}) {
   const url = typeof input === "string" ? input : (input && input.url) || "";
   if (url.includes("/auth/v1/")) return fetch(input, init);   // never intercept auth endpoints — prevents refresh recursion
   return fetch(input, init).then(async (res) => {
