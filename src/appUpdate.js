@@ -58,6 +58,12 @@ let reloadingForUpdate = false; // set by applyUpdate: its own saved place (e.g.
 
 export const updateReady = () => !!deployed;
 export function registerPlaceGetter(fn) { placeGetter = typeof fn === "function" ? fn : () => null; }
+// The person CLOSED the Ask B4C panel: drop its part of any saved place (a refresh after closing opens it fresh), but
+// keep the screen/sub-view/scroll. Only this explicit close clears — an OPEN panel is still carried across a reload.
+export function forgetSavedAsk() {
+  const r = readJSON(ss(), RESTORE_KEY);
+  if (r && r.ask) { r.ask = null; writeJSON(ss(), RESTORE_KEY, r); }
+}
 // App unmount (sign-out): stop saving, and FORGET anything saved — the place can hold the Ask B4C conversation, which
 // must never be restored into whoever signs in next on this tab.
 export const clearPlaceGetter = () => { placeGetter = () => null; removeKey(ss(), RESTORE_KEY); };
