@@ -63,7 +63,7 @@ The end-to-end test now covers this: 15 of 15 pass.
 The model has never been called — all tests use fake stand-ins. Do not promote an AI feature that has never produced a real answer.
 
 - [ ] Ashlea adds `ANTHROPIC_API_KEY`, `SUPABASE_URL` and `SUPABASE_ANON_KEY` to Vercel **Preview**.
-- [ ] Apply `sql/assistant_usage_DRAFT.sql`, then run the RETEST and expect 0 failed.
+- [x] Applied `sql/assistant_usage_2026-10-16.sql` (2026-10-16; state check clean, 157 policies unchanged). RETEST on live: 31 passed, 0 failed, 0 skipped.
 - [ ] On the signed-in preview, viewing as a member, ask real questions and check that each answer is correct and shows its grounding:
   - my hours this month
   - which certs are expiring

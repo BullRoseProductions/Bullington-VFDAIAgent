@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for assistant_usage_DRAFT.sql.
+-- RETEST for assistant_usage_2026-10-16.sql. RAN 2026-10-16 on live: 31 passed, 0 failed, 0 skipped (all 5 departments).
 -- Once: anon can't execute the RPC; authenticated has no privilege on the table.
 -- For each department with a signed-in-able member, sign in exactly as the app does (JWT email claim + role
 -- authenticated) and check:

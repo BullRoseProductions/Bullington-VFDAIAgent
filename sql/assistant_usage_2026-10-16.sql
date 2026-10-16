@@ -1,6 +1,8 @@
 -- =====================================================================
 -- ASK B4C (assistant) — per-department monthly ceiling on assistant turns.
--- Record: Claude gate review PASS 2026-10-16 (recorded BEFORE apply); ceiling 500 confirmed. Was: DRAFT — for the reviewing Claude, then Ashlea applies. Test script: sql/assistant_usage_RETEST.sql (run AFTER).
+-- Record: Claude gate review PASS 2026-10-16 (recorded BEFORE apply); ceiling 500 confirmed.
+-- APPLIED by hand 2026-10-16. State check: rls_on true · 0 policies · 0 rows · anon_execute false · auth_select false ·
+-- 157 other policies (unchanged). RETEST on live: 31 passed, 0 failed, 0 skipped (all 5 departments). Was: DRAFT — for the reviewing Claude, then Ashlea applies. Test script: sql/assistant_usage_RETEST.sql (run AFTER).
 --
 -- WHAT IT IS. The same shape as image_gen_usage (reviewed PASS, live 2026-10-15), for /api/assistant: each department
 -- may run at most SAFETY_CEILING assistant turns per calendar month (America/Chicago). One TURN = one question the
