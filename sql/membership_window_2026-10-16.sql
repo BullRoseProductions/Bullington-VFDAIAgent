@@ -1,10 +1,11 @@
 -- =====================================================================
 -- MEMBERSHIP WINDOW — attendance only inside a member's start..end dates; a Department-Admin-only termination date.
--- APPLIED by hand 2026-10-16 (before a recorded review PASS). State check on live: rls_on true · 0 policies · 0 rows ·
+-- Record: Claude gate review PASS (exemplary) 2026-10-16 — recorded AFTER apply (applied by hand earlier the same day).
+-- APPLIED by hand 2026-10-16. State check on live: rls_on true · 0 policies · 0 rows ·
 -- anon_execute false · auth_window_execute false · auth_select false · triggers 2 · 157 policies (unchanged).
 -- RETEST on live: 50 passed, 0 failed, 8 skipped. Was: DRAFT — for the reviewing Claude, then Ashlea applies. Test script: sql/membership_window_RETEST.sql (run AFTER,
 -- separately). Cleanup of rows that already break the rule is a SEPARATE, previewed script:
--- sql/membership_window_cleanup_PREVIEW.sql then sql/membership_window_cleanup_DRAFT.sql.
+-- sql/membership_window_cleanup_PREVIEW(_compact).sql then sql/membership_window_cleanup_2026-10-16.sql.
 --
 -- THE PROBLEM. Nothing on the server checks that a member belonged to the department on the drill's date. The
 -- officer roster (toggleAttend — a direct session_attendance INSERT under RLS) and the QR path (member_check_in)

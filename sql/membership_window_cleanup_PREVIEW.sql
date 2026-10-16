@@ -1,6 +1,6 @@
 -- =====================================================================
 -- MEMBERSHIP WINDOW CLEANUP — PREVIEW. READ-ONLY. Run AFTER membership_window (it reads member_separation), BEFORE
--- membership_window_cleanup_DRAFT.sql. Nothing here changes anything.
+-- membership_window_cleanup_2026-10-16.sql. Nothing here changes anything.
 --
 -- One result set, one row per thing the cleanup WOULD delete, plus INFO rows for what it deliberately KEEPS:
 --   DELETE prejoin    attendance on a drill dated before the member's start (joined_date, else Jan 1 of `joined`'s year)

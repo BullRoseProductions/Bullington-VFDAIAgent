@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for membership_window_DRAFT.sql. READ-ONLY IN EFFECT — run AFTER the migration, separately.
+-- RETEST for membership_window_2026-10-16.sql. READ-ONLY IN EFFECT — run AFTER the migration, separately.
 -- RAN 2026-10-16 on live: 50 passed, 0 failed, 8 skipped. V5 (Project Admin refused) skipped in EVERY department — no
 -- non-DA Project Admin exists live, so the PA exclusion is proven only by the PGlite mutation run, not on live.
 -- Once: anon can't execute the RPCs; nobody but the owner can call the window helper; no view exposes terminated_on;

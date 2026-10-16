@@ -1,5 +1,6 @@
 -- =====================================================================
--- MEMBERSHIP WINDOW CLEANUP — ONE-OFF DATA REPAIR. APPLIED by hand 2026-10-16 (before a recorded review PASS). Do NOT re-run
+-- MEMBERSHIP WINDOW CLEANUP — ONE-OFF DATA REPAIR. Record: Claude gate review PASS (exemplary) 2026-10-16 — recorded AFTER apply (applied by hand earlier the same day).
+-- APPLIED by hand 2026-10-16. Do NOT re-run
 -- as-is (the counts are spent). Result on live: paul_terminated_on 2026-10-09 · paul_certs 0 · prejoin_left 0 ·
 -- postexit_left 0 · paul_attendance_kept 11. Deleted: 1 pre-join row (Kai Newton, 9/18 drill), 0 post-exit, 41 Paul certs.
 -- For a later pass (e.g. Jared Allen once his join date is on file): re-run the PREVIEW and refill the constants.
