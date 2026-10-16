@@ -35,9 +35,14 @@
 | Update | Reloads and records exactly one attempt |
 | Background tab | Correctly skipped |
 
-## Still to verify before promoting (needs a signed-in preview session)
+## Acceptance pass (2026-10-16, signed-in preview, build `0bce233`)
 
-- [ ] After an update reload, the person lands on the same screen (including the Settings › Former members sub-view).
-- [ ] The silent swap when navigating: the reload lands on the destination screen.
+| # | Test | Result |
+|---|---|---|
+| 1 | From Settings › Former members, the update pill → Update | **PASS.** The reload landed back on Former members. The saved place was consumed and exactly one attempt was recorded. |
+| 2 | With an update pending (fresh fake id), click Roster | **PASS.** The reload landed on Roster, the destination, not on the screen that was left. |
+| 3 | Manual refresh on Reports › Station Hours (pagehide) | **PASS.** Landed back on Station Hours. `ATTEMPT_KEY` was untouched, so a manual refresh doesn't count against the 3-reload cap. |
 
-Once both pass, promote the usual way. Notify crew stays held back. Rollback is the current release, `3f21678`.
+**Known gap — scroll is not restored.** The app scrolls inside an inner panel, not the window, so the `window.scrollY` that gets saved is always 0. Scroll was best-effort in the spec, so this doesn't block promotion. **Follow-up:** save and restore the scroll of the main content panel instead.
+
+The fakes were reset after the pass: the test keys, attempts, firstSeen and dismissed entries were all removed.
