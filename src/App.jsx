@@ -3098,7 +3098,13 @@ export default function App() {
             Scoped to <main> ONLY. The sidebar and topbar stay outside, so when a page breaks the
             menu it takes to escape is still rendered. A boundary that swallows its own escape
             hatch is a white screen with extra steps. */}
-        <main style={{ ...S.content, ...(askOpen && wide ? { marginRight: ASK_PANEL_W } : {}) }}>
+        <main style={{ ...S.content, ...(askOpen && wide ? {
+          // Docked: the content box (width 100%, max 1080, auto margins) is capped to the space beside the panel and
+          // centred in it — a bare marginRight would just push a 100%-wide box under the panel.
+          maxWidth: `min(1080px, calc(100% - ${ASK_PANEL_W}px))`,
+          marginLeft: `max(0px, calc((100% - ${ASK_PANEL_W}px - 1080px) / 2))`,
+          marginRight: `calc(${ASK_PANEL_W}px + max(0px, calc((100% - ${ASK_PANEL_W}px - 1080px) / 2)))`,
+        } : {}) }}>
           <ErrorBoundary key={screen}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
