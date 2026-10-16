@@ -20,7 +20,7 @@
 
 ## Follow-ups
 
-- **Jared Allen.** No join date on file catches him. Once his real join date is set, re-run the compact preview, refill the cleanup constants and run a second pass.
+- **Jared Allen — CLOSED 2026-10-16, nothing to delete.** His join date of 2026-08-06 is on file, and exactly one member has his name. The full preview re-ran with prejoin 0, postexit 0 and Paul certs 0. `sql/jared_allen_window_CHECK.sql` shows his 5 recorded drills (8/20, 8/27, 9/10, 9/18, 10/8), all on or after Aug 6. The early drills seen on screen were most likely the roster listing him as absent at pre-join drills, which "Joined later" now handles. No second cleanup pass was written.
 - **Other former members.** The Department Admin records them in Settings & Support › Admin › Former members, then we run one more preview → cleanup pass for their post-exit rows.
 - **Paul's 41 proof files.** The reviewer asked for these to be deleted from storage. They are **HELD**, because `approve_cert_submission` copies the *submission's* `proof_path` onto the cert, so each file is the same object the kept cert submission points at. Deleting the files would break his submission history, which the brief says to keep. Waiting on Ashlea's decision.
 - **Client.** The termination control moved to Settings & Support › Admin › Former members (Department Admin only), relabelled "Former member", with Reactivate. That is commit `548100f`, together with `097f813`. **Live on production 2026-10-16** as release `0eb2e7a` ("Release industrial-noir-6"); `version.json` serves `{"build":"0eb2e7a"}`. Rollback is `9e6d6ea`. Notify crew is still held back: it is absent from the bundle and `/api/notify-session` returns 404.
