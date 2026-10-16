@@ -4781,6 +4781,105 @@ function StationClockCard({ S, dept, go }) {
     </div>
   );
 }
+/* ---------------- Ask B4C — the member assistant (Phase 1: answers + SOPs + navigation, never acts) ----------------
+   One box for "where do I stand / what does our SOP say / take me there". The server (api/assistant.js) answers from
+   the member's OWN records through a fixed set of read-only tools that run as them (RLS-scoped) and cites the
+   department's SOPs; it never writes. This component only sends the conversation and renders what comes back:
+   grounding chips ("From your records" / "From your SOPs" / "General guidance") so a guessed number can't pass as fact,
+   and a navigation it re-checks against THIS person's own nav before going anywhere. Blue = AI, as in Station Q&A. */
+const ASK_SUGGESTIONS = ["My hours this year", "Expiring certs", "Next drill", "Am I clocked in?", "Ask about an SOP"];
+const ASK_RECORD_LABEL = { am_i_checked_in: "station clock", my_hours: "hours", my_certs: "certs", my_schedule: "schedule", my_attendance: "attendance" };
+function AskB4C({ role, go, dept, onClose }) {
+  const [msgs, setMsgs] = useState([]);   // { role, content, meta? }
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const endRef = useRef(null);
+  const inputRef = useRef(null);
+  useEditorOpen(!!text.trim() || busy);   // a half-typed question or an answer in flight blocks the auto-update reload
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [msgs, busy]);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  // The server's open_screen allowlist is wider than any one person's nav; only go where this person could tap.
+  const canOpen = (k) => k === "notifications" || NAV.some((n) => n.key === k && hasAny(role, n.roles) && moduleEnabled(k, dept?.disabled_modules));
+  async function ask(q) {
+    const question = String(q || "").trim();
+    if (!question || busy) return;
+    if (question === "Ask about an SOP") { setText("What does our SOP say about "); inputRef.current?.focus(); return; }
+    const next = [...msgs, { role: "user", content: question }];
+    setMsgs(next); setText(""); setBusy(true); setErr("");
+    try {
+      const res = await authedFetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next.map(({ role: r, content }) => ({ role: r, content })) }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || "Ask B4C couldn't answer just now — please try again.");
+      setMsgs((m) => [...m, { role: "assistant", content: data.text, meta: { records: data.records || [], sops: data.sops, limited: !!data.limited } }]);
+      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onClose(); go(data.navigate); }, 700);
+    } catch (e) {
+      setErr(e.message || "Ask B4C couldn't answer just now — please try again.");
+      setMsgs((m) => m.slice(0, -1)); setText(question);   // give the question back so nothing is lost
+    } finally { setBusy(false); }
+  }
+  const chip = (label, title) => <span key={label} title={title} style={{ ...NOIR_AI.chip, fontSize: 9.5, padding: "3px 8px" }}>{label}</span>;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 150, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(16px, env(safe-area-inset-top)) 16px 16px", overflowY: "auto" }}>
+      <div role="dialog" aria-modal="true" aria-label="Ask B4C" onClick={(e) => e.stopPropagation()}
+        style={{ ...FS.cardNoir, backgroundImage: NOIR_AI.glow, width: "min(640px, 100%)", marginTop: 24, padding: 0, display: "flex", flexDirection: "column", maxHeight: "calc(100dvh - 64px)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+          <Sparkles size={18} color={NOIR_AI.blue} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Ask B4C</div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>Your hours, certs, schedule and SOPs — from your own records. It can't change anything.</div>
+          </div>
+          <button aria-label="Close" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} color={FIRE.textMuted} /></button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, minHeight: 180 }}>
+          {msgs.length === 0 && <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ask about your hours, certifications, upcoming drills, whether you&rsquo;re clocked in, or what your department&rsquo;s SOPs say. You can also say &ldquo;open my hours&rdquo;.</div>}
+          {msgs.map((m, i) => m.role === "user" ? (
+            <div key={i} style={{ alignSelf: "flex-end", maxWidth: "85%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: "12px 12px 3px 12px", padding: "8px 12px", fontSize: 13.5, color: FIRE.textPrimary, whiteSpace: "pre-wrap" }}>{m.content}</div>
+          ) : (
+            <div key={i} style={{ alignSelf: "flex-start", maxWidth: "92%", borderLeft: `3px solid ${NOIR_AI.blue}`, paddingLeft: 11 }}>
+              <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.content}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                {m.meta?.records?.length > 0 && chip(`From your records · ${m.meta.records.map((r) => ASK_RECORD_LABEL[r] || r).join(", ")}`, "Read from your own records just now")}
+                {m.meta?.sops && (m.meta.sops.cited?.length
+                  ? chip(`From your SOPs · ${m.meta.sops.cited.join(", ")}`, "Cited from your department's documents")
+                  : chip("General guidance", "Not from your department's SOPs — confirm against them"))}
+              </div>
+            </div>
+          ))}
+          {busy && <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: NOIR_AI.blueText }}><Loader2 size={14} className="spin" /> Checking…</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
+          <div ref={endRef} />
+        </div>
+        <div style={{ padding: "10px 16px 14px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+          {msgs.length === 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {ASK_SUGGESTIONS.map((q) => <button key={q} disabled={busy} onClick={() => ask(q)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}>{q}</button>)}
+            </div>
+          )}
+          <form onSubmit={(e) => { e.preventDefault(); ask(text); }} style={{ display: "flex", gap: 8 }}>
+            <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask about your hours, certs, drills or SOPs…" maxLength={1000} style={{ ...FS.input, flex: 1, minWidth: 0 }} />
+            <button type="submit" disabled={busy || !text.trim()} style={{ ...FS.btnPrimary, opacity: busy || !text.trim() ? 0.6 : 1 }}><Send size={15} /> Ask</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+function AskB4CLauncher({ role, go, dept }) {
+  const [open, setOpen] = useState(false);
+  return (<>
+    <button onClick={() => setOpen(true)} style={{ ...FS.cardNoir, backgroundImage: NOIR_AI.glow, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+      <span style={{ width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: "rgba(79,144,214,.14)", border: "1px solid rgba(79,144,214,.3)" }}><Sparkles size={18} color={NOIR_AI.blue} /></span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, color: FIRE.textPrimary }}>Ask B4C</span>
+        <span style={{ display: "block", fontSize: 12.5, color: FIRE.textSecondary }}>&ldquo;How many hours do I have?&rdquo; &middot; &ldquo;When does my EMT expire?&rdquo; &middot; &ldquo;What does our SOP say about&hellip;&rdquo;</span>
+      </span>
+      <ChevronRight size={16} color={NOIR_AI.blueText} />
+    </button>
+    {open && <AskB4C role={role} go={go} dept={dept} onClose={() => setOpen(false)} />}
+  </>);
+}
 function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, isEqMgr }) {
   // NOTE: no useProofViewer here any more — PersonalView owns the certs card and its own proof viewer.
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -4846,6 +4945,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
           (it renders nothing once complete); only its place in the order changed. */}
       <OnboardingCard S={S} me={me} go={go} dept={dept} />
+      {/* Ask B4C — the member assistant (answers from their own records + SOPs; never acts) */}
+      <AskB4CLauncher role={role} go={go} dept={dept} />
       {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
       <StationFundraiserCard />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}

@@ -1,0 +1,17 @@
+import { todayCT, ctMidnight, hoursRange, hoursTotals, certStatus, pickSopPassages, SCREENS } from "../api/assistant.js";
+const eq = (a, b, m) => { const ok = JSON.stringify(a) === JSON.stringify(b); console.log(ok ? "PASS" : "FAIL", m, ok ? "" : `got ${JSON.stringify(a)} want ${JSON.stringify(b)}`); };
+eq(ctMidnight("2026-10-01").toISOString(), "2026-10-01T05:00:00.000Z", "CDT midnight");
+eq(ctMidnight("2026-01-01").toISOString(), "2026-01-01T06:00:00.000Z", "CST midnight");
+eq(todayCT(new Date("2026-10-17T03:30:00Z")), "2026-10-16", "todayCT late evening Central");
+const now = new Date("2026-10-16T22:00:00Z");
+eq(hoursRange("month", now).from.toISOString(), "2026-10-01T05:00:00.000Z", "month from");
+eq([hoursRange("last", now).from.toISOString(), hoursRange("last", now).to.toISOString()], ["2026-09-01T05:00:00.000Z", "2026-10-01T05:00:00.000Z"], "last month");
+eq(hoursRange("quarter", now).from.toISOString(), "2026-10-01T05:00:00.000Z", "quarter from");
+eq(hoursRange("year", now).from.toISOString(), "2026-01-01T06:00:00.000Z", "year from");
+eq(hoursRange("last", new Date("2026-01-10T18:00:00Z")).from.toISOString(), "2025-12-01T06:00:00.000Z", "last month across New Year");
+eq(hoursTotals([{hours:2.5,verified:true,kind:"standby"},{hours:1.25,verified:true,kind:"training"},{hours:3,verified:false,kind:"standby"}]), {credited:3.8,standby:2.5,training:1.3,unverified:3,verified_shifts:2,shifts:3}, "hours totals (verified only credited)");
+eq([certStatus("2026-09", now), certStatus("2026-10", now), certStatus("2027-01", now), certStatus("2027-02", now), certStatus("", now)], ["expired","expiring","expiring","current","no date"], "certStatus thresholds");
+const small = pickSopPassages([{name:"SOP 1",text:"short"}], "x"); eq(small.mode, "all", "small library sent whole");
+const big = pickSopPassages([{name:"Hose SOP", text: ("Hose testing is annual.\n\n" + "filler words here ".repeat(150) + "\n\n").repeat(40)}, {name:"Vehicle SOP", text: ("Emergency driving rules apply.\n\n" + "other text ".repeat(200) + "\n\n").repeat(40)}], "when is hose testing");
+eq([big.mode, big.docs.length > 0, big.docs.every(d => d.name === "Hose SOP"), big.docs.reduce((n,d)=>n+d.text.length,0) <= 24000], ["passages", true, true, true], "big library -> matching passages only, capped");
+eq(["checkin","department"].some(k => k in SCREENS), false, "checkin/department not openable");
