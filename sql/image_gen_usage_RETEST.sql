@@ -1,5 +1,6 @@
 -- =====================================================================
--- RETEST for image_gen_usage_DRAFT.sql. READ-ONLY IN EFFECT — run AFTER the migration, separately.
+-- RETEST for image_gen_usage_2026-10-15.sql.
+-- RAN 2026-10-15 on live: 36 passed, 0 failed, 0 skipped (all 5 departments A-E). READ-ONLY IN EFFECT — run AFTER the migration, separately.
 -- Once: anon can't execute the RPC; authenticated has no privilege on the table; a bad tier is refused.
 -- For each department with a signed-in-able member, sign in exactly as the app does (JWT email claim + role
 -- authenticated) and check:

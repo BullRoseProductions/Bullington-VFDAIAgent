@@ -1,5 +1,7 @@
 -- =====================================================================
--- IMAGE GENERATOR — per-department monthly safety ceiling. DRAFT — NOT APPLIED — NOT YET REVIEWED.
+-- IMAGE GENERATOR — per-department monthly safety ceiling.
+-- Record: Claude gate review PASS, then applied by hand 2026-10-15. Idempotent. State check on live: rls_on true · 0 policies ·
+-- 0 rows · anon_execute false · auth_select false · 157 other policies (unchanged). RETEST on live: 36 passed, 0 failed, 0 skipped.
 -- For the reviewing Claude, then Ashlea applies. Test script: sql/image_gen_usage_RETEST.sql (run AFTER, separately).
 --
 -- WHAT IT IS. A runaway backstop for /api/image (OpenAI gpt-image-1): each department may generate at most
