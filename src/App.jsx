@@ -4823,7 +4823,7 @@ function AskB4C({ role, go, dept, onClose }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 150, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(16px, env(safe-area-inset-top)) 16px 16px", overflowY: "auto" }}>
       <div role="dialog" aria-modal="true" aria-label="Ask B4C" onClick={(e) => e.stopPropagation()}
-        style={{ ...FS.cardNoir, backgroundImage: NOIR_AI.glow, width: "min(640px, 100%)", marginTop: 24, padding: 0, display: "flex", flexDirection: "column", maxHeight: "calc(100dvh - 64px)" }}>
+        style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "min(640px, 100%)", marginTop: 24, padding: 0, display: "flex", flexDirection: "column", maxHeight: "calc(100dvh - 64px)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           <Sparkles size={18} color={NOIR_AI.blue} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -4869,7 +4869,7 @@ function AskB4C({ role, go, dept, onClose }) {
 function AskB4CLauncher({ role, go, dept }) {
   const [open, setOpen] = useState(false);
   return (<>
-    <button onClick={() => setOpen(true)} style={{ ...FS.cardNoir, backgroundImage: NOIR_AI.glow, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+    <button onClick={() => setOpen(true)} style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
       <span style={{ width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: "rgba(79,144,214,.14)", border: "1px solid rgba(79,144,214,.3)" }}><Sparkles size={18} color={NOIR_AI.blue} /></span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, color: FIRE.textPrimary }}>Ask B4C</span>
