@@ -1768,6 +1768,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
 }
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
+  { key: "ask", label: "Ask B4C", Icon: Sparkles, roles: ROLES },   // the member assistant — one tap from anywhere (answers from your own records; never acts)
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
@@ -3094,6 +3095,7 @@ export default function App() {
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
+          {screen === "ask" && <AskB4CScreen role={role} go={go} dept={dept} />}
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
@@ -4789,7 +4791,7 @@ function StationClockCard({ S, dept, go }) {
    and a navigation it re-checks against THIS person's own nav before going anywhere. Blue = AI, as in Station Q&A. */
 const ASK_SUGGESTIONS = ["My hours this year", "Expiring certs", "Next drill", "Am I clocked in?", "Ask about an SOP"];
 const ASK_RECORD_LABEL = { am_i_checked_in: "station clock", my_hours: "hours", my_certs: "certs", my_schedule: "schedule", my_attendance: "attendance" };
-function AskB4C({ role, go, dept, onClose }) {
+function AskB4C({ role, go, dept, onClose, embedded = false }) {
   const [msgs, setMsgs] = useState([]);   // { role, content, meta? }
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -4798,7 +4800,7 @@ function AskB4C({ role, go, dept, onClose }) {
   const inputRef = useRef(null);
   useEditorOpen(!!text.trim() || busy);   // a half-typed question or an answer in flight blocks the auto-update reload
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [msgs, busy]);
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => { if (!embedded) inputRef.current?.focus(); }, []);   // the page version doesn't pop a phone keyboard on arrival
   // The server's open_screen allowlist is wider than any one person's nav; only go where this person could tap.
   const canOpen = (k) => k === "notifications" || NAV.some((n) => n.key === k && hasAny(role, n.roles) && moduleEnabled(k, dept?.disabled_modules));
   async function ask(q) {
@@ -4813,24 +4815,23 @@ function AskB4C({ role, go, dept, onClose }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || "Ask B4C couldn't answer just now — please try again.");
       setMsgs((m) => [...m, { role: "assistant", content: data.text, meta: { records: data.records || [], sops: data.sops, limited: !!data.limited } }]);
-      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onClose(); go(data.navigate); }, 700);
+      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onClose?.(); go(data.navigate); }, 700);
     } catch (e) {
       setErr(e.message || "Ask B4C couldn't answer just now — please try again.");
       setMsgs((m) => m.slice(0, -1)); setText(question);   // give the question back so nothing is lost
     } finally { setBusy(false); }
   }
   const chip = (label, title) => <span key={label} title={title} style={{ ...NOIR_AI.chip, fontSize: 9.5, padding: "3px 8px" }}>{label}</span>;
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 150, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(16px, env(safe-area-inset-top)) 16px 16px", overflowY: "auto" }}>
-      <div role="dialog" aria-modal="true" aria-label="Ask B4C" onClick={(e) => e.stopPropagation()}
-        style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "min(640px, 100%)", marginTop: 24, padding: 0, display: "flex", flexDirection: "column", maxHeight: "calc(100dvh - 64px)" }}>
+  const panel = (
+      <div {...(embedded ? { "aria-label": "Ask B4C" } : { role: "dialog", "aria-modal": "true", "aria-label": "Ask B4C", onClick: (e) => e.stopPropagation() })}
+        style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: embedded ? "100%" : "min(640px, 100%)", maxWidth: 760, marginTop: embedded ? 0 : 24, padding: 0, display: "flex", flexDirection: "column", ...(embedded ? { minHeight: 420, maxHeight: "calc(100dvh - 220px)" } : { maxHeight: "calc(100dvh - 64px)" }) }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
           <Sparkles size={18} color={NOIR_AI.blue} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Ask B4C</div>
             <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>Your hours, certs, schedule and SOPs — from your own records. It can't change anything.</div>
           </div>
-          <button aria-label="Close" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} color={FIRE.textMuted} /></button>
+          {!embedded && <button aria-label="Close" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} color={FIRE.textMuted} /></button>}
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, minHeight: 180 }}>
           {msgs.length === 0 && <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ask about your hours, certifications, upcoming drills, whether you&rsquo;re clocked in, or what your department&rsquo;s SOPs say. You can also say &ldquo;open my hours&rdquo;.</div>}
@@ -4863,7 +4864,22 @@ function AskB4C({ role, go, dept, onClose }) {
           </form>
         </div>
       </div>
+  );
+  if (embedded) return panel;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 150, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(16px, env(safe-area-inset-top)) 16px 16px", overflowY: "auto" }}>
+      {panel}
     </div>
+  );
+}
+// The sidebar entry: the same assistant as a page, so it's one tap from any screen.
+function AskB4CScreen({ role, go, dept }) {
+  return (
+    <PageShell band kicker="ASK B4C" title="Ask B4C" sub="Your hours, certs, schedule and SOPs — answered from your own records. It can take you to a screen, but it never changes anything.">
+      <NoirSkin>
+        <AskB4C role={role} go={go} dept={dept} embedded />
+      </NoirSkin>
+    </PageShell>
   );
 }
 function AskB4CLauncher({ role, go, dept }) {
