@@ -22152,7 +22152,10 @@ function GraphicStudio({ S, brand }) {
   async function genAI() {
     setAiLoading(true); setAiErr("");
     try {
-      const res = await authedFetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt }) });
+      // Pinned to this button's original behaviour: square, high. It never sent a size or quality, so it got the provider's
+      // square default at quality "auto" (≈ high for gpt-image-1); /api/image's new defaults (portrait, medium) are for the
+      // Image Generator, not this background. "high" is the closest pin the endpoint accepts (it takes medium|high).
+      const res = await authedFetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt, size: "1024x1024", quality: "high" }) });
       const data = await res.json();
       if (!res.ok || data.error) setAiErr(data.error || "AI image isn't available right now.");
       else if (data.image) { setBg(data.image); setUseBg(true); }
