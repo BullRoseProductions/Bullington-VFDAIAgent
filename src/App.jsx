@@ -21994,34 +21994,23 @@ function BrandKit({ S, role, brand, setBrand, setDept }) {
   );
 }
 
-/* ---------------- Graphics Studio (on-brand templates) ---------------- */
+/* ---------------- Graphics Studio — the cinematic generator (Image Generator Phase B) ----------------
+   Occasion in -> 3 on-brand concepts (/api/concepts, the Claude art director) -> pick one -> a full-bleed photo
+   (/api/image, gpt-image-1, metered against the department's monthly ceiling) -> B4C lays the REAL text crisp over the
+   open space (the model garbles text, so it never renders words) -> download. A free path skips both AI calls: use your
+   own photo. Client-only: no schema, no new DB read (Brand Kit comes in as `brand`, already loaded). */
 function escX(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function initialsOf(name) { return (String(name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase()) || "VF"; }
 function wrapLines(text, max) { const words = String(text || "").split(/\s+/); const lines = []; let cur = ""; words.forEach((w) => { if ((cur + " " + w).trim().length > max) { if (cur) lines.push(cur); cur = w; } else cur = (cur + " " + w).trim(); }); if (cur) lines.push(cur); return lines.length ? lines : [""]; }
-function tspans(lines, x, y, lh) { return lines.map((ln, i) => `<tspan x="${x}" y="${y + i * lh}">${escX(ln)}</tspan>`).join(""); }
 const GFX_SIZES = [
+  { key: "portrait", name: "Portrait 4:5", w: 1080, h: 1350, hint: "Taller feed post (default)" },
   { key: "square", name: "Square 1:1", w: 1080, h: 1080, hint: "Instagram / Facebook feed" },
-  { key: "portrait", name: "Portrait 4:5", w: 1080, h: 1350, hint: "Taller feed post" },
   { key: "story", name: "Story 9:16", w: 1080, h: 1920, hint: "Stories / Reels / TikTok" },
   { key: "landscape", name: "Landscape 16:9", w: 1200, h: 675, hint: "Facebook / X / website header" },
 ];
-function stackRows(rows, x, anchor, top, bottom) {
-  let total = 0;
-  rows.forEach((r, i) => { total += r.lines.length * r.lh + (i < rows.length - 1 ? (r.gap ?? 18) : 0); });
-  let y = top + Math.max(0, (bottom - top - total) / 2);
-  let out = "";
-  rows.forEach((r, idx) => {
-    r.lines.forEach((ln, i) => { out += `<text x="${x}" y="${Math.round(y + r.size + i * r.lh)}" text-anchor="${anchor}" font-family="${r.ff}" font-size="${r.size}" font-weight="${r.weight || 400}"${r.italic ? ' font-style="italic"' : ''}${r.spacing ? ` letter-spacing="${r.spacing}"` : ''} fill="${r.fill}">${escX(ln)}</text>`; });
-    y += r.lines.length * r.lh + (idx < rows.length - 1 ? (r.gap ?? 18) : 0);
-  });
-  return out;
-}
-const STYLES = [
-  { key: "bold", name: "Bold" },
-  { key: "badge", name: "Badge" },
-  { key: "checker", name: "Checkered" },
-  { key: "classic", name: "Classic" },
-];
+// The photo is rendered ONCE per orientation: portrait 2:3 (1024x1536) feeds Portrait 4:5, Square and Story 9:16 as
+// centre crops; Landscape 16:9 needs a landscape 3:2 render (a 16:9 band cut from a 2:3 portrait would be a sliver).
+const renderSizeFor = (sizeKey) => (sizeKey === "landscape" ? "1536x1024" : "1024x1536");
 function shade(hex, p) {
   let h = (hex || "#000000").replace("#", ""); if (h.length === 3) h = h.split("").map((c) => c + c).join("");
   let r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
@@ -22036,194 +22025,186 @@ function maltesePath(cx, cy, R) {
   dirs.forEach((dir, k) => { d += (k === 0 ? "M " : "L ") + pt(ri, dir - aIn) + " L " + pt(ro, dir - aOut) + " L " + pt(rn, dir) + " L " + pt(ro, dir + aOut) + " L " + pt(ri, dir + aIn) + " "; });
   return d + "Z";
 }
-function buildGraphicSVG(tk, brand, f, photo, bg, size, style) {
-  const W = size?.w || 1080, H = size?.h || 1080;
+/* The poster: the photo full-bleed (cover crop), a scrim on the text side for legibility, then the department's
+   crest + name, the headline and an optional details line — all real, crisp, brand-font text. `pos` = "top" | "bottom".
+   The PHOTO is not embedded: the SVG is the text + scrim layer only (a few KB), laid over the photo — by CSS in the
+   preview and by the canvas on download. Re-encoding a 2 MB photo into the SVG on every keystroke would lag typing.
+   With no photo yet, the SVG draws its own dark brand background so the preview is never blank. */
+function buildCinematicSVG({ brand, hasPhoto, headline, details, pos, size }) {
+  const W = size.w, H = size.h, M = Math.round(W * 0.06);
   const ff = FONT_STACKS[brand.font] || FONT_STACKS["Modern sans"];
-  const P = brand.primary || "#B11E2A", A = brand.accent || "#1F4E79", GOLD = "#E5B53C";
-  const st = style || "bold";
-  const darkBase = tk === "post" || tk === "stat";
-  const darkBg = !!bg || darkBase;
-  const ink = darkBg ? "#ffffff" : "#16181C", sub = darkBg ? "rgba(255,255,255,0.86)" : "#3A4750";
-  const logo = brand.logo, M = 64, sc = H < 820 ? 0.78 : 1, Z = (n) => Math.round(n * sc);
-  const defs = `<defs>
-    <linearGradient id="gp" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="${shade(P, 0.16)}"/><stop offset="1" stop-color="${shade(P, -0.28)}"/></linearGradient>
-    <linearGradient id="ga" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shade(A, 0.12)}"/><stop offset="1" stop-color="${shade(A, -0.30)}"/></linearGradient>
-    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#EFEEF3"/></linearGradient>
-  </defs>`;
-  const pFill = st === "classic" ? P : "url(#gp)";
-  const aFill = st === "classic" ? A : "url(#ga)";
-  let bgLayer;
-  if (bg) bgLayer = `<image href="${bg}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/><rect width="${W}" height="${H}" fill="${pFill}" opacity="0.62"/>`;
-  else if (darkBg) bgLayer = `<rect width="${W}" height="${H}" fill="${pFill}"/>`;
-  else bgLayer = `<rect width="${W}" height="${H}" fill="${st === "classic" ? "#ffffff" : "url(#gl)"}"/>`;
-  let deco = "";
-  if ((st === "bold" || st === "badge") && !bg) {
-    const R = Math.min(W, H) * 0.5;
-    deco += `<path d="${maltesePath(W * 0.9, H * 0.88, R)}" fill="${darkBg ? "#ffffff" : P}" opacity="${darkBg ? 0.07 : 0.05}"/>`;
-  }
-  if (st === "checker") {
-    const sq = 30, n = Math.ceil(W / sq);
-    for (let i = 0; i < n; i++) deco += `<rect x="${i * sq}" y="0" width="${sq}" height="18" fill="${i % 2 ? "#ffffff" : A}"/>`;
-  }
-  const emblem = (x, y, s, light) => logo
-    ? `<image href="${logo}" x="${x}" y="${y}" width="${s}" height="${s}" preserveAspectRatio="xMidYMid meet"/>`
-    : `<path d="${maltesePath(x + s / 2, y + s / 2, s * 0.5)}" fill="${light ? "#ffffff" : P}"/>`;
-  const ring = st === "classic" ? P : "url(#ga)";
-  let body = "";
-  if (tk === "flyer") {
-    const bandH = Math.max(92, Math.min(160, Math.round(H * 0.135)));
-    const center = stackRows([
-      { lines: [(f.l1 || "").toUpperCase()], size: Z(44), lh: Z(54), weight: 700, spacing: 3, fill: A, ff, gap: 14 },
-      { lines: wrapLines(f.l2, 16), size: Z(90), lh: Z(100), weight: 800, fill: ink, ff, gap: 22 },
-      { lines: wrapLines(f.l3, 40), size: Z(40), lh: Z(50), weight: 400, fill: sub, ff },
-    ], M, "start", bandH + 10, H - bandH - 56);
-    body = `<rect x="0" y="0" width="${W}" height="${bandH}" fill="${pFill}"/>${emblem(48, (bandH - 78) / 2, 78, true)}
-      <text x="${W - 48}" y="${bandH / 2 + 13}" text-anchor="end" font-family="${ff}" font-size="38" font-weight="700" fill="#fff">${escX(brand.name)}</text>
-      ${center}
-      <text x="${M}" y="${H - bandH - 22}" font-family="${ff}" font-size="28" fill="${sub}">${escX(brand.tagline)}</text>
-      <rect x="0" y="${H - bandH}" width="${W}" height="${bandH}" fill="${aFill}"/>
-      <text x="${W / 2}" y="${H - bandH / 2 + 13}" text-anchor="middle" font-family="${ff}" font-size="${Z(40)}" font-weight="700" fill="#fff">${escX(f.l4)}</text>`;
-  } else if (tk === "post") {
-    const center = stackRows([
-      { lines: [(f.l1 || "").toUpperCase()], size: Z(34), lh: Z(44), weight: 700, spacing: 2, fill: "rgba(255,255,255,0.92)", ff, gap: 16 },
-      { lines: wrapLines(f.l2, 18), size: Z(98), lh: Z(108), weight: 800, fill: "#fff", ff, gap: 20 },
-      { lines: wrapLines(f.l3, 34), size: Z(42), lh: Z(52), weight: 400, fill: "rgba(255,255,255,0.9)", ff },
-    ], M, "start", 168, H - 96);
-    body = `${emblem(M, 56, 80, true)}<text x="${M + 100}" y="109" font-family="${ff}" font-size="38" font-weight="700" fill="#fff">${escX(brand.name)}</text>
-      <rect x="${M}" y="148" width="${Z(70)}" height="6" rx="3" fill="${GOLD}"/>
-      ${center}
-      <rect x="${M}" y="${H - 86}" width="${W - 2 * M}" height="2" fill="rgba(255,255,255,0.3)"/>
-      <text x="${M}" y="${H - 42}" font-family="${ff}" font-size="32" fill="rgba(255,255,255,0.85)">${escX(f.l4)}</text>`;
-  } else if (tk === "spotlight") {
-    const r = Math.round(Math.min(W, H) * 0.16), cx = W / 2, cy = Math.round(H * (H < 820 ? 0.24 : 0.27));
-    const pic = photo
-      ? `<defs><clipPath id="cc"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath></defs><image href="${photo}" x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" preserveAspectRatio="xMidYMid slice" clip-path="url(#cc)"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${ring}" stroke-width="12"/>`
-      : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${st === "classic" ? A : "url(#ga)"}"/><text x="${cx}" y="${cy + r * 0.22}" text-anchor="middle" font-family="${ff}" font-size="${r * 0.8}" font-weight="800" fill="#fff">${escX(initialsOf(f.l2))}</text>`;
-    const ql = wrapLines(f.l4, 38), qLines = ql.map((ln, i) => (i === 0 ? "\u201C" : "") + ln + (i === ql.length - 1 ? "\u201D" : ""));
-    const center = stackRows([
-      { lines: [(f.l1 || "MEMBER SPOTLIGHT").toUpperCase()], size: Z(38), lh: Z(46), weight: 700, spacing: 3, fill: A, ff, gap: 10 },
-      { lines: [f.l2], size: Z(80), lh: Z(88), weight: 800, fill: ink, ff, gap: 6 },
-      { lines: [f.l3], size: Z(38), lh: Z(46), weight: 400, fill: sub, ff, gap: 22 },
-      { lines: qLines, size: Z(38), lh: Z(50), weight: 400, italic: true, fill: sub, ff },
-    ], cx, "middle", cy + r + 22, H - 92);
-    body = `<rect x="0" y="0" width="14" height="${H}" fill="${pFill}"/>${pic}<rect x="${cx - 34}" y="${cy + r + 8}" width="68" height="5" rx="2.5" fill="${GOLD}"/>${center}${emblem(cx - 32, H - 86, 64, false)}`;
-  } else {
-    const big = Math.round(Math.min(W * 0.52, H * (H < 820 ? 0.34 : 0.44)));
-    const center = stackRows([
-      { lines: [(f.l1 || "").toUpperCase()], size: Z(40), lh: Z(48), weight: 700, spacing: 3, fill: "rgba(255,255,255,0.85)", ff, gap: 4 },
-      { lines: [f.l2], size: big, lh: big, weight: 800, fill: "#fff", ff, gap: 2 },
-      { lines: wrapLines(f.l3, 26), size: Z(48), lh: Z(56), weight: 400, fill: "rgba(255,255,255,0.92)", ff, gap: 26 },
-      { lines: wrapLines(f.l4, 30), size: Z(52), lh: Z(62), weight: 700, fill: "#fff", ff },
-    ], M, "start", 150, H - 78);
-    body = `${emblem(M, 56, 78, true)}<text x="${M + 96}" y="107" font-family="${ff}" font-size="36" font-weight="700" fill="#fff">${escX(brand.name)}</text>${center}`;
-  }
-  let frame = "";
-  if (st === "badge") frame = `<rect x="22" y="22" width="${W - 44}" height="${H - 44}" fill="none" stroke="${GOLD}" stroke-width="3"/><rect x="31" y="31" width="${W - 62}" height="${H - 62}" fill="none" stroke="${GOLD}" stroke-width="1.5" opacity="0.55"/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}${bgLayer}${deco}${body}${frame}</svg>`;
+  const P = brand.primary || "#B11E2A";
+  const top = pos !== "bottom";
+  const wide = W / H > 1.2;
+  const hSize = Math.round(Math.min(W * (wide ? 0.072 : 0.105), H * 0.1));
+  const hLines = wrapLines(String(headline || "").toUpperCase(), wide ? 22 : 14).slice(0, 4);
+  const dSize = Math.round(hSize * 0.36), dLines = details ? wrapLines(details, wide ? 60 : 36).slice(0, 3) : [];
+  const crest = Math.round(hSize * 0.85);
+  const blockH = crest + hSize * 0.5 + hLines.length * hSize * 1.02 + (dLines.length ? 18 + dLines.length * dSize * 1.3 : 0) + 14;
+  const y0 = top ? M : H - M - blockH;
+  const scrimId = "scrim";
+  const scrim = top
+    ? `<linearGradient id="${scrimId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.78"/><stop offset="${Math.min(0.95, (blockH + M * 2.4) / H).toFixed(2)}" stop-color="#000" stop-opacity="0"/></linearGradient>`
+    : `<linearGradient id="${scrimId}" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0.8"/><stop offset="${Math.min(0.95, (blockH + M * 2.4) / H).toFixed(2)}" stop-color="#000" stop-opacity="0"/></linearGradient>`;
+  const bg = hasPhoto ? "" : `<rect width="${W}" height="${H}" fill="${shade(P, -0.55)}"/><path d="${maltesePath(W * 0.72, H * 0.62, Math.min(W, H) * 0.42)}" fill="#ffffff" opacity="0.05"/>`;
+  const logo = brand.logo
+    ? `<image href="${brand.logo}" x="${M}" y="${y0}" width="${crest}" height="${crest}" preserveAspectRatio="xMidYMid meet"/>`
+    : `<path d="${maltesePath(M + crest / 2, y0 + crest / 2, crest * 0.5)}" fill="#ffffff"/>`;
+  let y = y0 + crest;
+  const nameY = y0 + crest * 0.62;
+  let out = `${logo}<text x="${M + crest + 16}" y="${nameY}" font-family="${ff}" font-size="${Math.round(crest * 0.36)}" font-weight="700" letter-spacing="1" fill="#fff">${escX(brand.name)}</text>`;
+  y += hSize * 0.5;
+  out += `<rect x="${M}" y="${y - hSize * 0.18}" width="${Math.round(hSize * 0.9)}" height="${Math.max(5, Math.round(hSize * 0.08))}" fill="${P}"/>`;
+  hLines.forEach((ln, i) => { out += `<text x="${M}" y="${Math.round(y + hSize * 0.9 + i * hSize * 1.02)}" font-family="${ff}" font-size="${hSize}" font-weight="800" fill="#fff">${escX(ln)}</text>`; });
+  y += hLines.length * hSize * 1.02 + 18;
+  dLines.forEach((ln, i) => { out += `<text x="${M}" y="${Math.round(y + dSize + i * dSize * 1.3)}" font-family="${ff}" font-size="${dSize}" font-weight="500" fill="rgba(255,255,255,0.92)">${escX(ln)}</text>`; });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${scrim}</defs>${bg}<rect width="${W}" height="${H}" fill="url(#${scrimId})"/>${out}</svg>`;
 }
-const GFX_TEMPLATES = [
-  { key: "flyer", name: "Recruitment flyer", labels: ["Eyebrow", "Headline", "Subline", "Call to action"], def: { l1: "Now recruiting volunteers", l2: "We need you on the crew", l3: "No experience needed — we train you.", l4: "Stop by the station Tuesdays at 7pm" } },
-  { key: "post", name: "Social announcement", labels: ["Label", "Headline", "Details", "Footer / link"], def: { l1: "Community update", l2: "Open house this Saturday", l3: "Food, trucks, and meet your local crew · 10am–2pm.", l4: "North Hood Country VFD · Station 20" } },
-  { key: "spotlight", name: "Member spotlight", labels: ["Eyebrow", "Member name", "Role / years", "Quote"], def: { l1: "Member spotlight", l2: "Maria Reyes", l3: "Chief · 12 years of service", l4: "This town is worth showing up for." } },
-  { key: "stat", name: "Stat card", labels: ["Eyebrow", "Big number", "What it measures", "Call to action"], def: { l1: "Last month", l2: "41", l3: "calls answered by your volunteers", l4: "Your neighbors need you. Join the crew." } },
-];
+const GFX_PURPOSES = ["Recruitment", "Fundraiser", "Community", "Training", "Safety", "Thank you", "Other"];
 function GraphicStudio({ S, brand }) {
-  const GS_ON = { background: "rgba(200,50,58,.14)", borderColor: FIRE.redBright, color: FIRE.textPrimary };   // was S.segBtnOn (purple-grey, off-palette)
-  const [tk, setTk] = useState("flyer");
-  const tmpl = GFX_TEMPLATES.find((t) => t.key === tk);
-  const [f, setF] = useState(tmpl.def);
-  const [photo, setPhoto] = useState(null);
-  const [bg, setBg] = useState(null); const [useBg, setUseBg] = useState(false);
-  const [sizeKey, setSizeKey] = useState("square");
+  const ON = { background: "rgba(200,50,58,.14)", borderColor: FIRE.redBright, color: FIRE.textPrimary };
+  const seg = { ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary };
+  const [purpose, setPurpose] = useState("Recruitment");
+  const [occasion, setOccasion] = useState("");
+  const [details, setDetails] = useState("");
+  const [concepts, setConcepts] = useState(null);       // [{headline, mood, imagePrompt}] | null
+  const [cBusy, setCBusy] = useState(false); const [cErr, setCErr] = useState("");
+  const [picked, setPicked] = useState(null);           // index into concepts
+  const [quality, setQuality] = useState("medium");
+  const [photo, setPhoto] = useState(null);             // { src, orient: "portrait"|"landscape", own: bool }
+  const [iBusy, setIBusy] = useState(false); const [iErr, setIErr] = useState("");
+  const [usage, setUsage] = useState(null);             // { used, ceiling } — known after the first render (no read-only meter exists)
+  const [headline, setHeadline] = useState("");
+  const [pos, setPos] = useState("top");
+  const [sizeKey, setSizeKey] = useState("portrait");
   const size = GFX_SIZES.find((s) => s.key === sizeKey) || GFX_SIZES[0];
-  const [styleKey, setStyleKey] = useState("bold");
-  const [aiOpen, setAiOpen] = useState(false); const [aiPrompt, setAiPrompt] = useState("a red fire engine outside a small-town station at golden hour, cinematic");
-  const [aiLoading, setAiLoading] = useState(false); const [aiErr, setAiErr] = useState("");
-  function pick(k) { const t = GFX_TEMPLATES.find((x) => x.key === k); setTk(k); setF(t.def); setPhoto(null); }
-  function onPhoto(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(file); }
-  function onUploadBg(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => { setBg(r.result); setUseBg(true); }; r.readAsDataURL(file); e.target.value = ""; }
-  const svg = buildGraphicSVG(tk, brand, f, photo, useBg ? bg : null, size, styleKey);
-  const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-  function download() {
-    const img = new window.Image();
-    img.onload = () => { const c = document.createElement("canvas"); c.width = size.w; c.height = size.h; const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size.w, size.h); ctx.drawImage(img, 0, 0, size.w, size.h); c.toBlob((b) => { if (b) saveOrShare(b, `${tk}-${size.key}.png`, "QR poster"); }); };
-    img.src = dataUrl;
-  }
-  async function genAI() {
-    setAiLoading(true); setAiErr("");
+  const wantOrient = sizeKey === "landscape" ? "landscape" : "portrait";
+  const concept = concepts && picked != null ? concepts[picked] : null;
+
+  async function getConcepts() {
+    if (!occasion.trim()) { setCErr("Say what it's for — e.g. “open house on May 3” or “we need volunteers”."); return; }
+    setCBusy(true); setCErr(""); setConcepts(null); setPicked(null);
     try {
-      const res = await authedFetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt }) });
-      const data = await res.json();
-      if (!res.ok || data.error) setAiErr(data.error || "AI image isn't available right now.");
-      else if (data.image) { setBg(data.image); setUseBg(true); }
-    } catch { setAiErr("Couldn't reach the image service."); } finally { setAiLoading(false); }
+      const res = await authedFetch("/api/concepts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        purpose, occasion: occasion.trim(), details: details.trim(), count: 3,
+        brandName: brand.name, colors: `${brand.primary} and ${brand.accent}`, voice: brand.voice, tagline: brand.tagline }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(data.concepts)) setCErr(data.error || "Couldn't get concepts right now.");
+      else setConcepts(data.concepts);
+    } catch { setCErr("Couldn't reach the concept service."); } finally { setCBusy(false); }
   }
+  function choose(i) {
+    setPicked(i); setHeadline(concepts[i].headline || "");
+    setPos(/\b(bottom|lower)\b/i.test(concepts[i].imagePrompt) ? "bottom" : "top");   // put the text where the art director left space
+  }
+  async function render() {
+    if (!concept) return;
+    setIBusy(true); setIErr("");
+    try {
+      const res = await authedFetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: concept.imagePrompt, quality, size: renderSizeFor(sizeKey) }) });
+      const data = await res.json().catch(() => ({}));
+      if (data.used != null && data.ceiling != null) setUsage({ used: data.used, ceiling: data.ceiling });
+      if (!res.ok || !data.image) setIErr(data.error || "The image didn't come back — try again.");
+      else setPhoto({ src: data.image, orient: wantOrient, own: false });
+    } catch { setIErr("Couldn't reach the image service."); } finally { setIBusy(false); }
+  }
+  function onOwnPhoto(e) {
+    const file = e.target.files?.[0]; if (!file) return;
+    const r = new FileReader();
+    r.onload = () => { const img = new window.Image(); img.onload = () => setPhoto({ src: r.result, orient: img.width > img.height ? "landscape" : "portrait", own: true }); img.src = r.result; };
+    r.readAsDataURL(file); e.target.value = "";
+  }
+  const svg = buildCinematicSVG({ brand, hasPhoto: !!photo, headline, details, pos, size });
+  const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  const load = (src) => new Promise((ok, bad) => { const im = new window.Image(); im.onload = () => ok(im); im.onerror = bad; im.src = src; });
+  async function download() {
+    if (!photo) return;
+    try {
+      const [ph, overlay] = await Promise.all([load(photo.src), load(dataUrl)]);
+      const c = document.createElement("canvas"); c.width = size.w; c.height = size.h;
+      const ctx = c.getContext("2d");
+      // cover crop, centred — the same crop the preview shows (Story 9:16 / Square / Portrait 4:5 from the 2:3 render)
+      const k = Math.max(size.w / ph.width, size.h / ph.height);
+      ctx.drawImage(ph, (size.w - ph.width * k) / 2, (size.h - ph.height * k) / 2, ph.width * k, ph.height * k);
+      ctx.drawImage(overlay, 0, 0, size.w, size.h);
+      c.toBlob((b) => { if (b) saveOrShare(b, `${(headline || "graphic").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}-${size.key}.png`, "Graphic"); }, "image/png");
+    } catch { setIErr("Couldn't build the download — try again."); }
+  }
+  const step = (n, t) => <div style={{ ...NOIR_LABEL, display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}><span style={{ width: 20, height: 20, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", background: FIRE.redBright, color: "#fff", fontSize: 11 }}>{n}</span>{t}</div>;
+  const mismatch = photo && !photo.own && photo.orient !== wantOrient;
   return (
     <div style={{ marginTop: 8 }}>
-      <CardHead icon={ImageIcon} title="Make a graphic" />
-      <p style={NOIR_HELP}>On-brand graphics using your Brand Kit colors and logo. Pick a template and a size, edit the text, optionally drop in your own background image, and download a ready-to-post PNG.</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
-        {GFX_TEMPLATES.map((t) => (
-          <button key={t.key} onClick={() => pick(t.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(tk === t.key ? GS_ON : {}) }}>{t.name}</button>
-        ))}
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>SIZE — WHERE'S IT GOING?</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-          {GFX_SIZES.map((sz) => (
-            <button key={sz.key} onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(sizeKey === sz.key ? GS_ON : {}), display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25, padding: "7px 11px" }}><span>{sz.name}</span><span style={{ fontSize: 10, fontWeight: 500, opacity: 0.7 }}>{sz.hint}</span></button>
-          ))}
-        </div>
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ ...NOIR_LABEL, marginBottom: 6 }}>STYLE</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-          {STYLES.map((sy) => (
-            <button key={sy.key} onClick={() => setStyleKey(sy.key)} style={{ ...S.segBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, ...(styleKey === sy.key ? GS_ON : {}) }}>{sy.name}</button>
-          ))}
-        </div>
-      </div>
+      <CardHead icon={ImageIcon} title="Make a graphic" right={usage ? <span style={{ fontSize: 11.5, color: usage.used >= usage.ceiling ? FIRE.redText : FIRE.textSecondary, ...FS.num }}>{usage.used} of {usage.ceiling} AI images this month</span> : null} />
+      <p style={NOIR_HELP}>Tell it the occasion — get three on-brand concepts, pick one, and it paints a cinematic photo. Your headline and details go on top crisp, in your Brand Kit font and colors. Or use your own photo, free.</p>
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 240 }}>
-          {[0, 1, 2, 3].map((i) => {
-            const key = `l${i + 1}`;
-            return (
-              <label key={i} style={{ ...S.field, marginBottom: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{tmpl.labels[i]}</span>
-                <input style={FS.input} value={f[key] || ""} onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))} /></label>
-            );
-          })}
-          {tk === "spotlight" && (
-            <label style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 4, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> {photo ? "Change photo" : "Add member photo"}<input type="file" accept="image/*" onChange={onPhoto} style={{ display: "none" }} /></label>
-          )}
-          <div style={{ marginTop: 14, padding: 12, border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 10, background: FIRE.card2Noir }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8 }}><ImageIcon size={14} /> BACKGROUND IMAGE</div>
-            <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Add a photo behind your text — your text stays readable over it. Optional.</p>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload image<input type="file" accept="image/*" onChange={onUploadBg} style={{ display: "none" }} /></label>
-              {bg && <label style={{ fontSize: 12.5, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> use it</label>}
-              {bg && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.card2Noir, color: FIRE.redText, borderColor: FIRE.line2Noir }} onClick={() => { setBg(null); setUseBg(false); }}><X size={13} /> Remove</button>}
+        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+          {step(1, "WHAT'S IT FOR?")}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {GFX_PURPOSES.map((p) => <button key={p} type="button" onClick={() => setPurpose(p)} style={{ ...seg, ...(purpose === p ? ON : {}) }}>{p}</button>)}
+          </div>
+          <label style={{ ...S.field, marginBottom: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>The occasion</span>
+            <input style={FS.input} value={occasion} placeholder="e.g. Pancake breakfast fundraiser, Saturday Nov 8" onChange={(e) => setOccasion(e.target.value)} /></label>
+          <label style={{ ...S.field, marginBottom: 10 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Details line on the graphic (optional)</span>
+            <input style={FS.input} value={details} placeholder="e.g. Sat Nov 8 · 7–11am · Station 20 · $8 plates" onChange={(e) => setDetails(e.target.value)} /></label>
+          <button style={{ ...FS.btnPrimary, opacity: cBusy ? 0.7 : 1 }} onClick={getConcepts} disabled={cBusy}>{cBusy ? <><Loader2 size={15} className="spin" /> Thinking up concepts…</> : <><Sparkles size={15} /> Get 3 concepts</>}</button>
+          {cErr && <div style={{ ...NOIR_ERR, marginTop: 8 }}>{cErr}</div>}
+
+          {concepts && (<div style={{ marginTop: 16 }}>
+            {step(2, "PICK A CONCEPT")}
+            {concepts.map((c, i) => (
+              <button key={i} type="button" onClick={() => choose(i)} aria-pressed={picked === i}
+                style={{ width: "100%", textAlign: "left", fontFamily: "inherit", cursor: "pointer", marginBottom: 7, padding: "10px 12px", borderRadius: 10, background: picked === i ? "rgba(200,50,58,.1)" : FIRE.card2Noir, border: `1px solid ${picked === i ? FIRE.redBright : FIRE.line2Noir}` }}>
+                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>{c.headline}</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{c.mood}</div>
+              </button>
+            ))}
+          </div>)}
+
+          {concept && (<div style={{ marginTop: 14 }}>
+            {step(3, "PAINT THE PHOTO")}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+              <button type="button" onClick={() => setQuality("medium")} style={{ ...seg, ...(quality === "medium" ? ON : {}) }}>Standard</button>
+              <button type="button" onClick={() => setQuality("high")} style={{ ...seg, ...(quality === "high" ? ON : {}) }}>High detail</button>
+              <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{quality === "high" ? "Sharper — about 4× the cost. Use for print." : "Great for social posts."}</span>
             </div>
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: FIRE.textMuted, display: "inline-flex", alignItems: "center", gap: 6 }}><Wand2 size={13} /> Or generate one with AI <span style={{ fontSize: 10, background: FIRE.card2Noir, color: FIRE.textMuted, padding: "1px 6px", borderRadius: 999 }}>BETA</span></div>
-                <button style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 0, padding: "5px 10px", fontSize: 12 }} onClick={() => setAiOpen((v) => !v)}>{aiOpen ? "Hide" : "Try it"}</button>
-              </div>
-              {aiOpen && <div style={{ marginTop: 10 }}>
-                <p style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 0, marginBottom: 8 }}>Needs an image-provider key set up in the app; each image costs money on the provider's side.</p>
-                <textarea style={{ ...FS.input, minHeight: 54, resize: "vertical", fontFamily: "inherit" }} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
-                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                  <button style={{ ...FS.btnPrimary, marginTop: 0, opacity: aiLoading ? 0.7 : 1 }} onClick={genAI} disabled={aiLoading}>{aiLoading ? <><Loader2 size={15} className="spin" /> Generating…</> : <><Wand2 size={15} /> Generate</>}</button>
-                </div>
-                {aiErr && <div style={{ ...NOIR_ERR, marginTop: 8 }}>{aiErr}</div>}
-              </div>}
+            <button style={{ ...FS.btnPrimary, opacity: iBusy ? 0.7 : 1 }} onClick={render} disabled={iBusy}>{iBusy ? <><Loader2 size={15} className="spin" /> Painting… (up to a minute)</> : <><Wand2 size={15} /> {photo && !photo.own ? "Paint another" : "Paint it"}</>}</button>
+            {iErr && <div style={{ ...NOIR_ERR, marginTop: 8 }}>{iErr}</div>}
+          </div>)}
+
+          <div style={{ marginTop: 16, padding: 12, border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 10, background: FIRE.card2Noir }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: FIRE.textSecondary, marginBottom: 6 }}>Or use your own photo — free</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ ...S.ghostBtn, background: FIRE.card2Noir, borderColor: FIRE.line2Noir, color: FIRE.textSecondary, marginTop: 0, cursor: "pointer", display: "inline-flex" }}><Upload size={15} /> Upload a photo<input type="file" accept="image/*" onChange={onOwnPhoto} style={{ display: "none" }} /></label>
+              {photo && <button style={{ ...S.ghostBtn, marginTop: 0, padding: "5px 9px", fontSize: 12, background: FIRE.card2Noir, color: FIRE.redText, borderColor: FIRE.line2Noir }} onClick={() => setPhoto(null)}><X size={13} /> Clear photo</button>}
             </div>
           </div>
         </div>
-        <div style={{ width: 300, maxWidth: "100%" }}>
-          <div style={{ display: "flex", justifyContent: "center", background: FIRE.card2Noir, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, padding: 10 }}>
-            <img src={dataUrl} alt="graphic preview" style={{ maxWidth: "100%", maxHeight: 420, borderRadius: 6, display: "block" }} />
+
+        <div style={{ flex: "0 1 320px", width: 320, maxWidth: "100%" }}>
+          {step(4, "TEXT, SIZE & DOWNLOAD")}
+          <label style={{ ...S.field, marginBottom: 8 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Headline</span>
+            <input style={FS.input} value={headline} placeholder="Your headline" onChange={(e) => setHeadline(e.target.value)} /></label>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>Text at</span>
+            {[["top", "Top"], ["bottom", "Bottom"]].map(([k, l]) => <button key={k} type="button" onClick={() => setPos(k)} style={{ ...seg, padding: "5px 11px", ...(pos === k ? ON : {}) }}>{l}</button>)}
           </div>
-          <button style={{ ...FS.btnPrimary, marginTop: 10, width: "100%", justifyContent: "center" }} onClick={download}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {GFX_SIZES.map((sz) => <button key={sz.key} type="button" onClick={() => setSizeKey(sz.key)} title={sz.hint} style={{ ...seg, padding: "5px 10px", fontSize: 12, ...(sizeKey === sz.key ? ON : {}) }}>{sz.name}</button>)}
+          </div>
+          {mismatch && (
+            <div style={{ fontSize: 11.5, color: FIRE.amberText, marginBottom: 8, lineHeight: 1.45 }}>
+              This photo was painted {photo.orient} — {wantOrient === "landscape" ? "Landscape crops a thin band from it." : "it's cropped to fit."} {concept && <button type="button" onClick={render} disabled={iBusy} style={{ background: "none", border: "none", color: FIRE.blueText, cursor: "pointer", padding: 0, fontFamily: "inherit", fontSize: 11.5, textDecoration: "underline" }}>Paint a {wantOrient} version</button>}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "center", background: FIRE.card2Noir, borderRadius: 12, border: `1px solid ${FIRE.lineNoir}`, padding: 10 }}>
+            {/* photo (CSS cover crop) under the text layer — the same centred crop the download uses */}
+            <div style={{ position: "relative", width: "100%", maxWidth: Math.round(440 * size.w / size.h), aspectRatio: `${size.w} / ${size.h}`, borderRadius: 6, overflow: "hidden",
+                          backgroundImage: photo ? `url("${photo.src}")` : "none", backgroundSize: "cover", backgroundPosition: "center" }}>
+              <img src={dataUrl} alt="graphic preview" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
+            </div>
+          </div>
+          <button style={{ ...FS.btnPrimary, marginTop: 10, width: "100%", justifyContent: "center", opacity: photo ? 1 : 0.6 }} onClick={download} disabled={!photo}><Download size={16} /> Download {size.w}×{size.h} PNG</button>
+          {!photo && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6, textAlign: "center" }}>Paint a photo or upload your own to download.</div>}
         </div>
       </div>
     </div>
