@@ -54,6 +54,14 @@ const res2 = log.filter(l => l.anthropic)[1].lastMsg.content.map(c => JSON.parse
 check(r.body.navigate === "stationhours", "navigate = stationhours");
 check(res2[1].error === "Unknown tool." && res2[2].error, "unlisted tool + non-allowlisted screen refused");
 check(!log.some(l => !l.anthropic && /run_sql|members\?select=\*/.test(l.url) && l.url.includes("run")), "nothing executed for the unknown tool");
+log.length = 0;
+script = [
+  { stop_reason: "tool_use", content: [{ type: "tool_use", id: "r1", name: "open_screen", input: { screen: "reports" } }] },
+  { stop_reason: "end_turn", content: [{ type: "text", text: "Reports is for leadership." }] },
+];
+r = await call([{ role: "user", content: "open reports" }]);
+const res3 = JSON.parse(log.filter(l => l.anthropic)[1].lastMsg.content[0].content);
+check(r.body.navigate === null && /leadership/.test(res3.error || ""), "plain member: leadership-only screen refused server-side, no navigate");
 
 // 3. ceiling reached -> friendly message, model never called
 log.length = 0; anthropicCalls = 0; limitHit = true;

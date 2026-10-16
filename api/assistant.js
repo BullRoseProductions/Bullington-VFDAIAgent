@@ -35,6 +35,7 @@ export const SCREENS = {
   study: "Study Session", apparatus: "Apparatus", resources: "Your Six", notifications: "Notifications",
   settings: "Settings & Support", reports: "Reports", minutes: "Meetings",
 };
+const LEADERSHIP_SCREENS = new Set(["reports", "minutes"]);   // NAV: LEADERSHIP only — never offered to a plain member
 
 /* ---------------- pure helpers (exported for tests) ---------------- */
 // Today's calendar date in Central, as YYYY-MM-DD — drills are dated in local days.
@@ -178,6 +179,7 @@ async function runTool(sb, name, input, ctx) {
     if (name === "open_screen") {
       const key = String(input?.screen || "");
       if (!SCREENS[key]) return fail("That isn't a screen I can open.");
+      if (LEADERSHIP_SCREENS.has(key) && !ctx.isLeader) return fail(`${SCREENS[key]} is for department leadership — this member can't open it.`);
       ctx.navigate = key;
       return ok({ opening: SCREENS[key] });
     }
