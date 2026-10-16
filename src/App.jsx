@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
-  Flame, HeartPulse, Search, ShieldAlert, Users, FileText, Download, Plus, Copy, UtensilsCrossed,
+  Flame, HeartPulse, Search, ShieldAlert, Users, UserX, FileText, Download, Plus, Copy, UtensilsCrossed,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
   Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
@@ -1532,9 +1532,108 @@ function AfterCallSettings({ S, role, dept, setDept, notify }) {
   );
 }
 
-function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests, members, meId, notify }) {
+/* FORMER MEMBERS — DEPARTMENT ADMIN ONLY (not Project Admin, not officers). A former member's date is HR-sensitive: it
+   lives in a locked table reached only through get_/set_member_termination, which re-check the caller server-side, and
+   it is in no view (celebrations and the roster never carry it). It also closes the member's attendance window — the
+   server refuses attendance on drills after it (sql/membership_window). Marking someone former also moves them off the
+   active roster (status Inactive); Reactivate clears the date and puts them back. Attendance already recorded after
+   the date is reported, never deleted here. There is no list RPC, so the list is one get_ per roster member. */
+function FormerMembers({ S, members, setMembers, meId, notify }) {
+  const roster = (members || []).filter(isAssignable);
+  const rosterKey = roster.map((m) => m.id).join(",");
+  const [terms, setTerms] = useState(null);       // Map member id -> date; null until the first successful read
+  const [loadErr, setLoadErr] = useState(false);
+  const [pick, setPick] = useState("");
+  const [on, setOn] = useState("");
+  const [busy, setBusy] = useState(null);
+  useEditorOpen(!!pick || !!on);
+  function load(isAlive = () => true) {
+    setLoadErr(false);
+    Promise.all(roster.map((m) => supabase.rpc("get_member_termination", { p_member: m.id })
+      .then(({ data, error }) => { if (error) throw error; return [m.id, data || null]; })))
+      .then((pairs) => { if (isAlive()) setTerms(new Map(pairs.filter(([, d]) => d))); })
+      .catch(() => { if (isAlive()) setLoadErr(true); });   // a failed read keeps the last list — never "nobody has left"
+  }
+  useEffect(() => { let alive = true; load(() => alive); return () => { alive = false; }; }, [rosterKey]);
+  const byId = new Map(roster.map((m) => [m.id, m]));
+  const former = terms ? [...terms].map(([id, d]) => ({ m: byId.get(id), d })).filter((x) => x.m).sort((a, b) => b.d.localeCompare(a.d)) : [];
+  const current = roster.filter((m) => !(terms && terms.has(m.id))).sort((a, b) => a.name.localeCompare(b.name));
+  const leftAfterText = (name, n) => n > 0 ? ` ${name} is still marked present at ${n} drill${n === 1 ? "" : "s"} after that date — nothing was removed; take them off those rosters if they weren't there.` : "";
+  async function markFormer() {
+    const m = byId.get(pick);
+    if (!m || !on) return;
+    if (m.id === meId) { notify({ kind: "error", title: "Can't mark yourself", text: "Have another Department Admin do it." }); return; }
+    if (!(await noirConfirm({ title: `Mark ${m.name} as a former member?`, body: `Attendance can't be recorded for them on drills after ${fmtLongDate(on)}, and they move off the active roster. Only Department Admins can see this date.`, confirmLabel: "Mark as former member", danger: true }))) return;
+    setBusy(m.id);
+    const { data, error } = await supabase.rpc("set_member_termination", { p_member: m.id, p_date: on });
+    if (error) { setBusy(null); notify({ kind: "error", title: "Couldn't mark them as a former member", text: "Nothing was changed. Please try again.", details: error.message }); return; }
+    setTerms((t) => new Map(t || []).set(m.id, on));
+    const { error: e2 } = await supabase.from("members").update({ status: "Inactive" }).eq("id", m.id);
+    setBusy(null);
+    if (e2) { notify({ kind: "error", title: "Date saved, roster status didn't", text: `${m.name}'s former-member date is saved, but they're still on the active roster. Deactivate them from their member file.`, details: e2.message }); }
+    else { setMembers?.((ms) => ms.map((x) => x.id === m.id ? { ...x, status: "Inactive" } : x)); notify({ kind: "success", text: `${m.name} is now a former member.${leftAfterText(m.name, Number(data?.attendance_after || 0))}` }); }
+    setPick(""); setOn("");
+  }
+  async function reactivate(m) {
+    if (!(await noirConfirm({ title: `Reactivate ${m.name}?`, body: "Their former-member date is cleared and they return to the active roster. Attendance can be recorded for them again.", confirmLabel: "Reactivate" }))) return;
+    setBusy(m.id);
+    const { error } = await supabase.rpc("set_member_termination", { p_member: m.id, p_date: null });
+    if (error) { setBusy(null); notify({ kind: "error", title: "Couldn't reactivate them", text: "Nothing was changed. Please try again.", details: error.message }); return; }
+    setTerms((t) => { const n = new Map(t || []); n.delete(m.id); return n; });
+    const { error: e2 } = await supabase.from("members").update({ status: "Active" }).eq("id", m.id);
+    setBusy(null);
+    if (e2) { notify({ kind: "error", title: "Date cleared, roster status didn't", text: `${m.name} is no longer a former member, but is still marked inactive. Reactivate them from their member file.`, details: e2.message }); return; }
+    setMembers?.((ms) => ms.map((x) => x.id === m.id ? { ...x, status: "Active" } : x));
+    notify({ kind: "success", text: `${m.name} is back on the active roster.` });
+  }
+  return (
+    <PageShell band kicker="ADMIN" title="Former members"
+      sub="People who have left the department. Only Department Admins see this list or these dates.">
+      <NoirSkin>
+      <div style={{ ...FS.cardNoir, padding: 18, display: "flex", flexDirection: "column", gap: 12, maxWidth: 560 }}>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>Mark someone as a former member</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: "1 1 200px", minWidth: 0 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Member</span>
+            <select style={FS.input} value={pick} disabled={!terms} onChange={(e) => setPick(e.target.value)}>
+              <option value="">— Choose —</option>
+              {current.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select></label>
+          <label style={{ ...S.field, flex: "0 1 170px" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Last day</span>
+            <input type="date" style={FS.input} value={on} onChange={(e) => setOn(e.target.value)} /></label>
+          <button style={FS.btnPrimary} disabled={!pick || !on || !!busy} onClick={markFormer}><UserX size={15} /> Mark as former member</button>
+        </div>
+        <div style={{ fontSize: 12, color: FIRE.textMuted, lineHeight: 1.45 }}>Drills up to and including their last day still count. After it, attendance can&rsquo;t be recorded for them.</div>
+      </div>
+      <SectionBar icon={UserX} label="Former members" count={terms ? former.length : null} />
+      {loadErr && (
+        <div style={{ ...NOIR_INSET, padding: "10px 14px", marginBottom: 10, fontSize: 12.5, color: FIRE.amberText, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ flex: 1, minWidth: 0 }}>Couldn&rsquo;t load former members{terms ? " — showing the last list" : ""}.</span>
+          <button style={{ ...FS.btn, padding: "5px 10px" }} onClick={() => load()}><RotateCcw size={13} /> Retry</button>
+        </div>
+      )}
+      {!terms && !loadErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 2px" }}>Loading…</div>}
+      {terms && former.length === 0 && <EmptyState text="No former members on file." />}
+      {terms && former.length > 0 && (
+        <Card padding="4px 14px">
+          {former.map(({ m, d }, i) => (
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: i < former.length - 1 ? `1px solid ${FIRE.lineNoir}` : "none", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: FIRE.textPrimary }}>{m.name}</div>
+                <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>Former member · last day {fmtLongDate(d)}</div>
+              </div>
+              <button style={{ ...FS.btn, padding: "6px 11px" }} disabled={!!busy} onClick={() => reactivate(m)}><RotateCcw size={13} /> {busy === m.id ? "Working…" : "Reactivate"}</button>
+            </div>
+          ))}
+        </Card>
+      )}
+      </NoirSkin>
+    </PageShell>
+  );
+}
+function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setRequests, members, setMembers, meId, notify }) {
   const [view, setView] = useState(null);   // null = hub cards; else a sub-screen key
   const isDA = isDeptAdmin(role);
+  const isDeptAdminOnly = hasAny(role, ["Department Admin"]);   // the Admin section is a Department Admin's alone — not Project Admin
   const back = () => setView(null);
   const backBtn = <button style={{ ...FS.btn, marginBottom: 12 }} onClick={back}><ArrowLeft size={15} /> Settings &amp; Support</button>;
   const LEGAL = [
@@ -1607,6 +1706,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   /* GATED HERE TOO, not only on the card. A card that is not rendered is not a permission — the
      view key survives in state, so the route needs the same test the card does or a stale key
      would walk somebody straight past it. */
+  if (view === "former" && isDeptAdminOnly) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<FormerMembers S={S} members={members} setMembers={setMembers} meId={meId} notify={notify} /></div>;
   if (view === "aftercall" && canManage(role)) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<AfterCallSettings S={S} role={role} dept={dept} setDept={setDept} notify={notify} /></div>;
   const card = (key, Icon, acc, title, desc, badge) => (
     <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => setView(key)}>
@@ -1647,6 +1747,13 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
       {card("support", Mail, NOIR_AI.blue, "Support & Contact", "Get help, send feedback, or request custom training.")}
       {card("about", Award, "#8C9AAB", "About", "App info, build and copyright.")}
     </div>
+    {/* ADMIN — Department Admin only (the card AND the route above are gated the same way). */}
+    {isDeptAdminOnly && (<>
+      <SectionBar icon={ShieldAlert} label="Admin" style={{ margin: "20px 0 10px" }} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(250px, 100%), 1fr))", gap: 12 }}>
+        {card("former", UserX, "#8C9AAB", "Former members", "Record who has left and their last day, or reactivate someone. Only Department Admins see this.")}
+      </div>
+    </>)}
     {/* Legal & Trust — external links to the public documentation center. No role gate: every member sees these. */}
     <SectionBar icon={ShieldAlert} label="Legal & trust" style={{ margin: "20px 0 0" }} />
     {legalRows}
@@ -2994,7 +3101,7 @@ export default function App() {
           {screen === "reports" && (isDeptAdmin(role)
             ? <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />
             : <BoardStats S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />)}
-          {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} meId={myMemberId} notify={notify} />}
+          {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} setMembers={setMembers} meId={myMemberId} notify={notify} />}
           {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} go={go} />}
           {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} />}
@@ -10740,7 +10847,6 @@ function fmtLongDate(iso) {
 function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members, meId, dept }) {
   const { openProof, proofMount } = useProofViewer(notify);   // inspector-facing: open the proof on file for an approved cert
   const assign = hasAny(role, DEPT_ADMIN_ROLES);
-  const isDA = hasAny(role, ["Department Admin"]);   // the termination date is a Department Admin's alone
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [editingCertId, setEditingCertId] = useState(null);
@@ -10762,9 +10868,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     let alive = true;
     loadPrivate(() => alive);
     loadNotes(() => alive);
-    if (isDA) loadTermination(() => alive);
     return () => { alive = false; };
-  }, [member.id, assign, isDA]);
+  }, [member.id, assign]);
   /* A FAILED READ IS NOT "NOTHING ON FILE". member_private used to fall back to {} on error, which the Edit form
      then seeded as blanks — and Save upserts those blanks, i.e. a hiccup could null a member's birthday,
      address and joined date. privErr now blocks Edit until the details have actually loaded. (maybeSingle
@@ -10772,16 +10877,6 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
      member_notes likewise kept [] and said "No notes yet". */
   const [privErr, setPrivErr] = useState(false);
   const [notesErr, setNotesErr] = useState(false);
-  /* TERMINATION DATE — HR-sensitive, DEPARTMENT ADMIN ONLY (not Project Admin, not officers). It lives in a locked
-     table reached only through get_/set_member_termination, which re-check the caller server-side; it is in no view,
-     so celebrations and the roster never carry it. It also closes the member's attendance window (the server refuses
-     attendance on drills after it). A failed read keeps the field out of the Edit form so a hiccup can't save a blank. */
-  const [termOn, setTermOn] = useState(null);
-  const [termErr, setTermErr] = useState(false);
-  function loadTermination(isAlive = () => true) {
-    supabase.rpc("get_member_termination", { p_member: member.id })
-      .then(({ data, error }) => { if (!isAlive()) return; if (error) { setTermErr(true); return; } setTermErr(false); setTermOn(data || null); });
-  }
   function loadPrivate(isAlive = () => true) {
     supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
       .then(({ data, error }) => { if (!isAlive()) return; if (error) { setPrivErr(true); return; } setPrivErr(false); setPriv(data || {}); });
@@ -10791,7 +10886,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       .then(({ data, error }) => { if (!isAlive()) return; if (error || !data) { setNotesErr(true); return; } setNotesErr(false); setNotes(data); });
   }
   function startEditForm() {
-    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "", terminated_on: termOn || "" });
+    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
     setEditing(true);
   }
   async function toggleActive() {
@@ -10824,21 +10919,11 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
     const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: deptId, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
-    const td = form.terminated_on || null;
-    let leftAfter = 0;   // attendance already recorded after a new termination date — reported, never deleted here
-    if (isDA && !termErr && td !== (termOn || null)) {
-      const { data: tr, error: e3 } = await supabase.rpc("set_member_termination", { p_member: member.id, p_date: td });
-      if (e3) { setSaving(false); notify({ kind: "error", title: "Profile saved, termination date didn't", text: "The other changes saved, but the termination date failed. Please try again.", details: e3.message }); return; }
-      setTermOn(td);
-      leftAfter = Number(tr?.attendance_after || 0);
-    }
     setSaving(false);
     onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, joinedOn: jd, mentorId: form.mentor_id || null, email });
     setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
     setEditing(false);
-    notify({ kind: "success", text: leftAfter > 0
-      ? `Member updated. ${member.name} is still marked present at ${leftAfter} drill${leftAfter === 1 ? "" : "s"} after the termination date — nothing was removed; take them off those rosters if they weren't there.`
-      : "Member updated." });
+    notify({ kind: "success", text: "Member updated." });
   }
   async function addNote() {
     const t = note.trim(); if (!t) return;
@@ -11008,7 +11093,6 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 ["Phone", member.phone || "—"],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
-                ...(isDA && termOn ? [["Terminated", fmtLongDate(termOn)]] : []),
                 ["Address", priv?.address || "—"],
               ].map(([l, v]) => (
                 <div key={l} style={l === "Email" || l === "Address" ? { gridColumn: "1 / -1" } : undefined}>
@@ -11046,9 +11130,6 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 </select></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Joined (date)</span><input type="date" style={FS.input} value={form.joined_date || ""} onChange={(e) => setForm((f) => ({ ...f, joined_date: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
-              {isDA && (termErr
-                ? <div style={{ ...S.field, fontSize: 12, color: FIRE.amberText }}>Termination date couldn&rsquo;t load — it can&rsquo;t be changed right now.</div>
-                : <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Termination date · Dept Admin only</span><input type="date" style={FS.input} value={form.terminated_on || ""} onChange={(e) => setForm((f) => ({ ...f, terminated_on: e.target.value }))} /></label>)}
               <label style={{ ...S.field, gridColumn: "1 / -1" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>
             </div>
             <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "8px 0 12px" }}>Email is the member's login identity (stored lowercase). Changing it re-links their sign-in — for someone who already logs in, only change it alongside their auth email. Access changes take effect on their next sign-in.</div>
