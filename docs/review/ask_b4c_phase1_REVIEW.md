@@ -103,3 +103,16 @@ Diff: `docs/review/ask_b4c_cite_fix_DIFF.patch`
 - **`citedDocs()`** matches document names regardless of case, file extension, and `_` / `-` / `.`. It also accepts a name with its trailing number token dropped, but only when what remains is at least 12 characters.
 - **System prompt** now asks for plain text with no markdown, and says to report only what the record says ("counts toward attendance", not "mandatory").
 - **Tests:** helpers 17/17 (4 new citation tests), end-to-end 15/15.
+
+## Fix shipped 2026-10-16 as `574aef8` ("Release industrial-noir-10")
+
+Shipped before the announcement, at Ashlea's direction. This was a server-only change and had no separate review.
+
+Re-checked on production, as Ashlea:
+
+| # | Question | Result |
+|---|---|---|
+| 4 | SOP: how often to inspect PPE | **Correct.** Now tagged **"From your SOPs · Document_308_VFIS-PPERoutineInspectionChecklist_02021.pdf"**. Plain text, no raw `**`. |
+| 3 | Next drill | **Correct.** Fire Training Week 4, Thu Oct 22, 7:00 PM. Tagged "From your records · schedule". The answer no longer says "mandatory". |
+
+**Rollback:** `c8acbe7` restores the previous Ask B4C. `6cf154f` removes Ask B4C entirely.
