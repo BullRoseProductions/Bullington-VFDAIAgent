@@ -296,26 +296,58 @@ index 0000000..749f27e
 +  }
 +}
 diff --git a/src/App.jsx b/src/App.jsx
-index 215bfac..9bb78c9 100644
+index 215bfac..2c58f8a 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
+@@ -29,7 +29,7 @@ import { consumePendingScan } from "./pendingScan";
+ import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
+ import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
+ import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
+-import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView } from "./appUpdate";
++import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest } from "./appUpdate";
+ import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
+ // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
+ // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 @@ -1768,6 +1768,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
  }
  const NAV = [
    { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
-+  { key: "ask", label: "Ask B4C", Icon: Sparkles, roles: ROLES },   // the member assistant — one tap from anywhere (answers from your own records; never acts)
++  { key: "ask", label: "Ask B4C", Icon: Sparkles, roles: ROLES },   // NOT a screen: go("ask") opens the Ask B4C drawer over wherever they are (see go())
    { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
    { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
    { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
-@@ -3094,6 +3095,7 @@ export default function App() {
+@@ -2349,7 +2350,9 @@ export default function App() {
+   const [screen, setScreen] = useState(() => bootPlace()?.screen || "dashboard");
+   useEffect(() => { if (screen === "ai") setScreen("training"); }, [screen]);   // retired AI Training page → redirect any stale deep-link
+   const [packetId, setPacketId] = useState(() => bootPlace()?.packetId ?? null);
+-  const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
++  const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);
++  const [askOpen, setAskOpen] = useState(false);   // the Ask B4C drawer
++  const [askMsgs, setAskMsgs] = useState([]);      // its conversation, kept across open/close (not across a reload)   // optional deep-link arg carried by go() (e.g. Roster initial tab)
+   // What a reload (app update or manual refresh) carries. A ref kept current every render, registered by an effect so
+   // StrictMode's mount/unmount/mount can't leave it cleared; unmount (sign-out) clears it so a refresh on the login
+   // screen never carries the old screen.
+@@ -2781,6 +2784,8 @@ export default function App() {
+   const S = baseStyles();
+ 
+   function go(k, arg) {
++    // "ask" is not a screen: it opens the Ask B4C drawer over the current one — no navigation, no update swap.
++    if (k === "ask") { setAskOpen(true); setDrawer(false); return; }
+     // A newer build is waiting and nothing is unsaved or in flight: they're leaving this view anyway, so reload
+     // straight onto the screen they're heading to (src/appUpdate.js). Otherwise navigate as always.
+     if (applyAtBoundary({ screen: k, navArg: arg ?? null, packetId: null })) return;
+@@ -3094,6 +3099,10 @@ export default function App() {
            {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
            {screen === "study" && <StudySession S={S} />}
            {screen === "qanda" && <StationQA S={S} />}
-+          {screen === "ask" && <AskB4CScreen role={role} go={go} dept={dept} />}
++          {/* Ask B4C — a slide-over drawer, MOUNTED ONLY WHILE OPEN (it is aria-modal, so a mounted drawer defers
++              auto-update reloads; unmounting on close is what lets them proceed). The conversation lives here, in App,
++              so closing and reopening keeps it. */}
++          {askOpen && <AskB4C role={role} go={go} dept={dept} msgs={askMsgs} setMsgs={setAskMsgs} onClose={() => setAskOpen(false)} />}
            {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
            {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
            {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
-@@ -4781,6 +4783,119 @@ function StationClockCard({ S, dept, go }) {
+@@ -4781,6 +4790,108 @@ function StationClockCard({ S, dept, go }) {
      </div>
    );
  }
@@ -327,8 +359,7 @@ index 215bfac..9bb78c9 100644
 +   and a navigation it re-checks against THIS person's own nav before going anywhere. Blue = AI, as in Station Q&A. */
 +const ASK_SUGGESTIONS = ["My hours this year", "Expiring certs", "Next drill", "Am I clocked in?", "Ask about an SOP"];
 +const ASK_RECORD_LABEL = { am_i_checked_in: "station clock", my_hours: "hours", my_certs: "certs", my_schedule: "schedule", my_attendance: "attendance" };
-+function AskB4C({ role, go, dept, onClose, embedded = false }) {
-+  const [msgs, setMsgs] = useState([]);   // { role, content, meta? }
++function AskB4C({ role, go, dept, onClose, msgs, setMsgs }) {
 +  const [text, setText] = useState("");
 +  const [busy, setBusy] = useState(false);
 +  const [err, setErr] = useState("");
@@ -336,7 +367,8 @@ index 215bfac..9bb78c9 100644
 +  const inputRef = useRef(null);
 +  useEditorOpen(!!text.trim() || busy);   // a half-typed question or an answer in flight blocks the auto-update reload
 +  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [msgs, busy]);
-+  useEffect(() => { if (!embedded) inputRef.current?.focus(); }, []);   // the page version doesn't pop a phone keyboard on arrival
++  useEffect(() => { inputRef.current?.focus(); }, []);
++  useEffect(() => { const esc = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", esc); return () => window.removeEventListener("keydown", esc); }, [onClose]);
 +  // The server's open_screen allowlist is wider than any one person's nav; only go where this person could tap.
 +  const canOpen = (k) => k === "notifications" || NAV.some((n) => n.key === k && hasAny(role, n.roles) && moduleEnabled(k, dept?.disabled_modules));
 +  async function ask(q) {
@@ -345,29 +377,34 @@ index 215bfac..9bb78c9 100644
 +    if (question === "Ask about an SOP") { setText("What does our SOP say about "); inputRef.current?.focus(); return; }
 +    const next = [...msgs, { role: "user", content: question }];
 +    setMsgs(next); setText(""); setBusy(true); setErr("");
++    beginAppRequest();   // the auto-updater can't see this fetch otherwise; held even if the drawer closes mid-answer
 +    try {
 +      const res = await authedFetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" },
 +        body: JSON.stringify({ messages: next.map(({ role: r, content }) => ({ role: r, content })) }) });
 +      const data = await res.json().catch(() => ({}));
 +      if (!res.ok || data.error) throw new Error(data.error || "Ask B4C couldn't answer just now — please try again.");
 +      setMsgs((m) => [...m, { role: "assistant", content: data.text, meta: { records: data.records || [], sops: data.sops, limited: !!data.limited } }]);
-+      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onClose?.(); go(data.navigate); }, 700);
++      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onClose(); go(data.navigate); }, 700);
 +    } catch (e) {
 +      setErr(e.message || "Ask B4C couldn't answer just now — please try again.");
 +      setMsgs((m) => m.slice(0, -1)); setText(question);   // give the question back so nothing is lost
-+    } finally { setBusy(false); }
++    } finally { endAppRequest(); setBusy(false); }
 +  }
 +  const chip = (label, title) => <span key={label} title={title} style={{ ...NOIR_AI.chip, fontSize: 9.5, padding: "3px 8px" }}>{label}</span>;
-+  const panel = (
-+      <div {...(embedded ? { "aria-label": "Ask B4C" } : { role: "dialog", "aria-modal": "true", "aria-label": "Ask B4C", onClick: (e) => e.stopPropagation() })}
-+        style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: embedded ? "100%" : "min(640px, 100%)", maxWidth: 760, marginTop: embedded ? 0 : 24, padding: 0, display: "flex", flexDirection: "column", ...(embedded ? { minHeight: 420, maxHeight: "calc(100dvh - 220px)" } : { maxHeight: "calc(100dvh - 64px)" }) }}>
++  return (
++    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 150, background: "rgba(8,10,16,.55)" }}>
++      <style>{`@keyframes b4c-ask-in{from{transform:translateX(100%)}to{transform:none}}@media (prefers-reduced-motion: reduce){.b4c-ask-sheet{animation:none!important}}`}</style>
++      {/* aria-modal while open is LOAD-BEARING: isSafeToReload() refuses to auto-reload under an aria-modal element,
++          so an update never lands mid-conversation. The drawer is unmounted on close, so it can't block updates after. */}
++      <div role="dialog" aria-modal="true" aria-label="Ask B4C" className="b4c-ask-sheet" onClick={(e) => e.stopPropagation()}
++        style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, position: "absolute", top: 0, right: 0, bottom: 0, width: "min(460px, 100vw)", borderRadius: "14px 0 0 14px", padding: "env(safe-area-inset-top) 0 env(safe-area-inset-bottom)", display: "flex", flexDirection: "column", animation: "b4c-ask-in .22s ease-out" }}>
 +        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
 +          <Sparkles size={18} color={NOIR_AI.blue} />
 +          <div style={{ flex: 1, minWidth: 0 }}>
 +            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Ask B4C</div>
 +            <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>Your hours, certs, schedule and SOPs — from your own records. It can't change anything.</div>
 +          </div>
-+          {!embedded && <button aria-label="Close" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} color={FIRE.textMuted} /></button>}
++          <button aria-label="Close" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} color={FIRE.textMuted} /></button>
 +        </div>
 +        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, minHeight: 180 }}>
 +          {msgs.length === 0 && <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ask about your hours, certifications, upcoming drills, whether you&rsquo;re clocked in, or what your department&rsquo;s SOPs say. You can also say &ldquo;open my hours&rdquo;.</div>}
@@ -400,28 +437,13 @@ index 215bfac..9bb78c9 100644
 +          </form>
 +        </div>
 +      </div>
-+  );
-+  if (embedded) return panel;
-+  return (
-+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 150, background: "rgba(8,10,16,.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(16px, env(safe-area-inset-top)) 16px 16px", overflowY: "auto" }}>
-+      {panel}
 +    </div>
 +  );
 +}
-+// The sidebar entry: the same assistant as a page, so it's one tap from any screen.
-+function AskB4CScreen({ role, go, dept }) {
++// The dashboard card: opens the same drawer as the sidebar entry (go("ask") — App owns the drawer).
++function AskB4CLauncher({ go }) {
 +  return (
-+    <PageShell band kicker="ASK B4C" title="Ask B4C" sub="Your hours, certs, schedule and SOPs — answered from your own records. It can take you to a screen, but it never changes anything.">
-+      <NoirSkin>
-+        <AskB4C role={role} go={go} dept={dept} embedded />
-+      </NoirSkin>
-+    </PageShell>
-+  );
-+}
-+function AskB4CLauncher({ role, go, dept }) {
-+  const [open, setOpen] = useState(false);
-+  return (<>
-+    <button onClick={() => setOpen(true)} style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
++    <button onClick={() => go("ask")} style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
 +      <span style={{ width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: "rgba(79,144,214,.14)", border: "1px solid rgba(79,144,214,.3)" }}><Sparkles size={18} color={NOIR_AI.blue} /></span>
 +      <span style={{ flex: 1, minWidth: 0 }}>
 +        <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, color: FIRE.textPrimary }}>Ask B4C</span>
@@ -429,21 +451,43 @@ index 215bfac..9bb78c9 100644
 +      </span>
 +      <ChevronRight size={16} color={NOIR_AI.blueText} />
 +    </button>
-+    {open && <AskB4C role={role} go={go} dept={dept} onClose={() => setOpen(false)} />}
-+  </>);
++  );
 +}
  function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, isEqMgr }) {
    // NOTE: no useProofViewer here any more — PersonalView owns the certs card and its own proof viewer.
    const DISPLAY = "'Oswald', system-ui, sans-serif";
-@@ -4846,6 +4961,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
+@@ -4846,6 +4957,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
        {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
            (it renders nothing once complete); only its place in the order changed. */}
        <OnboardingCard S={S} me={me} go={go} dept={dept} />
 +      {/* Ask B4C — the member assistant (answers from their own records + SOPs; never acts) */}
-+      <AskB4CLauncher role={role} go={go} dept={dept} />
++      <AskB4CLauncher go={go} />
        {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
        <StationFundraiserCard />
        {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
+diff --git a/src/appUpdate.js b/src/appUpdate.js
+index 22691db..a97112b 100644
+--- a/src/appUpdate.js
++++ b/src/appUpdate.js
+@@ -85,9 +85,18 @@ async function fetchDeployedBuild() {
+   } catch { return null; }
+ }
+ 
++/* NON-SUPABASE REQUESTS THAT MUST NOT BE CUT OFF. writesInFlight() only sees requests through the Supabase client; a
++   call to one of our own /api/* functions (e.g. Ask B4C's /api/assistant) goes through plain fetch and would be
++   invisible. Callers bracket such a request with beginAppRequest()/endAppRequest() (endAppRequest in a finally). Held
++   at module level so it outlives the component that started it — closing the Ask B4C drawer mid-answer still defers. */
++let appRequestsInFlight = 0;
++export const beginAppRequest = () => { appRequestsInFlight += 1; };
++export const endAppRequest = () => { appRequestsInFlight = Math.max(0, appRequestsInFlight - 1); };
++
+ export function isSafeToReload() {
+   if (anEditorIsOpen()) return false;                 // a form / editor with input is on screen
+   if (writesInFlight() > 0) return false;             // a save, an RPC, a clock-in/out is mid-flight
++  if (appRequestsInFlight > 0) return false;          // an /api/* request we started (Ask B4C's answer) is mid-flight
+   if (typeof document !== "undefined" && document.querySelector('[aria-modal="true"]')) return false;   // a modal is up
+   return true;
+ }
 diff --git a/tests/assistant.e2e.test.mjs b/tests/assistant.e2e.test.mjs
 new file mode 100644
 index 0000000..2bfe2e7

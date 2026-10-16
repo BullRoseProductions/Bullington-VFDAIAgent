@@ -85,9 +85,18 @@ async function fetchDeployedBuild() {
   } catch { return null; }
 }
 
+/* NON-SUPABASE REQUESTS THAT MUST NOT BE CUT OFF. writesInFlight() only sees requests through the Supabase client; a
+   call to one of our own /api/* functions (e.g. Ask B4C's /api/assistant) goes through plain fetch and would be
+   invisible. Callers bracket such a request with beginAppRequest()/endAppRequest() (endAppRequest in a finally). Held
+   at module level so it outlives the component that started it — closing the Ask B4C drawer mid-answer still defers. */
+let appRequestsInFlight = 0;
+export const beginAppRequest = () => { appRequestsInFlight += 1; };
+export const endAppRequest = () => { appRequestsInFlight = Math.max(0, appRequestsInFlight - 1); };
+
 export function isSafeToReload() {
   if (anEditorIsOpen()) return false;                 // a form / editor with input is on screen
   if (writesInFlight() > 0) return false;             // a save, an RPC, a clock-in/out is mid-flight
+  if (appRequestsInFlight > 0) return false;          // an /api/* request we started (Ask B4C's answer) is mid-flight
   if (typeof document !== "undefined" && document.querySelector('[aria-modal="true"]')) return false;   // a modal is up
   return true;
 }
