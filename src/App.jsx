@@ -13624,6 +13624,20 @@ function StationHoursReport({ S, role, dept, notify, back }) {
   // The one write this panel performs. Same shape as confirmOut: busy id, RPC, notify with the
   // server's own sentence on failure, reload BOTH the list and the windowed figures on success —
   // closing a shift adds credited hours, so the tiles above must not keep showing the old total.
+  /* THE ONE CLOSE, shared by both admin closers (the long-open list below and the "Check out" button on
+     On station right now). close_open_shift sets checked_out_at + auto_closed only — it never touches the
+     arrival verdict ("confirmed on station"), and neither does anything here. */
+  async function closeShiftAt(shiftId, when, name) {
+    setBusyId(shiftId);
+    const { error } = await supabase.rpc("close_open_shift", { p_shift_id: shiftId, p_checked_out_at: when.toISOString() });
+    setBusyId(null);
+    // The RPC raises rather than no-opping, so error.message is a sentence an admin can act on
+    // ("That shift is already closed.") — surface it rather than swallowing it.
+    if (error) { notify?.({ kind: "error", title: "Couldn't close that shift", text: error.message || "Please try again." }); return false; }
+    notify?.({ kind: "success", text: `Shift closed for ${name || "that member"}.` });
+    loadOpenLong(); loadOpenShifts(); load(rangeKey);
+    return true;
+  }
   async function closeOpenShift(r) {
     const raw = closeAt[r.shift_id];
     const when = raw ? new Date(raw) : null;       // datetime-local parses as LOCAL time — correct here
@@ -13631,16 +13645,65 @@ function StationHoursReport({ S, role, dept, notify, back }) {
       notify?.({ kind: "error", title: "Enter the out-time", text: "Set when the member actually left before closing the shift." });
       return;
     }
-    setBusyId(r.shift_id);
-    const { error } = await supabase.rpc("close_open_shift", { p_shift_id: r.shift_id, p_checked_out_at: when.toISOString() });
-    setBusyId(null);
-    // The RPC raises rather than no-opping, so error.message is a sentence an admin can act on
-    // ("That shift is already closed.") — surface it rather than swallowing it.
-    if (error) { notify?.({ kind: "error", title: "Couldn't close that shift", text: error.message || "Please try again." }); return; }
-    notify?.({ kind: "success", text: `Shift closed for ${r.member_name || "that member"}.` });
-    setCloseAt((o) => { const n = { ...o }; delete n[r.shift_id]; return n; });
-    loadOpenLong(); load(rangeKey);
+    if (await closeShiftAt(r.shift_id, when, r.member_name)) setCloseAt((o) => { const n = { ...o }; delete n[r.shift_id]; return n; });
   }
+  /* ---- "Check out" on On station right now — same admin gate as the closer above ----
+     dept_on_station_now_all() carries no shift id, so dept_open_shifts() (admin-gated, same gate as
+     close_open_shift) supplies it; a row gets a button only when its shift is found there. Until that read
+     lands — or if it fails — no buttons appear (fail closed; the list itself is unaffected). Training rows
+     never match: a drill's clock is closed by finalizing the session. */
+  const [openShifts, setOpenShifts] = useState(null);   // null = not loaded
+  const [checkoutFor, setCheckoutFor] = useState(null); // shift_id whose out-time picker is open
+  const [checkoutAt, setCheckoutAt] = useState("");     // datetime-local, prefilled with now
+  function loadOpenShifts() {
+    if (!isDA) return;
+    supabase.rpc("dept_open_shifts").then(({ data, error }) => { if (!error && Array.isArray(data)) setOpenShifts(data); });   // a failed read keeps the last list
+  }
+  useEffect(() => { loadOpenShifts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isDA]);
+  const shiftFor = (p) => (openShifts || []).find((s) => s.member_id === p.member_id && Date.parse(s.checked_in_at) === Date.parse(p.checked_in_at)) || null;
+  const durText = (ms) => { const m = Math.max(0, Math.floor(ms / 60000)); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`; };
+  async function checkOut(sh) {
+    const when = checkoutAt ? new Date(checkoutAt) : null;   // datetime-local parses as LOCAL time
+    const inAt = new Date(sh.checked_in_at);
+    if (!when || isNaN(when.getTime())) { notify?.({ kind: "error", title: "Enter the out-time", text: "Set when the member left." }); return; }
+    if (when <= inAt || when > new Date()) { notify?.({ kind: "error", title: "Out-time outside the shift", text: "Pick a time after they checked in and no later than now." }); return; }
+    const sameDay = when.toDateString() === new Date().toDateString();
+    const at = when.toLocaleString("en-US", sameDay ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    if (!(await noirConfirm({ title: `Check out ${sh.member_name || "this member"}?`, body: `Checked out at ${at} — credits ${durText(when - inAt)}.`, confirmLabel: "Check out" }))) return;
+    if (await closeShiftAt(sh.shift_id, when, sh.member_name)) { setCheckoutFor(null); setCheckoutAt(""); }
+  }
+  const checkoutBtn = (p) => {
+    const sh = isDA ? shiftFor(p) : null;
+    if (!sh) return null;
+    const open = checkoutFor === sh.shift_id;
+    return <button style={{ ...FS.btn, padding: "5px 10px" }} disabled={busyId === sh.shift_id}
+      onClick={() => { if (open) { setCheckoutFor(null); return; } setCheckoutFor(sh.shift_id); setCheckoutAt(localInput(new Date().toISOString())); }}>
+      {open ? <><X size={13} color={FIRE.btnIcon} /> Cancel</> : <><LogOut size={13} color={FIRE.btnIcon} /> Check out</>}</button>;
+  };
+  const checkoutPanel = (p) => {
+    const sh = isDA ? shiftFor(p) : null;
+    if (!sh || checkoutFor !== sh.shift_id) return null;
+    const busy = busyId === sh.shift_id;
+    const when = checkoutAt ? new Date(checkoutAt) : null;
+    const ok = when && !isNaN(when.getTime()) && when > new Date(sh.checked_in_at);
+    return (
+      <div style={{ flexBasis: "100%", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", padding: "8px 0 4px 18px" }}>
+        {/* Prefilled with NOW (the build order's default) — unlike the long-open closer, whose field stays empty because
+            "now" there would quietly credit a full-length forgotten shift. Here the member is on the live list and the
+            admin is checking them out at the moment. min/max bound the native picker to [check-in, now]. */}
+        <label style={{ ...S.field, minWidth: 210 }}>
+          <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Out-time</span>
+          <input type="datetime-local" style={FS.input} value={checkoutAt}
+            min={localInput(sh.checked_in_at)} max={localInput(new Date().toISOString())}
+            onChange={(e) => setCheckoutAt(e.target.value)} />
+        </label>
+        <button disabled={busy} style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={() => checkOut(sh)}>
+          {busy ? <><Loader2 size={15} className="spin" /> Saving…</> : <><CheckCircle2 size={15} /> Check out</>}
+        </button>
+        {ok && <span style={{ fontSize: 12, color: FIRE.textMuted, paddingBottom: 9 }}>credits {durText(when - new Date(sh.checked_in_at))}</span>}
+      </div>
+    );
+  };
   // <input type="datetime-local"> speaks local wall-clock with no zone. Format for min/max the same
   // way the browser will hand the value back, so the native picker constrains to a sane window.
   const localInput = (iso) => {
@@ -14194,7 +14257,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{g.people.length || "nobody"}{g.people.length ? (g.people.length === 1 ? " person" : " people") : " there"}</span>
                 </div>
                 {g.people.map((p, i) => (
-                  <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === g.people.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                  <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, flexWrap: "wrap", borderBottom: i === g.people.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                     <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
                     <div style={FS.rowTitle}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
@@ -14205,7 +14268,9 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: p.verified ? FIRE.greenText : FIRE.amberText }}>
                         {p.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{p.verified ? "Verified" : "Not verified"}
                       </span>
+                      {checkoutBtn(p)}
                     </div>
+                    {checkoutPanel(p)}
                   </div>
                 ))}
               </div>
@@ -14214,7 +14279,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         ) : (
           <div style={{ marginTop: 8 }}>
             {onNow.map((p, i) => (
-              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, borderBottom: i === onNow.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+              <div key={`${p.member_id}-${p.checked_in_at}`} style={{ ...FS.row, flexWrap: "wrap", borderBottom: i === onNow.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.green, flexShrink: 0 }} />
                 <div style={FS.rowTitle}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.member_name || "—"}</div>
@@ -14225,7 +14290,9 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: p.verified ? FIRE.greenText : FIRE.amberText }}>
                     {p.verified ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{p.verified ? "Verified" : "Not verified"}
                   </span>
+                  {checkoutBtn(p)}
                 </div>
+                {checkoutPanel(p)}
               </div>
             ))}
           </div>
