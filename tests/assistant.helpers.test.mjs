@@ -1,4 +1,4 @@
-import { todayCT, ctMidnight, hoursRange, hoursTotals, certStatus, pickSopPassages, SCREENS } from "../api/assistant.js";
+import { todayCT, ctMidnight, hoursRange, hoursTotals, certStatus, pickSopPassages, SCREENS, citedDocs } from "../api/assistant.js";
 const eq = (a, b, m) => { const ok = JSON.stringify(a) === JSON.stringify(b); console.log(ok ? "PASS" : "FAIL", m, ok ? "" : `got ${JSON.stringify(a)} want ${JSON.stringify(b)}`); };
 eq(ctMidnight("2026-10-01").toISOString(), "2026-10-01T05:00:00.000Z", "CDT midnight");
 eq(ctMidnight("2026-01-01").toISOString(), "2026-01-01T06:00:00.000Z", "CST midnight");
@@ -15,3 +15,7 @@ const small = pickSopPassages([{name:"SOP 1",text:"short"}], "x"); eq(small.mode
 const big = pickSopPassages([{name:"Hose SOP", text: ("Hose testing is annual.\n\n" + "filler words here ".repeat(150) + "\n\n").repeat(40)}, {name:"Vehicle SOP", text: ("Emergency driving rules apply.\n\n" + "other text ".repeat(200) + "\n\n").repeat(40)}], "when is hose testing");
 eq([big.mode, big.docs.length > 0, big.docs.every(d => d.name === "Hose SOP"), big.docs.reduce((n,d)=>n+d.text.length,0) <= 24000], ["passages", true, true, true], "big library -> matching passages only, capped");
 eq(["checkin","department"].some(k => k in SCREENS), false, "checkin/department not openable");
+eq(citedDocs("According to your **Document_308_VFIS-PPERoutineInspectionChecklist** (a VFIS sample)", ["Document_308_VFIS-PPERoutineInspectionChecklist_02021.pdf"]), ["Document_308_VFIS-PPERoutineInspectionChecklist_02021.pdf"], "live miss 2026-10-16: extension + trailing token tolerated");
+eq(citedDocs("per your hose testing sop", ["Hose_Testing_SOP.docx"]), ["Hose_Testing_SOP.docx"], "underscores/extension tolerated");
+eq(citedDocs("general guidance only, check your SOPs", ["Hose_Testing_SOP.docx"]), [], "no false cite");
+eq(citedDocs("check the SOP for that", ["SOP_20210.pdf"]), [], "short name: its trimmed form ('sop') alone is not a cite");

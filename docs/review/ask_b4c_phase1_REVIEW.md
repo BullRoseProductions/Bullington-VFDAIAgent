@@ -71,3 +71,35 @@ The model has never been called — all tests use fake stand-ins. Do not promote
   - an SOP question
   - "open my hours"
 - [ ] Promote. Notify crew stays held; rollback is `6cf154f`.
+
+## Promoted 2026-10-16 as `c8acbe7` ("Release industrial-noir-9")
+
+Promoted by **Ashlea's decision**, which deviates from the gate above: it went to production without first being tested on Preview. Notify crew is still held back: `/api/notify-session` returns 404, and `/api/assistant` with no session returns 401. **Rollback = `6cf154f`.**
+
+### The five real questions, on production as Ashlea
+
+Each answer was checked against her records, read independently in the same session.
+
+| # | Question | Her records | Answer | Source tag |
+|---|---|---|---|---|
+| 1 | Hours this month | 1 shift, unconfirmed; 0.0 credited | **Correct.** 0.0 credited, 1 shift not yet confirmed | "From your records · hours" ✓ |
+| 2 | Expiring certs | No certs, none pending | **Correct** | "From your records · certs" ✓ |
+| 3 | Next drill | Fire Training Week 4, Thu Oct 22, 7:00 PM | **Correct** (calls it "mandatory" — see below) | "From your records · schedule" ✓ |
+| 4 | SOP: how often to inspect PPE | VFIS PPE checklist: upon issuance and after each use | **Correct.** Cites the document and quotes NFPA 1851 | **"General guidance" ✗** — should have been "From your SOPs" |
+| 5 | "open my hours" | — | **Correct.** Opened Station Hours | — |
+
+No answer was wrong and nothing errored, so the rollback condition was not met.
+
+### Defects found
+
+1. **Wrong source tag on #4.** The answer named the document without its `.pdf` extension and trailing token, and the tag check compares names exactly. Station Q&A uses the same exact match, so it has the same flaw.
+2. **Markdown shows as raw asterisks.** The model writes `**bold**` and the panel prints it literally.
+3. **"Mandatory" is an overstatement.** The record only says the drill counts toward attendance.
+
+### Fix — prepared on the branch, NOT deployed
+
+Diff: `docs/review/ask_b4c_cite_fix_DIFF.patch`
+
+- **`citedDocs()`** matches document names regardless of case, file extension, and `_` / `-` / `.`. It also accepts a name with its trailing number token dropped, but only when what remains is at least 12 characters.
+- **System prompt** now asks for plain text with no markdown, and says to report only what the record says ("counts toward attendance", not "mandatory").
+- **Tests:** helpers 17/17 (4 new citation tests), end-to-end 15/15.

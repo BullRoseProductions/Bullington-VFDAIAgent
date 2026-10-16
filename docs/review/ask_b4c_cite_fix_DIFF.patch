@@ -1,0 +1,66 @@
+diff --git a/api/assistant.js b/api/assistant.js
+index 749f27e..cb5cb92 100644
+--- a/api/assistant.js
++++ b/api/assistant.js
+@@ -99,6 +99,22 @@ export function pickSopPassages(docs, question) {
+   return { mode: "passages", docs: out };
+ }
+ 
++// Which of the returned SOP documents the answer actually names. Station Q&A's rule (the answer must name the document),
++// made tolerant of how a model writes a file name: case, the file extension, and _ / - vs spaces don't matter.
++// (Live 2026-10-16: "Document_308_VFIS-PPERoutineInspectionChecklist" vs the stored "...Checklist_02021.pdf" -> missed.)
++const normName = (t) => String(t || "").toLowerCase().replace(/\.(pdf|docx?|txt|md|rtf|pptx?|xlsx?)\b/g, " ").replace(/[_\-–—.]+/g, " ").replace(/\s+/g, " ").trim();
++export function citedDocs(text, names) {
++  const hay = normName(text);
++  return [...new Set(names || [])].filter((n) => {
++    if (!n) return false;
++    const full = normName(n);
++    if (full && hay.includes(full)) return true;
++    // also accept the name with its trailing date/version token dropped (e.g. "..._02021"), if what remains is specific
++    const trimmed = full.replace(/\s+\d{3,}$/, "");
++    return trimmed.length >= 12 && trimmed !== full && hay.includes(trimmed);
++  }).slice(0, 3);
++}
++
+ /* ---------------- tools ---------------- */
+ const TOOLS = [
+   { name: "am_i_checked_in", description: "Whether the member is clocked in at the station right now (standby, training or off-site), since when, and whether the check-in was confirmed on station.", input_schema: { type: "object", properties: {} } },
+@@ -199,7 +215,9 @@ HARD RULES:
+ - You cannot change anything: no clocking in or out, no submissions, no edits. If asked, explain where in the app they can do it and offer to open that screen.
+ - Department policy / procedure questions: use search_sops. Answer from those documents and CITE them ("According to your {document name}…"). When the documents are silent, give general fire-service guidance and SAY that it is general. NEVER invent a department-specific protocol, number or threshold — a volunteer could act on a made-up procedure on a live call. Remind them to follow their department's actual SOPs and verify specifics against the standards that apply to them (NFPA / TCFP / NREMT / their AHJ and medical direction).
+ - Only call open_screen when they ask to go somewhere / open / pull something up.
+-- Be brief and plain: a short direct answer, then the key numbers or dates. Hours to one decimal. Dates like "Tue Oct 21, 7:00 PM".`;
++- Be brief and plain: a short direct answer, then the key numbers or dates. Hours to one decimal. Dates like "Tue Oct 21, 7:00 PM".
++- Write PLAIN TEXT: no markdown (no **bold**, no # headings, no > quotes) — the app shows your words exactly as written. Simple "- " lists are fine.
++- Say only what the record says: a drill that counts toward attendance is "counts toward attendance", not "mandatory"; don't add details the tool didn't return.`;
+ 
+ export default async function handler(req, res) {
+   if (cors(req, res)) return;
+@@ -278,8 +296,7 @@ export default async function handler(req, res) {
+     }
+     // Grounding for the UI: which records were read, and which SOPs the answer actually names (Station Q&A's rule).
+     const records = [...ctx.used].filter((t) => ["am_i_checked_in", "my_hours", "my_certs", "my_schedule", "my_attendance"].includes(t));
+-    const lower = text.toLowerCase();
+-    const cited = [...new Set(ctx.sopNames)].filter((n) => n && lower.includes(String(n).toLowerCase())).slice(0, 3);
++    const cited = citedDocs(text, ctx.sopNames);
+     return res.status(200).json({
+       text: text || "Sorry — I couldn't put an answer together. Try asking another way.",
+       navigate: ctx.navigate, records, sops: ctx.used.has("search_sops") ? { cited } : null,
+diff --git a/tests/assistant.helpers.test.mjs b/tests/assistant.helpers.test.mjs
+index 20cd4aa..43d584e 100644
+--- a/tests/assistant.helpers.test.mjs
++++ b/tests/assistant.helpers.test.mjs
+@@ -1,4 +1,4 @@
+-import { todayCT, ctMidnight, hoursRange, hoursTotals, certStatus, pickSopPassages, SCREENS } from "../api/assistant.js";
++import { todayCT, ctMidnight, hoursRange, hoursTotals, certStatus, pickSopPassages, SCREENS, citedDocs } from "../api/assistant.js";
+ const eq = (a, b, m) => { const ok = JSON.stringify(a) === JSON.stringify(b); console.log(ok ? "PASS" : "FAIL", m, ok ? "" : `got ${JSON.stringify(a)} want ${JSON.stringify(b)}`); };
+ eq(ctMidnight("2026-10-01").toISOString(), "2026-10-01T05:00:00.000Z", "CDT midnight");
+ eq(ctMidnight("2026-01-01").toISOString(), "2026-01-01T06:00:00.000Z", "CST midnight");
+@@ -15,3 +15,7 @@ const small = pickSopPassages([{name:"SOP 1",text:"short"}], "x"); eq(small.mode
+ const big = pickSopPassages([{name:"Hose SOP", text: ("Hose testing is annual.\n\n" + "filler words here ".repeat(150) + "\n\n").repeat(40)}, {name:"Vehicle SOP", text: ("Emergency driving rules apply.\n\n" + "other text ".repeat(200) + "\n\n").repeat(40)}], "when is hose testing");
+ eq([big.mode, big.docs.length > 0, big.docs.every(d => d.name === "Hose SOP"), big.docs.reduce((n,d)=>n+d.text.length,0) <= 24000], ["passages", true, true, true], "big library -> matching passages only, capped");
+ eq(["checkin","department"].some(k => k in SCREENS), false, "checkin/department not openable");
++eq(citedDocs("According to your **Document_308_VFIS-PPERoutineInspectionChecklist** (a VFIS sample)", ["Document_308_VFIS-PPERoutineInspectionChecklist_02021.pdf"]), ["Document_308_VFIS-PPERoutineInspectionChecklist_02021.pdf"], "live miss 2026-10-16: extension + trailing token tolerated");
++eq(citedDocs("per your hose testing sop", ["Hose_Testing_SOP.docx"]), ["Hose_Testing_SOP.docx"], "underscores/extension tolerated");
++eq(citedDocs("general guidance only, check your SOPs", ["Hose_Testing_SOP.docx"]), [], "no false cite");
++eq(citedDocs("check the SOP for that", ["SOP_20210.pdf"]), [], "short name: its trimmed form ('sop') alone is not a cite");
