@@ -1,12 +1,12 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index d442a79..4f4b24c 100644
+index ac8d48b..215bfac 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -29,6 +29,7 @@ import { consumePendingScan } from "./pendingScan";
  import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
  import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
  import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
-+import { registerPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView } from "./appUpdate";
++import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView } from "./appUpdate";
  import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
  // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
  // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -19,7 +19,7 @@ index d442a79..4f4b24c 100644
    const isDA = isDeptAdmin(role);
    const isDeptAdminOnly = hasAny(role, ["Department Admin"]);   // the Admin section is a Department Admin's alone — not Project Admin
    const back = () => setView(null);
-@@ -2337,10 +2338,19 @@ export default function App() {
+@@ -2337,10 +2338,24 @@ export default function App() {
    const [authEmail, setAuthEmail] = useState(null);
    const [myMemberId, setMyMemberId] = useState(null);
    const [identityChecked, setIdentityChecked] = useState(false);
@@ -38,11 +38,16 @@ index d442a79..4f4b24c 100644
 -  const [navArg, setNavArg] = useState(null);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
 +  const [packetId, setPacketId] = useState(() => bootPlace()?.packetId ?? null);
 +  const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
-+  registerPlaceGetter(() => ({ screen, packetId, navArg }));   // what an app-update reload carries (idempotent, every render)
++  // What a reload (app update or manual refresh) carries. A ref kept current every render, registered by an effect so
++  // StrictMode's mount/unmount/mount can't leave it cleared; unmount (sign-out) clears it so a refresh on the login
++  // screen never carries the old screen.
++  const placeRef = useRef(null);
++  placeRef.current = { screen, packetId, navArg };
++  useEffect(() => { registerPlaceGetter(() => placeRef.current); return clearPlaceGetter; }, []);
    const [drawer, setDrawer] = useState(false);
    const [library, setLibrary] = useState(SEED);
    const [requests, setRequests] = useState([]);
-@@ -2765,7 +2775,12 @@ export default function App() {
+@@ -2765,7 +2780,12 @@ export default function App() {
    }, [role]);
    const S = baseStyles();
  
@@ -56,7 +61,7 @@ index d442a79..4f4b24c 100644
    // Native push registration — once we know which member is signed in, so the device token is filed
    // against the right person. No-op on web and while VITE_PUSH_ENABLED is off. Tapping a push opens
    // the inbox rather than deep-linking to the subject: the inbox is the one destination we control.
-@@ -9292,7 +9307,7 @@ function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open
+@@ -9292,7 +9312,7 @@ function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open
     NO GRANTS TILE. A tile that opens nothing teaches people the app is broken. When grants exist it
     is one more `if (view === ...)` line and one more card. */
  function Funding({ S, role, notify, dept, meId, members }) {
@@ -65,7 +70,7 @@ index d442a79..4f4b24c 100644
  
    /* MONEY RAISED — a headline total, and the two dated figures it is made of.
  
-@@ -12394,7 +12409,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+@@ -12394,7 +12414,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
  /* ---------------- Reports (leadership reporting hub) ---------------- */
  // Container that holds many report "cards". Stage 1: Yearly Attendance (live) + Chief's Report (Stage 2 placeholder).
  function Reports({ S, role, members, sessions, dept, meId, notify }) {
@@ -74,12 +79,117 @@ index d442a79..4f4b24c 100644
    const [openReport, setOpenReport] = useState(null);   // a saved report picked from the hub's peek opens straight into its viewer
    if (view === "attendance") return <AttendanceReport S={S} members={members} sessions={sessions} dept={dept} back={() => setView(null)} />;
    if (view === "chief") return <RosterReports S={S} role={role} members={members} sessions={sessions} dept={dept} meId={meId} notify={notify} initialReport={openReport} back={() => { setOpenReport(null); setView(null); }} />;
+@@ -20653,6 +20673,80 @@ function AttachAgendaModal({ S, session, byName, notify, onAttached, onClose })
+     </div>
+   );
+ }
++// "Notify crew" confirm sheet. Opens with a DRY RUN of /api/notify-session (nothing sent) so the counts per
++// channel and the message preview are what the server would actually do; then an explicit confirm. The
++// server re-checks everything (is_dept_admin(), same department, is_muted fail-closed, dedupe) — this UI
++// only asks.
++function NotifyCrewModal({ session, onClose, notify }) {
++  const [state, setState] = useState({ loading: true, data: null, err: "" });
++  const [busy, setBusy] = useState("");
++  const [result, setResult] = useState(null);
++  const call = async (params) => {
++    const qs = new URLSearchParams({ session_id: String(session.id), ...params }).toString();
++    const r = await authedFetch(`/api/notify-session?${qs}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
++    const j = await r.json().catch(() => ({}));
++    if (!r.ok) throw new Error(j.error || `Request failed (HTTP ${r.status})`);
++    return j;
++  };
++  useEffect(() => {
++    let alive = true;
++    call({ dry: "1" }).then((d) => alive && setState({ loading: false, data: d, err: "" })).catch((e) => alive && setState({ loading: false, data: null, err: e.message }));
++    return () => { alive = false; };
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [session.id]);
++  const send = async (mode) => {
++    setBusy(mode);
++    try {
++      const out = await call(mode === "self" ? { only: "self" } : {});
++      setResult(out);
++      const s = out.sent || {};
++      notify({ kind: "success", title: mode === "self" ? "Test sent to you" : "Crew notified",
++        text: `Inbox ${s.inbox ?? 0} · push ${s.push?.sent ?? 0} device${(s.push?.sent ?? 0) === 1 ? "" : "s"} · email ${s.email?.sent ?? 0}` });
++      if (mode !== "self") onClose();
++    } catch (e) { notify({ kind: "error", title: "Couldn't send", text: e.message }); }
++    setBusy("");
++  };
++  const d = state.data, w = d?.wouldSendTo;
++  const row = (label, n, note) => (
++    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
++      <span style={{ fontSize: 13, color: FIRE.textSecondary }}>{label}{note && <span style={{ fontSize: 11, color: FIRE.textMuted }}> · {note}</span>}</span>
++      <b style={{ fontFamily: DISPLAY_FONT, fontSize: 18, color: FIRE.textPrimary, ...FS.num }}>{n}</b>
++    </div>
++  );
++  return createPortal(
++    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 130, background: "rgba(0,0,0,.66)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
++      <div onClick={(e) => e.stopPropagation()} style={{ ...NOIR_MODAL_PANEL, background: `radial-gradient(120% 60% at 92% 0%, rgba(200,50,58,.12), transparent 40%), ${NOIR_MODAL_PANEL.background}`, width: "100%", maxWidth: 460, padding: "18px 18px 16px", margin: "40px 0" }}>
++        <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
++          <CardHead icon={Megaphone} title="Notify crew" style={{ marginBottom: 0, width: "auto" }} />
++          <button onClick={onClose} aria-label="Close" style={{ ...FS.btn, marginLeft: "auto", padding: "5px 8px" }}><X size={15} color={FIRE.btnIcon} /></button>
++        </div>
++        <div style={{ fontSize: 13, color: FIRE.textSecondary, marginBottom: 10 }}>{session.title}</div>
++        {state.loading && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}><Loader2 size={14} className="spin" style={{ verticalAlign: "-2px" }} /> Checking who would get it…</div>}
++        {state.err && <div style={{ fontSize: 13, color: FIRE.redText, padding: "8px 0", lineHeight: 1.45 }}>{state.err}</div>}
++        {d && (<>
++          <div style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
++            <div style={{ fontSize: 10.5, letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700, marginBottom: 4 }}>PREVIEW</div>
++            <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>{d.preview.push.title}</div>
++            <div style={{ fontSize: 13, color: FIRE.textSecondary }}>{d.preview.push.body}</div>
++            <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>Email subject: {d.preview.email.subject}</div>
++          </div>
++          {row("Inbox", w.inbox, `${d.eligible} eligible`)}
++          {row("Push", w.push.members, w.push.off ? w.push.off : `${w.push.devices} device${w.push.devices === 1 ? "" : "s"}`)}
++          {row("Email", w.email, w.emailOff || "members with an email on file")}
++          <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 8, lineHeight: 1.45 }}>
++            {d.muted ? `${d.muted} muted event reminders and won't get this. ` : ""}{d.alreadyNotified ? `${d.alreadyNotified} already got this reminder and won't get it twice. ` : ""}Audience: {d.session.audience === "board" ? "Board only" : d.session.audience === "leadership" ? "Leadership only" : "everyone"} in your department.
++          </div>
++          {result && <div style={{ fontSize: 12, color: FIRE.greenText, marginTop: 8 }}>Test sent — check your inbox, phone and email.</div>}
++          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
++            <button style={FS.btn} disabled={!!busy} onClick={() => send("self")}>{busy === "self" ? <Loader2 size={14} className="spin" /> : <Send size={14} color={FIRE.btnIcon} />} Send a test to me</button>
++            <button style={{ ...FS.btnPrimary, opacity: busy || !w.inbox ? 0.6 : 1 }} disabled={!!busy || !w.inbox} onClick={() => send("crew")}>{busy === "crew" ? <Loader2 size={14} className="spin" /> : <Megaphone size={14} />} Send to {w.inbox} {w.inbox === 1 ? "member" : "members"}</button>
++          </div>
++        </>)}
++      </div>
++    </div>,
++    document.body
++  );
++}
+ /* ---------------- Register — a PLAN to attend, not attendance ----------------
+    A member's heads-up for whoever runs a session: Coming / Maybe / Not coming. It lives in its own table
+    (session_registrations) and is NEVER read by, or written from, anything attendance — not the roll, check-in,
+@@ -20748,6 +20842,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+   const [showSess, setShowSess] = useState(false);
+   const [openAtt, setOpenAtt] = useState(null);
+   const [openSignin, setOpenSignin] = useState(null);
++  const [notifyFor, setNotifyFor] = useState(null);   // session whose "Notify crew" confirm sheet is open
+   const [openPlans, setOpenPlans] = useState(null);   // per-session attached-plans section: collapsed by default (calm-at-rest), expand deliberately
+   /* Live codes come from open_signin. They are held here for display, and RESTORED on load
+      from current_signin_token() — a leadership-gated read of the same column member_check_in
+@@ -21478,6 +21573,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+               <div style={{ display: "flex", gap: 9, marginTop: 17, flexWrap: "wrap" }}>
+                 {nextSession && canRunSignin && !nextSession.done && <button style={thbtn} onClick={() => goToNext(() => setOpenSignin(nextSession.id))}><QrCode size={14} color={FIRE.redText} /> QR sign-in</button>}
+                 {nextSession && nextPlans.length > 0 && <button style={thbtn} onClick={() => openSessionPlans(nextSession)}><FileText size={14} color={FIRE.textMuted} /> View plan</button>}
++                {nextSession && !nextSession.done && isDeptAdmin(role) && <button style={thbtn} onClick={() => setNotifyFor(nextSession)}><Megaphone size={14} color={FIRE.textMuted} /> Notify crew</button>}
+                 {canPlanAI && <button style={thbtn} onClick={() => setDraftOpen((v) => !v)}><Sparkles size={14} color={FIRE.redText} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
+                 {nextSession && !nextSession.done && <button style={thbtn} aria-expanded={plansOpen === "hero"} onClick={() => setPlansOpen(plansOpen === "hero" ? null : "hero")}><Users size={14} color={FIRE.textMuted} /> {plansOpen === "hero" ? "Hide plans" : "Who's planning to come"}</button>}
+                 {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
+@@ -21516,6 +21612,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+       })()}
+ 
+       {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} />}
++      {notifyFor && <NotifyCrewModal session={notifyFor} notify={notify} onClose={() => setNotifyFor(null)} />}
+       {agendaSession && <AttachAgendaModal S={S} session={agendaSession} byName={me?.name} notify={notify} onAttached={loadSessions} onClose={() => setAgendaSession(null)} />}
+       {mounts}
+       {/* overdue banner — kept as-is (light alert, per instruction) */}
 diff --git a/src/appUpdate.js b/src/appUpdate.js
 new file mode 100644
-index 0000000..893f936
+index 0000000..22691db
 --- /dev/null
 +++ b/src/appUpdate.js
-@@ -0,0 +1,207 @@
+@@ -0,0 +1,229 @@
 +import { useState } from "react";
 +import { Capacitor } from "@capacitor/core";
 +import { anEditorIsOpen } from "./useReconnect";
@@ -136,9 +246,11 @@ index 0000000..893f936
 +let deployed = null;          // the newer deploy id, once seen; null = current (or can't tell)
 +let interacted = false;       // has the person touched the page since load?
 +let placeGetter = () => null; // App registers () => ({ screen, packetId, navArg })
++let reloadingForUpdate = false; // set by applyUpdate: its own saved place (e.g. a boundary swap's DESTINATION) must not be overwritten on the way out
 +
 +export const updateReady = () => !!deployed;
 +export function registerPlaceGetter(fn) { placeGetter = typeof fn === "function" ? fn : () => null; }
++export const clearPlaceGetter = () => { placeGetter = () => null; };   // App unmount (sign-out): don't carry a stale screen
 +
 +/* ---- restorable sub-views (e.g. Settings & Support's card -> sub-screen) ----
 +   A drop-in for useState(initial) on a hub's `view`. Records the current value during render (idempotent, like
@@ -196,6 +308,7 @@ index 0000000..893f936
 +  const a = readJSON(ss(), ATTEMPT_KEY);
 +  writeJSON(ss(), ATTEMPT_KEY, { id: deployed, n: a && a.id === deployed ? (a.n || 0) + 1 : 1, at: Date.now() });
 +  persistPlace(place, keepScroll);
++  reloadingForUpdate = true;
 +  window.location.reload();
 +  return true;
 +}
@@ -276,6 +389,21 @@ index 0000000..893f936
 +  showBanner();
 +}
 +
++/* MANUAL REFRESH KEEPS THEIR PLACE TOO. Save the same place the pill path saves (screen/packetId/navArg + sub-views +
++   scroll) whenever the page is going away: `pagehide` fires right before a refresh, so the timestamp is seconds old when
++   takeRestoredPlace() checks its 2-minute window; `visibilitychange -> hidden` covers mobile Safari, which doesn't
++   reliably fire pagehide when an installed app is backgrounded and then reloaded. Same RESTORE_KEY, NO new key.
++   DELIBERATELY OUTSIDE THE UPDATE MACHINERY: never touches ATTEMPT_KEY / canAttempt, so a person refreshing by hand
++   can never use up the 3-reload loop cap. Skipped while an update reload is under way (that already saved its own
++   place, which for a navigation swap is the destination, not this screen). The restore-side guards are unchanged:
++   a deep link still wins, the one-shot scan screens are never restored, every storage access is try/caught. */
++function saveCurrentPlace() {
++  if (reloadingForUpdate) return;
++  const place = placeGetter();
++  if (!place || !place.screen) return;              // not signed in / App not mounted — nothing worth carrying
++  persistPlace(place, true);
++}
++
 +let started = false;
 +export function startUpdateWatch() {
 +  if (started || typeof window === "undefined" || isNative()) return;
@@ -284,7 +412,11 @@ index 0000000..893f936
 +  window.addEventListener("pointerdown", touched, { once: true, capture: true });
 +  window.addEventListener("keydown", touched, { once: true, capture: true });
 +  check("load");
-+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") check("resume"); });
++  window.addEventListener("pagehide", saveCurrentPlace);
++  document.addEventListener("visibilitychange", () => {
++    if (document.visibilityState === "visible") check("resume");
++    else saveCurrentPlace();
++  });
 +  setInterval(() => { if (document.visibilityState === "visible") check("interval"); }, CHECK_EVERY_MS);
 +}
 diff --git a/src/main.jsx b/src/main.jsx

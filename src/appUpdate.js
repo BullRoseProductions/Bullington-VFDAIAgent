@@ -54,9 +54,11 @@ const ls = () => { try { return window.localStorage; } catch { return null; } };
 let deployed = null;          // the newer deploy id, once seen; null = current (or can't tell)
 let interacted = false;       // has the person touched the page since load?
 let placeGetter = () => null; // App registers () => ({ screen, packetId, navArg })
+let reloadingForUpdate = false; // set by applyUpdate: its own saved place (e.g. a boundary swap's DESTINATION) must not be overwritten on the way out
 
 export const updateReady = () => !!deployed;
 export function registerPlaceGetter(fn) { placeGetter = typeof fn === "function" ? fn : () => null; }
+export const clearPlaceGetter = () => { placeGetter = () => null; };   // App unmount (sign-out): don't carry a stale screen
 
 /* ---- restorable sub-views (e.g. Settings & Support's card -> sub-screen) ----
    A drop-in for useState(initial) on a hub's `view`. Records the current value during render (idempotent, like
@@ -114,6 +116,7 @@ function applyUpdate(place, { keepScroll = true, automatic = true } = {}) {
   const a = readJSON(ss(), ATTEMPT_KEY);
   writeJSON(ss(), ATTEMPT_KEY, { id: deployed, n: a && a.id === deployed ? (a.n || 0) + 1 : 1, at: Date.now() });
   persistPlace(place, keepScroll);
+  reloadingForUpdate = true;
   window.location.reload();
   return true;
 }
@@ -194,6 +197,21 @@ async function check(reason) {
   showBanner();
 }
 
+/* MANUAL REFRESH KEEPS THEIR PLACE TOO. Save the same place the pill path saves (screen/packetId/navArg + sub-views +
+   scroll) whenever the page is going away: `pagehide` fires right before a refresh, so the timestamp is seconds old when
+   takeRestoredPlace() checks its 2-minute window; `visibilitychange -> hidden` covers mobile Safari, which doesn't
+   reliably fire pagehide when an installed app is backgrounded and then reloaded. Same RESTORE_KEY, NO new key.
+   DELIBERATELY OUTSIDE THE UPDATE MACHINERY: never touches ATTEMPT_KEY / canAttempt, so a person refreshing by hand
+   can never use up the 3-reload loop cap. Skipped while an update reload is under way (that already saved its own
+   place, which for a navigation swap is the destination, not this screen). The restore-side guards are unchanged:
+   a deep link still wins, the one-shot scan screens are never restored, every storage access is try/caught. */
+function saveCurrentPlace() {
+  if (reloadingForUpdate) return;
+  const place = placeGetter();
+  if (!place || !place.screen) return;              // not signed in / App not mounted — nothing worth carrying
+  persistPlace(place, true);
+}
+
 let started = false;
 export function startUpdateWatch() {
   if (started || typeof window === "undefined" || isNative()) return;
@@ -202,6 +220,10 @@ export function startUpdateWatch() {
   window.addEventListener("pointerdown", touched, { once: true, capture: true });
   window.addEventListener("keydown", touched, { once: true, capture: true });
   check("load");
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") check("resume"); });
+  window.addEventListener("pagehide", saveCurrentPlace);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") check("resume");
+    else saveCurrentPlace();
+  });
   setInterval(() => { if (document.visibilityState === "visible") check("interval"); }, CHECK_EVERY_MS);
 }

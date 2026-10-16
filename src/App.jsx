@@ -29,7 +29,7 @@ import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
-import { registerPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView } from "./appUpdate";
+import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView } from "./appUpdate";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -2350,7 +2350,12 @@ export default function App() {
   useEffect(() => { if (screen === "ai") setScreen("training"); }, [screen]);   // retired AI Training page → redirect any stale deep-link
   const [packetId, setPacketId] = useState(() => bootPlace()?.packetId ?? null);
   const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
-  registerPlaceGetter(() => ({ screen, packetId, navArg }));   // what an app-update reload carries (idempotent, every render)
+  // What a reload (app update or manual refresh) carries. A ref kept current every render, registered by an effect so
+  // StrictMode's mount/unmount/mount can't leave it cleared; unmount (sign-out) clears it so a refresh on the login
+  // screen never carries the old screen.
+  const placeRef = useRef(null);
+  placeRef.current = { screen, packetId, navArg };
+  useEffect(() => { registerPlaceGetter(() => placeRef.current); return clearPlaceGetter; }, []);
   const [drawer, setDrawer] = useState(false);
   const [library, setLibrary] = useState(SEED);
   const [requests, setRequests] = useState([]);
