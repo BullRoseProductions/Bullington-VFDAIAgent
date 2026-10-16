@@ -1,5 +1,9 @@
 -- =====================================================================
 -- CLOSE THREE FORGOTTEN SHIFTS — North Hood County, out-time 9:30 PM Central, 10/15/2026. HOURS-WRITING.
+-- APPLIED by hand 2026-10-16 as ashlea@bullroseproductions.com (North Hood DA). No recorded review PASS before apply.
+-- Do NOT re-run (the shifts are closed; a re-run refuses). Result on live: Kai Newton 7:02:26 PM -> 9:30 PM = 2h27m33s ·
+-- Mike Bell 7:39:17 PM -> 9:30 PM = 1h50m42s · Kenny Bell 7:40:30 PM -> 9:30 PM = 1h49m29s; all auto_closed false,
+-- verified unchanged (true). Chase Thomas (in 10:36:56 PM) and Spencer Sampler (in 7:39:14 PM) left OPEN.
 -- Run ONLY after sql/close_forgotten_shifts_2026-10-15_PREVIEW.sql has been checked.
 -- Goes through the admin-gated close_open_shift() (it enforces out-time in [check-in, now], refuses an already-closed
 -- shift, sets checked_out_at + auto_closed = false, never touches verified) — acting as a North Hood Department Admin.
