@@ -58,7 +58,9 @@ let reloadingForUpdate = false; // set by applyUpdate: its own saved place (e.g.
 
 export const updateReady = () => !!deployed;
 export function registerPlaceGetter(fn) { placeGetter = typeof fn === "function" ? fn : () => null; }
-export const clearPlaceGetter = () => { placeGetter = () => null; };   // App unmount (sign-out): don't carry a stale screen
+// App unmount (sign-out): stop saving, and FORGET anything saved — the place can hold the Ask B4C conversation, which
+// must never be restored into whoever signs in next on this tab.
+export const clearPlaceGetter = () => { placeGetter = () => null; removeKey(ss(), RESTORE_KEY); };
 
 /* ---- restorable sub-views (e.g. Settings & Support's card -> sub-screen) ----
    A drop-in for useState(initial) on a hub's `view`. Records the current value during render (idempotent, like
@@ -85,9 +87,18 @@ async function fetchDeployedBuild() {
   } catch { return null; }
 }
 
+/* NON-SUPABASE REQUESTS THAT MUST NOT BE CUT OFF. writesInFlight() only sees requests through the Supabase client; a
+   call to one of our own /api/* functions (e.g. Ask B4C's /api/assistant) goes through plain fetch and would be
+   invisible. Callers bracket such a request with beginAppRequest()/endAppRequest() (endAppRequest in a finally). Held
+   at module level so it outlives the component that started it — closing the Ask B4C drawer mid-answer still defers. */
+let appRequestsInFlight = 0;
+export const beginAppRequest = () => { appRequestsInFlight += 1; };
+export const endAppRequest = () => { appRequestsInFlight = Math.max(0, appRequestsInFlight - 1); };
+
 export function isSafeToReload() {
   if (anEditorIsOpen()) return false;                 // a form / editor with input is on screen
   if (writesInFlight() > 0) return false;             // a save, an RPC, a clock-in/out is mid-flight
+  if (appRequestsInFlight > 0) return false;          // an /api/* request we started (Ask B4C's answer) is mid-flight
   if (typeof document !== "undefined" && document.querySelector('[aria-modal="true"]')) return false;   // a modal is up
   return true;
 }
@@ -103,6 +114,7 @@ function persistPlace(place, keepScroll) {
   const p = place || {};
   writeJSON(ss(), RESTORE_KEY, {
     screen: p.screen || null, packetId: p.packetId ?? null, navArg: p.navArg ?? null,
+    ask: p.ask ?? null,                                              // the Ask B4C panel: open?, conversation, draft
     subviews: keepScroll ? Object.fromEntries(liveSubviews) : {},    // a boundary swap is going somewhere new
     scrollY: keepScroll && typeof window !== "undefined" ? Math.round(window.scrollY || 0) : 0,
     at: Date.now(), from: BUILD_ID,

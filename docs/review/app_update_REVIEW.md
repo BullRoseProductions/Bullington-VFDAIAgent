@@ -1,6 +1,8 @@
 # Seamless auto-update (web) — review record
 
-**Verdict: PASS**, from the Claude review via Ashlea on 2026-10-16, for build `3776aaa`. It is **not promoted yet.**
+**Verdict: PASS**, from the Claude review via Ashlea on 2026-10-16, for build `3776aaa`.
+
+**Live on production 2026-10-16** as release `6cf154f` ("Release industrial-noir-8"), which includes the pagehide change `0bce233`. `version.json` serves `{"build":"6cf154f"}` with `Cache-Control: no-store, max-age=0`. Rollback is `3f21678`. Notify crew is still held back (absent from the bundle; `/api/notify-session` returns 404).
 
 - **Code:** `src/appUpdate.js`, plus wiring in `App.jsx`, `main.jsx` and `supabaseClient.js`.
 - **Diff:** `docs/review/app_update_no_refresh_DIFF.patch`

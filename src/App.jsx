@@ -29,7 +29,7 @@ import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
-import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView } from "./appUpdate";
+import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest } from "./appUpdate";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -1768,6 +1768,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
 }
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
+  { key: "ask", label: "Ask B4C", Icon: Sparkles, roles: ROLES },   // NOT a screen: go("ask") opens the Ask B4C drawer over wherever they are (see go())
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
@@ -2349,12 +2350,20 @@ export default function App() {
   const [screen, setScreen] = useState(() => bootPlace()?.screen || "dashboard");
   useEffect(() => { if (screen === "ai") setScreen("training"); }, [screen]);   // retired AI Training page → redirect any stale deep-link
   const [packetId, setPacketId] = useState(() => bootPlace()?.packetId ?? null);
-  const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
+  const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);
+  /* The Ask B4C side panel. Its open state, conversation and half-typed question ride along with the saved place
+     (src/appUpdate.js), so an auto-update or a manual refresh reopens it as it was instead of closing it and wiping the
+     chat. Forgotten on sign-out (clearPlaceGetter). */
+  const [askOpen, setAskOpen] = useState(() => !!bootPlace()?.ask?.open);
+  const [askMsgs, setAskMsgs] = useState(() => (Array.isArray(bootPlace()?.ask?.msgs) ? bootPlace().ask.msgs : []));
+  const [askDraft, setAskDraft] = useState(() => (typeof bootPlace()?.ask?.draft === "string" ? bootPlace().ask.draft : ""));
+  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1100);   // dock beside the content
+  useEffect(() => { const on = () => setWide(window.innerWidth >= 1100); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
   // What a reload (app update or manual refresh) carries. A ref kept current every render, registered by an effect so
   // StrictMode's mount/unmount/mount can't leave it cleared; unmount (sign-out) clears it so a refresh on the login
   // screen never carries the old screen.
   const placeRef = useRef(null);
-  placeRef.current = { screen, packetId, navArg };
+  placeRef.current = { screen, packetId, navArg, ask: { open: askOpen, msgs: askMsgs.slice(-20), draft: askDraft } };
   useEffect(() => { registerPlaceGetter(() => placeRef.current); return clearPlaceGetter; }, []);
   const [drawer, setDrawer] = useState(false);
   const [library, setLibrary] = useState(SEED);
@@ -2781,9 +2790,12 @@ export default function App() {
   const S = baseStyles();
 
   function go(k, arg) {
+    // "ask" is not a screen: it opens the Ask B4C drawer over the current one — no navigation, no update swap.
+    if (k === "ask") { setAskOpen(true); setDrawer(false); return; }
+    // (the boundary swap carries the panel too, so it reopens on the destination screen)
     // A newer build is waiting and nothing is unsaved or in flight: they're leaving this view anyway, so reload
     // straight onto the screen they're heading to (src/appUpdate.js). Otherwise navigate as always.
-    if (applyAtBoundary({ screen: k, navArg: arg ?? null, packetId: null })) return;
+    if (applyAtBoundary({ screen: k, navArg: arg ?? null, packetId: null, ask: placeRef.current?.ask ?? null })) return;
     setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null);
   }
   // Native push registration — once we know which member is signed in, so the device token is filed
@@ -3086,7 +3098,13 @@ export default function App() {
             Scoped to <main> ONLY. The sidebar and topbar stay outside, so when a page breaks the
             menu it takes to escape is still rendered. A boundary that swallows its own escape
             hatch is a white screen with extra steps. */}
-        <main style={S.content}>
+        <main style={{ ...S.content, ...(askOpen && wide ? {
+          // Docked: the content box (width 100%, max 1080, auto margins) is capped to the space beside the panel and
+          // centred in it — a bare marginRight would just push a 100%-wide box under the panel.
+          maxWidth: `min(1080px, calc(100% - ${ASK_PANEL_W}px))`,
+          marginLeft: `max(0px, calc((100% - ${ASK_PANEL_W}px - 1080px) / 2))`,
+          marginRight: `calc(${ASK_PANEL_W}px + max(0px, calc((100% - ${ASK_PANEL_W}px - 1080px) / 2)))`,
+        } : {}) }}>
           <ErrorBoundary key={screen}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
@@ -3094,6 +3112,11 @@ export default function App() {
           {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
+          {/* Ask B4C — a NON-MODAL side panel + its right-edge handle. The app stays fully usable beside it. It does NOT
+              hold off auto-updates by being open (no aria-modal); only an answer in flight does (beginAppRequest), and
+              the panel + conversation are carried across the reload (placeRef -> persistPlace). */}
+          <AskB4CDock open={askOpen} setOpen={setAskOpen} wide={wide} role={role} go={go} dept={dept}
+            msgs={askMsgs} setMsgs={setAskMsgs} draft={askDraft} setDraft={setAskDraft} />
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
@@ -4781,6 +4804,125 @@ function StationClockCard({ S, dept, go }) {
     </div>
   );
 }
+/* ---------------- Ask B4C — the member assistant (Phase 1: answers + SOPs + navigation, never acts) ----------------
+   One box for "where do I stand / what does our SOP say / take me there". The server (api/assistant.js) answers from
+   the member's OWN records through a fixed set of read-only tools that run as them (RLS-scoped) and cites the
+   department's SOPs; it never writes. This component only sends the conversation and renders what comes back:
+   grounding chips ("From your records" / "From your SOPs" / "General guidance") so a guessed number can't pass as fact,
+   and a navigation it re-checks against THIS person's own nav before going anywhere. Blue = AI, as in Station Q&A. */
+const ASK_SUGGESTIONS = ["My hours this year", "Expiring certs", "Next drill", "Am I clocked in?", "Ask about an SOP"];
+const ASK_RECORD_LABEL = { am_i_checked_in: "station clock", my_hours: "hours", my_certs: "certs", my_schedule: "schedule", my_attendance: "attendance" };
+const ASK_PANEL_W = 380;
+function AskB4C({ role, go, dept, onClose, msgs, setMsgs, text, setText }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const endRef = useRef(null);
+  const inputRef = useRef(null);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [msgs, busy]);
+  const panelRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  // Esc closes it — but only when focus is in the panel (or nowhere), since the rest of the app stays live beside it.
+  useEffect(() => {
+    const esc = (e) => { if (e.key !== "Escape") return; const a = document.activeElement; if (!a || a === document.body || panelRef.current?.contains(a)) onClose(); };
+    window.addEventListener("keydown", esc); return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
+  // The server's open_screen allowlist is wider than any one person's nav; only go where this person could tap.
+  const canOpen = (k) => k === "notifications" || NAV.some((n) => n.key === k && hasAny(role, n.roles) && moduleEnabled(k, dept?.disabled_modules));
+  async function ask(q) {
+    const question = String(q || "").trim();
+    if (!question || busy) return;
+    if (question === "Ask about an SOP") { setText("What does our SOP say about "); inputRef.current?.focus(); return; }
+    const next = [...msgs, { role: "user", content: question }];
+    setMsgs(next); setText(""); setBusy(true); setErr("");
+    beginAppRequest();   // the auto-updater can't see this fetch otherwise; held even if the drawer closes mid-answer
+    try {
+      const res = await authedFetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next.map(({ role: r, content }) => ({ role: r, content })) }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || "Ask B4C couldn't answer just now — please try again.");
+      setMsgs((m) => [...m, { role: "assistant", content: data.text, meta: { records: data.records || [], sops: data.sops, limited: !!data.limited } }]);
+      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onClose(); go(data.navigate); }, 700);
+    } catch (e) {
+      setErr(e.message || "Ask B4C couldn't answer just now — please try again.");
+      setMsgs((m) => m.slice(0, -1)); setText(question);   // give the question back so nothing is lost
+    } finally { endAppRequest(); setBusy(false); }
+  }
+  const chip = (label, title) => <span key={label} title={title} style={{ ...NOIR_AI.chip, fontSize: 9.5, padding: "3px 8px" }}>{label}</span>;
+  return (
+      /* NON-MODAL on purpose: no backdrop, no role="dialog"/aria-modal — the app beside it stays fully usable, and an
+         open panel does not hold off auto-updates (only an answer in flight does). Starts under the top bar (bell, View as
+         stay reachable); z 45/46 sits above page content and BELOW every modal (50+) and toast (60). */
+      <aside ref={panelRef} aria-label="Ask B4C" className="b4c-ask-sheet"
+        style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, position: "fixed", top: "calc(60px + env(safe-area-inset-top))", right: 0, bottom: 0, zIndex: 45, width: `min(${ASK_PANEL_W}px, calc(100vw - 44px))`, borderRadius: 0, borderTop: "none", borderRight: "none", borderBottom: "none", padding: "0 0 env(safe-area-inset-bottom)", display: "flex", flexDirection: "column", animation: "b4c-ask-in .2s ease-out" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+          <Sparkles size={18} color={NOIR_AI.blue} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>Ask B4C</div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>Your hours, certs, schedule and SOPs — from your own records. It can't change anything.</div>
+          </div>
+          <button aria-label="Close" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} color={FIRE.textMuted} /></button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, minHeight: 180 }}>
+          {msgs.length === 0 && <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5 }}>Ask about your hours, certifications, upcoming drills, whether you&rsquo;re clocked in, or what your department&rsquo;s SOPs say. You can also say &ldquo;open my hours&rdquo;.</div>}
+          {msgs.map((m, i) => m.role === "user" ? (
+            <div key={i} style={{ alignSelf: "flex-end", maxWidth: "85%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: "12px 12px 3px 12px", padding: "8px 12px", fontSize: 13.5, color: FIRE.textPrimary, whiteSpace: "pre-wrap" }}>{m.content}</div>
+          ) : (
+            <div key={i} style={{ alignSelf: "flex-start", maxWidth: "92%", borderLeft: `3px solid ${NOIR_AI.blue}`, paddingLeft: 11 }}>
+              <div style={{ fontSize: 13.5, color: FIRE.textPrimary, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.content}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                {m.meta?.records?.length > 0 && chip(`From your records · ${m.meta.records.map((r) => ASK_RECORD_LABEL[r] || r).join(", ")}`, "Read from your own records just now")}
+                {m.meta?.sops && (m.meta.sops.cited?.length
+                  ? chip(`From your SOPs · ${m.meta.sops.cited.join(", ")}`, "Cited from your department's documents")
+                  : chip("General guidance", "Not from your department's SOPs — confirm against them"))}
+              </div>
+            </div>
+          ))}
+          {busy && <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: NOIR_AI.blueText }}><Loader2 size={14} className="spin" /> Checking…</div>}
+          {err && <div style={NOIR_ERR}>{err}</div>}
+          <div ref={endRef} />
+        </div>
+        <div style={{ padding: "10px 16px 14px", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+          {msgs.length === 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {ASK_SUGGESTIONS.map((q) => <button key={q} disabled={busy} onClick={() => ask(q)} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12.5 }}>{q}</button>)}
+            </div>
+          )}
+          <form onSubmit={(e) => { e.preventDefault(); ask(text); }} style={{ display: "flex", gap: 8 }}>
+            <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask about your hours, certs, drills or SOPs…" maxLength={1000} style={{ ...FS.input, flex: 1, minWidth: 0 }} />
+            <button type="submit" disabled={busy || !text.trim()} style={{ ...FS.btnPrimary, opacity: busy || !text.trim() ? 0.6 : 1 }}><Send size={15} /> Ask</button>
+          </form>
+        </div>
+      </aside>
+  );
+}
+/* The panel and its right-edge handle, always mounted together (the handle is all there is while closed). */
+function AskB4CDock({ open, setOpen, wide, role, go, dept, msgs, setMsgs, draft, setDraft }) {
+  return (<>
+    <style>{`@keyframes b4c-ask-in{from{transform:translateX(100%)}to{transform:none}}@media (prefers-reduced-motion: reduce){.b4c-ask-sheet{animation:none!important}}`}</style>
+    {open && <AskB4C role={role} go={go} dept={dept} msgs={msgs} setMsgs={setMsgs} text={draft} setText={setDraft} onClose={() => setOpen(false)} />}
+    <button onClick={() => setOpen(!open)} aria-expanded={open} aria-label={open ? "Close Ask B4C" : "Open Ask B4C"} title={open ? "Close Ask B4C" : "Ask B4C"}
+      style={{ position: "fixed", zIndex: 46, top: "50%", transform: "translateY(-50%)", right: open ? `min(${ASK_PANEL_W}px, calc(100vw - 44px))` : 0,
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 7px", cursor: "pointer",
+        background: FIRE.card2Noir, border: "1px solid rgba(79,144,214,.4)", borderRight: "none", borderRadius: "10px 0 0 10px",
+        boxShadow: "-4px 0 14px rgba(0,0,0,.35)", color: NOIR_AI.blueText, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".1em" }}>
+      {open ? <ChevronRight size={16} /> : <Sparkles size={16} color={NOIR_AI.blue} />}
+      <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>ASK B4C</span>
+    </button>
+  </>);
+}
+// The dashboard card: opens the same panel as the sidebar entry and the handle (go("ask") — App owns the panel).
+function AskB4CLauncher({ go }) {
+  return (
+    <button onClick={() => go("ask")} style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+      <span style={{ width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: "rgba(79,144,214,.14)", border: "1px solid rgba(79,144,214,.3)" }}><Sparkles size={18} color={NOIR_AI.blue} /></span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, color: FIRE.textPrimary }}>Ask B4C</span>
+        <span style={{ display: "block", fontSize: 12.5, color: FIRE.textSecondary }}>&ldquo;How many hours do I have?&rdquo; &middot; &ldquo;When does my EMT expire?&rdquo; &middot; &ldquo;What does our SOP say about&hellip;&rdquo;</span>
+      </span>
+      <ChevronRight size={16} color={NOIR_AI.blueText} />
+    </button>
+  );
+}
 function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, isEqMgr }) {
   // NOTE: no useProofViewer here any more — PersonalView owns the certs card and its own proof viewer.
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -4846,6 +4988,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
           (it renders nothing once complete); only its place in the order changed. */}
       <OnboardingCard S={S} me={me} go={go} dept={dept} />
+      {/* Ask B4C — the member assistant (answers from their own records + SOPs; never acts) */}
+      <AskB4CLauncher go={go} />
       {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
       <StationFundraiserCard />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
