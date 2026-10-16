@@ -2482,7 +2482,7 @@ export default function App() {
       p_token: token,
       p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null, p_accuracy: pos?.accuracy ?? null,
     });
-    if (error) return { ok: false, reason: error.message || "We couldn't record your sign-in — please see your training officer.", title };
+    if (error) return { ok: false, reason: isMembershipWindowErr(error) ? "You weren't on the department roster on this drill's date, so it can't be recorded — please see your training officer." : (error.message || "We couldn't record your sign-in — please see your training officer."), title };
     loadSessions();   // refresh attendance counts / roster
     if (data === "already") return { ok: true, already: true, title, geoFailed };
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -3039,6 +3039,9 @@ const joinCutoff = (m) => {
   return y ? `${y[1]}-01-01` : null;
 };
 const expectedAfterJoin = (m, s) => { const c = joinCutoff(m); return !c || toISODate(sessDate(s)) >= c; };
+/* The server refuses attendance outside a member's membership window (join date .. termination date — the trigger in
+   sql/membership_window). Its message carries no date (a termination date is Department-Admin-only); match the prefix. */
+const isMembershipWindowErr = (e) => /^MEMBERSHIP_WINDOW:/.test(String(e?.message || ""));
 function deptAttendance(members, sessions, year, range) {
   // scope by date range {from,to} (ISO) when given (empty bound = unbounded); else the original year filter — backward-compatible for dashboards
   const inScope = range
@@ -10737,6 +10740,7 @@ function fmtLongDate(iso) {
 function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, members, meId, dept }) {
   const { openProof, proofMount } = useProofViewer(notify);   // inspector-facing: open the proof on file for an approved cert
   const assign = hasAny(role, DEPT_ADMIN_ROLES);
+  const isDA = hasAny(role, ["Department Admin"]);   // the termination date is a Department Admin's alone
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [editingCertId, setEditingCertId] = useState(null);
@@ -10758,8 +10762,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     let alive = true;
     loadPrivate(() => alive);
     loadNotes(() => alive);
+    if (isDA) loadTermination(() => alive);
     return () => { alive = false; };
-  }, [member.id, assign]);
+  }, [member.id, assign, isDA]);
   /* A FAILED READ IS NOT "NOTHING ON FILE". member_private used to fall back to {} on error, which the Edit form
      then seeded as blanks — and Save upserts those blanks, i.e. a hiccup could null a member's birthday,
      address and joined date. privErr now blocks Edit until the details have actually loaded. (maybeSingle
@@ -10767,6 +10772,16 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
      member_notes likewise kept [] and said "No notes yet". */
   const [privErr, setPrivErr] = useState(false);
   const [notesErr, setNotesErr] = useState(false);
+  /* TERMINATION DATE — HR-sensitive, DEPARTMENT ADMIN ONLY (not Project Admin, not officers). It lives in a locked
+     table reached only through get_/set_member_termination, which re-check the caller server-side; it is in no view,
+     so celebrations and the roster never carry it. It also closes the member's attendance window (the server refuses
+     attendance on drills after it). A failed read keeps the field out of the Edit form so a hiccup can't save a blank. */
+  const [termOn, setTermOn] = useState(null);
+  const [termErr, setTermErr] = useState(false);
+  function loadTermination(isAlive = () => true) {
+    supabase.rpc("get_member_termination", { p_member: member.id })
+      .then(({ data, error }) => { if (!isAlive()) return; if (error) { setTermErr(true); return; } setTermErr(false); setTermOn(data || null); });
+  }
   function loadPrivate(isAlive = () => true) {
     supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
       .then(({ data, error }) => { if (!isAlive()) return; if (error) { setPrivErr(true); return; } setPrivErr(false); setPriv(data || {}); });
@@ -10776,7 +10791,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       .then(({ data, error }) => { if (!isAlive()) return; if (error || !data) { setNotesErr(true); return; } setNotesErr(false); setNotes(data); });
   }
   function startEditForm() {
-    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
+    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "", terminated_on: termOn || "" });
     setEditing(true);
   }
   async function toggleActive() {
@@ -10809,11 +10824,21 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
     const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: deptId, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
+    const td = form.terminated_on || null;
+    let leftAfter = 0;   // attendance already recorded after a new termination date — reported, never deleted here
+    if (isDA && !termErr && td !== (termOn || null)) {
+      const { data: tr, error: e3 } = await supabase.rpc("set_member_termination", { p_member: member.id, p_date: td });
+      if (e3) { setSaving(false); notify({ kind: "error", title: "Profile saved, termination date didn't", text: "The other changes saved, but the termination date failed. Please try again.", details: e3.message }); return; }
+      setTermOn(td);
+      leftAfter = Number(tr?.attendance_after || 0);
+    }
     setSaving(false);
     onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, joinedOn: jd, mentorId: form.mentor_id || null, email });
     setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
     setEditing(false);
-    notify({ kind: "success", text: "Member updated." });
+    notify({ kind: "success", text: leftAfter > 0
+      ? `Member updated. ${member.name} is still marked present at ${leftAfter} drill${leftAfter === 1 ? "" : "s"} after the termination date — nothing was removed; take them off those rosters if they weren't there.`
+      : "Member updated." });
   }
   async function addNote() {
     const t = note.trim(); if (!t) return;
@@ -10983,6 +11008,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 ["Phone", member.phone || "—"],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
+                ...(isDA && termOn ? [["Terminated", fmtLongDate(termOn)]] : []),
                 ["Address", priv?.address || "—"],
               ].map(([l, v]) => (
                 <div key={l} style={l === "Email" || l === "Address" ? { gridColumn: "1 / -1" } : undefined}>
@@ -11020,6 +11046,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 </select></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Joined (date)</span><input type="date" style={FS.input} value={form.joined_date || ""} onChange={(e) => setForm((f) => ({ ...f, joined_date: e.target.value }))} /></label>
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
+              {isDA && (termErr
+                ? <div style={{ ...S.field, fontSize: 12, color: FIRE.amberText }}>Termination date couldn&rsquo;t load — it can&rsquo;t be changed right now.</div>
+                : <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Termination date · Dept Admin only</span><input type="date" style={FS.input} value={form.terminated_on || ""} onChange={(e) => setForm((f) => ({ ...f, terminated_on: e.target.value }))} /></label>)}
               <label style={{ ...S.field, gridColumn: "1 / -1" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>
             </div>
             <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "8px 0 12px" }}>Email is the member's login identity (stored lowercase). Changing it re-links their sign-in — for someone who already logs in, only change it alongside their auth email. Access changes take effect on their next sign-in.</div>
@@ -20812,6 +20841,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
       const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
       if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
       const { error } = await supabase.from("session_attendance").insert({ department_id: deptId, session_id: s.id, member_id: mid, checked_in_at: new Date().toISOString() });
+      if (error && isMembershipWindowErr(error)) { notify({ kind: "error", title: "Not on the roster that day", text: "This member wasn't on the department roster on this drill's date, so their attendance can't be recorded." }); return; }
       if (error) { notify({ kind: "error", title: "Couldn't update attendance", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
       const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
       setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), mid], times: { ...(x.times || {}), [mid]: now } } : x));
@@ -21712,13 +21742,19 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
                       <div style={{ fontSize: 12, color: FIRE.textMuted2, marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
                       {roll.map((m) => {
                         const present = att.includes(m.id);
+                        // Joined after this drill: nothing to mark (the server refuses it). A row already recorded stays tappable so it can be removed.
+                        const notYet = !present && !expectedAfterJoin(m, s);
                         return (
                           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
-                            {canManage && !s.done
+                            {notYet
+                              ? <span style={{ width: 18, textAlign: "center", color: FIRE.textMuted, fontSize: 13 }}>—</span>
+                              : canManage && !s.done
                               ? <button onClick={() => toggleAttend(s, m.id)} title={present ? "Mark absent" : "Mark present"} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex" }}>{present ? <CheckCircle2 size={18} color={FIRE.greenText} /> : <span style={{ width: 16, height: 16, borderRadius: 999, border: "2px solid rgba(255,255,255,.25)", display: "inline-block" }} />}</button>
                               : <CheckMark state={present ? "pass" : "fail"} size={18} />}
                             <span style={{ flex: 1, fontSize: 13.5, color: present ? FIRE.name : FIRE.textMuted2 }}>{m.name}{m.id === meId ? " (you)" : ""}{restricted && !rollFor(s, m) ? <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 11.5 }}> · not counted</span> : ""}</span>
-                            <ResultBadge pass={present}>{present ? "PRESENT" : "ABSENT"}</ResultBadge>
+                            {notYet
+                              ? <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Joined later</span>
+                              : <ResultBadge pass={present}>{present ? "PRESENT" : "ABSENT"}</ResultBadge>}
                           </div>
                         );
                       })}
