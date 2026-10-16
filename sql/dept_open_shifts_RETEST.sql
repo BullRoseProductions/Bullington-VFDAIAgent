@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for dept_open_shifts_DRAFT.sql. READ-ONLY — run AFTER the migration, separately. NOTHING CHANGES (the function
+-- RETEST for dept_open_shifts_2026-10-16.sql. RAN 2026-10-16 on live: 12 passed, 0 failed, 4 skipped (Demo + Granbury
+-- lack a unique-email officer/member). Open shifts seen by the DA: Indian Harbor 7, North Hood 2, others 0.
+-- READ-ONLY — run AFTER the migration, separately. NOTHING CHANGES (the function
 -- only reads; the whole block ends in a RAISE that is the report). The "ERROR" IS the report.
 -- Once: anon can't execute.
 -- For each department:
