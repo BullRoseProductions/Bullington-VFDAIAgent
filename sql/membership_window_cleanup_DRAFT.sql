@@ -21,9 +21,9 @@
 -- =====================================================================
 DO $fix$
 DECLARE
-  EXPECT_PREJOIN     constant int := NULL;   -- <- PREVIEW SUMMARY EXPECT_PREJOIN
-  EXPECT_POSTEXIT    constant int := NULL;   -- <- PREVIEW SUMMARY EXPECT_POSTEXIT (includes Paul's after 10/9)
-  EXPECT_PAUL_CERTS  constant int := 41;     -- brief: Paul's 41 certs; confirm against PREVIEW EXPECT_PAUL_CERTS
+  EXPECT_PREJOIN     constant int := 1;      -- PREVIEW 2026-10-16: Kai Newton (joined 2026-10-08) on the 2026-09-18 drill
+  EXPECT_POSTEXIT    constant int := 0;      -- PREVIEW 2026-10-16: none (Paul has no attendance after 10/9)
+  EXPECT_PAUL_CERTS  constant int := 41;     -- PREVIEW 2026-10-16: 41 (matches the brief)
   v_paul uuid; v_paul_dept uuid; v_on date; v_n int;
 BEGIN
   IF EXPECT_PREJOIN IS NULL OR EXPECT_POSTEXIT IS NULL OR EXPECT_PAUL_CERTS IS NULL THEN
