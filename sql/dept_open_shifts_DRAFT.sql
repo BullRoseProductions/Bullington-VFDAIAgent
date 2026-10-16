@@ -1,6 +1,6 @@
 -- =====================================================================
 -- dept_open_shifts() — the shift ids behind "On station right now", for the DA "Check out" button.
--- DRAFT — for the reviewing Claude, then Ashlea applies. Test script: sql/dept_open_shifts_RETEST.sql (run AFTER).
+-- Record: Claude gate review PASS 2026-10-16 (recorded BEFORE apply). Was: DRAFT — for the reviewing Claude, then Ashlea applies. Test script: sql/dept_open_shifts_RETEST.sql (run AFTER).
 --
 -- WHY A NEW READ (the build order said "no new RPC" — flagged; Ashlea chose this 2026-10-16). The Check out button
 -- calls the existing close_open_shift(p_shift_id, p_checked_out_at), which needs the SHIFT id. Nothing the client can
