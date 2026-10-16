@@ -1,6 +1,8 @@
 -- =====================================================================
 -- MEMBERSHIP WINDOW — attendance only inside a member's start..end dates; a Department-Admin-only termination date.
--- DRAFT — for the reviewing Claude, then Ashlea applies. Test script: sql/membership_window_RETEST.sql (run AFTER,
+-- APPLIED by hand 2026-10-16 (before a recorded review PASS). State check on live: rls_on true · 0 policies · 0 rows ·
+-- anon_execute false · auth_window_execute false · auth_select false · triggers 2 · 157 policies (unchanged).
+-- RETEST on live: 50 passed, 0 failed, 8 skipped. Was: DRAFT — for the reviewing Claude, then Ashlea applies. Test script: sql/membership_window_RETEST.sql (run AFTER,
 -- separately). Cleanup of rows that already break the rule is a SEPARATE, previewed script:
 -- sql/membership_window_cleanup_PREVIEW.sql then sql/membership_window_cleanup_DRAFT.sql.
 --
