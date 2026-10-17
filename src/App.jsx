@@ -6482,6 +6482,16 @@ function useRsOpener(notify) {
     if (data?.content_text) { setViewer({ text: data.content_text, name: row.title }); return; }
     notify({ kind: "error", title: "Couldn't open the document", text: "Please try again, or ask an officer for a copy." });
   }
+  /* THE RECEIPT: open the exact version this member signed — that version's own snapshot (document_versions keeps the
+     published row's document_id + storage_path), never just the current one. For a re-sign the signed version is older;
+     either way, a later file replace never changes what opens here. */
+  async function openSigned(row) {
+    if (!row.signed_version) return;
+    const { data, error } = await supabase.from("document_versions").select("document_id, storage_path, title")
+      .eq("series_id", row.series_id).eq("version", row.signed_version).maybeSingle();
+    if (error || !data) { notify({ kind: "error", title: "Couldn't open the signed version", text: "Please try again." }); return; }
+    return open({ document_id: data.document_id, storage_path: data.storage_path, title: `${data.title} (v${row.signed_version} — the version you signed)` });
+  }
   const mount = viewer ? (viewer.url
     ? <DocViewer url={viewer.url} name={viewer.name} onClose={() => setViewer(null)} />
     : createPortal(
@@ -6494,7 +6504,7 @@ function useRsOpener(notify) {
           <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6, color: FIRE.textSecondary }}>{viewer.text}</div>
         </div>
       </div>, document.body)) : null;
-  return { open, mount };
+  return { open, openSigned, mount };
 }
 
 const RS_TONE = {
@@ -6507,7 +6517,7 @@ function RsTag({ children, tone = "role" }) {
   const t = tone === "annual" ? { c: "#6D8CAC", rgb: "109,140,172" } : { c: NOIR_AI.blueText, rgb: "79,144,214" };
   return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", borderRadius: 5, padding: "3px 7px", whiteSpace: "nowrap", color: t.c, background: `rgba(${t.rgb},.12)`, border: `1px solid rgba(${t.rgb},.4)` }}>{children}</span>;
 }
-function RsDocCard({ row, open, onToggle, onRead, onSign, busy }) {
+function RsDocCard({ row, open, onToggle, onRead, onReadSigned, onSign, busy }) {
   const [agree, setAgree] = useState(false);
   const actionable = row.status !== "current";
   const lapsed = row.status === "resign" && row.signed_version === row.version;   // annual re-sign, same version
@@ -6557,6 +6567,11 @@ function RsDocCard({ row, open, onToggle, onRead, onSign, busy }) {
           </span>
         </button>
       )}
+      {row.signed_version && (
+        <button onClick={() => onReadSigned(row)} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: FIRE.textSecondary, marginTop: 8, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+          <FileCheck size={13} /> {row.signed_version === row.version ? "Open what you signed" : `Open the v${row.signed_version} you signed`}
+        </button>
+      )}
     </div>
   );
 }
@@ -6571,7 +6586,7 @@ function RsSection({ tone, icon: Icon, label, children }) {
 // The member screen (the approved mock). Data: my_read_sign_queue(). Writes: acknowledge_document() only.
 function ReadSign({ notify, onCountChange }) {
   const { rows, err, reload } = useReadSignQueue(true);
-  const { open: openFile, mount } = useRsOpener(notify);
+  const { open: openFile, openSigned, mount } = useRsOpener(notify);
   const [openId, setOpenId] = useState(null);
   const [busy, setBusy] = useState(null);
   const needs = (rows || []).filter((r) => r.status === "needs");
@@ -6588,7 +6603,7 @@ function ReadSign({ notify, onCountChange }) {
     setOpenId(null); reload();
   }
   const card = (r) => <RsDocCard key={r.series_id} row={r} open={firstOpen === r.series_id} busy={busy === r.series_id}
-    onToggle={() => setOpenId(r.series_id)} onRead={openFile} onSign={sign} />;
+    onToggle={() => setOpenId(r.series_id)} onRead={openFile} onReadSigned={openSigned} onSign={sign} />;
   return (
     <PageShell band kicker="REQUIRED READING" title="Read & sign"
       sub="Documents your role requires you to read and attest. Your signature is recorded against the exact version — the document itself is never stored on you."

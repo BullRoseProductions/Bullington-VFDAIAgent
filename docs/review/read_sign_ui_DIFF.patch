@@ -1,5 +1,5 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index 524626e..8792a5e 100644
+index 524626e..a56a489 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -1,6 +1,6 @@
@@ -63,7 +63,7 @@ index 524626e..8792a5e 100644
        {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
        <StationFundraiserCard />
        {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
-@@ -6434,6 +6443,295 @@ function DocViewer({ url, name, onClose }) {
+@@ -6434,6 +6443,310 @@ function DocViewer({ url, name, onClose }) {
      document.body
    );
  }
@@ -106,6 +106,16 @@ index 524626e..8792a5e 100644
 +    if (data?.content_text) { setViewer({ text: data.content_text, name: row.title }); return; }
 +    notify({ kind: "error", title: "Couldn't open the document", text: "Please try again, or ask an officer for a copy." });
 +  }
++  /* THE RECEIPT: open the exact version this member signed — that version's own snapshot (document_versions keeps the
++     published row's document_id + storage_path), never just the current one. For a re-sign the signed version is older;
++     either way, a later file replace never changes what opens here. */
++  async function openSigned(row) {
++    if (!row.signed_version) return;
++    const { data, error } = await supabase.from("document_versions").select("document_id, storage_path, title")
++      .eq("series_id", row.series_id).eq("version", row.signed_version).maybeSingle();
++    if (error || !data) { notify({ kind: "error", title: "Couldn't open the signed version", text: "Please try again." }); return; }
++    return open({ document_id: data.document_id, storage_path: data.storage_path, title: `${data.title} (v${row.signed_version} — the version you signed)` });
++  }
 +  const mount = viewer ? (viewer.url
 +    ? <DocViewer url={viewer.url} name={viewer.name} onClose={() => setViewer(null)} />
 +    : createPortal(
@@ -118,7 +128,7 @@ index 524626e..8792a5e 100644
 +          <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6, color: FIRE.textSecondary }}>{viewer.text}</div>
 +        </div>
 +      </div>, document.body)) : null;
-+  return { open, mount };
++  return { open, openSigned, mount };
 +}
 +
 +const RS_TONE = {
@@ -131,7 +141,7 @@ index 524626e..8792a5e 100644
 +  const t = tone === "annual" ? { c: "#6D8CAC", rgb: "109,140,172" } : { c: NOIR_AI.blueText, rgb: "79,144,214" };
 +  return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", borderRadius: 5, padding: "3px 7px", whiteSpace: "nowrap", color: t.c, background: `rgba(${t.rgb},.12)`, border: `1px solid rgba(${t.rgb},.4)` }}>{children}</span>;
 +}
-+function RsDocCard({ row, open, onToggle, onRead, onSign, busy }) {
++function RsDocCard({ row, open, onToggle, onRead, onReadSigned, onSign, busy }) {
 +  const [agree, setAgree] = useState(false);
 +  const actionable = row.status !== "current";
 +  const lapsed = row.status === "resign" && row.signed_version === row.version;   // annual re-sign, same version
@@ -181,6 +191,11 @@ index 524626e..8792a5e 100644
 +          </span>
 +        </button>
 +      )}
++      {row.signed_version && (
++        <button onClick={() => onReadSigned(row)} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: FIRE.textSecondary, marginTop: 8, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
++          <FileCheck size={13} /> {row.signed_version === row.version ? "Open what you signed" : `Open the v${row.signed_version} you signed`}
++        </button>
++      )}
 +    </div>
 +  );
 +}
@@ -195,7 +210,7 @@ index 524626e..8792a5e 100644
 +// The member screen (the approved mock). Data: my_read_sign_queue(). Writes: acknowledge_document() only.
 +function ReadSign({ notify, onCountChange }) {
 +  const { rows, err, reload } = useReadSignQueue(true);
-+  const { open: openFile, mount } = useRsOpener(notify);
++  const { open: openFile, openSigned, mount } = useRsOpener(notify);
 +  const [openId, setOpenId] = useState(null);
 +  const [busy, setBusy] = useState(null);
 +  const needs = (rows || []).filter((r) => r.status === "needs");
@@ -212,7 +227,7 @@ index 524626e..8792a5e 100644
 +    setOpenId(null); reload();
 +  }
 +  const card = (r) => <RsDocCard key={r.series_id} row={r} open={firstOpen === r.series_id} busy={busy === r.series_id}
-+    onToggle={() => setOpenId(r.series_id)} onRead={openFile} onSign={sign} />;
++    onToggle={() => setOpenId(r.series_id)} onRead={openFile} onReadSigned={openSigned} onSign={sign} />;
 +  return (
 +    <PageShell band kicker="REQUIRED READING" title="Read & sign"
 +      sub="Documents your role requires you to read and attest. Your signature is recorded against the exact version — the document itself is never stored on you."
@@ -359,7 +374,7 @@ index 524626e..8792a5e 100644
  function Documents({ S, role, notify, uploaderName, members }) {
    const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
  
-@@ -6456,19 +6754,29 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6456,19 +6769,29 @@ function Documents({ S, role, notify, uploaderName, members }) {
    function loadDocs() {
      return supabase
        .from("documents")
@@ -391,7 +406,7 @@ index 524626e..8792a5e 100644
    function loadTrashed() {
      setTrashLoading(true);
      return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
-@@ -6689,6 +6997,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6689,6 +7012,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
          </>)}
        </>)}
  
@@ -399,7 +414,7 @@ index 524626e..8792a5e 100644
        <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
        {!docsLoading && docs.length === 0 ? (
          <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
-@@ -6704,15 +7013,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6704,15 +7028,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
              <div key={d.id}>
                <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                  <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
