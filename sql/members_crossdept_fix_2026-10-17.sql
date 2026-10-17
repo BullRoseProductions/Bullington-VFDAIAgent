@@ -1,5 +1,8 @@
 -- =====================================================================
--- SECURITY FIX — members INSERT / DELETE: add the department scope. DRAFT — for the reviewing Claude, then Ashlea applies.
+-- SECURITY FIX — members INSERT / DELETE: add the department scope.
+-- APPLIED by hand 2026-10-17 (no review PASS recorded before apply — send to the reviewer for the record). State check:
+-- both expressions = (is_leader() AND (department_id = my_department_id())); total_policies 160 (= 157 + Read & Sign's 3;
+-- this fix adds/drops none). RETEST on live: 21 passed, 0 failed, 0 skipped (all 5 departments).
 -- Probe first: sql/members_crossdept_PROBE.sql (rollback-wrapped). Test after: sql/members_crossdept_fix_RETEST.sql.
 -- PROBE RAN on live 2026-10-17 — CONFIRMED in all 5 departments: a leader of one department can INSERT a member row into
 -- another (X2 "CROSS-TENANT INSERT allowed" ×5); cross-department DELETE returned 0 rows ×5 (blocked only because the

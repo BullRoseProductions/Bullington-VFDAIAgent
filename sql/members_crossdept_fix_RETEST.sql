@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for members_crossdept_fix_DRAFT.sql. Run AFTER the fix, separately. NOTHING CHANGES — every write is inside a
+-- RETEST for members_crossdept_fix_2026-10-17.sql. RAN on live 2026-10-17: 21 passed, 0 failed, 0 skipped (all 5 departments). Run AFTER the fix, separately. NOTHING CHANGES — every write is inside a
 -- sub-block ending in RAISE 'SENTINEL' (rolled back); the final RAISE is the report. The "ERROR" IS the report.
 -- Once: both members write policies carry my_department_id().
 -- For each department A with a leader (is_leader() true, not a Project Admin) with a unique email, signed in as them:
