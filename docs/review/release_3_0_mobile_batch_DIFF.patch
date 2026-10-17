@@ -1,0 +1,75 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 6242bd2..94fa7ca 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -84,7 +84,7 @@ function useFitHeight(on) {
+   const [top, setTop] = useState(null);
+   useEffect(() => {
+     if (!on) return;
+-    const measure = () => { const el = ref.current; if (el) setTop(Math.round(el.getBoundingClientRect().top)); };
++    const measure = () => { const el = ref.current; if (!el) return; if (window.innerWidth < 900) { setTop(null); return; } setTop(Math.round(el.getBoundingClientRect().top)); };
+     measure();
+     window.addEventListener("resize", measure);
+     return () => window.removeEventListener("resize", measure);
+@@ -1768,7 +1768,6 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
+ }
+ const NAV = [
+   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
+-  { key: "ask", label: "Ask B4C", Icon: Sparkles, roles: ROLES },   // NOT a screen: go("ask") opens the Ask B4C drawer over wherever they are (see go())
+   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
+   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
+   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
+@@ -4907,10 +4906,10 @@ function AskB4C({ role, go, dept, onClose, onHide, gen, msgs, setMsgs, text, set
+ }
+ /* The panel and its right-edge handle, always mounted together (the handle is all there is while closed). */
+ function AskB4CDock({ open, onOpen, onClose, onHide, gen, role, go, dept, msgs, setMsgs, draft, setDraft }) {
+-  return (<>
+-    <style>{`@keyframes b4c-ask-in{from{transform:translateX(100%)}to{transform:none}}@media (prefers-reduced-motion: reduce){.b4c-ask-sheet{animation:none!important}}`}</style>
++  return createPortal(<>
++    <style>{`@keyframes b4c-ask-in{from{transform:translateX(100%)}to{transform:none}}@keyframes b4c-ask-up{from{transform:translateY(100%)}to{transform:none}}@media (prefers-reduced-motion: reduce){.b4c-ask-sheet{animation:none!important}}@media (max-width:640px){.b4c-ask-sheet{left:0!important;right:0!important;width:100%!important;max-width:100vw!important;top:auto!important;bottom:0!important;height:auto!important;max-height:72dvh!important;border-radius:16px 16px 0 0!important;box-sizing:border-box!important;box-shadow:0 -8px 30px rgba(0,0,0,.55)!important;animation:b4c-ask-up .22s ease-out!important;overflow-x:clip!important}.b4c-ask-sheet div{min-width:0!important;overflow-wrap:anywhere!important}.b4c-ask-handle-open{display:none!important}}`}</style>
+     {open && <AskB4C role={role} go={go} dept={dept} msgs={msgs} setMsgs={setMsgs} text={draft} setText={setDraft} onClose={onClose} onHide={onHide} gen={gen} />}
+-    <button onClick={() => (open ? onClose() : onOpen())} aria-expanded={open} aria-label={open ? "Close Ask B4C" : "Open Ask B4C"} title={open ? "Close Ask B4C" : "Ask B4C"}
++    <button onClick={() => (open ? onClose() : onOpen())} aria-expanded={open} aria-label={open ? "Close Ask B4C" : "Open Ask B4C"} title={open ? "Close Ask B4C" : "Ask B4C"} className={open ? "b4c-ask-handle b4c-ask-handle-open" : "b4c-ask-handle"}
+       style={{ position: "fixed", zIndex: 46, top: "50%", transform: "translateY(-50%)", right: open ? `min(${ASK_PANEL_W}px, calc(100vw - 44px))` : 0,
+         display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 7px", cursor: "pointer",
+         background: FIRE.card2Noir, border: "1px solid rgba(79,144,214,.4)", borderRight: "none", borderRadius: "10px 0 0 10px",
+@@ -4918,20 +4917,7 @@ function AskB4CDock({ open, onOpen, onClose, onHide, gen, role, go, dept, msgs,
+       {open ? <ChevronRight size={16} /> : <Sparkles size={16} color={NOIR_AI.blue} />}
+       <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>ASK B4C</span>
+     </button>
+-  </>);
+-}
+-// The dashboard card: opens the same panel as the sidebar entry and the handle (go("ask") — App owns the panel).
+-function AskB4CLauncher({ go }) {
+-  return (
+-    <button onClick={() => go("ask")} style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+-      <span style={{ width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: "rgba(79,144,214,.14)", border: "1px solid rgba(79,144,214,.3)" }}><Sparkles size={18} color={NOIR_AI.blue} /></span>
+-      <span style={{ flex: 1, minWidth: 0 }}>
+-        <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, color: FIRE.textPrimary }}>Ask B4C</span>
+-        <span style={{ display: "block", fontSize: 12.5, color: FIRE.textSecondary }}>&ldquo;How many hours do I have?&rdquo; &middot; &ldquo;When does my EMT expire?&rdquo; &middot; &ldquo;What does our SOP say about&hellip;&rdquo;</span>
+-      </span>
+-      <ChevronRight size={16} color={NOIR_AI.blueText} />
+-    </button>
+-  );
++  </>, document.body);
+ }
+ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, isEqMgr }) {
+   // NOTE: no useProofViewer here any more — PersonalView owns the certs card and its own proof viewer.
+@@ -4998,8 +4984,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
+       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
+           (it renders nothing once complete); only its place in the order changed. */}
+       <OnboardingCard S={S} me={me} go={go} dept={dept} />
+-      {/* Ask B4C — the member assistant (answers from their own records + SOPs; never acts) */}
+-      <AskB4CLauncher go={go} />
+       {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
+       <StationFundraiserCard />
+       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
+@@ -24927,7 +24911,7 @@ function baseStyles() {
+     deptLabel: { fontSize: 9.5, fontFamily: mono, color: "#8A929B", letterSpacing: ".8px" },
+     deptName: { fontFamily: display, fontWeight: 600, fontSize: 16, marginTop: 4 },
+     deptMeta: { fontSize: 12, color: "#9AA1A9", marginTop: 2 },
+-    main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100dvh", overflowY: "auto" },
++    main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100dvh", overflowY: "auto", overflowX: "hidden" },
+     /* FIXED TOP CHROME. box-sizing + minHeight rather than a bare `height`: with content-box the inset
+        padding stacked ON TOP of the declared height, so the row could still ride up under the status bar
+        on a Dynamic Island device. Explicit sides also pick up the landscape left/right insets. */
