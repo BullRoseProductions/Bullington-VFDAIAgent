@@ -1,5 +1,8 @@
 -- =====================================================================
--- READ & SIGN — required reading is set by a DEPARTMENT ADMIN only (not Officers). DRAFT — reviewed, then Ashlea applies.
+-- READ & SIGN — required reading is set by a DEPARTMENT ADMIN only (not Officers).
+-- APPLIED by hand 2026-10-17 (no review PASS recorded before apply — send for the record). State check: both functions
+-- da_only true · uses_canmanage_ops false · dept_check true · anon false · total_policies 160 (unchanged).
+-- RETEST on live: 54 passed, 0 failed, 2 skipped — O1 (Officer refused config + publish) PASS in IH, Lipan, North Hood.
 -- Test: sql/read_sign_RETEST.sql (updated: O1 proves an Officer is refused config + publish; the DA path still works).
 --
 -- WHAT CHANGES — two CREATE OR REPLACE, nothing else:
