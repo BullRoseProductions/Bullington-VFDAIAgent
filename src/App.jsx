@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
-  Flame, HeartPulse, Search, ShieldAlert, Users, UserX, FileText, Download, Plus, Copy, UtensilsCrossed,
+  Flame, HeartPulse, Search, ShieldAlert, Users, UserX, FileText, FileCheck, PenLine, Eye, Download, Plus, Copy, UtensilsCrossed,
   ChevronRight, Sparkles, ClipboardList, GraduationCap, Megaphone, Landmark,
   Briefcase, AlertTriangle, LogOut, LayoutDashboard, Send, CheckCircle2, Clock,
   Wrench, X, Menu, ArrowLeft, Loader2, Building2, TrendingUp, Calendar, DollarSign,
@@ -1785,6 +1785,7 @@ const NAV = [
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
+  { key: "readsign", label: "Read & Sign", Icon: FileCheck, roles: ROLES },   // required reading — shown when you have any, or manage documents (see visibleNav)
   { key: "resources", label: "Your Six", Icon: LifeBuoy, roles: ROLES },
   { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
@@ -2338,6 +2339,7 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState(null);
   const [myMemberId, setMyMemberId] = useState(null);
   const [identityChecked, setIdentityChecked] = useState(false);
+  const rsQueue = useReadSignQueue(!!myMemberId);   // Read & Sign: drives the nav entry + badge (my_read_sign_queue)
   /* WHERE THEY WERE before an app-update reload (src/appUpdate.js) — read once, then the key is gone. A deep link in
      the URL wins (routeDeepLink below still owns routing for it), and the one-shot check-in / handoff screens are never
      restored: they need the pending state that came with the scan. */
@@ -3021,7 +3023,9 @@ export default function App() {
   const visibleNav = (isProjectAdminOnly
     ? NAV.filter((n) => PA_NAV.includes(n.key))
     : NAV.filter((n) => hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr))
-  ).filter((n) => moduleEnabled(n.key, disabledModules));
+  ).filter((n) => moduleEnabled(n.key, disabledModules))
+   // Read & Sign: in the menu when you have required reading, or you're leadership (who configure + watch compliance).
+   .filter((n) => n.key !== "readsign" || (rsQueue.rows && rsQueue.rows.length > 0) || hasAny(role, CANMANAGE_ROLES));
   // Closes the hole the nav filter can't: go() is called from dashboard tiles and CTAs, and ?checkin=/
   // ?handoff= set the screen directly, so a disabled module stays reachable without passing the sidebar.
   // Also covers a module being switched off while a member is standing on it. Mirrors the retired-"ai"
@@ -3057,6 +3061,7 @@ export default function App() {
               <button key={n.key} onClick={() => go(n.key)} className={active ? "dr-nav-on" : undefined} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
                 <n.Icon size={18} /><span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
                 {n.premium && <span style={S.premiumTag}>AI</span>}
+                {n.key === "readsign" && rsOutstanding(rsQueue.rows) > 0 && <span aria-label={`${rsOutstanding(rsQueue.rows)} to sign`} style={{ minWidth: 18, height: 18, borderRadius: 999, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff", background: FIRE.red }}>{rsOutstanding(rsQueue.rows)}</span>}
               </button>
             );
           })}
@@ -3125,6 +3130,7 @@ export default function App() {
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
+          {screen === "readsign" && <ReadSign notify={notify} onCountChange={() => rsQueue.reload()} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
@@ -4984,6 +4990,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
           (it renders nothing once complete); only its place in the order changed. */}
       <OnboardingCard S={S} me={me} go={go} dept={dept} />
+      {/* Read & Sign — only while something is outstanding */}
+      <ReadSignCard go={go} />
       {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
       <StationFundraiserCard />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
@@ -6434,6 +6442,295 @@ function DocViewer({ url, name, onClose }) {
     document.body
   );
 }
+/* ---------------- Read & Sign (Phase 3.1 #1) — document acknowledgment ----------------
+   DB layer: sql/read_sign_2026-10-17.sql (applied + tested live). The UI ONLY calls the five RPCs — it never writes the
+   tables. A signature binds to a document SERIES + published version + file fingerprint; replacing a file never forces a
+   re-sign, only "Publish new version" does. Members read the exact published file (scans included). No feature flag:
+   nothing shows until a DA/Officer turns "requires acknowledgment" on for a document. America/Chicago for display. */
+const RS_ROLE_LABEL = { "Member": "members", "Officer": "officers", "Board Member": "board", "Department Admin": "dept admins" };
+const RS_ROLES = ["Member", "Officer", "Board Member", "Department Admin"];
+const rsAudience = (roles) => (!roles || roles.length === 0 ? "all members" : roles.map((r) => RS_ROLE_LABEL[r] || r).join(" · "));
+const rsDateTime = (iso) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : `${d.toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" })} · ${d.toLocaleTimeString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" })}`; };
+const rsDate = (ymd) => { if (!ymd) return ""; const d = new Date(`${String(ymd).slice(0, 10)}T12:00:00`); return isNaN(d) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
+// The caller's required documents. A failed read keeps the last list (never "nothing to sign").
+function useReadSignQueue(enabled = true) {
+  const [rows, setRows] = useState(null);   // null = not loaded
+  const [err, setErr] = useState(false);
+  const load = React.useCallback(() => {
+    if (!enabled) return Promise.resolve();
+    return supabase.rpc("my_read_sign_queue").then(({ data, error }) => {
+      if (error || !Array.isArray(data)) { setErr(true); return; }
+      setErr(false); setRows(data);
+    });
+  }, [enabled]);
+  useEffect(() => { load(); }, [load]);
+  useReconnect(() => { load(); });
+  return { rows, err, reload: load };
+}
+const rsOutstanding = (rows) => (rows || []).filter((r) => r.status !== "current").length;
+
+// Open the exact published file in the in-app viewer (signed URL, private bucket). No file -> the extracted text.
+function useRsOpener(notify) {
+  const [viewer, setViewer] = useState(null);   // {url,name} | {text,name}
+  async function open(row) {
+    if (row.storage_path) {
+      const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.storage_path, 3600);
+      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title }); return; }
+    }
+    const { data } = await supabase.from("documents").select("content_text").eq("id", row.document_id).maybeSingle();
+    if (data?.content_text) { setViewer({ text: data.content_text, name: row.title }); return; }
+    notify({ kind: "error", title: "Couldn't open the document", text: "Please try again, or ask an officer for a copy." });
+  }
+  const mount = viewer ? (viewer.url
+    ? <DocViewer url={viewer.url} name={viewer.name} onClose={() => setViewer(null)} />
+    : createPortal(
+      <div onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(8,10,16,.78)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+        <div role="dialog" aria-modal="true" aria-label={viewer.name} onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 720, margin: "24px 0", padding: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <div style={{ flex: 1, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary }}>{viewer.name}</div>
+            <button aria-label="Close" onClick={() => setViewer(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={18} color={FIRE.textMuted} /></button>
+          </div>
+          <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6, color: FIRE.textSecondary }}>{viewer.text}</div>
+        </div>
+      </div>, document.body)) : null;
+  return { open, mount };
+}
+
+const RS_TONE = {
+  needs:   { c: NOIR_AI.blueText, rgb: "79,144,214" },
+  await:   { c: FIRE.amberText,   rgb: "204,158,82" },
+  resign:  { c: FIRE.redText,     rgb: "224,86,94" },
+  current: { c: FIRE.greenText,   rgb: "47,168,105" },
+};
+function RsTag({ children, tone = "role" }) {
+  const t = tone === "annual" ? { c: "#6D8CAC", rgb: "109,140,172" } : { c: NOIR_AI.blueText, rgb: "79,144,214" };
+  return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", borderRadius: 5, padding: "3px 7px", whiteSpace: "nowrap", color: t.c, background: `rgba(${t.rgb},.12)`, border: `1px solid rgba(${t.rgb},.4)` }}>{children}</span>;
+}
+function RsDocCard({ row, open, onToggle, onRead, onSign, busy }) {
+  const [agree, setAgree] = useState(false);
+  const actionable = row.status !== "current";
+  const lapsed = row.status === "resign" && row.signed_version === row.version;   // annual re-sign, same version
+  const tone = row.status === "current" ? RS_TONE.current : row.status === "resign" ? RS_TONE.resign : open ? RS_TONE.needs : RS_TONE.await;
+  return (
+    <div style={{ position: "relative", overflow: "hidden", background: "linear-gradient(180deg,#0F131A,#0B0E13)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 14, padding: 14 }}>
+      <div style={{ display: "flex", gap: 12 }}>
+        <span style={{ width: 42, height: 42, borderRadius: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: `linear-gradient(160deg,rgba(${tone.rgb},.22),rgba(${tone.rgb},.08))`, border: `1px solid ${tone.c}`, boxShadow: `0 0 16px rgba(${tone.rgb},.26)` }}>
+          {row.status === "current" ? <FileCheck size={21} color={tone.c} /> : <FileText size={21} color={tone.c} />}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, lineHeight: 1.12, color: "#fff", overflowWrap: "anywhere" }}>{row.title}</div>
+          <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>
+            Version {row.version} · {row.status === "current" ? "current" : row.status === "resign" && !lapsed && row.signed_version
+              ? <span style={{ color: FIRE.redText }}>replaces v{row.signed_version} you signed</span>
+              : `effective ${rsDate(row.effective_on)}`}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            <RsTag>Required · {rsAudience(row.required_roles)}</RsTag>
+            {row.annual_resign && <RsTag tone="annual">Annual re-sign</RsTag>}
+          </div>
+        </div>
+      </div>
+      {actionable && open ? (<>
+        <button onClick={() => onRead(row)} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: NOIR_AI.blueText, marginTop: 10, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+          <Eye size={13} /> Read the full policy
+        </button>
+        <div style={{ marginTop: 12, background: "rgba(79,144,214,.05)", border: "1px solid rgba(79,144,214,.28)", borderRadius: 11, padding: 12 }}>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer" }}>
+            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 18, height: 18, marginTop: 1, accentColor: NOIR_AI.blue, flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: FIRE.textPrimary, lineHeight: 1.45 }}>I have <b style={{ color: "#fff" }}>read and understand</b> {row.title} (v{row.version}) and agree to comply.</span>
+          </label>
+          <button disabled={!agree || busy} onClick={() => onSign(row)}
+            style={{ marginTop: 11, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, letterSpacing: ".04em", textTransform: "uppercase", color: "#fff", background: "linear-gradient(180deg,#2E6DB0,#234f82)", border: "1px solid rgba(127,178,230,.55)", borderRadius: 10, padding: 11, cursor: agree && !busy ? "pointer" : "not-allowed", opacity: agree && !busy ? 1 : 0.5 }}>
+            {busy ? <><Loader2 size={16} className="spin" /> Signing…</> : <><PenLine size={16} /> Sign now</>}
+          </button>
+        </div>
+      </>) : (
+        <button onClick={actionable ? onToggle : undefined} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", marginTop: 12, paddingTop: 11, borderTop: `1px solid ${FIRE.lineNoir}`, fontSize: 11.5, color: tone.c, background: "none", borderLeft: "none", borderRight: "none", borderBottom: "none", paddingLeft: 0, paddingRight: 0, paddingBottom: 0, cursor: actionable ? "pointer" : "default", textAlign: "left", fontFamily: "inherit" }}>
+          {row.status === "current" ? <CheckCircle2 size={15} /> : row.status === "resign" ? <RefreshCw size={15} /> : <Clock size={15} />}
+          <span>{row.status === "current" ? `Signed v${row.signed_version}`
+            : row.status === "resign" ? (lapsed ? "Annual re-sign due" : `Updated — your v${row.signed_version} signature no longer current`)
+            : "Awaiting your signature"}</span>
+          <span style={{ marginLeft: "auto", color: FIRE.textMuted, fontSize: 10.5, textAlign: "right" }}>
+            {row.status === "current" ? rsDateTime(row.signed_at) + (row.resign_due ? ` · re-sign by ${rsDate(row.resign_due)}` : "")
+              : row.signed_version ? `Signed v${row.signed_version} · ${rsDate(row.signed_at)}` : "Tap to read & sign"}
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+function RsSection({ tone, icon: Icon, label, children }) {
+  return (<>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".09em", textTransform: "uppercase", margin: "4px 2px 11px", color: tone }}>
+      <Icon size={14} />{label}<span style={{ flex: 1, height: 1, background: `linear-gradient(90deg,${tone},transparent)`, opacity: .4 }} />
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 11, marginBottom: 19 }}>{children}</div>
+  </>);
+}
+// The member screen (the approved mock). Data: my_read_sign_queue(). Writes: acknowledge_document() only.
+function ReadSign({ notify, onCountChange }) {
+  const { rows, err, reload } = useReadSignQueue(true);
+  const { open: openFile, mount } = useRsOpener(notify);
+  const [openId, setOpenId] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const needs = (rows || []).filter((r) => r.status === "needs");
+  const resign = (rows || []).filter((r) => r.status === "resign");
+  const current = (rows || []).filter((r) => r.status === "current");
+  const firstOpen = openId ?? (needs[0] || resign[0])?.series_id ?? null;   // the first thing to sign starts open
+  useEffect(() => { if (rows) onCountChange?.(rsOutstanding(rows)); }, [rows]);   // keep the nav badge honest
+  async function sign(row) {
+    setBusy(row.series_id);
+    const { error } = await supabase.rpc("acknowledge_document", { p_document_id: row.document_id, p_version: row.version, p_content_hash: row.content_hash });
+    setBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't record your signature", text: error.message || "Please try again." }); reload(); return; }
+    notify({ kind: "success", text: `Signed — ${row.title} (v${row.version}).` });
+    setOpenId(null); reload();
+  }
+  const card = (r) => <RsDocCard key={r.series_id} row={r} open={firstOpen === r.series_id} busy={busy === r.series_id}
+    onToggle={() => setOpenId(r.series_id)} onRead={openFile} onSign={sign} />;
+  return (
+    <PageShell band kicker="REQUIRED READING" title="Read & sign"
+      sub="Documents your role requires you to read and attest. Your signature is recorded against the exact version — the document itself is never stored on you."
+      above={err && rows ? <OfflineNotice onRetry={reload} what="your required reading" /> : null}>
+      <NoirSkin>
+        <div style={{ display: "flex", gap: 9, marginBottom: 16, maxWidth: 520 }}>
+          {[["Signed", current.length, FIRE.greenText], ["Awaiting", needs.length, FIRE.amberText], ["Re-sign", resign.length, FIRE.redText]].map(([l, n, c]) => (
+            <div key={l} style={{ flex: 1, background: "rgba(255,255,255,.04)", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 11, padding: "9px 11px" }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1, color: c, ...FS.num }}>{rows ? n : "–"}</div>
+              <div style={{ fontSize: 9.5, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 4 }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ maxWidth: 560 }}>
+          {!rows && !err && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</div>}
+          {!rows && err && <div style={NOIR_ERR}>Couldn&rsquo;t load your required reading. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></div>}
+          {rows && rows.length === 0 && <EmptyState text="Nothing to read and sign right now. When your department requires a document, it shows up here." />}
+          {needs.length > 0 && <RsSection tone={FIRE.amberText} icon={Clock} label="Needs your signature">{needs.map(card)}</RsSection>}
+          {resign.length > 0 && <RsSection tone={FIRE.redText} icon={AlertTriangle} label="New version — re-sign needed">{resign.map(card)}</RsSection>}
+          {current.length > 0 && <RsSection tone={FIRE.textSecondary} icon={CheckCircle2} label="Signed & current">{current.map(card)}</RsSection>}
+          {rows && rows.length > 0 && <div style={{ fontSize: 11, color: FIRE.textMuted, lineHeight: 1.55, marginTop: 4 }}>B4C records the signature trail — you, the document version, the date — never a personal document.</div>}
+        </div>
+        {mount}
+      </NoirSkin>
+    </PageShell>
+  );
+}
+// Dashboard card: shown only while something is outstanding (mirrors the onboarding card).
+function ReadSignCard({ go }) {
+  const { rows } = useReadSignQueue(true);
+  const out = (rows || []).filter((r) => r.status !== "current");
+  if (out.length === 0) return null;
+  const re = out.filter((r) => r.status === "resign").length;
+  return (
+    <Card as="button" onClick={() => go("readsign")} padding={16} style={{ marginBottom: 8, width: "100%", textAlign: "left", cursor: "pointer", display: "block", borderLeft: `3px solid ${FIRE.amberText}` }}>
+      <CardHead icon={FileCheck} title={`Read & Sign — ${out.length} outstanding`} style={{ marginBottom: 6 }} />
+      <div style={{ fontSize: 13, color: FIRE.textSecondary }}>{re > 0 ? `${re} need${re === 1 ? "s" : ""} a re-sign after a new version. ` : ""}Your department requires you to read and sign {out.length === 1 ? "a document" : "these documents"}.</div>
+      {out.slice(0, 3).map((r) => <div key={r.series_id} style={{ fontSize: 13.5, color: FIRE.textPrimary, padding: "3px 0" }}>· {r.title} <span style={{ color: FIRE.textMuted, fontSize: 12 }}>v{r.version}</span></div>)}
+      <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 4 }}>Read &amp; sign <ChevronRight size={14} color={FIRE.btnIcon} /></div>
+    </Card>
+  );
+}
+// DA / Officer controls for one document (Station Documents row). Config + publish through the RPCs only.
+function RsDocControls({ doc, series, canConfig, notify, onChanged }) {
+  const s = series || { requires_ack: false, required_roles: null, annual_resign: false, current_version: 0 };
+  const [requires, setRequires] = useState(!!s.requires_ack);
+  const [roles, setRoles] = useState(s.required_roles || []);
+  const [annual, setAnnual] = useState(!!s.annual_resign);
+  const [busy, setBusy] = useState(false);
+  const dirty = requires !== !!s.requires_ack || annual !== !!s.annual_resign || JSON.stringify([...roles].sort()) !== JSON.stringify([...(s.required_roles || [])].sort());
+  async function save() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("set_document_ack_config", { p_document_id: doc.id, p_requires: requires, p_required_roles: roles.length ? roles : null, p_annual: annual });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: requires ? `Saved — “${doc.name}” now requires a signature (v${data?.current_version ?? 1}).` : `Saved — “${doc.name}” no longer requires a signature.` });
+    onChanged();
+  }
+  async function publish() {
+    if (!(await noirConfirm({ title: "Publish a new version?", body: `Everyone who must sign “${doc.name}” will be asked to read and sign it again. Their earlier signatures stay on record. (Replacing the file alone never does this.)`, confirmLabel: "Publish & require re-sign" }))) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("publish_document_version", { p_document_id: doc.id });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't publish", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: `Published v${data?.current_version} — members will be asked to re-sign.` });
+    onChanged();
+  }
+  const toggleRole = (r) => setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
+  if (!canConfig) return null;
+  return (
+    <Card padding={12} style={{ marginTop: 6, marginBottom: 8, boxShadow: "none" }}>
+      <SectionLabel style={{ marginBottom: 8 }}>READ &amp; SIGN</SectionLabel>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textPrimary, cursor: "pointer" }}>
+        <input type="checkbox" checked={requires} onChange={(e) => setRequires(e.target.checked)} style={{ width: 16, height: 16, accentColor: NOIR_AI.blue }} />
+        Requires acknowledgment
+        {s.current_version > 0 && <span style={{ fontSize: 12, color: FIRE.textMuted }}>· v{s.current_version} published</span>}
+      </label>
+      {requires && (<>
+        <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "10px 0 6px" }}>Who must sign (none ticked = all members)</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {RS_ROLES.map((r) => (
+            <button key={r} type="button" aria-pressed={roles.includes(r)} onClick={() => toggleRole(r)}
+              style={{ ...FS.btn, padding: "5px 10px", fontSize: 12, ...(roles.includes(r) ? { borderColor: NOIR_AI.blue, color: NOIR_AI.blueText } : {}) }}>{r}</button>
+          ))}
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textPrimary, marginTop: 10, cursor: "pointer" }}>
+          <input type="checkbox" checked={annual} onChange={(e) => setAnnual(e.target.checked)} style={{ width: 16, height: 16, accentColor: NOIR_AI.blue }} />
+          Re-sign every year
+        </label>
+      </>)}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <button disabled={!dirty || busy} onClick={save} style={{ ...FS.btnPrimary, padding: "7px 14px", opacity: dirty && !busy ? 1 : 0.5 }}>{busy ? "Saving…" : "Save"}</button>
+        {s.requires_ack && s.current_version > 0 && (
+          <button disabled={busy} onClick={publish} style={{ ...FS.btn, padding: "7px 12px" }}><RefreshCw size={14} /> Publish new version (requires re-sign)</button>
+        )}
+      </div>
+      {!s.requires_ack && requires && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 8 }}>Saving publishes version 1 of the current file — everyone it applies to is asked to sign it.</div>}
+    </Card>
+  );
+}
+// Board / DA / Officer: who's current on each required document. Honest denominator — audience 0 is "not applicable".
+function RsCompliance({ refreshKey }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(false);
+  const [openSeries, setOpenSeries] = useState(null);
+  useEffect(() => {
+    supabase.rpc("dept_read_sign_compliance").then(({ data, error }) => {
+      if (error || !Array.isArray(data)) { setErr(true); return; }
+      setErr(false); setRows(data);
+    });
+  }, [refreshKey]);
+  if (err && !rows) return null;
+  if (!rows || rows.length === 0) return null;
+  return (<>
+    <CardHead icon={FileCheck} title="Read & Sign compliance" style={{ marginTop: 14 }} />
+    <Card padding="2px 14px" style={{ marginBottom: 6 }}>
+      {rows.map((r) => {
+        const na = !r.audience;
+        const pct = na ? 0 : Math.round((r.current_count / r.audience) * 100);
+        const out = Array.isArray(r.outstanding) ? r.outstanding : [];
+        const tone = na ? FIRE.textMuted : pct === 100 ? FIRE.greenText : pct >= 50 ? FIRE.amberText : FIRE.redText;
+        return (
+          <div key={r.series_id} style={{ padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+            <button onClick={() => setOpenSeries(openSeries === r.series_id ? null : r.series_id)} disabled={na || out.length === 0}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", cursor: na || out.length === 0 ? "default" : "pointer", fontFamily: "inherit" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{r.title} <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 12 }}>v{r.version} · {rsAudience(r.required_roles)}{r.annual_resign ? " · annual" : ""}</span></div>
+              </div>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: tone, ...FS.num, whiteSpace: "nowrap" }}>{na ? "Not applicable" : `${r.current_count} of ${r.audience} current`}</span>
+              {!na && out.length > 0 && (openSeries === r.series_id ? <ChevronUp size={14} color={FIRE.textMuted} /> : <ChevronDown size={14} color={FIRE.textMuted} />)}
+            </button>
+            {!na && <ProgressBar pct={pct} tone={pct === 100 ? "green" : pct >= 50 ? "amber" : "red"} />}
+            {openSeries === r.series_id && out.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textSecondary }}>
+                <span style={{ color: FIRE.textMuted }}>Outstanding ({out.length}): </span>{out.map((o) => o.name).join(", ")}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Card>
+  </>);
+}
 function Documents({ S, role, notify, uploaderName, members }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
@@ -6456,19 +6753,29 @@ function Documents({ S, role, notify, uploaderName, members }) {
   function loadDocs() {
     return supabase
       .from("documents")
-      .select("id, name, type, storage_path, supersedes")
+      .select("id, name, type, storage_path, supersedes, series_id")
       .is("deleted_at", null)                            // hide trashed SOPs from the live list
       .is("archived_at", null)                           // hide superseded (older) versions — only current versions show
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (error || !data) { setDocsLoading(false); setLoadErr(true); return; }   // leave existing docs in place on a flaky read
         setLoadErr(false);
-        setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path, supersedes: r.supersedes })));
+        setDocs(data.map((r) => ({ id: r.id, name: r.name, type: r.type, storage_path: r.storage_path, supersedes: r.supersedes, series_id: r.series_id })));
         setDocsLoading(false);
       });
   }
   useEffect(() => { loadDocs(); }, []);
   useReconnect(() => { if (loadErr) loadDocs(); });
+  // Read & Sign: each document's acknowledgment config, keyed by series (a replaced file keeps its series).
+  const canSeeCompliance = hasAny(role, CANMANAGE_ROLES);   // Board/DA/Officer — dept_read_sign_compliance()'s gate
+  const [rsSeries, setRsSeries] = useState({});             // series_id -> document_series row
+  const [rsOpenFor, setRsOpenFor] = useState(null);         // doc id whose Read & Sign panel is open
+  const [rsTick, setRsTick] = useState(0);                  // bump to refresh the compliance view after a change
+  function loadRsSeries() {
+    return supabase.from("document_series").select("series_id, requires_ack, required_roles, annual_resign, current_version")
+      .then(({ data, error }) => { if (!error && Array.isArray(data)) setRsSeries(Object.fromEntries(data.map((r) => [r.series_id, r]))); });
+  }
+  useEffect(() => { loadRsSeries(); }, []);
   function loadTrashed() {
     setTrashLoading(true);
     return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
@@ -6689,6 +6996,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
         </>)}
       </>)}
 
+      {canSeeCompliance && <RsCompliance refreshKey={rsTick} />}
       <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
       {!docsLoading && docs.length === 0 ? (
         <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
@@ -6704,15 +7012,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
             <div key={d.id}>
               <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
-                <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span></div>
+                <div style={{ flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{d.name}</span> <span style={{ color: FIRE.textMuted, fontSize: 13 }}>· {d.type}</span>
+                  {rsSeries[d.series_id]?.requires_ack && <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", borderRadius: 5, padding: "2px 6px", color: NOIR_AI.blueText, background: "rgba(79,144,214,.12)", border: "1px solid rgba(79,144,214,.4)", whiteSpace: "nowrap" }}>Requires signature · v{rsSeries[d.series_id].current_version}</span>}
+                </div>
                 {/* ONE flex group: inline on desktop, drops below the title as a unit on a phone (no overlap) */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
                   <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDoc(d)}><Download size={14} /> Open</button>
+                  {canManageDocs && <button aria-pressed={rsOpenFor === d.id} style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => setRsOpenFor(rsOpenFor === d.id ? null : d.id)}><FileCheck size={14} /> Read &amp; Sign</button>}
                   <button style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => toggleHistory(d)}><Clock size={14} /> History <span style={{ display: "inline-flex" }}>{historyFor === d.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span></button>
                   {isDA && <label style={{ ...FS.btn, padding: "6px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }} title="Replace with a new version"><Upload size={14} /> Replace<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) doReplace(d, f); }} /></label>}
                   {isDA && <button title="Move to trash" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => deleteDoc(d)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
               </div>
+              {rsOpenFor === d.id && (
+                <RsDocControls key={`${d.id}-${JSON.stringify(rsSeries[d.series_id] || {})}`} doc={d} series={rsSeries[d.series_id]} canConfig={canManageDocs} notify={notify}
+                  onChanged={() => { loadRsSeries(); setRsTick((t) => t + 1); }} />
+              )}
               {historyFor === d.id && (
                 <Card padding={12} style={{ marginTop: 6, marginBottom: 8, boxShadow: "none" }}>
                   <SectionLabel style={{ marginBottom: 6 }}>VERSION HISTORY</SectionLabel>
