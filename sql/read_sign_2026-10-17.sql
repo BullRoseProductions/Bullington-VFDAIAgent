@@ -1,6 +1,11 @@
 -- =====================================================================
--- PHASE 3.1 #1 — READ & SIGN (document acknowledgment). DRAFT — for the reviewing Claude, then Ashlea applies.
--- Test script: sql/read_sign_RETEST.sql (run AFTER, separately). STEP0 check ran on live 2026-10-17 (see C).
+-- PHASE 3.1 #1 — READ & SIGN (document acknowledgment).
+-- APPLIED by hand 2026-10-17 — BEFORE a recorded review PASS (send to the reviewer for the record). State check on live:
+-- docs_without_series 0 · series 15 (9 live docs + soft-deleted/archived rows; no live replacements, so each its own) ·
+-- rls_on true · write_policies 0 · auth_insert false · anon_rpc false · triggers 2 · other_policies 157 (unchanged).
+-- The documents guard triggers did not block the series_id backfill. RETEST on live: 51 passed, 0 failed, 2 skipped
+-- (Demo + Granbury have no two plain members with unique emails).
+-- Test script: sql/read_sign_RETEST.sql (run AFTER, separately). Was: DRAFT. STEP0 check ran on live 2026-10-17 (see C).
 --
 -- WHAT IT STORES: an acknowledgment TRAIL ONLY — member · document series · version · content fingerprint · time ·
 -- the attestation wording shown. No personal documents, nothing a member signs about themselves. Never reads or

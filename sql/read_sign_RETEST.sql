@@ -1,5 +1,6 @@
 -- =====================================================================
--- RETEST for read_sign_DRAFT.sql. Run AFTER the migration, separately. NOTHING CHANGES: each department's checks run
+-- RETEST for read_sign_2026-10-17.sql. RAN 2026-10-17 on live: 51 passed, 0 failed, 2 skipped (IH, Lipan, North Hood all 17/17;
+-- Demo + Granbury skip). Honest audiences: IH 37 · Lipan 28 · North Hood 27. Run AFTER the migration, separately. NOTHING CHANGES: each department's checks run
 -- inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE documents it creates itself — no real SOP
 -- is configured, published or signed. The final RAISE is the report. The "ERROR" IS the report.
 -- Per department (needs a DA, an Officer and two plain members with unique emails, plus a DA in another department):
