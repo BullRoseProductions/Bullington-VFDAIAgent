@@ -1,0 +1,105 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index d60f8aa..a38bb49 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -6381,10 +6381,19 @@ function PdfPage({ pdf, pageNum, width }) {
+ // In-app document viewer. Takes the ALREADY-signed URL (no new RLS surface). PDF -> pdfjs page
+ // canvases; docx -> mammoth HTML (text + basic structure, download fallback); image -> inline;
+ // anything else -> download-only. The Download button opens the original (today's behavior).
+-function DocViewer({ url, name, onClose }) {
+-  const ext = (name || "").toLowerCase().split(".").pop();
+-  const kind = ext === "pdf" ? "pdf" : ext === "docx" ? "docx" : ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext) ? "image" : "other";
+-  const [status, setStatus] = useState(kind === "other" ? "error" : "loading");   // loading | ready | error(=download-only)
++/* WHAT TO RENDER IS DECIDED BY THE FILE, NOT ITS DISPLAY NAME. A replaced document keeps its original name, so a row
++   named "…Harassment.docx" can point at a .pdf (2026-10-17) — rendering by the name sent a PDF through mammoth. Order:
++   the fetched Content-Type → the actual file's extension (storage path, else the signed URL's own path) → the name's
++   extension only when the file has none. */
++const DOC_IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
++const docExtOf = (s) => { const m = /\.([a-z0-9]{1,5})$/i.exec(String(s || "").split("?")[0].split("#")[0]); return m ? m[1].toLowerCase() : ""; };
++const docKindOfExt = (e) => (e === "pdf" ? "pdf" : e === "docx" ? "docx" : DOC_IMAGE_EXTS.includes(e) ? "image" : "other");
++const docKindOfType = (ct) => { const t = String(ct || "").toLowerCase(); return t.includes("application/pdf") ? "pdf" : t.includes("wordprocessingml") ? "docx" : t.startsWith("image/") ? "image" : null; };
++function DocViewer({ url, name, path, onClose }) {
++  const urlPath = (() => { try { return decodeURIComponent(new URL(url).pathname); } catch { return ""; } })();
++  const guess = docKindOfExt(docExtOf(path) || docExtOf(urlPath) || docExtOf(name));
++  const [kind, setKind] = useState(guess);                // settled from the fetched Content-Type below
++  const [status, setStatus] = useState("loading");        // loading | ready | error(=download-only)
+   const [pdf, setPdf] = useState(null);
+   const [numPages, setNumPages] = useState(0);
+   const [html, setHtml] = useState("");
+@@ -6396,24 +6405,33 @@ function DocViewer({ url, name, onClose }) {
+     let cancelled = false;
+     (async () => {
+       try {
+-        if (kind === "pdf") {
++        // One fetch: the file's own Content-Type decides the renderer; the extension guess is only the fallback.
++        const res = await fetch(url);
++        if (!res.ok) throw new Error(`HTTP ${res.status}`);
++        const k = docKindOfType(res.headers.get("content-type")) || guess;
++        if (cancelled) return;
++        setKind(k);
++        if (k === "pdf") {
++          const buf = await res.arrayBuffer();
+           const lib = await loadPdfjs();
+-          const doc = await lib.getDocument({ url }).promise;
++          const doc = await lib.getDocument({ data: new Uint8Array(buf) }).promise;
+           if (cancelled) return;
+           setPdf(doc); setNumPages(doc.numPages); setStatus("ready");
+-        } else if (kind === "docx") {
+-          const buf = await (await fetch(url)).arrayBuffer();
++        } else if (k === "docx") {
++          const buf = await res.arrayBuffer();
+           const mammoth = await loadMammoth();
+           const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });   // text + basic structure (NOT pixel-perfect Word)
+           if (cancelled) return;
+           if (value && value.trim()) { setHtml(value); setStatus("ready"); } else { setStatus("error"); }   // empty => download fallback
+-        } else if (kind === "image") {
+-          if (!cancelled) setStatus("ready");
++        } else if (k === "image") {
++          setStatus("ready");
++        } else {
++          setStatus("error");                             // not something we render in-app => download
+         }
+       } catch { if (!cancelled) setStatus("error"); }   // any failure => clean download-only fallback
+     })();
+     return () => { cancelled = true; };
+-  }, [url, kind]);
++  }, [url]);
+   return createPortal(
+     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 130, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+       <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxWidth: 820, width: "100%", margin: "0 auto" }}>
+@@ -6476,7 +6494,7 @@ function useRsOpener(notify) {
+   async function open(row) {
+     if (row.storage_path) {
+       const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.storage_path, 3600);
+-      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title }); return; }
++      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title, path: row.storage_path }); return; }
+     }
+     const { data } = await supabase.from("documents").select("content_text").eq("id", row.document_id).maybeSingle();
+     if (data?.content_text) { setViewer({ text: data.content_text, name: row.title }); return; }
+@@ -6493,7 +6511,7 @@ function useRsOpener(notify) {
+     return open({ document_id: data.document_id, storage_path: data.storage_path, title: `${data.title} (v${row.signed_version} — the version you signed)` });
+   }
+   const mount = viewer ? (viewer.url
+-    ? <DocViewer url={viewer.url} name={viewer.name} onClose={() => setViewer(null)} />
++    ? <DocViewer url={viewer.url} name={viewer.name} path={viewer.path} onClose={() => setViewer(null)} />
+     : createPortal(
+       <div onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(8,10,16,.78)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+         <div role="dialog" aria-modal="true" aria-label={viewer.name} onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 720, margin: "24px 0", padding: 18 }}>
+@@ -6875,7 +6893,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+       notify({ kind: "error", title: "Couldn't open file", text: "The document couldn't be opened — please try again.", details: error?.message ?? "no signed URL" });
+       return;
+     }
+-    setViewerDoc({ url: data.signedUrl, name: item.name });   // in-app viewer; Download inside opens the original (today's behavior)
++    setViewerDoc({ url: data.signedUrl, name: item.name, path: item.storage_path });   // in-app viewer; the FILE (path / Content-Type) picks the renderer
+   }
+   // Soft-delete: move to trash (DA/PA, server-stamped). File STAYS in Storage so it can be restored.
+   async function deleteDoc(item) {
+@@ -7087,7 +7105,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+           )}
+         </div>
+       )}
+-      {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} onClose={() => setViewerDoc(null)} />}
++      {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} path={viewerDoc.path} onClose={() => setViewerDoc(null)} />}
+       </NoirSkin>
+     </PageShell>
+   );
