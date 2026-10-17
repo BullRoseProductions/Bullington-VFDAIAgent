@@ -1,6 +1,12 @@
 -- =====================================================================
 -- READ & SIGN — Step 0 investigation. READ-ONLY (one result set). Confirms the live shapes the build order depends on;
 -- schema.sql is a stale snapshot, so these are read from the catalog, not the file.
+-- RAN on live 2026-10-17. Findings: documents edit gate is_canmanage_ops() (DA/Officer); lifecycle RPCs + guard triggers
+-- is_dept_admin(); hard delete PA. is_canmanage_ops()/is_canmanage()/is_dept_admin() are DEPARTMENT-SCOPED (status
+-- Active/Probationary); is_department_admin()/is_leadership() are not. Live docs: IH 2, Lipan 2, North Hood 5 (4 with no
+-- text = scans), 0 replacements anywhere. Onboarding: Lipan + North Hood "SOG & policy acknowledgment signed"; IH "SOG
+-- Policy Review". Status values: Active 96 · Inactive 9 · Probationary 9. cert_submissions.reviewed_by uuid.
+-- Maria Reyes / Cody Pearson: NOT FOUND. document_versions / document_acknowledgments: names free.
 -- =====================================================================
 SELECT 1 AS ord, 'documents column' AS what, column_name AS name, data_type || CASE WHEN is_nullable = 'NO' THEN ' NOT NULL' ELSE '' END AS detail
   FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'documents'

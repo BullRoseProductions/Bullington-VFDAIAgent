@@ -20,8 +20,9 @@
 --   Y1 annual re-sign: a 13-month-old current-version signature reads "resign"
 -- DRY RUN 2026-10-17 — PGlite mock (2 departments, Supabase-style default grants, a mocked replace_document that sets
 -- supersedes + archived_at): migration OK + idempotent; backfill put a replaced pair in one series; this RETEST 17 passed /
--- 0 failed / 1 skipped (mock dept 2 has one plain member). Mutations, each caught: department check dropped from the
--- role gate -> C2 FAIL · no append-only trigger -> migration rolls back · no fingerprint check -> A1 FAIL · a member
+-- 0 failed / 1 skipped (mock dept 2 has one plain member). Re-run 2026-10-17 after switching to the live dept-scoped
+-- is_canmanage_ops()/is_canmanage(): same 17/0/1. Mutations, each caught: the document's own department check dropped
+-- -> C2 FAIL · leader read without is_canmanage() -> R1 FAIL · no append-only trigger -> migration rolls back · no fingerprint check -> A1 FAIL · a member
 -- write grant -> migration rolls back · no series inherit on replace -> S2+ FAIL · audience counts Inactive -> H1 FAIL.
 -- =====================================================================
 DO $retest$

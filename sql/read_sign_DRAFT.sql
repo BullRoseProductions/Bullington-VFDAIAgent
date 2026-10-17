@@ -1,6 +1,6 @@
 -- =====================================================================
 -- PHASE 3.1 #1 — READ & SIGN (document acknowledgment). DRAFT — for the reviewing Claude, then Ashlea applies.
--- Test script: sql/read_sign_RETEST.sql (run AFTER, separately). Run sql/read_sign_STEP0_CHECK.sql first.
+-- Test script: sql/read_sign_RETEST.sql (run AFTER, separately). STEP0 check ran on live 2026-10-17 (see C).
 --
 -- WHAT IT STORES: an acknowledgment TRAIL ONLY — member · document series · version · content fingerprint · time ·
 -- the attestation wording shown. No personal documents, nothing a member signs about themselves. Never reads or
@@ -15,10 +15,11 @@
 --   B. FINGERPRINT FROM THE FILE: sha256(documents.id | storage_path | content_text) of the row live at publish. Every
 --      upload is a new immutable storage path, and scans have no text, so text alone can't be the fingerprint. The
 --      version row snapshots that row's id/name/storage_path: members read and sign exactly what was published.
---   C. WHO CONFIGURES / PUBLISHES: Department Admin + Officer (the documents table's own edit gate is
---      is_canmanage_ops()), and ALWAYS scoped to the document's department with an explicit members-row test —
---      never a role-anywhere helper alone (the 2026-10-13 cert-leak class). Leaders who may READ the department's
---      signatures: Board Member / Department Admin / Officer (is_canmanage's set), same explicit department scope.
+--   C. WHO CONFIGURES / PUBLISHES: is_canmanage_ops() — the documents table's own edit gate (DA + Officer). Live
+--      definition (STEP0 check, 2026-10-17) is ALREADY department-scoped (members.department_id = my_department_id(),
+--      status Active/Probationary), so it is used as-is, plus the document's own department must equal
+--      my_department_id(). Leaders who may READ the department's signatures: is_canmanage() (Board/DA/Officer; also
+--      department-scoped live) + department_id = my_department_id(). No role-anywhere check anywhere.
 --   D. AUDIENCE: required_roles matches members.access; empty/NULL = every member. The honest count includes only
 --      members who are not Inactive, not former (member_separation), and not Project Admin accounts.
 --   E. Publish-only re-sign · default wording "I have read and understand {title} (v{n}) and agree to comply." ·
@@ -33,7 +34,7 @@
 --   NEW document_series (config + current_version + title snapshot) · document_versions (immutable) ·
 --     document_acknowledgments (append-only: an UPDATE/DELETE trigger refuses every change, even for the owner).
 --     RLS on all three. Reads: series + versions = the department; acknowledgments = your own rows, or the
---     department's for a Board/DA/Officer OF THAT DEPARTMENT. NO write grants or write policies anywhere —
+--     department's for a Board/DA/Officer of it (is_canmanage()). NO write grants or write policies anywhere —
 --     every write is one of the RPCs below.
 --   RPCs (SECURITY DEFINER; EXECUTE revoked from anon/public, granted to authenticated):
 --     set_document_ack_config(p_document_id, p_requires, p_required_roles, p_annual)  — DA/Officer of the dept;
@@ -58,8 +59,14 @@ DECLARE
       FROM pg_policies WHERE schemaname = 'public' AND tablename NOT IN ('document_series', 'document_versions', 'document_acknowledgments')$q$;
 BEGIN
   -- 0. preconditions — the live shapes this is written against
-  IF to_regprocedure('public.my_department_id()') IS NULL OR to_regprocedure('public.my_member_id()') IS NULL THEN
-    RAISE EXCEPTION 'Precondition failed: my_department_id() / my_member_id() missing.';
+  IF to_regprocedure('public.my_department_id()') IS NULL OR to_regprocedure('public.my_member_id()') IS NULL
+     OR to_regprocedure('public.is_canmanage_ops()') IS NULL OR to_regprocedure('public.is_canmanage()') IS NULL THEN
+    RAISE EXCEPTION 'Precondition failed: my_department_id() / my_member_id() / is_canmanage_ops() / is_canmanage() missing.';
+  END IF;
+  -- C rests on these two gates being department-scoped (checked live 2026-10-17). Refuse if that ever changed.
+  IF position('my_department_id()' in pg_get_functiondef('public.is_canmanage_ops()'::regprocedure)) = 0
+     OR position('my_department_id()' in pg_get_functiondef('public.is_canmanage()'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'Precondition failed: is_canmanage_ops()/is_canmanage() is no longer department-scoped — do not build on it.';
   END IF;
   FOREACH v_t IN ARRAY array['id', 'department_id', 'name', 'storage_path', 'content_text', 'supersedes', 'archived_at', 'deleted_at'] LOOP
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'documents' AND column_name = v_t) THEN
@@ -73,7 +80,7 @@ BEGIN
   END IF;
   FOREACH v_t IN ARRAY array['public.set_document_ack_config(uuid,boolean,text[],boolean)', 'public.publish_document_version(uuid)',
                              'public.acknowledge_document(uuid,integer,text)', 'public.my_read_sign_queue()', 'public.dept_read_sign_compliance()',
-                             'public.rs_member_in_audience(uuid,text[])', 'public.rs_is_dept_role(uuid,text[])',
+                             'public.rs_member_in_audience(uuid,text[])',
                              'public.tg_documents_series()', 'public.tg_document_acks_append_only()', 'public.rs_publish(uuid,uuid,uuid)'] LOOP
     IF to_regprocedure(v_t) IS NOT NULL THEN   -- nested: SQL AND doesn't short-circuit
       IF position('B4C:read_sign' in pg_get_functiondef(to_regprocedure(v_t))) = 0 THEN
@@ -186,19 +193,6 @@ $ddl$;
 
   -- 3. helpers (internal; not callable by members)
   EXECUTE $ddl$
-CREATE OR REPLACE FUNCTION public.rs_is_dept_role(p_department uuid, p_roles text[])
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-  -- B4C:read_sign — the caller holds one of p_roles IN THIS DEPARTMENT (never role-anywhere).
-  select p_department is not null and p_department = public.my_department_id() and exists (
-    select 1 from public.members me
-     where lower(me.email) = lower(auth.email()) and me.department_id = p_department and me.access && p_roles);
-$function$
-$ddl$;
-  EXECUTE $ddl$
 CREATE OR REPLACE FUNCTION public.rs_member_in_audience(p_member uuid, p_roles text[])
  RETURNS boolean
  LANGUAGE sql
@@ -241,10 +235,6 @@ begin
 end;
 $function$
 $ddl$;
-  REVOKE EXECUTE ON FUNCTION public.rs_is_dept_role(uuid, text[])        FROM anon, public;
-  -- authenticated KEEPS execute on rs_is_dept_role: the acknowledgments read policy calls it AS THE MEMBER. It only
-  -- answers "does the caller hold one of these roles in their own department" — nothing another member could use.
-  GRANT  EXECUTE ON FUNCTION public.rs_is_dept_role(uuid, text[])        TO authenticated;
   REVOKE EXECUTE ON FUNCTION public.rs_member_in_audience(uuid, text[])  FROM anon, authenticated, public;
   REVOKE EXECUTE ON FUNCTION public.rs_publish(uuid, uuid, uuid)          FROM anon, authenticated, public;
 
@@ -259,7 +249,7 @@ $ddl$;
   CREATE POLICY document_acknowledgments_read ON public.document_acknowledgments FOR SELECT TO authenticated
     USING (department_id = public.my_department_id()
            AND (member_id = public.my_member_id()
-                OR public.rs_is_dept_role(department_id, array['Board Member','Department Admin','Officer']::text[])));
+                OR public.is_canmanage()));
 
   -- 5. RPCs
   EXECUTE $ddl$
@@ -273,7 +263,7 @@ AS $function$
 declare d public.documents%rowtype; v_me uuid := public.my_member_id(); v_roles text[]; v_bad text; v_ver int;
 begin
   select * into d from public.documents where id = p_document_id;
-  if not found or not public.rs_is_dept_role(d.department_id, array['Department Admin','Officer']::text[]) then
+  if not found or d.department_id is distinct from public.my_department_id() or not public.is_canmanage_ops() then
     raise exception 'Only a Department Admin or Officer of this department can change this.';
   end if;
   v_roles := case when p_required_roles is null or cardinality(p_required_roles) = 0 then null else p_required_roles end;
@@ -303,7 +293,7 @@ AS $function$
 declare d public.documents%rowtype; s public.document_series%rowtype; v_ver int;
 begin
   select * into d from public.documents where id = p_document_id;
-  if not found or not public.rs_is_dept_role(d.department_id, array['Department Admin','Officer']::text[]) then
+  if not found or d.department_id is distinct from public.my_department_id() or not public.is_canmanage_ops() then
     raise exception 'Only a Department Admin or Officer of this department can publish.';
   end if;
   select * into s from public.document_series where series_id = d.series_id for update;
@@ -396,7 +386,7 @@ AS $function$
 -- current, and who is outstanding. audience 0 = "not applicable" (the client never shows that as 100%).
 declare v_dept uuid := public.my_department_id();
 begin
-  if not public.rs_is_dept_role(v_dept, array['Board Member','Department Admin','Officer']::text[]) then
+  if v_dept is null or not public.is_canmanage() then
     raise exception 'Only department leadership can see compliance.';
   end if;
   return query
@@ -448,9 +438,8 @@ $ddl$;
     IF has_function_privilege('anon', v_t, 'EXECUTE') THEN RAISE EXCEPTION 'Post-condition failed: anon can execute %.', v_t; END IF;
   END LOOP;
   IF has_function_privilege('authenticated', 'public.rs_publish(uuid,uuid,uuid)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.rs_member_in_audience(uuid,text[])', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.rs_is_dept_role(uuid,text[])', 'EXECUTE') THEN
-    RAISE EXCEPTION 'Post-condition failed: an internal helper is callable by members (rs_publish / rs_member_in_audience) or anon.';
+     OR has_function_privilege('authenticated', 'public.rs_member_in_audience(uuid,text[])', 'EXECUTE') THEN
+    RAISE EXCEPTION 'Post-condition failed: an internal helper (rs_publish / rs_member_in_audience) is callable by members.';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'document_acknowledgments_append_only' AND tgenabled = 'O')
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'documents_series' AND tgenabled = 'O') THEN
@@ -486,7 +475,7 @@ SELECT (SELECT count(*) FROM public.documents WHERE series_id IS NULL) AS docs_w
 --   DROP FUNCTION IF EXISTS public.dept_read_sign_compliance(), public.my_read_sign_queue(),
 --     public.acknowledge_document(uuid,integer,text), public.publish_document_version(uuid),
 --     public.set_document_ack_config(uuid,boolean,text[],boolean), public.rs_publish(uuid,uuid,uuid),
---     public.rs_member_in_audience(uuid,text[]), public.rs_is_dept_role(uuid,text[]);
+--     public.rs_member_in_audience(uuid,text[]);
 --   DROP TABLE IF EXISTS public.document_acknowledgments, public.document_versions, public.document_series;
 --   DROP TRIGGER IF EXISTS documents_series ON public.documents;
 --   DROP FUNCTION IF EXISTS public.tg_documents_series(), public.tg_document_acks_append_only();
