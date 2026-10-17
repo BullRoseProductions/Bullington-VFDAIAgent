@@ -132,3 +132,5 @@ The reviewer confirmed:
 - A late answer arriving after close is dropped.
 - A refresh while the panel is open restores the chat and the draft.
 - Closing removes the chat from any saved place.
+
+**Live on production 2026-10-16** as `541df2f` ("Release industrial-noir-11"). Notify crew is still held back (`/api/notify-session` returns 404). Rollback is `574aef8`.
