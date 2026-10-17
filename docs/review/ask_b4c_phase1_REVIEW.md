@@ -116,3 +116,19 @@ Re-checked on production, as Ashlea:
 | 3 | Next drill | **Correct.** Fire Training Week 4, Thu Oct 22, 7:00 PM. Tagged "From your records · schedule". The answer no longer says "mandatory". |
 
 **Rollback:** `c8acbe7` restores the previous Ask B4C. `6cf154f` removes Ask B4C entirely.
+
+## Clear-on-close (`d9d3036`) — review PASS (2026-10-16)
+
+Diff: `docs/review/ask_b4c_clear_on_close_DIFF.patch`. Client-only; the gate count is flat.
+
+The reviewer confirmed:
+- `forgetSavedAsk()` drops only the `ask` part of the saved place. The auto-update machinery is untouched.
+- `closeAsk()` and the `askGen` guard clear the conversation and drop late answers. `endAppRequest` still runs in `finally`.
+- Open-panel persistence is intact.
+- The sign-out wipe is intact.
+
+**Preview tests:**
+- Closing with ✕, Esc or the handle gives a blank panel on the next open.
+- A late answer arriving after close is dropped.
+- A refresh while the panel is open restores the chat and the draft.
+- Closing removes the chat from any saved place.
