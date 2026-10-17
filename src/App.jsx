@@ -29,7 +29,7 @@ import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
-import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest } from "./appUpdate";
+import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest, forgetSavedAsk } from "./appUpdate";
 import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
@@ -2357,6 +2357,12 @@ export default function App() {
   const [askOpen, setAskOpen] = useState(() => !!bootPlace()?.ask?.open);
   const [askMsgs, setAskMsgs] = useState(() => (Array.isArray(bootPlace()?.ask?.msgs) ? bootPlace().ask.msgs : []));
   const [askDraft, setAskDraft] = useState(() => (typeof bootPlace()?.ask?.draft === "string" ? bootPlace().ask.draft : ""));
+  /* CLOSING CLEARS. An explicit close (✕, Esc, the edge handle) resets the conversation and draft so the next open is a
+     blank panel — and drops the panel from any saved place, so a refresh after closing opens fresh too. Only an OPEN
+     panel is carried across a reload (the mid-question protection). askGen ticks on every close so an answer still in
+     flight can't land in the fresh panel. (On a shared station tablet, closing clears the chat even before sign-out.) */
+  const askGen = useRef(0);
+  const closeAsk = () => { askGen.current += 1; setAskMsgs([]); setAskDraft(""); setAskOpen(false); forgetSavedAsk(); };
   const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1100);   // dock beside the content
   useEffect(() => { const on = () => setWide(window.innerWidth >= 1100); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);   // optional deep-link arg carried by go() (e.g. Roster initial tab)
   // What a reload (app update or manual refresh) carries. A ref kept current every render, registered by an effect so
@@ -3115,8 +3121,8 @@ export default function App() {
           {/* Ask B4C — a NON-MODAL side panel + its right-edge handle. The app stays fully usable beside it. It does NOT
               hold off auto-updates by being open (no aria-modal); only an answer in flight does (beginAppRequest), and
               the panel + conversation are carried across the reload (placeRef -> persistPlace). */}
-          <AskB4CDock open={askOpen} setOpen={setAskOpen} wide={wide} role={role} go={go} dept={dept}
-            msgs={askMsgs} setMsgs={setAskMsgs} draft={askDraft} setDraft={setAskDraft} />
+          <AskB4CDock open={askOpen} onOpen={() => setAskOpen(true)} onClose={closeAsk} onHide={() => setAskOpen(false)} gen={askGen}
+            role={role} go={go} dept={dept} msgs={askMsgs} setMsgs={setAskMsgs} draft={askDraft} setDraft={setAskDraft} />
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
@@ -4813,7 +4819,7 @@ function StationClockCard({ S, dept, go }) {
 const ASK_SUGGESTIONS = ["My hours this year", "Expiring certs", "Next drill", "Am I clocked in?", "Ask about an SOP"];
 const ASK_RECORD_LABEL = { am_i_checked_in: "station clock", my_hours: "hours", my_certs: "certs", my_schedule: "schedule", my_attendance: "attendance" };
 const ASK_PANEL_W = 380;
-function AskB4C({ role, go, dept, onClose, msgs, setMsgs, text, setText }) {
+function AskB4C({ role, go, dept, onClose, onHide, gen, msgs, setMsgs, text, setText }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const endRef = useRef(null);
@@ -4834,16 +4840,20 @@ function AskB4C({ role, go, dept, onClose, msgs, setMsgs, text, setText }) {
     if (question === "Ask about an SOP") { setText("What does our SOP say about "); inputRef.current?.focus(); return; }
     const next = [...msgs, { role: "user", content: question }];
     setMsgs(next); setText(""); setBusy(true); setErr("");
+    const myGen = gen.current;   // closed (and so cleared) before the answer lands? then drop it
     beginAppRequest();   // the auto-updater can't see this fetch otherwise; held even if the drawer closes mid-answer
     try {
       const res = await authedFetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next.map(({ role: r, content }) => ({ role: r, content })) }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || "Ask B4C couldn't answer just now — please try again.");
+      if (gen.current !== myGen) return;
       setMsgs((m) => [...m, { role: "assistant", content: data.text, meta: { records: data.records || [], sops: data.sops, limited: !!data.limited } }]);
-      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onClose(); go(data.navigate); }, 700);
+      // Taking them somewhere HIDES the panel — it isn't a close, so the conversation stays for next time.
+      if (data.navigate && canOpen(data.navigate)) setTimeout(() => { onHide(); go(data.navigate); }, 700);
     } catch (e) {
       setErr(e.message || "Ask B4C couldn't answer just now — please try again.");
+      if (gen.current !== myGen) return;
       setMsgs((m) => m.slice(0, -1)); setText(question);   // give the question back so nothing is lost
     } finally { endAppRequest(); setBusy(false); }
   }
@@ -4896,11 +4906,11 @@ function AskB4C({ role, go, dept, onClose, msgs, setMsgs, text, setText }) {
   );
 }
 /* The panel and its right-edge handle, always mounted together (the handle is all there is while closed). */
-function AskB4CDock({ open, setOpen, wide, role, go, dept, msgs, setMsgs, draft, setDraft }) {
+function AskB4CDock({ open, onOpen, onClose, onHide, gen, role, go, dept, msgs, setMsgs, draft, setDraft }) {
   return (<>
     <style>{`@keyframes b4c-ask-in{from{transform:translateX(100%)}to{transform:none}}@media (prefers-reduced-motion: reduce){.b4c-ask-sheet{animation:none!important}}`}</style>
-    {open && <AskB4C role={role} go={go} dept={dept} msgs={msgs} setMsgs={setMsgs} text={draft} setText={setDraft} onClose={() => setOpen(false)} />}
-    <button onClick={() => setOpen(!open)} aria-expanded={open} aria-label={open ? "Close Ask B4C" : "Open Ask B4C"} title={open ? "Close Ask B4C" : "Ask B4C"}
+    {open && <AskB4C role={role} go={go} dept={dept} msgs={msgs} setMsgs={setMsgs} text={draft} setText={setDraft} onClose={onClose} onHide={onHide} gen={gen} />}
+    <button onClick={() => (open ? onClose() : onOpen())} aria-expanded={open} aria-label={open ? "Close Ask B4C" : "Open Ask B4C"} title={open ? "Close Ask B4C" : "Ask B4C"}
       style={{ position: "fixed", zIndex: 46, top: "50%", transform: "translateY(-50%)", right: open ? `min(${ASK_PANEL_W}px, calc(100vw - 44px))` : 0,
         display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 7px", cursor: "pointer",
         background: FIRE.card2Noir, border: "1px solid rgba(79,144,214,.4)", borderRight: "none", borderRadius: "10px 0 0 10px",
