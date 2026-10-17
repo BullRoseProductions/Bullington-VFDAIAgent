@@ -2,6 +2,7 @@
 -- SECURITY PROBE — members INSERT / DELETE gated by is_leader() with no department condition (cross-tenant?).
 -- READ-ONLY IN EFFECT: every write is inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). The final RAISE is
 -- the report. The "ERROR" IS the report — nothing is changed, no member is deleted or created.
+-- RAN on live 2026-10-17: X2 CROSS-TENANT INSERT allowed in all 5 departments; X1/X3 DELETE blocked (0 rows) in all 5.
 --
 -- Prints: the live is_leader() body and every members policy. Then, for each department A that has a leader (a member
 -- for whom is_leader() is true, not a Project Admin) with a unique email, signed in as that leader (JWT email claim +

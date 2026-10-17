@@ -1,6 +1,10 @@
 -- =====================================================================
 -- SECURITY FIX — members INSERT / DELETE: add the department scope. DRAFT — for the reviewing Claude, then Ashlea applies.
 -- Probe first: sql/members_crossdept_PROBE.sql (rollback-wrapped). Test after: sql/members_crossdept_fix_RETEST.sql.
+-- PROBE RAN on live 2026-10-17 — CONFIRMED in all 5 departments: a leader of one department can INSERT a member row into
+-- another (X2 "CROSS-TENANT INSERT allowed" ×5); cross-department DELETE returned 0 rows ×5 (blocked only because the
+-- SELECT policies hide the other department's rows). Live is_leader() is itself department-aware (the CALLER must lead
+-- their active department) but nothing ties the ROW's department_id to it — that is the hole this closes.
 --
 -- THE HOLE (same class as the 2026-10-13 cert leak): the live members write policies are
 --   "leaders insert members" FOR INSERT  WITH CHECK (is_leader())
