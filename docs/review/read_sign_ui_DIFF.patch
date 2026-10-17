@@ -1,5 +1,5 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index 524626e..a56a489 100644
+index 524626e..d60f8aa 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -1,6 +1,6 @@
@@ -63,7 +63,7 @@ index 524626e..a56a489 100644
        {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
        <StationFundraiserCard />
        {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
-@@ -6434,6 +6443,310 @@ function DocViewer({ url, name, onClose }) {
+@@ -6434,6 +6443,311 @@ function DocViewer({ url, name, onClose }) {
      document.body
    );
  }
@@ -270,7 +270,8 @@ index 524626e..a56a489 100644
 +    </Card>
 +  );
 +}
-+// DA / Officer controls for one document (Station Documents row). Config + publish through the RPCs only.
++// Department Admin controls for one document (Station Documents row) — required reading is set by a DA only
++// (set_document_ack_config / publish_document_version gate on is_dept_admin(); sql/read_sign_da_only). RPCs only.
 +function RsDocControls({ doc, series, canConfig, notify, onChanged }) {
 +  const s = series || { requires_ack: false, required_roles: null, annual_resign: false, current_version: 0 };
 +  const [requires, setRequires] = useState(!!s.requires_ack);
@@ -374,7 +375,7 @@ index 524626e..a56a489 100644
  function Documents({ S, role, notify, uploaderName, members }) {
    const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
  
-@@ -6456,19 +6769,29 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6456,19 +6770,30 @@ function Documents({ S, role, notify, uploaderName, members }) {
    function loadDocs() {
      return supabase
        .from("documents")
@@ -394,7 +395,8 @@ index 524626e..a56a489 100644
    useEffect(() => { loadDocs(); }, []);
    useReconnect(() => { if (loadErr) loadDocs(); });
 +  // Read & Sign: each document's acknowledgment config, keyed by series (a replaced file keeps its series).
-+  const canSeeCompliance = hasAny(role, CANMANAGE_ROLES);   // Board/DA/Officer — dept_read_sign_compliance()'s gate
++  const canSeeCompliance = hasAny(role, CANMANAGE_ROLES);   // Board/DA/Officer MONITOR — dept_read_sign_compliance()'s gate
++  // (Configuring / publishing required reading is a Department Admin's alone — isDA, matching is_dept_admin().)
 +  const [rsSeries, setRsSeries] = useState({});             // series_id -> document_series row
 +  const [rsOpenFor, setRsOpenFor] = useState(null);         // doc id whose Read & Sign panel is open
 +  const [rsTick, setRsTick] = useState(0);                  // bump to refresh the compliance view after a change
@@ -406,7 +408,7 @@ index 524626e..a56a489 100644
    function loadTrashed() {
      setTrashLoading(true);
      return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
-@@ -6689,6 +7012,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6689,6 +7014,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
          </>)}
        </>)}
  
@@ -414,7 +416,7 @@ index 524626e..a56a489 100644
        <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
        {!docsLoading && docs.length === 0 ? (
          <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
-@@ -6704,15 +7028,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6704,15 +7030,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
              <div key={d.id}>
                <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                  <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -425,14 +427,14 @@ index 524626e..a56a489 100644
                  {/* ONE flex group: inline on desktop, drops below the title as a unit on a phone (no overlap) */}
                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
                    <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDoc(d)}><Download size={14} /> Open</button>
-+                  {canManageDocs && <button aria-pressed={rsOpenFor === d.id} style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => setRsOpenFor(rsOpenFor === d.id ? null : d.id)}><FileCheck size={14} /> Read &amp; Sign</button>}
++                  {isDA && <button aria-pressed={rsOpenFor === d.id} style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => setRsOpenFor(rsOpenFor === d.id ? null : d.id)}><FileCheck size={14} /> Read &amp; Sign</button>}
                    <button style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => toggleHistory(d)}><Clock size={14} /> History <span style={{ display: "inline-flex" }}>{historyFor === d.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span></button>
                    {isDA && <label style={{ ...FS.btn, padding: "6px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }} title="Replace with a new version"><Upload size={14} /> Replace<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) doReplace(d, f); }} /></label>}
                    {isDA && <button title="Move to trash" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => deleteDoc(d)}><X size={14} color={FIRE.deleteRed} /></button>}
                  </div>
                </div>
-+              {rsOpenFor === d.id && (
-+                <RsDocControls key={`${d.id}-${JSON.stringify(rsSeries[d.series_id] || {})}`} doc={d} series={rsSeries[d.series_id]} canConfig={canManageDocs} notify={notify}
++              {isDA && rsOpenFor === d.id && (
++                <RsDocControls key={`${d.id}-${JSON.stringify(rsSeries[d.series_id] || {})}`} doc={d} series={rsSeries[d.series_id]} canConfig={isDA} notify={notify}
 +                  onChanged={() => { loadRsSeries(); setRsTick((t) => t + 1); }} />
 +              )}
                {historyFor === d.id && (

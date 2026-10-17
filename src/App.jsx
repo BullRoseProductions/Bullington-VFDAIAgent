@@ -6646,7 +6646,8 @@ function ReadSignCard({ go }) {
     </Card>
   );
 }
-// DA / Officer controls for one document (Station Documents row). Config + publish through the RPCs only.
+// Department Admin controls for one document (Station Documents row) — required reading is set by a DA only
+// (set_document_ack_config / publish_document_version gate on is_dept_admin(); sql/read_sign_da_only). RPCs only.
 function RsDocControls({ doc, series, canConfig, notify, onChanged }) {
   const s = series || { requires_ack: false, required_roles: null, annual_resign: false, current_version: 0 };
   const [requires, setRequires] = useState(!!s.requires_ack);
@@ -6783,7 +6784,8 @@ function Documents({ S, role, notify, uploaderName, members }) {
   useEffect(() => { loadDocs(); }, []);
   useReconnect(() => { if (loadErr) loadDocs(); });
   // Read & Sign: each document's acknowledgment config, keyed by series (a replaced file keeps its series).
-  const canSeeCompliance = hasAny(role, CANMANAGE_ROLES);   // Board/DA/Officer — dept_read_sign_compliance()'s gate
+  const canSeeCompliance = hasAny(role, CANMANAGE_ROLES);   // Board/DA/Officer MONITOR — dept_read_sign_compliance()'s gate
+  // (Configuring / publishing required reading is a Department Admin's alone — isDA, matching is_dept_admin().)
   const [rsSeries, setRsSeries] = useState({});             // series_id -> document_series row
   const [rsOpenFor, setRsOpenFor] = useState(null);         // doc id whose Read & Sign panel is open
   const [rsTick, setRsTick] = useState(0);                  // bump to refresh the compliance view after a change
@@ -7034,14 +7036,14 @@ function Documents({ S, role, notify, uploaderName, members }) {
                 {/* ONE flex group: inline on desktop, drops below the title as a unit on a phone (no overlap) */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
                   <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDoc(d)}><Download size={14} /> Open</button>
-                  {canManageDocs && <button aria-pressed={rsOpenFor === d.id} style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => setRsOpenFor(rsOpenFor === d.id ? null : d.id)}><FileCheck size={14} /> Read &amp; Sign</button>}
+                  {isDA && <button aria-pressed={rsOpenFor === d.id} style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => setRsOpenFor(rsOpenFor === d.id ? null : d.id)}><FileCheck size={14} /> Read &amp; Sign</button>}
                   <button style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => toggleHistory(d)}><Clock size={14} /> History <span style={{ display: "inline-flex" }}>{historyFor === d.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span></button>
                   {isDA && <label style={{ ...FS.btn, padding: "6px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }} title="Replace with a new version"><Upload size={14} /> Replace<input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) doReplace(d, f); }} /></label>}
                   {isDA && <button title="Move to trash" style={{ ...FS.btn, padding: "6px 8px" }} onClick={() => deleteDoc(d)}><X size={14} color={FIRE.deleteRed} /></button>}
                 </div>
               </div>
-              {rsOpenFor === d.id && (
-                <RsDocControls key={`${d.id}-${JSON.stringify(rsSeries[d.series_id] || {})}`} doc={d} series={rsSeries[d.series_id]} canConfig={canManageDocs} notify={notify}
+              {isDA && rsOpenFor === d.id && (
+                <RsDocControls key={`${d.id}-${JSON.stringify(rsSeries[d.series_id] || {})}`} doc={d} series={rsSeries[d.series_id]} canConfig={isDA} notify={notify}
                   onChanged={() => { loadRsSeries(); setRsTick((t) => t + 1); }} />
               )}
               {historyFor === d.id && (

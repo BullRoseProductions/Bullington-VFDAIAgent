@@ -12,7 +12,9 @@
 --   R1 member B can't see A's signature; A sees their own
 --   R2 a member's direct INSERT / UPDATE / DELETE on document_acknowledgments is refused
 --   R3 append-only: even the owner's UPDATE / DELETE is refused by the trigger
---   P1 a member can't publish                     P2 the Officer publishes v2 -> A is "resign", the v1 row survives,
+--   O1 an Officer is refused BOTH configuring and publishing (required reading is set by a Department Admin only —
+--      sql/read_sign_da_only); the DA path is C3 / P2
+--   P1 a member can't publish                     P2 the DA publishes v2 -> A is "resign", the v1 row survives,
 --                                                   re-signing adds a v2 row (2 rows)
 --   L1 compliance as the DA: B outstanding, A current; as a member: refused
 --   H1 honest denominator: audience = exactly the department's non-Inactive, non-former, non-Project-Admin members, and
@@ -25,6 +27,9 @@
 -- is_canmanage_ops()/is_canmanage(): same 17/0/1. Mutations, each caught: the document's own department check dropped
 -- -> C2 FAIL · leader read without is_canmanage() -> R1 FAIL · no append-only trigger -> migration rolls back · no fingerprint check -> A1 FAIL · a member
 -- write grant -> migration rolls back · no series inherit on replace -> S2+ FAIL · audience counts Inactive -> H1 FAIL.
+-- 2026-10-17 + read_sign_da_only: O1 added (Officer refused config + publish), P2 publishes as the DA, refusal checks match
+-- "Only a Department Admin…". Dry run base + da_only: 18 passed / 0 failed / 1 skipped. da_only mutations: department check
+-- dropped -> its post-condition rolls back · Officer gate kept -> O1 FAIL · re-run alone -> refused by its guard.
 -- =====================================================================
 DO $retest$
 DECLARE
@@ -80,7 +85,7 @@ BEGIN
       PERFORM set_config('role', 'authenticated', true);
       BEGIN PERFORM public.set_document_ack_config(v_doc2, true, NULL, false); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
       PERFORM set_config('role', 'postgres', true);
-      IF v_err LIKE 'Only a Department Admin or Officer%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  C1 member can''t configure%s', chr(10));
+      IF v_err LIKE 'Only a Department Admin%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  C1 member can''t configure%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  C1 -> "%s"%s', v_err, chr(10)); END IF;
       -- C2 another department's DA
       IF v_other_da IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  C2 — no other-department DA%s', chr(10));
@@ -89,7 +94,7 @@ BEGIN
         PERFORM set_config('role', 'authenticated', true);
         BEGIN PERFORM public.set_document_ack_config(v_doc2, true, NULL, false); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
         PERFORM set_config('role', 'postgres', true);
-        IF v_err LIKE 'Only a Department Admin or Officer%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  C2 another department''s DA refused%s', chr(10));
+        IF v_err LIKE 'Only a Department Admin%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  C2 another department''s DA refused%s', chr(10));
         ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  C2 -> "%s"%s', v_err, chr(10)); END IF;
       END IF;
       -- C3 DA turns it on -> v1
@@ -101,6 +106,19 @@ BEGIN
       IF v_err = 'OK' AND (v_res->>'current_version')::int = 1 AND v_hash ~ '^[0-9a-f]{64}$' THEN
         v_pass := v_pass + 1; rpt := rpt || format('   PASS  C3 DA config -> v1 published, sha256 fingerprint%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  C3 -> "%s" %s hash %s%s', v_err, v_res, v_hash, chr(10)); END IF;
+      -- O1 an Officer can't configure or publish (Department Admin only)
+      IF v_off IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  O1 — no officer with a unique email%s', chr(10));
+      ELSE
+        PERFORM set_config('request.jwt.claims', json_build_object('email', v_off, 'role', 'authenticated')::text, true);
+        PERFORM set_config('role', 'authenticated', true);
+        BEGIN PERFORM public.set_document_ack_config(v_doc2, true, NULL, true); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+        BEGIN PERFORM public.publish_document_version(v_doc2); v_st := 'OK'; EXCEPTION WHEN OTHERS THEN v_st := SQLERRM; END;
+        PERFORM set_config('role', 'postgres', true);
+        SELECT count(*) INTO v_n FROM public.document_versions WHERE series_id = v_series;
+        IF v_err LIKE 'Only a Department Admin%' AND v_st LIKE 'Only a Department Admin%' AND v_n = 1 THEN
+          v_pass := v_pass + 1; rpt := rpt || format('   PASS  O1 Officer refused config + publish (still v1)%s', chr(10));
+        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  O1 config "%s" publish "%s" versions %s%s', v_err, v_st, v_n, chr(10)); END IF;
+      END IF;
       -- Q1 queue
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
       PERFORM set_config('role', 'authenticated', true);
@@ -147,10 +165,10 @@ BEGIN
       PERFORM set_config('role', 'authenticated', true);
       BEGIN PERFORM public.publish_document_version(v_doc2); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
       PERFORM set_config('role', 'postgres', true);
-      IF v_err LIKE 'Only a Department Admin or Officer%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  P1 member can''t publish%s', chr(10));
+      IF v_err LIKE 'Only a Department Admin%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  P1 member can''t publish%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  P1 -> "%s"%s', v_err, chr(10)); END IF;
-      -- P2 Officer (or the DA when there's no officer) publishes v2
-      PERFORM set_config('request.jwt.claims', json_build_object('email', coalesce(v_off, v_da), 'role', 'authenticated')::text, true);
+      -- P2 the DA publishes v2
+      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
       PERFORM set_config('role', 'authenticated', true);
       BEGIN v_res := public.publish_document_version(v_doc2); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
@@ -159,7 +177,7 @@ BEGIN
       PERFORM set_config('role', 'postgres', true);
       SELECT count(*) INTO v_n FROM public.document_acknowledgments WHERE member_id = v_a_id AND series_id = v_series;
       IF v_err = 'OK' AND (v_res->>'current_version')::int = 2 AND v_st = 'resign' AND v_n = 2 THEN
-        v_pass := v_pass + 1; rpt := rpt || format('   PASS  P2 %s published v2 -> A resign; v1 kept; re-sign -> 2 rows%s', CASE WHEN v_off IS NULL THEN 'DA' ELSE 'Officer' END, chr(10));
+        v_pass := v_pass + 1; rpt := rpt || format('   PASS  P2 DA published v2 -> A resign; v1 kept; re-sign -> 2 rows%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  P2 -> "%s" %s status %s rows %s%s', v_err, v_res, v_st, v_n, chr(10)); END IF;
       -- L1 compliance
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
