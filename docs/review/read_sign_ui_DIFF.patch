@@ -1,5 +1,5 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index 524626e..d60f8aa 100644
+index 524626e..34161de 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -1,6 +1,6 @@
@@ -63,7 +63,78 @@ index 524626e..d60f8aa 100644
        {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
        <StationFundraiserCard />
        {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
-@@ -6434,6 +6443,311 @@ function DocViewer({ url, name, onClose }) {
+@@ -6372,10 +6381,19 @@ function PdfPage({ pdf, pageNum, width }) {
+ // In-app document viewer. Takes the ALREADY-signed URL (no new RLS surface). PDF -> pdfjs page
+ // canvases; docx -> mammoth HTML (text + basic structure, download fallback); image -> inline;
+ // anything else -> download-only. The Download button opens the original (today's behavior).
+-function DocViewer({ url, name, onClose }) {
+-  const ext = (name || "").toLowerCase().split(".").pop();
+-  const kind = ext === "pdf" ? "pdf" : ext === "docx" ? "docx" : ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext) ? "image" : "other";
+-  const [status, setStatus] = useState(kind === "other" ? "error" : "loading");   // loading | ready | error(=download-only)
++/* WHAT TO RENDER IS DECIDED BY THE FILE, NOT ITS DISPLAY NAME. A replaced document keeps its original name, so a row
++   named "…Harassment.docx" can point at a .pdf (2026-10-17) — rendering by the name sent a PDF through mammoth. Order:
++   the fetched Content-Type → the actual file's extension (storage path, else the signed URL's own path) → the name's
++   extension only when the file has none. */
++const DOC_IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
++const docExtOf = (s) => { const m = /\.([a-z0-9]{1,5})$/i.exec(String(s || "").split("?")[0].split("#")[0]); return m ? m[1].toLowerCase() : ""; };
++const docKindOfExt = (e) => (e === "pdf" ? "pdf" : e === "docx" ? "docx" : DOC_IMAGE_EXTS.includes(e) ? "image" : "other");
++const docKindOfType = (ct) => { const t = String(ct || "").toLowerCase(); return t.includes("application/pdf") ? "pdf" : t.includes("wordprocessingml") ? "docx" : t.startsWith("image/") ? "image" : null; };
++function DocViewer({ url, name, path, onClose, footer }) {
++  const urlPath = (() => { try { return decodeURIComponent(new URL(url).pathname); } catch { return ""; } })();
++  const guess = docKindOfExt(docExtOf(path) || docExtOf(urlPath) || docExtOf(name));
++  const [kind, setKind] = useState(guess);                // settled from the fetched Content-Type below
++  const [status, setStatus] = useState("loading");        // loading | ready | error(=download-only)
+   const [pdf, setPdf] = useState(null);
+   const [numPages, setNumPages] = useState(0);
+   const [html, setHtml] = useState("");
+@@ -6387,24 +6405,33 @@ function DocViewer({ url, name, onClose }) {
+     let cancelled = false;
+     (async () => {
+       try {
+-        if (kind === "pdf") {
++        // One fetch: the file's own Content-Type decides the renderer; the extension guess is only the fallback.
++        const res = await fetch(url);
++        if (!res.ok) throw new Error(`HTTP ${res.status}`);
++        const k = docKindOfType(res.headers.get("content-type")) || guess;
++        if (cancelled) return;
++        setKind(k);
++        if (k === "pdf") {
++          const buf = await res.arrayBuffer();
+           const lib = await loadPdfjs();
+-          const doc = await lib.getDocument({ url }).promise;
++          const doc = await lib.getDocument({ data: new Uint8Array(buf) }).promise;
+           if (cancelled) return;
+           setPdf(doc); setNumPages(doc.numPages); setStatus("ready");
+-        } else if (kind === "docx") {
+-          const buf = await (await fetch(url)).arrayBuffer();
++        } else if (k === "docx") {
++          const buf = await res.arrayBuffer();
+           const mammoth = await loadMammoth();
+           const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });   // text + basic structure (NOT pixel-perfect Word)
+           if (cancelled) return;
+           if (value && value.trim()) { setHtml(value); setStatus("ready"); } else { setStatus("error"); }   // empty => download fallback
+-        } else if (kind === "image") {
+-          if (!cancelled) setStatus("ready");
++        } else if (k === "image") {
++          setStatus("ready");
++        } else {
++          setStatus("error");                             // not something we render in-app => download
+         }
+       } catch { if (!cancelled) setStatus("error"); }   // any failure => clean download-only fallback
+     })();
+     return () => { cancelled = true; };
+-  }, [url, kind]);
++  }, [url]);
+   return createPortal(
+     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 130, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
+       <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxWidth: 820, width: "100%", margin: "0 auto" }}>
+@@ -6429,11 +6456,356 @@ function DocViewer({ url, name, onClose }) {
+           </>)}
+           {status === "ready" && kind === "image" && <img src={url} alt={name} style={{ display: "block", maxWidth: "100%", margin: "0 auto", borderRadius: 8 }} />}
+         </div>
++        {footer}
+       </div>
+     </div>,
      document.body
    );
  }
@@ -89,21 +160,60 @@ index 524626e..d60f8aa 100644
 +    });
 +  }, [enabled]);
 +  useEffect(() => { load(); }, [load]);
++  useEffect(() => { window.addEventListener(RS_CHANGED, load); return () => window.removeEventListener(RS_CHANGED, load); }, [load]);
 +  useReconnect(() => { load(); });
 +  return { rows, err, reload: load };
 +}
 +const rsOutstanding = (rows) => (rows || []).filter((r) => r.status !== "current").length;
++// Fired after a signature lands, so every queue on screen (nav badge, dashboard card, Documents list, Read & Sign) reloads.
++const RS_CHANGED = "b4c:readsign-changed";
++// Sign the CURRENT published version the queue row describes. Returns true on success. Never writes the tables directly.
++async function rsSignRow(row, notify) {
++  const { error } = await supabase.rpc("acknowledge_document", { p_document_id: row.document_id, p_version: row.version, p_content_hash: row.content_hash });
++  if (error) { notify({ kind: "error", title: "Couldn't record your signature", text: error.message || "Please try again." }); window.dispatchEvent(new Event(RS_CHANGED)); return false; }
++  notify({ kind: "success", text: `Signed — ${row.title} (v${row.version}).` });
++  window.dispatchEvent(new Event(RS_CHANGED));
++  return true;
++}
++/* The read -> attest -> sign footer, shown INSIDE the document viewer (and the text fallback) when the member owes a
++   signature on what they're reading. The wording matches the server's snapshot. */
++function RsSignFooter({ row, notify }) {
++  const [agree, setAgree] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [done, setDone] = useState(false);
++  async function go() { setBusy(true); const ok = await rsSignRow(row, notify); setBusy(false); if (ok) setDone(true); }
++  return (
++    <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, padding: "12px 14px calc(12px + env(safe-area-inset-bottom))", background: FIRE.card2Noir, borderTop: "1px solid rgba(79,144,214,.35)" }}>
++      {done ? (
++        <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.greenText, fontSize: 13.5, fontWeight: 600 }}>
++          <CheckCircle2 size={17} /> Signed v{row.version} — your signature is recorded against this version.
++        </div>
++      ) : (<>
++        <label style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer" }}>
++          <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 18, height: 18, marginTop: 1, accentColor: NOIR_AI.blue, flexShrink: 0 }} />
++          <span style={{ fontSize: 12.5, color: FIRE.textPrimary, lineHeight: 1.45 }}>I have <b style={{ color: "#fff" }}>read and understand</b> {row.title} (v{row.version}) and agree to comply.</span>
++        </label>
++        <button disabled={!agree || busy} onClick={go}
++          style={{ marginTop: 10, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, letterSpacing: ".04em", textTransform: "uppercase", color: "#fff", background: "linear-gradient(180deg,#2E6DB0,#234f82)", border: "1px solid rgba(127,178,230,.55)", borderRadius: 10, padding: 11, cursor: agree && !busy ? "pointer" : "not-allowed", opacity: agree && !busy ? 1 : 0.5 }}>
++          {busy ? <><Loader2 size={16} className="spin" /> Signing…</> : <><PenLine size={16} /> Sign now</>}
++        </button>
++      </>)}
++    </div>
++  );
++}
 +
 +// Open the exact published file in the in-app viewer (signed URL, private bucket). No file -> the extracted text.
 +function useRsOpener(notify) {
-+  const [viewer, setViewer] = useState(null);   // {url,name} | {text,name}
-+  async function open(row) {
++  const [viewer, setViewer] = useState(null);   // {url,name,path,sign?} | {text,name,sign?}
++  // opts.sign: show the read -> attest -> sign footer for this queue row (only when the member owes the signature)
++  async function open(row, opts = {}) {
++    const sign = opts.sign && row.status && row.status !== "current" ? row : null;
 +    if (row.storage_path) {
 +      const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.storage_path, 3600);
-+      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title }); return; }
++      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title, path: row.storage_path, sign }); return; }
 +    }
 +    const { data } = await supabase.from("documents").select("content_text").eq("id", row.document_id).maybeSingle();
-+    if (data?.content_text) { setViewer({ text: data.content_text, name: row.title }); return; }
++    if (data?.content_text) { setViewer({ text: data.content_text, name: row.title, sign }); return; }
 +    notify({ kind: "error", title: "Couldn't open the document", text: "Please try again, or ask an officer for a copy." });
 +  }
 +  /* THE RECEIPT: open the exact version this member signed — that version's own snapshot (document_versions keeps the
@@ -117,7 +227,8 @@ index 524626e..d60f8aa 100644
 +    return open({ document_id: data.document_id, storage_path: data.storage_path, title: `${data.title} (v${row.signed_version} — the version you signed)` });
 +  }
 +  const mount = viewer ? (viewer.url
-+    ? <DocViewer url={viewer.url} name={viewer.name} onClose={() => setViewer(null)} />
++    ? <DocViewer url={viewer.url} name={viewer.name} path={viewer.path} onClose={() => setViewer(null)}
++        footer={viewer.sign ? <RsSignFooter key={viewer.sign.series_id + viewer.sign.version} row={viewer.sign} notify={notify} /> : null} />
 +    : createPortal(
 +      <div onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(8,10,16,.78)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
 +        <div role="dialog" aria-modal="true" aria-label={viewer.name} onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 720, margin: "24px 0", padding: 18 }}>
@@ -126,6 +237,7 @@ index 524626e..d60f8aa 100644
 +            <button aria-label="Close" onClick={() => setViewer(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={18} color={FIRE.textMuted} /></button>
 +          </div>
 +          <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6, color: FIRE.textSecondary }}>{viewer.text}</div>
++          {viewer.sign && <div style={{ marginTop: 14, marginLeft: -18, marginRight: -18, marginBottom: -18 }}><RsSignFooter key={viewer.sign.series_id + viewer.sign.version} row={viewer.sign} notify={notify} /></div>}
 +        </div>
 +      </div>, document.body)) : null;
 +  return { open, openSigned, mount };
@@ -220,14 +332,12 @@ index 524626e..d60f8aa 100644
 +  useEffect(() => { if (rows) onCountChange?.(rsOutstanding(rows)); }, [rows]);   // keep the nav badge honest
 +  async function sign(row) {
 +    setBusy(row.series_id);
-+    const { error } = await supabase.rpc("acknowledge_document", { p_document_id: row.document_id, p_version: row.version, p_content_hash: row.content_hash });
++    const ok = await rsSignRow(row, notify);   // fires RS_CHANGED -> this queue (and the badge/card) reload
 +    setBusy(null);
-+    if (error) { notify({ kind: "error", title: "Couldn't record your signature", text: error.message || "Please try again." }); reload(); return; }
-+    notify({ kind: "success", text: `Signed — ${row.title} (v${row.version}).` });
-+    setOpenId(null); reload();
++    if (ok) setOpenId(null);
 +  }
 +  const card = (r) => <RsDocCard key={r.series_id} row={r} open={firstOpen === r.series_id} busy={busy === r.series_id}
-+    onToggle={() => setOpenId(r.series_id)} onRead={openFile} onReadSigned={openSigned} onSign={sign} />;
++    onToggle={() => setOpenId(r.series_id)} onRead={(row) => openFile(row, { sign: true })} onReadSigned={openSigned} onSign={sign} />;
 +  return (
 +    <PageShell band kicker="REQUIRED READING" title="Read & sign"
 +      sub="Documents your role requires you to read and attest. Your signature is recorded against the exact version — the document itself is never stored on you."
@@ -375,7 +485,7 @@ index 524626e..d60f8aa 100644
  function Documents({ S, role, notify, uploaderName, members }) {
    const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
  
-@@ -6456,19 +6770,30 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6456,19 +6828,35 @@ function Documents({ S, role, notify, uploaderName, members }) {
    function loadDocs() {
      return supabase
        .from("documents")
@@ -400,6 +510,11 @@ index 524626e..d60f8aa 100644
 +  const [rsSeries, setRsSeries] = useState({});             // series_id -> document_series row
 +  const [rsOpenFor, setRsOpenFor] = useState(null);         // doc id whose Read & Sign panel is open
 +  const [rsTick, setRsTick] = useState(0);                  // bump to refresh the compliance view after a change
++  // What *I* owe (member side): series_id -> my queue row when needs / re-sign. Read & Sign opens the PUBLISHED version
++  // (the queue row's file), with the sign footer — sign where the document lives.
++  const { rows: myRsRows } = useReadSignQueue(true);
++  const owed = new Map((myRsRows || []).filter((r) => r.status !== "current").map((r) => [r.series_id, r]));
++  const { open: openRs, mount: rsMount } = useRsOpener(notify);
 +  function loadRsSeries() {
 +    return supabase.from("document_series").select("series_id, requires_ack, required_roles, annual_resign, current_version")
 +      .then(({ data, error }) => { if (!error && Array.isArray(data)) setRsSeries(Object.fromEntries(data.map((r) => [r.series_id, r]))); });
@@ -408,7 +523,16 @@ index 524626e..d60f8aa 100644
    function loadTrashed() {
      setTrashLoading(true);
      return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
-@@ -6689,6 +7014,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6550,7 +6938,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+       notify({ kind: "error", title: "Couldn't open file", text: "The document couldn't be opened — please try again.", details: error?.message ?? "no signed URL" });
+       return;
+     }
+-    setViewerDoc({ url: data.signedUrl, name: item.name });   // in-app viewer; Download inside opens the original (today's behavior)
++    setViewerDoc({ url: data.signedUrl, name: item.name, path: item.storage_path });   // in-app viewer; the FILE (path / Content-Type) picks the renderer
+   }
+   // Soft-delete: move to trash (DA/PA, server-stamped). File STAYS in Storage so it can be restored.
+   async function deleteDoc(item) {
+@@ -6689,6 +7077,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
          </>)}
        </>)}
  
@@ -416,7 +540,7 @@ index 524626e..d60f8aa 100644
        <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
        {!docsLoading && docs.length === 0 ? (
          <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
-@@ -6704,15 +7030,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6704,15 +7093,23 @@ function Documents({ S, role, notify, uploaderName, members }) {
              <div key={d.id}>
                <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                  <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -426,6 +550,7 @@ index 524626e..d60f8aa 100644
 +                </div>
                  {/* ONE flex group: inline on desktop, drops below the title as a unit on a phone (no overlap) */}
                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0, maxWidth: "100%" }}>
++                  {owed.has(d.series_id) && <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5, borderColor: NOIR_AI.blue, color: NOIR_AI.blueText }} onClick={() => openRs(owed.get(d.series_id), { sign: true })}><PenLine size={14} /> {owed.get(d.series_id).status === "resign" ? "Re-sign" : "Read & Sign"}</button>}
                    <button style={{ ...FS.btn, padding: "7px 12px", fontSize: 12.5 }} onClick={() => openDoc(d)}><Download size={14} /> Open</button>
 +                  {isDA && <button aria-pressed={rsOpenFor === d.id} style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => setRsOpenFor(rsOpenFor === d.id ? null : d.id)}><FileCheck size={14} /> Read &amp; Sign</button>}
                    <button style={{ ...FS.btn, padding: "7px 10px", fontSize: 12.5 }} onClick={() => toggleHistory(d)}><Clock size={14} /> History <span style={{ display: "inline-flex" }}>{historyFor === d.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span></button>
@@ -440,3 +565,13 @@ index 524626e..d60f8aa 100644
                {historyFor === d.id && (
                  <Card padding={12} style={{ marginTop: 6, marginBottom: 8, boxShadow: "none" }}>
                    <SectionLabel style={{ marginBottom: 6 }}>VERSION HISTORY</SectionLabel>
+@@ -6754,7 +7151,8 @@ function Documents({ S, role, notify, uploaderName, members }) {
+           )}
+         </div>
+       )}
+-      {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} onClose={() => setViewerDoc(null)} />}
++      {viewerDoc && <DocViewer url={viewerDoc.url} name={viewerDoc.name} path={viewerDoc.path} onClose={() => setViewerDoc(null)} />}
++      {rsMount}
+       </NoirSkin>
+     </PageShell>
+   );
