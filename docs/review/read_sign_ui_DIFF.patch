@@ -1,5 +1,5 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index 524626e..ca7a64e 100644
+index 524626e..8792a5e 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -1,6 +1,6 @@
@@ -14,7 +14,7 @@ index 524626e..ca7a64e 100644
    { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
    { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
    { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
-+  { key: "readsign", label: "Read & Sign", Icon: FileCheck, roles: ROLES },   // required reading — shown when you have any, or manage documents (see visibleNav)
++  { key: "readsign", label: "Read & Sign", Icon: FileCheck, roles: ROLES },   // required reading — in the menu only while something is outstanding (see visibleNav)
    { key: "resources", label: "Your Six", Icon: LifeBuoy, roles: ROLES },
    { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
    { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
@@ -26,18 +26,19 @@ index 524626e..ca7a64e 100644
    /* WHERE THEY WERE before an app-update reload (src/appUpdate.js) — read once, then the key is gone. A deep link in
       the URL wins (routeDeepLink below still owns routing for it), and the one-shot check-in / handoff screens are never
       restored: they need the pending state that came with the scan. */
-@@ -3021,7 +3023,9 @@ export default function App() {
+@@ -3021,7 +3023,10 @@ export default function App() {
    const visibleNav = (isProjectAdminOnly
      ? NAV.filter((n) => PA_NAV.includes(n.key))
      : NAV.filter((n) => hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr))
 -  ).filter((n) => moduleEnabled(n.key, disabledModules));
 +  ).filter((n) => moduleEnabled(n.key, disabledModules))
-+   // Read & Sign: in the menu when you have required reading, or you're leadership (who configure + watch compliance).
-+   .filter((n) => n.key !== "readsign" || (rsQueue.rows && rsQueue.rows.length > 0) || hasAny(role, CANMANAGE_ROLES));
++   // Read & Sign: in the menu ONLY while you have outstanding required reading (needs / re-sign) — never a standing
++   // entry. Leaders configure documents and review compliance from Station Documents' Read & Sign controls.
++   .filter((n) => n.key !== "readsign" || rsOutstanding(rsQueue.rows) > 0);
    // Closes the hole the nav filter can't: go() is called from dashboard tiles and CTAs, and ?checkin=/
    // ?handoff= set the screen directly, so a disabled module stays reachable without passing the sidebar.
    // Also covers a module being switched off while a member is standing on it. Mirrors the retired-"ai"
-@@ -3057,6 +3061,7 @@ export default function App() {
+@@ -3057,6 +3062,7 @@ export default function App() {
                <button key={n.key} onClick={() => go(n.key)} className={active ? "dr-nav-on" : undefined} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
                  <n.Icon size={18} /><span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
                  {n.premium && <span style={S.premiumTag}>AI</span>}
@@ -45,7 +46,7 @@ index 524626e..ca7a64e 100644
                </button>
              );
            })}
-@@ -3125,6 +3130,7 @@ export default function App() {
+@@ -3125,6 +3131,7 @@ export default function App() {
            {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
            {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
            {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
@@ -53,7 +54,7 @@ index 524626e..ca7a64e 100644
            {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
            {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
            {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
-@@ -4984,6 +4990,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
+@@ -4984,6 +4991,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
        {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
            (it renders nothing once complete); only its place in the order changed. */}
        <OnboardingCard S={S} me={me} go={go} dept={dept} />
@@ -62,7 +63,7 @@ index 524626e..ca7a64e 100644
        {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
        <StationFundraiserCard />
        {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
-@@ -6434,6 +6442,295 @@ function DocViewer({ url, name, onClose }) {
+@@ -6434,6 +6443,295 @@ function DocViewer({ url, name, onClose }) {
      document.body
    );
  }
@@ -358,7 +359,7 @@ index 524626e..ca7a64e 100644
  function Documents({ S, role, notify, uploaderName, members }) {
    const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
  
-@@ -6456,19 +6753,29 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6456,19 +6754,29 @@ function Documents({ S, role, notify, uploaderName, members }) {
    function loadDocs() {
      return supabase
        .from("documents")
@@ -390,7 +391,7 @@ index 524626e..ca7a64e 100644
    function loadTrashed() {
      setTrashLoading(true);
      return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
-@@ -6689,6 +6996,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6689,6 +6997,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
          </>)}
        </>)}
  
@@ -398,7 +399,7 @@ index 524626e..ca7a64e 100644
        <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
        {!docsLoading && docs.length === 0 ? (
          <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
-@@ -6704,15 +7012,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6704,15 +7013,22 @@ function Documents({ S, role, notify, uploaderName, members }) {
              <div key={d.id}>
                <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                  <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />

@@ -1785,7 +1785,7 @@ const NAV = [
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
-  { key: "readsign", label: "Read & Sign", Icon: FileCheck, roles: ROLES },   // required reading — shown when you have any, or manage documents (see visibleNav)
+  { key: "readsign", label: "Read & Sign", Icon: FileCheck, roles: ROLES },   // required reading — in the menu only while something is outstanding (see visibleNav)
   { key: "resources", label: "Your Six", Icon: LifeBuoy, roles: ROLES },
   { key: "settings", label: "Settings & Support", Icon: Wrench, roles: ROLES },
   { key: "admin", label: "Content Admin", Icon: ShieldAlert, roles: ["Project Admin"] },
@@ -3024,8 +3024,9 @@ export default function App() {
     ? NAV.filter((n) => PA_NAV.includes(n.key))
     : NAV.filter((n) => hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr))
   ).filter((n) => moduleEnabled(n.key, disabledModules))
-   // Read & Sign: in the menu when you have required reading, or you're leadership (who configure + watch compliance).
-   .filter((n) => n.key !== "readsign" || (rsQueue.rows && rsQueue.rows.length > 0) || hasAny(role, CANMANAGE_ROLES));
+   // Read & Sign: in the menu ONLY while you have outstanding required reading (needs / re-sign) — never a standing
+   // entry. Leaders configure documents and review compliance from Station Documents' Read & Sign controls.
+   .filter((n) => n.key !== "readsign" || rsOutstanding(rsQueue.rows) > 0);
   // Closes the hole the nav filter can't: go() is called from dashboard tiles and CTAs, and ?checkin=/
   // ?handoff= set the screen directly, so a disabled module stays reachable without passing the sidebar.
   // Also covers a module being switched off while a member is standing on it. Mirrors the retired-"ai"
