@@ -6529,9 +6529,12 @@ function RsSignFooter({ row, notify }) {
 // Open the exact published file in the in-app viewer (signed URL, private bucket). No file -> the extracted text.
 function useRsOpener(notify) {
   const [viewer, setViewer] = useState(null);   // {url,name,path,sign?} | {text,name,sign?}
-  // opts.sign: show the read -> attest -> sign footer for this queue row (only when the member owes the signature)
+  /* TWO MODES, kept distinct:
+       to-sign  — open(queueRow, { sign: true }) shows the footer ONLY when that row is needs / resign for this member
+                  (the queue only holds documents whose audience includes them) and signs the CURRENT version it carries;
+       receipt  — openSigned(row) opens the version they signed, READ-ONLY: it never passes sign, so no footer is possible. */
   async function open(row, opts = {}) {
-    const sign = opts.sign && row.status && row.status !== "current" ? row : null;
+    const sign = opts.sign && (row.status === "needs" || row.status === "resign") ? row : null;
     if (row.storage_path) {
       const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.storage_path, 3600);
       if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title, path: row.storage_path, sign }); return; }
@@ -6768,12 +6771,14 @@ function RsCompliance({ refreshKey }) {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState(false);
   const [openSeries, setOpenSeries] = useState(null);
+  const [signedTick, setSignedTick] = useState(0);   // a signature anywhere in the app (RS_CHANGED) refreshes the counts
+  useEffect(() => { const on = () => setSignedTick((t) => t + 1); window.addEventListener(RS_CHANGED, on); return () => window.removeEventListener(RS_CHANGED, on); }, []);
   useEffect(() => {
     supabase.rpc("dept_read_sign_compliance").then(({ data, error }) => {
-      if (error || !Array.isArray(data)) { setErr(true); return; }
+      if (error || !Array.isArray(data)) { setErr(true); return; }   // keeps the last counts on a failed read
       setErr(false); setRows(data);
     });
-  }, [refreshKey]);
+  }, [refreshKey, signedTick]);
   if (err && !rows) return null;
   if (!rows || rows.length === 0) return null;
   return (<>

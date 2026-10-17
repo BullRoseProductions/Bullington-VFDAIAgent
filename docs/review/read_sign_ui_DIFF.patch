@@ -1,5 +1,5 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index 524626e..34161de 100644
+index 524626e..be6e232 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -1,6 +1,6 @@
@@ -128,7 +128,7 @@ index 524626e..34161de 100644
    return createPortal(
      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 130, display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top)" }}>
        <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxWidth: 820, width: "100%", margin: "0 auto" }}>
-@@ -6429,11 +6456,356 @@ function DocViewer({ url, name, onClose }) {
+@@ -6429,11 +6456,361 @@ function DocViewer({ url, name, onClose }) {
            </>)}
            {status === "ready" && kind === "image" && <img src={url} alt={name} style={{ display: "block", maxWidth: "100%", margin: "0 auto", borderRadius: 8 }} />}
          </div>
@@ -205,9 +205,12 @@ index 524626e..34161de 100644
 +// Open the exact published file in the in-app viewer (signed URL, private bucket). No file -> the extracted text.
 +function useRsOpener(notify) {
 +  const [viewer, setViewer] = useState(null);   // {url,name,path,sign?} | {text,name,sign?}
-+  // opts.sign: show the read -> attest -> sign footer for this queue row (only when the member owes the signature)
++  /* TWO MODES, kept distinct:
++       to-sign  — open(queueRow, { sign: true }) shows the footer ONLY when that row is needs / resign for this member
++                  (the queue only holds documents whose audience includes them) and signs the CURRENT version it carries;
++       receipt  — openSigned(row) opens the version they signed, READ-ONLY: it never passes sign, so no footer is possible. */
 +  async function open(row, opts = {}) {
-+    const sign = opts.sign && row.status && row.status !== "current" ? row : null;
++    const sign = opts.sign && (row.status === "needs" || row.status === "resign") ? row : null;
 +    if (row.storage_path) {
 +      const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.storage_path, 3600);
 +      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title, path: row.storage_path, sign }); return; }
@@ -444,12 +447,14 @@ index 524626e..34161de 100644
 +  const [rows, setRows] = useState(null);
 +  const [err, setErr] = useState(false);
 +  const [openSeries, setOpenSeries] = useState(null);
++  const [signedTick, setSignedTick] = useState(0);   // a signature anywhere in the app (RS_CHANGED) refreshes the counts
++  useEffect(() => { const on = () => setSignedTick((t) => t + 1); window.addEventListener(RS_CHANGED, on); return () => window.removeEventListener(RS_CHANGED, on); }, []);
 +  useEffect(() => {
 +    supabase.rpc("dept_read_sign_compliance").then(({ data, error }) => {
-+      if (error || !Array.isArray(data)) { setErr(true); return; }
++      if (error || !Array.isArray(data)) { setErr(true); return; }   // keeps the last counts on a failed read
 +      setErr(false); setRows(data);
 +    });
-+  }, [refreshKey]);
++  }, [refreshKey, signedTick]);
 +  if (err && !rows) return null;
 +  if (!rows || rows.length === 0) return null;
 +  return (<>
@@ -485,7 +490,7 @@ index 524626e..34161de 100644
  function Documents({ S, role, notify, uploaderName, members }) {
    const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
  
-@@ -6456,19 +6828,35 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6456,19 +6833,35 @@ function Documents({ S, role, notify, uploaderName, members }) {
    function loadDocs() {
      return supabase
        .from("documents")
@@ -523,7 +528,7 @@ index 524626e..34161de 100644
    function loadTrashed() {
      setTrashLoading(true);
      return supabase.from("documents").select("id, name, type, storage_path, deleted_at, deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false })
-@@ -6550,7 +6938,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6550,7 +6943,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
        notify({ kind: "error", title: "Couldn't open file", text: "The document couldn't be opened — please try again.", details: error?.message ?? "no signed URL" });
        return;
      }
@@ -532,7 +537,7 @@ index 524626e..34161de 100644
    }
    // Soft-delete: move to trash (DA/PA, server-stamped). File STAYS in Storage so it can be restored.
    async function deleteDoc(item) {
-@@ -6689,6 +7077,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6689,6 +7082,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
          </>)}
        </>)}
  
@@ -540,7 +545,7 @@ index 524626e..34161de 100644
        <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
        {!docsLoading && docs.length === 0 ? (
          <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
-@@ -6704,15 +7093,23 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6704,15 +7098,23 @@ function Documents({ S, role, notify, uploaderName, members }) {
              <div key={d.id}>
                <div style={{ ...S.certRow, flexWrap: "wrap", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                  <FileText size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
@@ -565,7 +570,7 @@ index 524626e..34161de 100644
                {historyFor === d.id && (
                  <Card padding={12} style={{ marginTop: 6, marginBottom: 8, boxShadow: "none" }}>
                    <SectionLabel style={{ marginBottom: 6 }}>VERSION HISTORY</SectionLabel>
-@@ -6754,7 +7151,8 @@ function Documents({ S, role, notify, uploaderName, members }) {
+@@ -6754,7 +7156,8 @@ function Documents({ S, role, notify, uploaderName, members }) {
            )}
          </div>
        )}
