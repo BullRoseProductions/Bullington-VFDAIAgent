@@ -1768,7 +1768,6 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
 }
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
-  { key: "ask", label: "Ask B4C", Icon: Sparkles, roles: ROLES },   // NOT a screen: go("ask") opens the Ask B4C drawer over wherever they are (see go())
   { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
@@ -4920,19 +4919,6 @@ function AskB4CDock({ open, onOpen, onClose, onHide, gen, role, go, dept, msgs, 
     </button>
   </>);
 }
-// The dashboard card: opens the same panel as the sidebar entry and the handle (go("ask") — App owns the panel).
-function AskB4CLauncher({ go }) {
-  return (
-    <button onClick={() => go("ask")} style={{ ...FS.cardNoir, background: `${NOIR_AI.glow}, ${FS.cardNoir.background}`, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-      <span style={{ width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: "rgba(79,144,214,.14)", border: "1px solid rgba(79,144,214,.3)" }}><Sparkles size={18} color={NOIR_AI.blue} /></span>
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: "block", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, color: FIRE.textPrimary }}>Ask B4C</span>
-        <span style={{ display: "block", fontSize: 12.5, color: FIRE.textSecondary }}>&ldquo;How many hours do I have?&rdquo; &middot; &ldquo;When does my EMT expire?&rdquo; &middot; &ldquo;What does our SOP say about&hellip;&rdquo;</span>
-      </span>
-      <ChevronRight size={16} color={NOIR_AI.blueText} />
-    </button>
-  );
-}
 function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, isEqMgr }) {
   // NOTE: no useProofViewer here any more — PersonalView owns the certs card and its own proof viewer.
   const DISPLAY = "'Oswald', system-ui, sans-serif";
@@ -4998,8 +4984,6 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       {/* Still onboarding → the checklist leads, directly under the greeting. Same component, same show rule
           (it renders nothing once complete); only its place in the order changed. */}
       <OnboardingCard S={S} me={me} go={go} dept={dept} />
-      {/* Ask B4C — the member assistant (answers from their own records + SOPs; never acts) */}
-      <AskB4CLauncher go={go} />
       {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
       <StationFundraiserCard />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
