@@ -1,0 +1,307 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index a01958c..8967ead 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -2504,7 +2504,7 @@ export default function App() {
+     if (!authEmail) { setDept(null); return; }
+     supabase.rpc("my_department_id").then(({ data: id }) => {
+       if (!id) return;
+-      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day, geofence_enabled, aftercall_enabled").eq("id", id).single().then(({ data }) => {
++      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day, geofence_enabled, aftercall_enabled, probation_enabled").eq("id", id).single().then(({ data }) => {
+         if (!data) return;
+         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
+         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
+@@ -3137,8 +3137,8 @@ export default function App() {
+           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
+           {/* Signers (Board/DA/Officer) and list editors (DA/PA) get the officer screen; everyone else sees their own checklist, read-only. */}
+           {screen === "onboarding" && ((canManage(role) || isDeptAdmin(role))
+-            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} meId={myMemberId} go={go} />
+-            : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} go={go} />)}
++            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} setDept={setDept} meId={myMemberId} go={go} />
++            : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} go={go} dept={dept} />)}
+           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
+           {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
+               deep-link, a stale screen) gets their own My Equipment instead — never the department log. */}
+@@ -11525,7 +11525,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+   const [priv, setPriv] = useState(null);        // member_private (birthday/address/joined_date) — DA/PA only
+   // Probation start (member_probation, written only by set_member_probation): a real Department Admin of the
+   // department — not a Project Admin — and never on their own record. undefined = not loaded; null = not set.
+-  const canSetProbStart = hasAny(role, ["Department Admin"]) && member.id !== meId;
++  const canSetProbStart = probationOn(dept) && hasAny(role, ["Department Admin"]) && member.id !== meId;   // hidden when the program is off
+   const [probStart, setProbStart] = useState(undefined);
+   useEffect(() => {
+     if (!canSetProbStart) return;
+@@ -20941,7 +20941,7 @@ const onboardingSignedLine = (row, members) => {
+ };
+ // MemberDashboard card: checklist incomplete AND (Probationary OR already started) → progress + next
+ // open items. A member promoted mid-checklist keeps it until done; one never onboarded never sees it.
+-function OnboardingCard({ S, me, go, dept }) {
++function OnboardingCardPath({ S, me, go, dept }) {
+   const noir = React.useContext(NoirCtx);   // Noir dashboards: CardHead header
+   const moduleOn = moduleEnabled("onboarding", dept?.disabled_modules);
+   // The SAME computed status as "Your path to active" (my_probation_status) — gate, auto items and legacy ticks
+@@ -20986,7 +20986,7 @@ function OnboardingCard({ S, me, go, dept }) {
+ }
+ // The member's own path to active, read-only (my_probation_status). Officers sign on the Onboarding screen; the only
+ // thing a member does here is follow the link to sign their required reading in Read & Sign.
+-function MyOnboarding({ S, me, members, go }) {
++function MyOnboardingPath({ S, me, members, go }) {
+   const { st, err, reload } = useProbationStatus(null, !!me?.id);
+   const cfg = useProbItemConfig(!!me?.id);
+   const items = Array.isArray(st?.items) ? st.items : null;
+@@ -21009,7 +21009,119 @@ function MyOnboarding({ S, me, members, go }) {
+     </PageShell>
+   );
+ }
+-function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
++/* PER-DEPARTMENT PROBATION SWITCH (departments.probation_enabled — a Department Admin's own on/off). OFF = the
++   station's plain onboarding checklist exactly as it was before probation (every item an officer sign-off); ON = the
++   path to active. Turning it off deletes nothing — the data comes back when it's turned on again. */
++const probationOn = (dept) => !!dept?.probation_enabled;
++function OnboardingCard(props) { return probationOn(props.dept) ? <OnboardingCardPath {...props} /> : <OnboardingCardPlain {...props} />; }
++function MyOnboarding(props) { return probationOn(props.dept) ? <MyOnboardingPath {...props} /> : <MyOnboardingPlain {...props} />; }
++// ---- the plain (probation off) member checklist — the pre-probation components, unchanged ----
++// The signed-in member's own checklist + progress. RLS: dept members read onboarding_items; a member reads
++// only their OWN onboarding_progress rows. A failed read sets err and keeps the last-known data.
++function useMyOnboarding(meId) {
++  const [items, setItems] = useState(null);   // null = loading
++  const [prog, setProg] = useState({});
++  const [err, setErr] = useState(false);
++  const load = () => {
++    if (!meId) return;
++    Promise.all([
++      supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true }),
++      supabase.from("onboarding_progress").select("item_id, done, checked_by, checked_at").eq("member_id", meId),
++    ]).then(([iRes, pRes]) => {
++      if (iRes.error || !iRes.data || pRes.error || !pRes.data) { setErr(true); return; }
++      setErr(false); setItems(iRes.data); setProg(Object.fromEntries(pRes.data.map((r) => [r.item_id, r])));
++    });
++  };
++  useEffect(() => { load(); }, [meId]);   // eslint-disable-line react-hooks/exhaustive-deps
++  useReconnect(() => { if (err) load(); });
++  return { items, prog, err, reload: load };
++}
++function OnboardingCardPlain({ S, me, go, dept }) {
++  const noir = React.useContext(NoirCtx);   // Noir dashboards: CardHead header
++  const moduleOn = moduleEnabled("onboarding", dept?.disabled_modules);
++  const { items, prog, err, reload } = useMyOnboarding(moduleOn ? me?.id : null);
++  if (!moduleOn) return null;
++  // Retry card only for Probationary: for anyone else a failed read can't say whether they've started,
++  // and a long-time member shouldn't get an onboarding error on every flaky resume.
++  if (err && !items) return me?.status !== "Probationary" ? null : (
++    <Card padding={16} style={{ marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>
++      Couldn't load your onboarding checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button>
++    </Card>
++  );
++  if (!items || items.length === 0) return null;
++  const open = items.filter((it) => !onboardingDone(it, me, prog));
++  if (open.length === 0) return null;
++  const done = items.length - open.length;
++  if (me?.status !== "Probationary" && done === 0) return null;
++  const pct = Math.round((done / items.length) * 100);
++  return (
++    <Card as="button" onClick={() => go("onboarding")} padding={16} style={{ marginBottom: 14, width: "100%", textAlign: "left", cursor: "pointer", display: "block" }}>
++      {noir ? <CardHead icon={UserPlus} title="Your onboarding" /> : <SectionLabel style={{ marginBottom: 8 }}><UserPlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR ONBOARDING</SectionLabel>}
++      <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>{done} of {items.length} complete</span><span>{pct}%</span></div>
++      <ProgressBar pct={pct} tone={pct >= 50 ? "amber" : "red"} />
++      <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: FIRE.textMuted, letterSpacing: ".06em" }}>NEXT UP</div>
++      {open.slice(0, 3).map((it) => <div key={it.id} style={{ fontSize: 13.5, color: FIRE.textPrimary, padding: "3px 0" }}>· {it.label}</div>)}
++      <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 4 }}>See your full checklist <ChevronRight size={14} color={FIRE.btnIcon} /></div>
++    </Card>
++  );
++}
++// The member's own checklist, read-only. Officers sign items on the Onboarding screen; nothing here writes.
++function MyOnboardingPlain({ S, me, members }) {
++  const { items, prog, err, reload } = useMyOnboarding(me?.id);
++  const mentorName = me?.mentorId ? (members || []).find((m) => m.id === me.mentorId)?.name : null;
++  const done = (items || []).filter((it) => onboardingDone(it, me, prog)).length;
++  const total = (items || []).length;
++  const pct = total ? Math.round((done / total) * 100) : 0;
++  return (
++    <PageShell band watermark="INTAKE" kicker="YOUR ONBOARDING" title="Getting started" sub="Your new-member checklist. An officer signs each item off as you complete it.">
++      <NoirSkin>
++      {err && !items ? (
++        <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Couldn't load your checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
++      ) : items === null ? (
++        <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading checklist…</Card>
++      ) : total === 0 ? (
++        <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Your department hasn't set up an onboarding checklist yet.</Card>
++      ) : (<>
++        <Card padding="16px 18px" style={{ marginBottom: 14 }}>
++          {/* Featured progress (the onboarding mock's head card): big Oswald %, the count, then the bar. */}
++          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
++            <div>
++              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 6 }}>Your progress</div>
++              <div style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{done} of {total} signed off</div>
++            </div>
++            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{pct}%</div>
++          </div>
++          <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
++          {err && <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={reload}>Retry</button></div>}
++        </Card>
++        {groupOnboarding(items).map((g) => {
++          const gDone = g.items.filter((it) => onboardingDone(it, me, prog)).length;
++          return (
++          <Card key={g.category} padding="14px 16px" style={{ marginBottom: 12 }}>
++            <CardHead icon={ClipboardCheck} title={g.category} right={<span style={{ color: gDone === g.items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{gDone}/{g.items.length}</span>} />
++            {g.items.map((it, i) => {
++              const ok = onboardingDone(it, me, prog);
++              const sub = it.is_mentor ? (mentorName ? `Mentor: ${mentorName}` : null) : onboardingSignedLine(prog[it.id], members);
++              return (
++                <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
++                  {/* Signed off = an earned green check; open = the neutral ring (the shared CheckMark). */}
++                  <CheckMark state={ok ? "pass" : "todo"} size={20} />
++                  <div style={{ flex: 1, minWidth: 0 }}>
++                    <div style={{ color: ok ? FIRE.textSecondary : FIRE.textPrimary, fontSize: 13.5 }}>{it.label}</div>
++                    <div style={{ fontSize: 11.5, color: ok ? FIRE.textMuted : FIRE.amberText, marginTop: 1 }}>{ok ? sub : "Open"}</div>
++                  </div>
++                </div>
++              );
++            })}
++          </Card>
++          );
++        })}
++      </>)}
++      </NoirSkin>
++    </PageShell>
++  );
++}
++function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId, go }) {
+   // PROGRESS, NOT PASS/FAIL (Ashlea's call): in-progress onboarding fills in a neutral tone — never red for a
+   // new member, never green before it's earned. Green only at 100%. The 90/70 attendance rule does NOT apply here.
+   const progTone = (p) => (p != null && p >= 100 ? FIRE.greenText : FIRE.textSecondary);
+@@ -21018,6 +21130,18 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+   const canEditItems = hasAny(role, DEPT_ADMIN_ROLES);   // add/rename/reorder/delete items + assign mentor: PA/DA — same set as is_dept_admin() (RLS enforces server-side)
+   const canSign = canManage(role);                       // check/sign items: Board/DA/Officer — set_onboarding_item is gated is_canmanage() (no PA)
+   const canLogTime = hasAny(role, CANMANAGE_OPS_ROLES);  // supervised time log / void: DA/Officer — is_canmanage_ops()
++  const probOn = probationOn(dept);                      // the department's probation program (its DA's switch)
++  const isRealDA = hasAny(role, ["Department Admin"]);   // set_probation_enabled's gate: a Department Admin, not a Project Admin
++  const [togBusy, setTogBusy] = useState(false);
++  async function setProbation(next) {
++    if (!next && !(await noirConfirm({ title: "Turn off the probation program?", body: "Members go back to the plain onboarding checklist. Nothing is deleted — turning it back on restores everything.", confirmLabel: "Turn off" }))) return;
++    setTogBusy(true);
++    const { data, error } = await supabase.rpc("set_probation_enabled", { p_enabled: next });
++    setTogBusy(false);
++    if (error) { notify({ kind: "error", title: "Couldn't change the probation program", text: error.message || "Please try again." }); return; }
++    setDept?.((d) => ({ ...(d || {}), probation_enabled: !!data }));
++    notify({ kind: "success", text: data ? "Probation program on." : "Probation program off — members see the plain onboarding checklist." });
++  }
+   const assignable = assignableMembers(members);
+   const candidates = assignable.length ? assignable : [{ id: 0, name: "New member", role: "Firefighter" }];
+   const probI = candidates.findIndex((m) => m.status === "Probationary");
+@@ -21036,13 +21160,14 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+   // The featured member's COMPUTED path (member_probation_status) — resolves the auto kinds (ack / hours / cert) and
+   // drives the gate banner, the reviews and the supervised-time log below the checklist.
+   const pathFor = person?.id && person.id !== 0 ? person.id : null;
+-  const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor);
++  const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor && probOn);
+   const pstById = Object.fromEntries((pst?.items || []).map((it) => [it.item_id, it]));
+   const [boardTick, setBoardTick] = useState(0);
+   const [boardRows, setBoardRows] = useState(null);
+   const refreshPath = () => { reloadPst(); setBoardTick((t) => t + 1); };
+   // manual items: the progress row (as before); auto kinds: the server's computed answer
+-  const doneOf = (it) => (it.kind && it.kind !== "manual" ? !!pstById[it.id]?.satisfied : onboardingDone(it, person, checks));
++  // (probation off: every item is a plain officer sign-off again, whatever its saved kind)
++  const doneOf = (it) => (probOn && it.kind && it.kind !== "manual" ? !!pstById[it.id]?.satisfied : onboardingDone(it, person, checks));
+   // group DB items by category (categories in first-appearance order; items already ordered by sort_order)
+   const grouped = groupOnboarding(items);
+   const doneCount = (items || []).filter(doneOf).length;   // mentor item = real mentor_id
+@@ -21099,19 +21224,19 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+   // one member's completion: the featured member from live `checks`, everyone else from the overview read
+   const progressOf = (m) => {
+     if (!items || !items.length) return null;
+-    const bd = String(m.id) === String(selId) ? null : (boardRows || []).find((r) => r.member_id === m.id)?.detail;
++    const bd = !probOn || String(m.id) === String(selId) ? null : (boardRows || []).find((r) => r.member_id === m.id)?.detail;
+     if (bd && Array.isArray(bd.items) && bd.items.length) {   // the server's computed status — auto kinds + legacy ticks included
+       const byId = Object.fromEntries(items.map((it) => [it.id, it]));
+       const openD = bd.items.filter((x) => !x.satisfied).map((x) => byId[x.item_id] || { id: x.item_id, label: x.label, is_mentor: false });
+       const doneD = bd.items.length - openD.length;
+-      return { pct: Math.round((doneD / bd.items.length) * 100), doneN: doneD, open: openD, openSignable: openD.filter((it) => !it.is_mentor && (!it.kind || it.kind === "manual")).length };
++      return { pct: Math.round((doneD / bd.items.length) * 100), doneN: doneD, open: openD, openSignable: openD.filter((it) => !it.is_mentor && (!it.kind || it.kind === "manual")).length };   // board rows exist only when on
+     }
+     const doneIds = String(m.id) === String(selId) ? null : (allProg ? (allProg.get(m.id) || new Set()) : undefined);
+     if (doneIds === undefined) return null;
+     const isDone = (it) => (doneIds ? (it.is_mentor ? !!m.mentorId : doneIds.has(it.id)) : doneOf(it));
+     const doneN = items.filter(isDone).length;
+     const open = items.filter((it) => !isDone(it));
+-    return { pct: Math.round((doneN / items.length) * 100), doneN, open, openSignable: open.filter((it) => !it.is_mentor && (!it.kind || it.kind === "manual")).length };
++    return { pct: Math.round((doneN / items.length) * 100), doneN, open, openSignable: open.filter((it) => !it.is_mentor && (!probOn || !it.kind || it.kind === "manual")).length };
+   };
+   const overview = probMembers.map((m) => ({ m, p: progressOf(m) }));
+   const known = overview.filter((o) => o.p);
+@@ -21139,11 +21264,12 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+   // onboarding_items through its existing DA policy — the same write path as rename / reorder.
+   const [rsDocs, setRsDocs] = useState([]);
+   useEffect(() => {
+-    if (!editMode) return;
++    if (!editMode || !probOn) return;
+     supabase.from("document_series").select("series_id, title, current_version").eq("requires_ack", true).gt("current_version", 0).order("title")
+       .then(({ data, error }) => { if (!error && Array.isArray(data)) setRsDocs(data); });
+-  }, [editMode]);
++  }, [editMode, probOn]);
+   async function setItemConfig(it, patch) {
++    if (!probOn) return;
+     if (patch.hours_target != null && !(Number(patch.hours_target) > 0 && Number(patch.hours_target) <= 10000)) { notify({ kind: "error", title: "Check the target", text: "The target must be more than 0." }); return; }
+     setBusy(true);
+     const { error } = await supabase.from("onboarding_items").update(patch).eq("id", it.id);
+@@ -21256,8 +21382,17 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+           {canEditItems && <button style={FS.btn} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
+         </div>}>
+       <NoirSkin>
++      {isRealDA && (
++        <Card padding="12px 16px" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
++          <div style={{ flex: "1 1 260px", minWidth: 0 }}>
++            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>Probation program <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", marginLeft: 6, color: probOn ? FIRE.greenText : FIRE.textMuted }}>{probOn ? "ON" : "OFF"}</span></div>
++            <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.45 }}>Tracks a new member's path to active: the cleared-to-run gate, 30/60/90/final reviews and supervised time.{probOn ? "" : " Off: members see the plain onboarding checklist."}</div>
++          </div>
++          <button style={probOn ? FS.btn : FS.btnPrimary} disabled={togBusy} onClick={() => setProbation(!probOn)}>{togBusy ? "Saving…" : probOn ? "Turn off" : "Turn on"}</button>
++        </Card>
++      )}
+       {/* PROBATION BOARD — ready for the vote + every probationary member's gate (dept_probation_board) */}
+-      {!editMode && <ProbationBoard onPick={(id) => setSelId(id)} refreshKey={boardTick} onRows={setBoardRows} />}
++      {!editMode && probOn && canSign && <ProbationBoard onPick={(id) => setSelId(id)} refreshKey={boardTick} onRows={setBoardRows} />}
+       {/* OVERVIEW is rendered here, above the featured member */}
+       {/* OVERVIEW — tiles + a progress ring per probationary member (click to feature them) */}
+       {!editMode && probMembers.length > 0 && items && items.length > 0 && (<>
+@@ -21334,12 +21469,12 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+                       <button style={FS.btnPrimary} onClick={saveEdit} disabled={busy}>Save</button>
+                       <button style={FS.btn} onClick={() => setEditId(null)}>Cancel</button>
+                     </>) : (<>
+-                      <span style={{ flex: 1, minWidth: 0, color: FIRE.textPrimary, fontSize: 14 }}>{it.label}{it.is_mentor && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55`, borderRadius: 4, padding: "1px 5px" }}>MENTOR</span>}<ProbItemTags it={it} /></span>
++                      <span style={{ flex: 1, minWidth: 0, color: FIRE.textPrimary, fontSize: 14 }}>{it.label}{it.is_mentor && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55`, borderRadius: 4, padding: "1px 5px" }}>MENTOR</span>}{probOn && <ProbItemTags it={it} />}</span>
+                       <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => startEdit(it)}>Edit</button>
+                       {it.is_mentor
+                         ? <button style={{ ...FS.btn, padding: "5px 9px", opacity: 0.45, cursor: "not-allowed" }} disabled title="Required — reflects the assigned mentor">Remove</button>
+                         : canDeleteShared ? <button style={{ ...FS.btn, padding: "5px 9px", color: FIRE.deleteRed }} onClick={() => removeItem(it)} disabled={busy}>Remove</button> : null}
+-                      {!editing && <ProbItemConfig it={it} docs={rsDocs} busy={busy} onSave={(patch) => setItemConfig(it, patch)} />}
++                      {probOn && !editing && <ProbItemConfig it={it} docs={rsDocs} busy={busy} onSave={(patch) => setItemConfig(it, patch)} />}
+                     </>)}
+                   </div>
+                 );
+@@ -21382,7 +21517,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+                 <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".09em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{g.category}<span style={{ fontSize: 10, color: FIRE.textSecondary, fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>{gDone} of {g.items.length}</span></div>
+                 {g.items.map((it, i) => {
+                   const mentor = !!it.is_mentor;
+-                  const auto = !!it.kind && it.kind !== "manual";   // ack / hours / cert: computed, never ticked
++                  const auto = probOn && !!it.kind && it.kind !== "manual";   // ack / hours / cert: computed, never ticked (on only)
+                   const done = doneOf(it);
+                   const signable = !mentor && !auto && canSign && !progErr && !isSelf;
+                   const signed = mentor ? null : auto ? (pstById[it.id] ? probItemView(pstById[it.id], it, false).text : "Checking…") : onboardingSignedLine(checks[it.id], members);
+@@ -21393,7 +21528,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+                         {done && <Check size={12} strokeWidth={3} color={FIRE.greenText} />}
+                       </button>
+                       <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+-                        <div style={{ fontSize: 13, fontWeight: 600, color: done ? FIRE.textPrimary : FIRE.textSecondary }}>{it.label}{mentor && <span style={{ fontSize: 10, fontWeight: 700, color: FIRE.amberText, background: "rgba(204,158,82,.12)", border: "1px solid rgba(204,158,82,.3)", borderRadius: 5, padding: "2px 7px", marginLeft: 8, letterSpacing: ".03em" }}>MENTOR</span>}<ProbItemTags it={it} /></div>
++                        <div style={{ fontSize: 13, fontWeight: 600, color: done ? FIRE.textPrimary : FIRE.textSecondary }}>{it.label}{mentor && <span style={{ fontSize: 10, fontWeight: 700, color: FIRE.amberText, background: "rgba(204,158,82,.12)", border: "1px solid rgba(204,158,82,.3)", borderRadius: 5, padding: "2px 7px", marginLeft: 8, letterSpacing: ".03em" }}>MENTOR</span>}{probOn && <ProbItemTags it={it} />}</div>
+                         {mentor ? (
+                           canEditItems ? (
+                             <select style={{ ...FS.input, maxWidth: 240, padding: "5px 9px", marginTop: 4 }} value={person?.mentorId || ""} onChange={(e) => assignMentor(e.target.value)}>
+@@ -21415,7 +21550,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+       )}
+       {/* PATH TO ACTIVE for the featured probationary member: the gate, the reviews (Board/DA/Officer sign) and the
+           supervised-time log (DA/Officer log + void). Never on your own record. */}
+-      {!editMode && pst && person?.status === "Probationary" && (
++      {!editMode && probOn && pst && person?.status === "Probationary" && (
+         <div style={{ marginTop: 14 }}>
+           <ProbGateBanner st={pst} self={false} go={go} />
+           <ProbMilestones st={pst} signer={canSign && !isSelf ? { canSign: true, onSave: signMilestone } : null} />

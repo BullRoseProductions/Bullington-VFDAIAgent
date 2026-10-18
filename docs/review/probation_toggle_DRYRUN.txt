@@ -1,0 +1,39 @@
+migration state: [{"col":true,"fn":true,"anon_exec":false,"guard":true,"probation_on":"Indian Harbor Volunteer Fire Department = 00000000-0000-0000-0000-00000000000c · Lipan = 00000000-0000-0000-0000-00000000000b · North Hood = 00000000-0000-0000-0000-00000000000a","probation_off":"B4C Demo Department · Granbury Fire Station","t
+re-run -> Precondition failed: departments.probation_enabled already exists — already applied. Nothing changed.
+PASS  T0 backfill = exactly IH / Lipan / North Hood on, all others off; anon denied; no verification column
+— B4C Demo Department (off)
+   SKIP  all — needs a DA (not a PA) and a plain member with unique emails (DA none, member none)
+— Granbury Fire Station (off)
+   SKIP  all — needs a DA (not a PA) and a plain member with unique emails (DA da@g, member none)
+— Indian Harbor Volunteer Fire Department (on)
+   PASS  Q1 a member can't flip it
+   PASS  Q2 the DA turns it on and off; no other department changed
+   PASS  Q3 board lists the probationary member when on, nothing when off; the member's own status still loads
+   PASS  Q4 direct UPDATE of probation_enabled refused ("Only a Department Admin can turn the probation program on or off."); the DA's other settings still save
+   SKIP  Q5 — no pure Project Admin with a unique email
+   PASS  Q6 another department's DA switched only their own department
+— Lipan (on)
+   PASS  Q1 a member can't flip it
+   PASS  Q2 the DA turns it on and off; no other department changed
+   PASS  Q3 board lists the probationary member when on, nothing when off; the member's own status still loads
+   PASS  Q4 direct UPDATE of probation_enabled refused ("Only a Department Admin can turn the probation program on or off."); the DA's other settings still save
+   SKIP  Q5 — no pure Project Admin with a unique email
+   PASS  Q6 another department's DA switched only their own department
+— North Hood (on)
+   PASS  Q1 a member can't flip it
+   PASS  Q2 the DA turns it on and off; no other department changed
+   PASS  Q3 board lists the probationary member when on, nothing when off; the member's own status still loads
+   PASS  Q4 direct UPDATE of probation_enabled refused ("Only a Department Admin can turn the probation program on or off."); the DA's other settings still save
+   PASS  Q5 a Project Admin can't flip it
+   PASS  Q6 another department's DA switched only their own department
+---- 17 passed, 0 failed, 4 skipped ----
+(this exception IS the rollback — nothing was changed)
+probation RETEST still: ---- 56 passed, 0 failed, 7 skipped ----
+MA gate back to is_dept_admin() -> migration Post-condition failed: set_probation_enabled must not gate on is_dept_admin().
+MB gate lets a Project Admin in ->    FAIL  Q5 PA -> "OK" | ---- 16 passed, 1 failed, 4 skipped ----
+MC RPC writes every department ->    FAIL  run aborted: query returned more than one row |    FAIL  run aborted: query returned more than one row |    FAIL  run aborted: query returned more than one row | ---- 4 passed, 3 failed, 2 skipped ----
+MD guard trigger never fires ->    FAIL  Q4 direct flag "OK 1" (now t); other column "OK" rows 1 |    FAIL  Q4 direct flag "OK 1" (now t); other column "OK" rows 1 |    FAIL  Q4 direct flag "OK 1" (now t); other column "OK" rows 1 | ---- 14 passed, 3 failed, 4 skipped ----
+ME board ignores the flag ->    FAIL  Q3 on-listed 1 off-rows 2 own-status t |    FAIL  Q3 on-listed 1 off-rows 1 own-status t |    FAIL  Q3 on-listed 1 off-rows 1 own-status t | ---- 14 passed, 3 failed, 4 skipped ----
+MF backfill hits Granbury instead of Lipan -> FAIL  T0 the-three-on 2, total-on 3, no-verified t, anon "permission denied for function set_probation_enabled" | ---- 16 passed, 1 failed, 4 skipped ----
+MG trigger left out -> migration Post-condition failed: the probation_enabled guard trigger is missing or disabled.
+MH anon left executable -> migration Post-condition failed: set_probation_enabled grants are wrong (anon must not, authenticated must).

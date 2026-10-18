@@ -1,0 +1,356 @@
+diff --git a/sql/probation_toggle_DRAFT.sql b/sql/probation_toggle_DRAFT.sql
+new file mode 100644
+index 0000000..a282b66
+--- /dev/null
++++ b/sql/probation_toggle_DRAFT.sql
+@@ -0,0 +1,205 @@
++-- =====================================================================
++-- PHASE 3.1 #2 — PER-DEPARTMENT PROBATION TOGGLE (DB layer).
++-- DRAFT — UNREVIEWED. Not applied. Test: sql/probation_toggle_RETEST.sql (run AFTER, separately).
++-- Builds on sql/probation_2026-10-18.sql (applied, RETEST 56/0/7). Does not change the status RPCs.
++--
++-- WHAT CHANGES:
++--   1. departments + probation_enabled boolean NOT NULL DEFAULT false. New departments start OFF.
++--   2. Backfill ON for Indian Harbor, Lipan, North Hood ONLY — matched by name, each must match exactly one row
++--      (Demo and Granbury stay OFF). The state check prints the three ids for the record.
++--   3. set_probation_enabled(p_enabled) — SECURITY DEFINER; a REAL Department Admin of the caller's own department
++--      (their member row there holds 'Department Admin', Active / Probationary — NOT is_dept_admin, so a pure Project
++--      Admin can't); writes only departments.id = my_department_id(). Returns the new value.
++--   4. GUARD TRIGGER (ADDITION to the brief, needed for item 3 to mean anything): departments ALREADY takes direct
++--      client UPDATEs (Settings name/station/city, Brand Kit, week start — RLS-gated, not column-limited), and a
++--      single column can't be revoked out of a table-wide UPDATE grant. So departments_probation_enabled_guard refuses
++--      any change to probation_enabled made by a client session (current_user anon / authenticated). The definer RPC
++--      (runs as the owner) and the SQL editor pass. Every other column's direct-update path is untouched.
++--   5. dept_probation_board() returns NO rows when the caller's department has probation off — one guard after the
++--      leadership check; the rest of the body is the applied text, unchanged. my_ / member_probation_status are NOT
++--      touched (they still back the plain onboarding checklist the UI shows when probation is off).
++-- Turning it off deletes nothing: starts, reviews and supervised time stay; the UI hides them; on again = back.
++-- UNCHANGED (post-conditions prove it): every policy, the status RPCs, the write RPCs, the onboarding_progress
++-- transition-state grant. Never touches the locked verification column.
++-- ONE STATEMENT. A single DO block — all-or-nothing. Re-running after success is refused by the guard.
++-- =====================================================================
++DO $migrate$
++DECLARE
++  v_pol_before text; v_pol_after text; v_n int; v_t text; v_ids uuid[];
++  v_status_before text; v_mstatus_before text;
++  pol_sql constant text := $q$
++    SELECT coalesce(string_agg(format('%s|%s|%s|%s|%s|%s', tablename, policyname, cmd, roles::text, qual, with_check), E'\n' ORDER BY tablename, policyname, cmd), '')
++      FROM pg_policies WHERE schemaname = 'public'$q$;
++BEGIN
++  -- ---------------------------------------------------------------- preconditions
++  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'departments' AND column_name = 'probation_enabled') THEN
++    RAISE EXCEPTION 'Precondition failed: departments.probation_enabled already exists — already applied. Nothing changed.';
++  END IF;
++  IF to_regprocedure('public.dept_probation_board()') IS NULL
++     OR position('B4C:probation' in pg_get_functiondef('public.dept_probation_board()'::regprocedure)) = 0 THEN
++    RAISE EXCEPTION 'Precondition failed: the probation layer (dept_probation_board) is not applied.';
++  END IF;
++  IF to_regprocedure('public.set_probation_enabled(boolean)') IS NOT NULL THEN
++    RAISE EXCEPTION 'Precondition failed: set_probation_enabled already exists.';
++  END IF;
++  FOREACH v_t IN ARRAY array['Indian Harbor%', 'Lipan%', 'North Hood%'] LOOP
++    SELECT count(*) INTO v_n FROM public.departments WHERE name ILIKE v_t;
++    IF v_n <> 1 THEN RAISE EXCEPTION 'Precondition failed: expected exactly one department matching "%", found %.', v_t, v_n; END IF;
++  END LOOP;
++  IF EXISTS (SELECT 1 FROM public.departments WHERE (name ILIKE '%demo%' OR name ILIKE 'Granbury%')
++               AND (name ILIKE 'Indian Harbor%' OR name ILIKE 'Lipan%' OR name ILIKE 'North Hood%')) THEN
++    RAISE EXCEPTION 'Precondition failed: a backfill name pattern also matches Demo / Granbury.';
++  END IF;
++  EXECUTE pol_sql INTO v_pol_before;
++  v_status_before := pg_get_functiondef('public.probation_status(uuid,uuid)'::regprocedure);
++  v_mstatus_before := pg_get_functiondef('public.member_probation_status(uuid)'::regprocedure);
++
++  -- ---------------------------------------------------------------- 1-2. the column + backfill
++  ALTER TABLE public.departments ADD COLUMN probation_enabled boolean NOT NULL DEFAULT false;
++  COMMENT ON COLUMN public.departments.probation_enabled IS
++    'B4C:probation — the department''s probation program on/off. Written only by set_probation_enabled (a real Department Admin); client UPDATEs of this column are refused by trigger.';
++  UPDATE public.departments SET probation_enabled = true
++   WHERE name ILIKE 'Indian Harbor%' OR name ILIKE 'Lipan%' OR name ILIKE 'North Hood%';
++  GET DIAGNOSTICS v_n = ROW_COUNT;
++  IF v_n <> 3 THEN RAISE EXCEPTION 'Backfill failed: expected 3 departments switched on, got %. Rolling back.', v_n; END IF;
++
++  -- ---------------------------------------------------------------- 4. the guard trigger
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.tg_departments_probation_enabled_guard()
++ RETURNS trigger
++ LANGUAGE plpgsql
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — probation_enabled changes only through set_probation_enabled (or the SQL editor), never a direct
++-- client UPDATE (departments takes direct UPDATEs for its other settings).
++begin
++  if new.probation_enabled is distinct from old.probation_enabled and current_user in ('anon', 'authenticated') then
++    raise exception 'Only a Department Admin can turn the probation program on or off.';
++  end if;
++  return new;
++end;
++$function$
++$ddl$;
++  CREATE TRIGGER departments_probation_enabled_guard BEFORE UPDATE OF probation_enabled ON public.departments
++    FOR EACH ROW EXECUTE FUNCTION public.tg_departments_probation_enabled_guard();
++  REVOKE EXECUTE ON FUNCTION public.tg_departments_probation_enabled_guard() FROM anon, authenticated, public;
++
++  -- ---------------------------------------------------------------- 3. the write RPC
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.set_probation_enabled(p_enabled boolean)
++ RETURNS boolean
++ LANGUAGE plpgsql
++ SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — a Department Admin of the department turns its probation program on or off. A REAL DA only: the
++-- caller's member row in THIS department holds 'Department Admin' and is Active / Probationary — never the
++-- Project-Admin support path. Writes only the caller's own department. Deletes nothing. Never touches the locked
++-- verification column.
++declare v_dept uuid := public.my_department_id(); v_on boolean;
++begin
++  if p_enabled is null then raise exception 'Say on or off.'; end if;
++  if v_dept is null or not exists (
++       select 1 from public.members x
++        where lower(x.email) = lower(auth.email()) and x.department_id = v_dept
++          and x.access && array['Department Admin']::text[] and x.status in ('Active', 'Probationary')) then
++    raise exception 'Only a Department Admin can turn the probation program on or off.';
++  end if;
++  update public.departments set probation_enabled = p_enabled where id = v_dept returning probation_enabled into v_on;
++  if not found then raise exception 'We could not find your department.'; end if;
++  return v_on;
++end;
++$function$
++$ddl$;
++  REVOKE EXECUTE ON FUNCTION public.set_probation_enabled(boolean) FROM anon, public;
++  GRANT  EXECUTE ON FUNCTION public.set_probation_enabled(boolean) TO authenticated;
++
++  -- ---------------------------------------------------------------- 5. the board: empty when off
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.dept_probation_board()
++ RETURNS TABLE(member_id uuid, name text, started_on date, day_n integer, gate_configured boolean, cleared_to_run boolean,
++               ready_for_vote boolean, detail jsonb)
++ LANGUAGE plpgsql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — Board / DA / Officer: every probationary member of the department (honest denominator: not
++-- Inactive, not former, not a Project Admin) with their gate + ready-for-vote state. Read-only; no push, no job.
++#variable_conflict use_column
++declare v_dept uuid := public.my_department_id();
++begin
++  if v_dept is null or not coalesce(public.is_canmanage(), false) then
++    raise exception 'Only department leadership can see the probation board.';
++  end if;
++  -- the department's probation program is off -> no board (nothing is deleted; on again = back)
++  if not coalesce((select d.probation_enabled from public.departments d where d.id = v_dept), false) then
++    return;
++  end if;
++  return query
++  select x.id, x.name, (d->>'started_on')::date, (d->>'day_n')::int, (d->'gate'->>'configured')::boolean,
++         (d->>'cleared_to_run')::boolean, (d->>'ready_for_vote')::boolean, d
++    from (select m.id, m.name, public.probation_status(m.id, v_dept) as d
++            from public.members m
++           where m.department_id = v_dept and m.status = 'Probationary'
++             and not coalesce(m.access && array['Project Admin']::text[], false)
++             and not exists (select 1 from public.member_separation s where s.member_id = m.id)) x
++   order by 7 desc, 2;
++end;
++$function$
++$ddl$;
++
++  -- ---------------------------------------------------------------- post-conditions (any failure undoes everything)
++  IF has_function_privilege('anon', 'public.set_probation_enabled(boolean)', 'EXECUTE')
++     OR NOT has_function_privilege('authenticated', 'public.set_probation_enabled(boolean)', 'EXECUTE') THEN
++    RAISE EXCEPTION 'Post-condition failed: set_probation_enabled grants are wrong (anon must not, authenticated must).';
++  END IF;
++  IF has_function_privilege('anon', 'public.dept_probation_board()', 'EXECUTE')
++     OR NOT has_function_privilege('authenticated', 'public.dept_probation_board()', 'EXECUTE') THEN
++    RAISE EXCEPTION 'Post-condition failed: dept_probation_board grants changed (CREATE OR REPLACE must keep them).';
++  END IF;
++  IF position('is_dept_admin' in pg_get_functiondef('public.set_probation_enabled(boolean)'::regprocedure)) > 0 THEN
++    RAISE EXCEPTION 'Post-condition failed: set_probation_enabled must not gate on is_dept_admin().';
++  END IF;
++  IF position('''Department Admin''' in pg_get_functiondef('public.set_probation_enabled(boolean)'::regprocedure)) = 0
++     OR position('x.department_id = v_dept' in pg_get_functiondef('public.set_probation_enabled(boolean)'::regprocedure)) = 0
++     OR position('where id = v_dept' in pg_get_functiondef('public.set_probation_enabled(boolean)'::regprocedure)) = 0 THEN
++    RAISE EXCEPTION 'Post-condition failed: set_probation_enabled lost its Department-Admin gate or its own-department scope.';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'departments_probation_enabled_guard' AND tgrelid = 'public.departments'::regclass AND tgenabled = 'O') THEN
++    RAISE EXCEPTION 'Post-condition failed: the probation_enabled guard trigger is missing or disabled.';
++  END IF;
++  IF position('probation_enabled' in pg_get_functiondef('public.dept_probation_board()'::regprocedure)) = 0
++     OR position('is_canmanage()' in pg_get_functiondef('public.dept_probation_board()'::regprocedure)) = 0
++     OR position('member_separation' in pg_get_functiondef('public.dept_probation_board()'::regprocedure)) = 0 THEN
++    RAISE EXCEPTION 'Post-condition failed: dept_probation_board lost its gate, its denominator, or the off guard.';
++  END IF;
++  IF pg_get_functiondef('public.probation_status(uuid,uuid)'::regprocedure) IS DISTINCT FROM v_status_before
++     OR pg_get_functiondef('public.member_probation_status(uuid)'::regprocedure) IS DISTINCT FROM v_mstatus_before THEN
++    RAISE EXCEPTION 'Post-condition failed: a status RPC changed.';
++  END IF;
++  IF NOT has_table_privilege('authenticated', 'public.onboarding_progress', 'INSERT') THEN
++    RAISE EXCEPTION 'Post-condition failed: the onboarding_progress transition-state grant was removed.';
++  END IF;
++  SELECT array_agg(id ORDER BY name) INTO v_ids FROM public.departments WHERE probation_enabled;
++  IF coalesce(array_length(v_ids, 1), 0) <> 3 THEN RAISE EXCEPTION 'Post-condition failed: % departments on, expected 3.', coalesce(array_length(v_ids, 1), 0); END IF;
++  EXECUTE pol_sql INTO v_pol_after;
++  IF v_pol_after IS DISTINCT FROM v_pol_before THEN RAISE EXCEPTION 'Post-condition failed: a policy changed.'; END IF;
++END
++$migrate$;
++
++NOTIFY pgrst, 'reload schema';
++
++-- state check (read-only) — expect: col true · fn true · anon_exec false · guard true · on = the three departments
++-- (Indian Harbor, Lipan, North Hood) with their ids · off includes Demo + Granbury · total_policies 163 (unchanged)
++SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'departments' AND column_name = 'probation_enabled') AS col,
++       to_regprocedure('public.set_probation_enabled(boolean)') IS NOT NULL AS fn,
++       has_function_privilege('anon', 'public.set_probation_enabled(boolean)', 'EXECUTE') AS anon_exec,
++       EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'departments_probation_enabled_guard' AND tgenabled = 'O') AS guard,
++       (SELECT string_agg(name || ' = ' || id, ' · ' ORDER BY name) FROM public.departments WHERE probation_enabled) AS probation_on,
++       (SELECT string_agg(name, ' · ' ORDER BY name) FROM public.departments WHERE NOT probation_enabled) AS probation_off,
++       (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') AS total_policies;
++
++-- ROLLBACK (only if needed, separately): DROP TRIGGER departments_probation_enabled_guard ON public.departments;
++-- DROP FUNCTION public.tg_departments_probation_enabled_guard(), public.set_probation_enabled(boolean);
++-- re-create dept_probation_board() from sql/probation_2026-10-18.sql (CREATE OR REPLACE keeps its grants);
++-- ALTER TABLE public.departments DROP COLUMN probation_enabled; NOTIFY pgrst, 'reload schema';
+diff --git a/sql/probation_toggle_RETEST.sql b/sql/probation_toggle_RETEST.sql
+new file mode 100644
+index 0000000..c83ad2a
+--- /dev/null
++++ b/sql/probation_toggle_RETEST.sql
+@@ -0,0 +1,139 @@
++-- =====================================================================
++-- RETEST for probation_toggle (departments.probation_enabled + set_probation_enabled + the board guard). Run AFTER
++-- the migration, separately. NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE
++-- 'SENTINEL' (rolled back). The final RAISE is the report. The "ERROR" IS the report.
++--   T0 (once) backfill = exactly Indian Harbor, Lipan, North Hood ON; every other department OFF; anon can't execute;
++--      none of the three new / changed bodies mentions the locked verification column
++-- Per department with a real DA (not a Project Admin) and a plain member, both with unique emails:
++--   Q1 a plain member can't flip it
++--   Q2 the DA flips their own department off and on; every OTHER department's value is untouched
++--   Q3 the board: ON with a probationary member -> listed; OFF -> no rows (and the member's own status still loads —
++--      the plain checklist keeps working)
++--   Q4 a direct client UPDATE of probation_enabled is refused (guard trigger); the DA's direct update of another
++--      departments column still works (the other settings' write path is untouched)
++--   Q5 a pure Project Admin of the department can't flip it (SKIP when there's none)
++--   Q6 another department's DA flips only THEIR department, never this one (SKIP when there's none)
++-- =====================================================================
++DO $retest$
++DECLARE
++  rec record; v_err text; v_e2 text; v_n int; v_m int; v_ok boolean; v_snap jsonb; v_js jsonb;
++  v_da text; v_a text; v_a_id uuid; v_pa text; v_other_da text; v_other_dept uuid; v_orig boolean;
++  rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
++BEGIN
++  -- T0
++  SELECT count(*) FILTER (WHERE probation_enabled AND (name ILIKE 'Indian Harbor%' OR name ILIKE 'Lipan%' OR name ILIKE 'North Hood%')),
++         count(*) FILTER (WHERE probation_enabled)
++    INTO v_n, v_m FROM public.departments;
++  v_ok := position(('verifie' || 'd') in lower(pg_get_functiondef('public.set_probation_enabled(boolean)'::regprocedure)
++            || pg_get_functiondef('public.tg_departments_probation_enabled_guard()'::regprocedure)
++            || pg_get_functiondef('public.dept_probation_board()'::regprocedure))) = 0;
++  BEGIN
++    PERFORM set_config('role', 'anon', true);
++    BEGIN PERFORM public.set_probation_enabled(true); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++    PERFORM set_config('role', 'postgres', true);
++  END;
++  IF v_n = 3 AND v_m = 3 AND v_ok AND v_err ILIKE '%permission denied%' THEN
++    v_pass := v_pass + 1; rpt := rpt || format('PASS  T0 backfill = exactly IH / Lipan / North Hood on, all others off; anon denied; no verification column%s', chr(10));
++  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  T0 the-three-on %s, total-on %s, no-verified %s, anon "%s"%s', v_n, v_m, v_ok, v_err, chr(10)); END IF;
++
++  FOR rec IN SELECT d.id AS dept_id, d.name AS dept, d.probation_enabled AS was_on FROM public.departments d ORDER BY d.name LOOP
++    rpt := rpt || format('— %s (%s)%s', rec.dept, CASE WHEN rec.was_on THEN 'on' ELSE 'off' END, chr(10));
++    v_da := NULL; v_a := NULL; v_a_id := NULL; v_pa := NULL; v_other_da := NULL; v_other_dept := NULL;
++    SELECT lower(m.email) INTO v_da FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Department Admin']::text[]
++       AND NOT m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.id INTO v_a, v_a_id FROM public.members m WHERE m.department_id = rec.dept_id
++       AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
++       AND m.status IS DISTINCT FROM 'Inactive' AND NOT EXISTS (SELECT 1 FROM public.member_separation s WHERE s.member_id = m.id)
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email) INTO v_pa FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Project Admin']::text[]
++       AND NOT m.access && array['Department Admin']::text[]
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.department_id INTO v_other_da, v_other_dept FROM public.members m WHERE m.department_id <> rec.dept_id
++       AND m.access && array['Department Admin']::text[] AND NOT m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    IF v_da IS NULL OR v_a IS NULL THEN
++      v_skip := v_skip + 1; rpt := rpt || format('   SKIP  all — needs a DA (not a PA) and a plain member with unique emails (DA %s, member %s)%s',
++        coalesce(v_da, 'none'), coalesce(v_a, 'none'), chr(10));
++      CONTINUE;
++    END IF;
++    BEGIN
++      SELECT jsonb_object_agg(id, probation_enabled) INTO v_snap FROM public.departments WHERE id <> rec.dept_id;
++      UPDATE public.members SET status = 'Probationary' WHERE id = v_a_id;   -- fixture: someone to put on the board
++
++      -- Q1 a member can't flip it
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      BEGIN PERFORM public.set_probation_enabled(NOT rec.was_on); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_err LIKE 'Only a Department Admin%' AND (SELECT probation_enabled FROM public.departments WHERE id = rec.dept_id) = rec.was_on THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  Q1 a member can''t flip it%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  Q1 member -> "%s"%s', v_err, chr(10)); END IF;
++
++      -- Q2 + Q3 the DA flips their own department; the board follows
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      v_ok := public.set_probation_enabled(true);
++      SELECT count(*) INTO v_n FROM public.dept_probation_board() b WHERE b.member_id = v_a_id;
++      v_err := (public.set_probation_enabled(false))::text;
++      SELECT count(*) INTO v_m FROM public.dept_probation_board();
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      IF v_ok AND v_err = 'false' AND (SELECT probation_enabled FROM public.departments WHERE id = rec.dept_id) = false
++         AND (SELECT jsonb_object_agg(id, probation_enabled) FROM public.departments WHERE id <> rec.dept_id) = v_snap THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  Q2 the DA turns it on and off; no other department changed%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  Q2 on %s off %s others unchanged %s%s', v_ok, v_err,
++             (SELECT jsonb_object_agg(id, probation_enabled) FROM public.departments WHERE id <> rec.dept_id) = v_snap, chr(10)); END IF;
++      IF v_n = 1 AND v_m = 0 AND v_js IS NOT NULL AND jsonb_typeof(v_js->'items') = 'array' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  Q3 board lists the probationary member when on, nothing when off; the member''s own status still loads%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  Q3 on-listed %s off-rows %s own-status %s%s', v_n, v_m, v_js IS NOT NULL, chr(10)); END IF;
++
++      -- Q4 the direct path: probation_enabled refused; another column still writable by the DA
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      BEGIN UPDATE public.departments SET probation_enabled = true WHERE id = rec.dept_id; GET DIAGNOSTICS v_n = ROW_COUNT; v_err := 'OK ' || v_n;
++      EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++      BEGIN UPDATE public.departments SET week_start_day = week_start_day WHERE id = rec.dept_id; GET DIAGNOSTICS v_m = ROW_COUNT; v_e2 := 'OK';
++      EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; v_m := NULL; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF (v_err LIKE 'Only a Department Admin%' OR v_err = 'OK 0') AND (SELECT probation_enabled FROM public.departments WHERE id = rec.dept_id) = false
++         AND v_e2 = 'OK' AND v_m = 1 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  Q4 direct UPDATE of probation_enabled refused ("%s"); the DA''s other settings still save%s', v_err, chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  Q4 direct flag "%s" (now %s); other column "%s" rows %s%s', v_err,
++             (SELECT probation_enabled FROM public.departments WHERE id = rec.dept_id), v_e2, v_m, chr(10)); END IF;
++
++      -- Q5 a pure Project Admin
++      IF v_pa IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  Q5 — no pure Project Admin with a unique email%s', chr(10));
++      ELSE
++        PERFORM set_config('request.jwt.claims', json_build_object('email', v_pa, 'role', 'authenticated')::text, true);
++        PERFORM set_config('role', 'authenticated', true);
++        BEGIN PERFORM public.set_probation_enabled(true); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++        PERFORM set_config('role', 'postgres', true);
++        IF v_err LIKE 'Only a Department Admin%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  Q5 a Project Admin can''t flip it%s', chr(10));
++        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  Q5 PA -> "%s"%s', v_err, chr(10)); END IF;
++      END IF;
++
++      -- Q6 another department's DA only ever touches their own department
++      IF v_other_da IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  Q6 — no other-department DA%s', chr(10));
++      ELSE
++        UPDATE public.departments SET probation_enabled = true WHERE id = rec.dept_id;   -- owner: this department on
++        PERFORM set_config('request.jwt.claims', json_build_object('email', v_other_da, 'role', 'authenticated')::text, true);
++        PERFORM set_config('role', 'authenticated', true);
++        v_orig := public.set_probation_enabled(false);
++        PERFORM set_config('role', 'postgres', true);
++        IF v_orig = false AND (SELECT probation_enabled FROM public.departments WHERE id = rec.dept_id) = true
++           AND (SELECT probation_enabled FROM public.departments WHERE id = v_other_dept) = false THEN
++          v_pass := v_pass + 1; rpt := rpt || format('   PASS  Q6 another department''s DA switched only their own department%s', chr(10));
++        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  Q6 this dept now %s, theirs %s%s', (SELECT probation_enabled FROM public.departments WHERE id = rec.dept_id),
++               (SELECT probation_enabled FROM public.departments WHERE id = v_other_dept), chr(10)); END IF;
++      END IF;
++      RAISE EXCEPTION 'SENTINEL';
++    EXCEPTION WHEN OTHERS THEN
++      IF SQLERRM <> 'SENTINEL' THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  run aborted: %s%s', SQLERRM, chr(10)); END IF;
++    END;
++  END LOOP;
++
++  RAISE EXCEPTION E'%\n---- % passed, % failed, % skipped ----\n(this exception IS the rollback — nothing was changed)', rpt, v_pass, v_fail, v_skip;
++END
++$retest$;
