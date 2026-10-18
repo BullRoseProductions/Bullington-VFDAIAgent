@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for read_sign_records (dept_signed_records). Run AFTER the migration, separately. NOTHING CHANGES: each
+-- RETEST for read_sign_records_2026-10-18.sql (dept_signed_records). Run AFTER the migration, separately. NOTHING CHANGES: each
 -- department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on a FIXTURE document it
 -- creates itself — no real SOP is configured, published or signed. The final RAISE is the report. The "ERROR" IS the report.
 -- Per department (needs a DA and two plain members with unique emails; Officer / Board / another department's DA

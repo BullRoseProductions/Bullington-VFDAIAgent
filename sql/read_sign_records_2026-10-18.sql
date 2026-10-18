@@ -1,7 +1,9 @@
 -- =====================================================================
 -- READ & SIGN — the department's SIGNED RECORDS (Board / DA / Officer): each member's signed version — signature,
 -- attestation wording, version, fingerprint, date — for the station's own audit copy.
--- Record: Claude gate review PASS 2026-10-18 (recorded BEFORE apply). Not yet applied. Test: sql/read_sign_records_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-18 (recorded BEFORE apply).
+-- APPLIED by hand 2026-10-18. State check: fn true · anon_exec false · auth_exec true · secdef true · append_only true ·
+-- total_policies 160. Test: sql/read_sign_records_RETEST.sql (run AFTER, separately).
 -- Brief: claude/B4C_Phase3.1_ReadSign_AdminSignedRecords_BuildOrder.md.
 --
 -- WHAT CHANGES (purely additive — one new read function):
