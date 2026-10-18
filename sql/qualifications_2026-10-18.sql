@@ -1,6 +1,8 @@
 -- =====================================================================
 -- PHASE 3.1 #3 — QUALIFICATION MATRIX + DRIVER/OPERATOR CHECK-OFFS + DRIVE LOG (DB layer).
--- Record: Claude gate review PASS 2026-10-18 on 0e4cf60 (no SQL changes), recorded BEFORE apply. Not yet applied.
+-- Record: Claude gate review PASS 2026-10-18 on 0e4cf60 (no SQL changes), recorded BEFORE apply.
+-- APPLIED by hand 2026-10-18. State check: tables 2 · rls true · new_policies 2 · fns 6 · anon_exec false ·
+-- internal_exec false · types 0 · signoffs 0 · total_policies 165.
 -- Decisions #1 / #2 shipped as their defaults (qualification drives also count as probation supervised time;
 -- set_qualification_type gated is_dept_admin()). Test: sql/qualifications_RETEST.sql (run AFTER, separately).
 -- Brief: Build Order #3 (2026-10-18). Step 0: sql/qualifications_STEP0_CHECK.sql (ran on live 2026-10-18).

@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for qualifications (Phase 3.1 #3). Run AFTER the migration, separately. NOTHING CHANGES: each department's
+-- RETEST for qualifications_2026-10-18.sql (Phase 3.1 #3). Run AFTER the migration, separately. NOTHING CHANGES: each department's
 -- checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE qualification types it creates.
 -- The final RAISE is the report. The "ERROR" IS the report.
 --   Z0 (once) anon can't execute any RPC; members can't execute the internal qualification_cells

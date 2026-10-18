@@ -20521,7 +20521,7 @@ const ONBOARD_TEMPLATE = [
   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
 ];
 /* ---------------- Qualifications (Phase 3.1 #3) — who can do what ----------------
-   DB layer: sql/qualifications (qualification_types · member_qualifications; drives = supervised_sessions rows with
+   DB layer: sql/qualifications_2026-10-18.sql (qualification_types · member_qualifications; drives = supervised_sessions rows with
    kind 'drive' + counts_toward = the type id). Reads: my_qualifications / dept_qualification_matrix + direct SELECTs of
    qualification_types (department-readable) and supervised_sessions (leaders read the department's). Writes ONLY
    through set_qualification_type (DA/PA) · sign_ / revoke_qualification + log_qualification_drive (DA/Officer) · the
