@@ -8,7 +8,7 @@
 --   G1 no item marked clears_to_run -> "Gate not configured": configured false, cleared false, never ready
 --   S1 the DA sets A's start (40 days ago) -> day 41, milestone due dates = start + 30/60/90/180; a future date refused;
 --      a member and an Officer refused (DA only); the DA can't set their own
---   C1 custody: A can't sign / log for themself (member gate) and the DA can't sign their own review
+--   C1 custody: A can't sign / log for themself (member gate; logging is DA/Officer only) and the DA can't sign their own review
 --   W1 a member's direct INSERT on each new table is refused
 --   K1 ack item: needs_signature (not satisfied, gate 0) -> A signs the fixture document -> signed_current (Level 1)
 --   K2 manual gate item: open -> the DA signs it (set_onboarding_item, unchanged) -> signed; gate cleared
@@ -23,11 +23,16 @@
 --   X1 another department's DA: can't set A's start / sign A's review / log for A / read A's status; their board has no A
 --   O1 an Officer signs a review and logs a session (is_canmanage), but can't set a start (DA only)
 --   K5 ack edge states: outside the document's audience -> not_required (satisfied); a broken link -> not_configured
---   T1 training_nights counts sessions attended on/after the start and up to today only
+--   T1 training_nights counts sessions attended all-time, up to today (future never)
+--   S2 a pure Project Admin can't set a start (a real Department Admin only — not the is_dept_admin() PA path)
+--   B2 a Board Member can't log or void supervised time (operational: DA / Officer)
+--   D1 void_supervised_session: member / other department / blank reason refused; the voided row stays and stops
+--      counting (hours item and supervised_hours both drop); a second void refused. (P0 covers anon.)
+--   D2 custody on the void: nobody voids a session logged for themself
 -- =====================================================================
 DO $retest$
 DECLARE
-  rec record; v_err text; v_e2 text; v_e3 text; v_n int; v_m int; v_k int; v_js jsonb; v_ok boolean; v_hash text;
+  rec record; v_err text; v_e2 text; v_e3 text; v_n int; v_m int; v_k int; v_sess uuid; v_h0 numeric; v_h1 numeric; v_board text; v_pa_em text; v_js jsonb; v_ok boolean; v_hash text;
   v_da text; v_off text; v_a text; v_b text; v_other_da text; v_pa uuid;
   v_da_id uuid; v_a_id uuid; v_b_id uuid;
   v_doc uuid; v_series uuid; v_i_man uuid; v_i_ack uuid; v_i_hrs uuid; v_i_cert uuid; v_i_leg uuid;
@@ -39,7 +44,7 @@ BEGIN
   -- P0 grants (once)
   v_ok := true;
   FOREACH v_t IN ARRAY array['public.set_member_probation(uuid,date,text)', 'public.set_probation_milestone(uuid,text,text,text)',
-      'public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)', 'public.my_probation_status()',
+      'public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)', 'public.void_supervised_session(uuid,text)', 'public.my_probation_status()',
       'public.member_probation_status(uuid)', 'public.dept_probation_board()'] LOOP
     IF has_function_privilege('anon', v_t, 'EXECUTE') OR NOT has_function_privilege('authenticated', v_t, 'EXECUTE') THEN v_ok := false; END IF;
   END LOOP;
@@ -48,7 +53,7 @@ BEGIN
     BEGIN PERFORM public.probation_status(gen_random_uuid(), gen_random_uuid()); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
     BEGIN PERFORM * FROM public.probation_item_states(gen_random_uuid(), gen_random_uuid()); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
     PERFORM set_config('role', 'anon', true);
-    BEGIN PERFORM public.my_probation_status(); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
+    BEGIN PERFORM public.my_probation_status(); PERFORM public.void_supervised_session(gen_random_uuid(), 'x'); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
     PERFORM set_config('role', 'postgres', true);
   END;
   IF v_ok AND v_err ILIKE '%permission denied%' AND v_e2 ILIKE '%permission denied%' AND v_e3 ILIKE '%permission denied%' THEN
@@ -57,12 +62,18 @@ BEGIN
 
   FOR rec IN SELECT d.id AS dept_id, d.name AS dept FROM public.departments d ORDER BY d.name LOOP
     rpt := rpt || format('— %s%s', rec.dept, chr(10));
-    v_da := NULL; v_off := NULL; v_a := NULL; v_b := NULL; v_other_da := NULL; v_da_id := NULL; v_a_id := NULL; v_b_id := NULL; v_pa := NULL;
+    v_da := NULL; v_off := NULL; v_a := NULL; v_b := NULL; v_other_da := NULL; v_da_id := NULL; v_a_id := NULL; v_b_id := NULL; v_pa := NULL; v_board := NULL; v_pa_em := NULL;
     SELECT lower(m.email), m.id INTO v_da, v_da_id FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Department Admin']::text[]
        AND NOT m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
        AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
     SELECT lower(m.email) INTO v_off FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Officer']::text[]
        AND NOT m.access && array['Department Admin','Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
+       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
+    SELECT lower(m.email) INTO v_board FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Board Member']::text[]
+       AND NOT m.access && array['Department Admin','Project Admin','Officer']::text[] AND m.status IN ('Active', 'Probationary')
+       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
+    SELECT lower(m.email) INTO v_pa_em FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Project Admin']::text[]
+       AND NOT m.access && array['Department Admin']::text[]
        AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
     SELECT lower(m.email), m.id INTO v_a, v_a_id FROM public.members m WHERE m.department_id = rec.dept_id
        AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
@@ -135,6 +146,18 @@ BEGIN
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  S1 member "%s" future "%s" own "%s" day %s due %s / %s%s', v_err, v_e2, v_e3,
              v_js->>'day_n', v_js->'milestones'->0->>'due_on', v_js->'milestones'->3->>'due_on', chr(10)); END IF;
 
+      -- S2 a pure Project Admin of the department can't set a start (a real Department Admin only)
+      IF v_pa_em IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  S2 — no pure Project Admin with a unique email%s', chr(10));
+      ELSE
+        PERFORM set_config('request.jwt.claims', json_build_object('email', v_pa_em, 'role', 'authenticated')::text, true);
+        PERFORM set_config('role', 'authenticated', true);
+        BEGIN PERFORM public.set_member_probation(v_a_id, v_today - 7, NULL); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+        PERFORM set_config('role', 'postgres', true);
+        IF v_err LIKE 'Only a Department Admin%' AND (SELECT started_on FROM public.member_probation WHERE member_id = v_a_id) = v_today - 40 THEN
+          v_pass := v_pass + 1; rpt := rpt || format('   PASS  S2 a Project Admin (not a DA) is refused the start date%s', chr(10));
+        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  S2 PA -> "%s"%s', v_err, chr(10)); END IF;
+      END IF;
+
       -- C1 custody
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
       PERFORM set_config('role', 'authenticated', true);
@@ -143,7 +166,7 @@ BEGIN
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
       BEGIN PERFORM public.set_probation_milestone(v_da_id, '30day', 'done', NULL); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
       PERFORM set_config('role', 'postgres', true);
-      IF v_err LIKE 'Only department leadership%' AND v_e2 LIKE 'Only department leadership%' AND v_e3 LIKE 'You can''t sign your own%' THEN
+      IF v_err LIKE 'Only department leadership%' AND v_e2 LIKE 'Only a Department Admin or Officer%' AND v_e3 LIKE 'You can''t sign your own%' THEN
         v_pass := v_pass + 1; rpt := rpt || format('   PASS  C1 a member can''t sign / log for themself; the DA can''t sign their own review%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  C1 member sign "%s" log "%s" DA own "%s"%s', v_err, v_e2, v_e3, chr(10)); END IF;
 
@@ -189,7 +212,7 @@ BEGIN
       -- K3 hours
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
       PERFORM set_config('role', 'authenticated', true);
-      PERFORM public.log_supervised_session(v_a_id, 'ride_along', 1.5, v_today - 3);
+      v_sess := (public.log_supervised_session(v_a_id, 'ride_along', 1.5, v_today - 3)).id;
       v_js := public.member_probation_status(v_a_id);
       v_err := (SELECT e->>'state' || '/' || (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_hrs);
       BEGIN PERFORM public.log_supervised_session(v_a_id, 'drive', 1, v_today, NULL, v_a_id); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
@@ -332,7 +355,7 @@ BEGIN
 
       -- T1 training nights: counts sessions attended on/after the start, up to today (not before, not future)
       INSERT INTO public.onboarding_items (department_id, category, label, sort_order, phase, kind, hours_target, hours_source)
-        VALUES (rec.dept_id, 'RETEST', 'RETEST training nights', 9006, 'onboarding', 'hours', 2, 'training_nights') RETURNING id INTO v_doc;
+        VALUES (rec.dept_id, 'RETEST', 'RETEST training nights', 9006, 'onboarding', 'hours', 3, 'training_nights') RETURNING id INTO v_doc;
       WITH s AS (INSERT INTO public.training_sessions (department_id, title, date)
                  SELECT rec.dept_id, 'RETEST night ' || x, v_today + x FROM unnest(array[-50, -5, 3]) x RETURNING id)
       INSERT INTO public.session_attendance (department_id, session_id, member_id) SELECT rec.dept_id, s.id, v_a_id FROM s;
@@ -346,9 +369,59 @@ BEGIN
       v_js := public.my_probation_status();
       PERFORM set_config('role', 'postgres', true);
       v_e2 := (SELECT e->>'state' || '/' || (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_doc);
-      IF v_err = 'in_progress/1' AND v_e2 = 'met/2' THEN
-        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T1 training nights: only on/after the start and up to today count (1 -> 2 = met)%s', chr(10));
+      IF v_err = 'in_progress/2' AND v_e2 = 'met/3' THEN
+        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T1 training nights: all-time up to today (before the start counts, future doesn''t): 2 -> 3 = met%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T1 %s -> %s%s', v_err, v_e2, chr(10)); END IF;
+      -- B2 a Board Member can't log supervised time (operational: DA / Officer only)
+      IF v_board IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  B2 — no Board Member with a unique email%s', chr(10));
+      ELSE
+        PERFORM set_config('request.jwt.claims', json_build_object('email', v_board, 'role', 'authenticated')::text, true);
+        PERFORM set_config('role', 'authenticated', true);
+        BEGIN PERFORM public.log_supervised_session(v_a_id, 'ride_along', 1, v_today); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+        BEGIN PERFORM public.void_supervised_session(v_sess, 'board try'); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
+        PERFORM set_config('role', 'postgres', true);
+        IF v_err LIKE 'Only a Department Admin or Officer%' AND v_e2 LIKE 'Only a Department Admin or Officer%' THEN
+          v_pass := v_pass + 1; rpt := rpt || format('   PASS  B2 a Board Member can''t log or void supervised time%s', chr(10));
+        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  B2 log "%s" void "%s"%s', v_err, v_e2, chr(10)); END IF;
+      END IF;
+
+      -- D1 void: a member can't; another department's DA can't; a reason is required; the DA voids the 1.5 h session ->
+      -- the row stays, it stops counting (hours item + supervised_hours drop by 1.5); voiding again is refused
+      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
+      PERFORM set_config('role', 'authenticated', true);
+      v_js := public.member_probation_status(v_a_id);
+      v_h0 := (v_js->>'supervised_hours')::numeric;
+      v_err := (SELECT (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_hrs);
+      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
+      BEGIN PERFORM public.void_supervised_session(v_sess, 'member try'); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
+      v_e3 := 'n/a';
+      IF v_other_da IS NOT NULL THEN
+        PERFORM set_config('request.jwt.claims', json_build_object('email', v_other_da, 'role', 'authenticated')::text, true);
+        BEGIN PERFORM public.void_supervised_session(v_sess, 'other dept try'); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
+      END IF;
+      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
+      BEGIN PERFORM public.void_supervised_session(v_sess, '   '); v_t := 'OK'; EXCEPTION WHEN OTHERS THEN v_t := SQLERRM; END;
+      PERFORM public.void_supervised_session(v_sess, 'RETEST: logged against the wrong member');
+      BEGIN PERFORM public.void_supervised_session(v_sess, 'again'); v_hash := 'OK'; EXCEPTION WHEN OTHERS THEN v_hash := SQLERRM; END;
+      v_js := public.member_probation_status(v_a_id);
+      v_h1 := (v_js->>'supervised_hours')::numeric;
+      PERFORM set_config('role', 'postgres', true);
+      SELECT count(*) INTO v_n FROM public.supervised_sessions WHERE id = v_sess AND voided_at IS NOT NULL AND voided_by = v_da_id AND void_reason LIKE 'RETEST:%';
+      IF v_e2 LIKE 'Only a Department Admin or Officer%' AND (v_e3 = 'n/a' OR v_e3 LIKE 'That session is not in your department%')
+         AND v_t LIKE 'Say why%' AND v_hash LIKE 'That session is already voided%' AND v_n = 1 AND v_h1 = v_h0 - 1.5
+         AND (SELECT (e->>'have')::numeric FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_hrs) = v_err::numeric - 1.5 THEN
+        v_pass := v_pass + 1; rpt := rpt || format('   PASS  D1 void: member / other dept / blank reason refused; voided row kept, stops counting (%s -> %s h); no double void%s', v_h0, v_h1, chr(10));
+      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  D1 member "%s" other "%s" blank "%s" again "%s" row %s hours %s -> %s item %s%s', v_e2, v_e3, v_t, v_hash, v_n, v_h0, v_h1, v_err, chr(10)); END IF;
+      -- D2 custody on the void: a session logged FOR the DA (fixture, as the owner) can't be voided by the DA themself
+      INSERT INTO public.supervised_sessions (department_id, member_id, kind, hours, occurred_on, supervisor_id, created_by)
+        VALUES (rec.dept_id, v_da_id, 'drive', 2, v_today, v_a_id, v_a_id) RETURNING id INTO v_sess;
+      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
+      PERFORM set_config('role', 'authenticated', true);
+      BEGIN PERFORM public.void_supervised_session(v_sess, 'my own'); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+      PERFORM set_config('role', 'postgres', true);
+      IF v_err LIKE 'You can''t void your own%' AND (SELECT voided_at FROM public.supervised_sessions WHERE id = v_sess) IS NULL THEN
+        v_pass := v_pass + 1; rpt := rpt || format('   PASS  D2 the DA can''t void a session logged for themself%s', chr(10));
+      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  D2 own void -> "%s"%s', v_err, chr(10)); END IF;
       RAISE EXCEPTION 'SENTINEL';
     EXCEPTION WHEN OTHERS THEN
       IF SQLERRM <> 'SENTINEL' THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  run aborted: %s%s', SQLERRM, chr(10)); END IF;

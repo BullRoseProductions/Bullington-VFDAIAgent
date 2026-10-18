@@ -19,18 +19,25 @@
 --   3. probation_milestones (30day / 60day / 90day / final; pending | on_track | needs_work | done; short officer note;
 --      signed_by / signed_at). due_on is COMPUTED at read from started_on (+30 / +60 / +90 / +180 days), not stored, so
 --      a corrected start date can never leave stale due dates behind (a deliberate divergence from the brief's column).
---   4. supervised_sessions — the ride-along / drive / shift log (built here, reused by #3). Leader-logged (D4).
+--   4. supervised_sessions — the ride-along / drive / shift log (built here, reused by #3). Logged by a DA/Officer (D4);
+--      corrected only by voiding (voided_at / voided_by / void_reason), never edited or deleted.
 --   All three new tables: RLS on, SELECT-only grant, ONE read policy each — own row, or Board/DA/Officer of the
 --   department (is_canmanage()); zero write policies, zero write grants. Writes go through the RPCs only.
 --
 --   RPCs (SECURITY DEFINER, department-scoped, never touch the locked verification column):
---     set_member_probation(member, started_on, note)        — a DA of the department (is_dept_admin()); not self.
+--     set_member_probation(member, started_on, note)        — a real Department Admin of the department (their member
+--                                                             row there has 'Department Admin', Active/Probationary) —
+--                                                             NOT is_dept_admin(), so a pure Project Admin can't; not self.
 --     set_probation_milestone(member, kind, status, note)    — Board/DA/Officer (is_canmanage()); not self; the member
 --                                                             must be Probationary in the caller's department.
 --     log_supervised_session(member, kind, hours, occurred_on, apparatus?, supervisor?, note?)
---                                                           — Board/DA/Officer (is_canmanage()); not self; supervisor
+--                                                           — DA/Officer (is_canmanage_ops(), operational); not self; supervisor
 --                                                             (defaults to the caller) is in the department and is
 --                                                             never the member; apparatus (if any) in the department.
+--     void_supervised_session(id, reason)                   — DA/Officer (is_canmanage_ops()), department-scoped, not
+--                                                             their own session: stamps voided_at / voided_by /
+--                                                             void_reason (never a delete — the ledger stays append-only).
+--                                                             A voided session counts toward nothing.
 --     my_probation_status()                                 — the caller's own path (jsonb).
 --     member_probation_status(member)                       — a leader viewing one member's path (to sign it); a
 --                                                             member may call it for themself only. (ADDITION to the
@@ -47,8 +54,8 @@
 --     version (and within 12 months when annual) — the same rule as dept_read_sign_compliance. A member outside the
 --     document's audience can't sign it, so for them the item reads 'not_required' and counts as satisfied. A missing /
 --     unpublished link reads 'not_configured' and is NOT satisfied. No roster / crediting block (Level 2 is a follow-up).
---     hours: hours_source 'supervised' (all logged sessions) | 'ride_along' | 'drive' | 'shift' (that kind) |
---     'training_nights' (COUNT of training sessions attended on/after started_on, up to today) >= hours_target.
+--     hours: hours_source 'supervised' (all non-voided logged sessions) | 'ride_along' | 'drive' | 'shift' (that kind) |
+--     'training_nights' (COUNT of training sessions attended, up to today) >= hours_target. BOTH are all-time.
 --     cert: a cert named cert_name (case/space-insensitive) with a dated, unexpired exp ('YYYY-MM', the app's
 --     certStatus rule). Undated never counts.
 --   gate — the department's clears_to_run items. None marked -> configured false -> "Gate not configured" (never
@@ -65,7 +72,7 @@ DECLARE
       FROM pg_policies WHERE schemaname = 'public' AND tablename NOT IN ('member_probation', 'probation_milestones', 'supervised_sessions')$q$;
   NEW_TABLES constant text[] := array['member_probation', 'probation_milestones', 'supervised_sessions'];
   PUBLIC_FNS constant text[] := array['public.set_member_probation(uuid,date,text)', 'public.set_probation_milestone(uuid,text,text,text)',
-    'public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)', 'public.my_probation_status()',
+    'public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)', 'public.void_supervised_session(uuid,text)', 'public.my_probation_status()',
     'public.member_probation_status(uuid)', 'public.dept_probation_board()'];
   INTERNAL_FNS constant text[] := array['public.probation_item_states(uuid,uuid)', 'public.probation_status(uuid,uuid)'];
 BEGIN
@@ -163,7 +170,11 @@ BEGIN
     counts_toward text NOT NULL DEFAULT 'probation' CHECK (length(counts_toward) <= 60),
     note          text CHECK (note IS NULL OR length(note) <= 500),
     created_by    uuid NOT NULL,
-    created_at    timestamptz NOT NULL DEFAULT now()
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    voided_at     timestamptz,                          -- a void, never a delete: the row stays, it just stops counting
+    voided_by     uuid,
+    void_reason   text CHECK (void_reason IS NULL OR length(void_reason) <= 300),
+    CONSTRAINT supervised_sessions_void_chk CHECK ((voided_at IS NULL) = (voided_by IS NULL) AND (voided_at IS NULL) = (void_reason IS NULL))
   );
   CREATE INDEX supervised_sessions_member_idx ON public.supervised_sessions (member_id, kind);
   CREATE INDEX probation_milestones_dept_idx ON public.probation_milestones (department_id);
@@ -238,10 +249,10 @@ AS $function$
     left join lateral (select case when i.hours_source = 'training_nights' then
                                 (select count(distinct a.session_id)::numeric from public.session_attendance a
                                    join public.training_sessions t on t.id = a.session_id and t.department_id = p_dept
-                                  where a.member_id = p_member and t.date <= td.d and (pr.started_on is null or t.date >= pr.started_on))
+                                  where a.member_id = p_member and t.date <= td.d)
                               else
                                 (select coalesce(sum(ss.hours), 0) from public.supervised_sessions ss
-                                  where ss.member_id = p_member and ss.department_id = p_dept
+                                  where ss.member_id = p_member and ss.department_id = p_dept and ss.voided_at is null
                                     and (i.hours_source = 'supervised' or ss.kind = i.hours_source))
                               end as have
                         where i.kind = 'hours') hr on true
@@ -276,7 +287,8 @@ AS $function$
        g as (select count(*) filter (where it.clears_to_run) as req, count(*) filter (where it.clears_to_run and it.satisfied) as ok,
                     count(*) filter (where it.phase = 'probation') as preq, count(*) filter (where it.phase = 'probation' and it.satisfied) as pok
                from it),
-       h as (select coalesce(sum(ss.hours), 0) as hrs from public.supervised_sessions ss where ss.member_id = p_member and ss.department_id = p_dept)
+       h as (select coalesce(sum(ss.hours), 0) as hrs from public.supervised_sessions ss
+               where ss.member_id = p_member and ss.department_id = p_dept and ss.voided_at is null)
   select jsonb_build_object(
            'member_id', m.id, 'name', m.name, 'status', m.status,
            'started_on', pr.started_on,
@@ -304,10 +316,16 @@ CREATE OR REPLACE FUNCTION public.set_member_probation(p_member_id uuid, p_start
  SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
--- B4C:probation — a Department Admin sets (or clears, with NULL) a member's probation start. Never touches the locked verification column.
+-- B4C:probation — a Department Admin of the department sets (or clears, with NULL) a member's probation start. A real
+-- DA only: the caller's member row in THIS department holds 'Department Admin' and is Active / Probationary. Not the
+-- is_dept_admin Project-Admin support path — a probation start is a compliance record. Never touches the locked
+-- verification column.
 declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_row public.member_probation;
 begin
-  if v_dept is null or v_me is null or not coalesce(public.is_dept_admin(), false) then
+  if v_dept is null or v_me is null or not exists (
+       select 1 from public.members x
+        where lower(x.email) = lower(auth.email()) and x.department_id = v_dept
+          and x.access && array['Department Admin']::text[] and x.status in ('Active', 'Probationary')) then
     raise exception 'Only a Department Admin can set a probation start.';
   end if;
   if p_member_id = v_me then raise exception 'You can''t set your own probation start — another Department Admin does.'; end if;
@@ -368,14 +386,14 @@ CREATE OR REPLACE FUNCTION public.log_supervised_session(p_member_id uuid, p_kin
  SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
--- B4C:probation — Board / DA / Officer logs a supervised ride-along / drive / shift for a member of their department.
+-- B4C:probation — a DA / Officer (operational) logs a supervised ride-along / drive / shift for a member of their department.
 -- Never for themself; the supervisor (default: the caller) is in the department and is never the member. Never
 -- touches the locked verification column.
 declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id();
         v_sup uuid := coalesce(p_supervisor_id, public.my_member_id()); v_row public.supervised_sessions;
 begin
-  if v_dept is null or v_me is null or not coalesce(public.is_canmanage(), false) then
-    raise exception 'Only department leadership can log supervised time.';
+  if v_dept is null or v_me is null or not coalesce(public.is_canmanage_ops(), false) then
+    raise exception 'Only a Department Admin or Officer can log supervised time.';
   end if;
   if p_member_id = v_me then raise exception 'You can''t log your own supervised time — an officer does.'; end if;
   if not exists (select 1 from public.members where id = p_member_id and department_id = v_dept) then
@@ -397,6 +415,33 @@ begin
   insert into public.supervised_sessions (department_id, member_id, kind, apparatus_id, hours, occurred_on, supervisor_id, note, created_by)
   values (v_dept, p_member_id, p_kind, p_apparatus_id, p_hours, p_occurred_on, v_sup, nullif(btrim(p_note), ''), v_me)
   returning * into v_row;
+  return v_row;
+end;
+$function$
+$ddl$;
+
+  EXECUTE $ddl$
+CREATE OR REPLACE FUNCTION public.void_supervised_session(p_id uuid, p_reason text)
+ RETURNS public.supervised_sessions
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+-- B4C:probation — a DA / Officer voids a mis-logged supervised session in their department. The row stays (append-only
+-- ledger); voided rows count toward nothing. Not your own session. Never touches the locked verification column.
+declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_row public.supervised_sessions;
+begin
+  if v_dept is null or v_me is null or not coalesce(public.is_canmanage_ops(), false) then
+    raise exception 'Only a Department Admin or Officer can void supervised time.';
+  end if;
+  select * into v_row from public.supervised_sessions where id = p_id and department_id = v_dept for update;
+  if not found then raise exception 'That session is not in your department.'; end if;
+  if v_row.member_id = v_me then raise exception 'You can''t void your own supervised time — another officer does.'; end if;
+  if v_row.voided_at is not null then raise exception 'That session is already voided.'; end if;
+  if coalesce(btrim(p_reason), '') = '' then raise exception 'Say why it''s being voided.'; end if;
+  if length(p_reason) > 300 then raise exception 'Keep the reason under 300 characters.'; end if;
+  update public.supervised_sessions set voided_at = now(), voided_by = v_me, void_reason = btrim(p_reason)
+   where id = p_id returning * into v_row;
   return v_row;
 end;
 $function$
@@ -503,11 +548,28 @@ $ddl$;
   END LOOP;
   IF position('p_member_id = v_me' in pg_get_functiondef('public.set_probation_milestone(uuid,text,text,text)'::regprocedure)) = 0
      OR position('p_member_id = v_me' in pg_get_functiondef('public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)'::regprocedure)) = 0
-     OR position('p_member_id = v_me' in pg_get_functiondef('public.set_member_probation(uuid,date,text)'::regprocedure)) = 0 THEN
+     OR position('p_member_id = v_me' in pg_get_functiondef('public.set_member_probation(uuid,date,text)'::regprocedure)) = 0
+     OR position('v_row.member_id = v_me' in pg_get_functiondef('public.void_supervised_session(uuid,text)'::regprocedure)) = 0 THEN
     RAISE EXCEPTION 'Post-condition failed: a write RPC lost its not-self (custody) check.';
+  END IF;
+  -- the start date is a real DA's alone (not the is_dept_admin() PA path); logging / voiding is operational (DA / Officer)
+  IF position('is_dept_admin()' in pg_get_functiondef('public.set_member_probation(uuid,date,text)'::regprocedure)) > 0
+     OR position('''Department Admin''' in pg_get_functiondef('public.set_member_probation(uuid,date,text)'::regprocedure)) = 0
+     OR position('x.department_id = v_dept' in pg_get_functiondef('public.set_member_probation(uuid,date,text)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'Post-condition failed: set_member_probation must gate on a Department Admin of the department, not is_dept_admin().';
+  END IF;
+  IF position('is_canmanage_ops()' in pg_get_functiondef('public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)'::regprocedure)) = 0
+     OR position('is_canmanage_ops()' in pg_get_functiondef('public.void_supervised_session(uuid,text)'::regprocedure)) = 0
+     OR position('department_id = v_dept' in pg_get_functiondef('public.void_supervised_session(uuid,text)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'Post-condition failed: logging / voiding supervised time must gate on is_canmanage_ops() and the department.';
+  END IF;
+  IF position('voided_at is null' in pg_get_functiondef('public.probation_item_states(uuid,uuid)'::regprocedure)) = 0
+     OR position('voided_at is null' in pg_get_functiondef('public.probation_status(uuid,uuid)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'Post-condition failed: a voided session could still count.';
   END IF;
   IF position('is_leader()' in pg_get_functiondef('public.set_probation_milestone(uuid,text,text,text)'::regprocedure)
                              || pg_get_functiondef('public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)'::regprocedure)
+                             || pg_get_functiondef('public.void_supervised_session(uuid,text)'::regprocedure)
                              || pg_get_functiondef('public.dept_probation_board()'::regprocedure)
                              || pg_get_functiondef('public.member_probation_status(uuid)'::regprocedure)) > 0 THEN
     RAISE EXCEPTION 'Post-condition failed: a gate uses the role-anywhere is_leader().';
@@ -551,7 +613,7 @@ SELECT (SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('public.member_p
 -- DO $rb$
 -- BEGIN
 --   DROP FUNCTION IF EXISTS public.dept_probation_board(), public.member_probation_status(uuid), public.my_probation_status(),
---     public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text), public.set_probation_milestone(uuid,text,text,text),
+--     public.void_supervised_session(uuid,text), public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text), public.set_probation_milestone(uuid,text,text,text),
 --     public.set_member_probation(uuid,date,text), public.probation_status(uuid,uuid), public.probation_item_states(uuid,uuid);
 --   DROP TABLE IF EXISTS public.supervised_sessions, public.probation_milestones, public.member_probation;
 --   ALTER TABLE public.onboarding_items DROP CONSTRAINT IF EXISTS onboarding_items_phase_chk, DROP CONSTRAINT IF EXISTS onboarding_items_kind_chk,

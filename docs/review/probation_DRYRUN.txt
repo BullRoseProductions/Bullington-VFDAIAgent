@@ -4,6 +4,7 @@ PASS  P0 anon can't execute the RPCs; members can't execute the internal helpers
 — Indian Harbor Volunteer Fire Department
    PASS  G1 no gate items -> not configured, not cleared, not ready; start not set -> no day count
    PASS  S1 DA sets the start -> day 41, due dates from it; member / future / own refused
+   SKIP  S2 — no pure Project Admin with a unique email
    PASS  C1 a member can't sign / log for themself; the DA can't sign their own review
    PASS  W1 direct INSERT refused on all three tables
    PASS  K1 ack item: needs_signature -> signed via Read & Sign -> signed_current (gate still open)
@@ -17,10 +18,14 @@ PASS  P0 anon can't execute the RPCs; members can't execute the internal helpers
    PASS  X1 another department's DA: start / review / log / status refused; not on their board; no rows
    PASS  O1 Officer signs a review + logs a session; can't set a start
    PASS  K5 ack: outside the audience -> not_required; broken link -> not_configured, gate reopens
-   PASS  T1 training nights: only on/after the start and up to today count (1 -> 2 = met)
+   PASS  T1 training nights: all-time up to today (before the start counts, future doesn't): 2 -> 3 = met
+   SKIP  B2 — no Board Member with a unique email
+   PASS  D1 void: member / other dept / blank reason refused; voided row kept, stops counting (4.5 -> 3 h); no double void
+   PASS  D2 the DA can't void a session logged for themself
 — Lipan
    PASS  G1 no gate items -> not configured, not cleared, not ready; start not set -> no day count
    PASS  S1 DA sets the start -> day 41, due dates from it; member / future / own refused
+   SKIP  S2 — no pure Project Admin with a unique email
    PASS  C1 a member can't sign / log for themself; the DA can't sign their own review
    PASS  W1 direct INSERT refused on all three tables
    PASS  K1 ack item: needs_signature -> signed via Read & Sign -> signed_current (gate still open)
@@ -34,10 +39,14 @@ PASS  P0 anon can't execute the RPCs; members can't execute the internal helpers
    PASS  X1 another department's DA: start / review / log / status refused; not on their board; no rows
    SKIP  O1 — no Officer with a unique email
    PASS  K5 ack: outside the audience -> not_required; broken link -> not_configured, gate reopens
-   PASS  T1 training nights: only on/after the start and up to today count (1 -> 2 = met)
+   PASS  T1 training nights: all-time up to today (before the start counts, future doesn't): 2 -> 3 = met
+   SKIP  B2 — no Board Member with a unique email
+   PASS  D1 void: member / other dept / blank reason refused; voided row kept, stops counting (2.5 -> 1 h); no double void
+   PASS  D2 the DA can't void a session logged for themself
 — North Hood
    PASS  G1 no gate items -> not configured, not cleared, not ready; start not set -> no day count
    PASS  S1 DA sets the start -> day 41, due dates from it; member / future / own refused
+   PASS  S2 a Project Admin (not a DA) is refused the start date
    PASS  C1 a member can't sign / log for themself; the DA can't sign their own review
    PASS  W1 direct INSERT refused on all three tables
    PASS  K1 ack item: needs_signature -> signed via Read & Sign -> signed_current (gate still open)
@@ -51,20 +60,30 @@ PASS  P0 anon can't execute the RPCs; members can't execute the internal helpers
    PASS  X1 another department's DA: start / review / log / status refused; not on their board; no rows
    PASS  O1 Officer signs a review + logs a session; can't set a start
    PASS  K5 ack: outside the audience -> not_required; broken link -> not_configured, gate reopens
-   PASS  T1 training nights: only on/after the start and up to today count (1 -> 2 = met)
----- 48 passed, 0 failed, 1 skipped ----
+   PASS  T1 training nights: all-time up to today (before the start counts, future doesn't): 2 -> 3 = met
+   PASS  B2 a Board Member can't log or void supervised time
+   PASS  D1 void: member / other dept / blank reason refused; voided row kept, stops counting (4.5 -> 3 h); no double void
+   PASS  D2 the DA can't void a session logged for themself
+---- 56 passed, 0 failed, 5 skipped ----
 (this exception IS the rollback — nothing was changed)
 read_sign RETEST still: ---- 56 passed, 0 failed, 1 skipped ----
-backfill rows: [{"member_id":"851d352a-9c4f-4063-9948-6b3c5adec25c","started_on":"2026-09-10T00:00:00.000Z","note":"Start taken from the join date on file (backfill 2026-10-18)."}]
-MA milestone gate removed ->    FAIL  C1 member sign "You can't sign your own probation review — an officer does." log "Only department leadership can log supervised time." DA own "You can't sign your own probation review — an officer does." |    FAIL  C1 member sign "You can't sign your own probation review — an officer does." log "Only department leadership can log supervised time." DA own "You 
+backfill rows: [{"member_id":"987b7428-5b6f-4e73-94dc-88ff7dcae96b","started_on":"2026-09-10T00:00:00.000Z","note":"Start taken from the join date on file (backfill 2026-10-18)."}]
+MA milestone gate removed ->    FAIL  C1 member sign "You can't sign your own probation review — an officer does." log "Only a Department Admin or Officer can log supervised time." DA own "You can't sign your own probation review — an officer does." |    FAIL  C1 member sign "You can't sign your own probation review — an officer
 MB milestone not-self removed (+ its post-condition) -> migration Post-condition failed: a write RPC lost its not-self (custody) check.
-MC log: member dept check removed ->    FAIL  X1 start "That member is not in your department." review "That member is not in your department." log "OK" status "That member is not in your department." board 0 rows 0 |    FAIL  X1 start "That member is not in your department." review "That member is not in your department." log "OK" status "That member is not in your department." board 0 rows 0 |  
-MD ack item always satisfied ->    FAIL  K1 before needs_signature/true/1 after signed_current/true cleared false |    FAIL  K5 audience not_required/true link not_configured/true cleared true |    FAIL  K1 before needs_signature/true/1 after signed_current/true cleared false |    FAIL  K5 audience not_required/true link not_configured/true cleared true |    FAIL  K1 before needs_signature/true/1 
-ME expired cert counts ->    FAIL  K4 current -> current |    FAIL  K4 current -> current |    FAIL  K4 current -> current | ---- 45 passed, 3 failed, 1 skipped ----
-MF empty gate reads cleared ->    FAIL  G1 {"gate": {"cleared": false, "required": 0, "satisfied": 0, "configured": false}, "name": "C P1", "day_n": null, "status": "Probationary", "member_id": "2d71a364-d28c-4f75-9449-a4b5eb650725", "probation": {"required": 0, "satisfied": 0}, "started_on": null, "target_days": 180, "cleared_to_run": true, "ready_for_vote": false, "milestones_done": 0, "supervis
-MG board counts former members ->    FAIL  B1 board 3 vs 2, A ready t, former listed true, PA listed , member "Only department leadership can see the probation board." |    FAIL  B1 board 2 vs 1, A ready t, former listed true, PA listed , member "Only department leadership can see the probation board." |    FAIL  B1 board 2 vs 1, A ready t, former listed true, PA listed false, member "Only departm
+MC log: member dept check removed ->    FAIL  X1 start "That member is not in your department." review "That member is not in your department." log "OK" status "That member is not in your department." board 0 rows 0 |    FAIL  X1 start "That member is not in your department." review "That member is not in your department." log "
+MD ack item always satisfied ->    FAIL  K1 before needs_signature/true/1 after signed_current/true cleared false |    FAIL  K5 audience not_required/true link not_configured/true cleared true |    FAIL  K1 before needs_signature/true/1 after signed_current/true cleared false |    FAIL  K5 audience not_required/true link not_con
+ME expired cert counts ->    FAIL  K4 current -> current |    FAIL  K4 current -> current |    FAIL  K4 current -> current | ---- 53 passed, 3 failed, 5 skipped ----
+MF empty gate reads cleared ->    FAIL  G1 {"gate": {"cleared": false, "required": 0, "satisfied": 0, "configured": false}, "name": "C P2", "day_n": null, "status": "Probationary", "member_id": "52fb4fe6-a28a-49e6-8e45-76e433cde470", "probation": {"required": 0, "satisfied": 0}, "started_on": null, "target_days": 180, "cleared_t
+MG board counts former members ->    FAIL  B1 board 2 vs 1, A ready t, former listed true, PA listed , member "Only department leadership can see the probation board." |    FAIL  B1 board 2 vs 1, A ready t, former listed true, PA listed , member "Only department leadership can see the probation board." |    FAIL  B1 board 2 vs 1
 MH read policy without the department -> migration Post-condition failed: member_probation must have exactly one department-scoped SELECT policy and no write policy.
 MI internal helper left callable -> migration Post-condition failed: the internal public.probation_item_states(uuid,uuid) is callable by members.
 MJ transition-state grant revoked -> migration Post-condition failed: the onboarding_progress transition-state grant was removed.
-MK ready without the final review ->    FAIL  R1 ready-before t after true done 4 rows 4 non-prob "Probation reviews are for probationary members." |    FAIL  R1 ready-before t after true done 4 rows 4 non-prob "Probation reviews are for probationary members." |    FAIL  R1 ready-before t after true done 4 rows 4 non-prob "OK" | ---- 45 passed, 3 failed, 1 skipped ----
-ML future start allowed ->    FAIL  S1 member "Only a Department Admin can set a probation start." future "OK" own "You can't set your own probation start — another Department Admin does." day 41 due 2026-10-08 / 2027-03-07 |    FAIL  S1 member "Only a Department Admin can set a probation start." future "OK" own "You can't set your own probation start — another Department Admin does." day 41 due 2
+MK ready without the final review ->    FAIL  R1 ready-before t after true done 4 rows 4 non-prob "Probation reviews are for probationary members." |    FAIL  R1 ready-before t after true done 4 rows 4 non-prob "Probation reviews are for probationary members." |    FAIL  R1 ready-before t after true done 4 rows 4 non-prob "OK" |
+MM start gate back to is_dept_admin() (PA path) -> migration Post-condition failed: set_member_probation must gate on a Department Admin of the department, not is_dept_admin().
+MM2 start gate lets a Project Admin in (behaviour; post-condition kept quiet) ->    FAIL  S2 PA -> "OK" | ---- 55 passed, 1 failed, 5 skipped ----
+MN log gate widened to is_canmanage() (Board) -> migration Post-condition failed: logging / voiding supervised time must gate on is_canmanage_ops() and the department.
+MO voided sessions still count (body + post-condition) ->    FAIL  D1 member "Only a Department Admin or Officer can void supervised time." other "That session is not in your department." blank "Say why it's being voided." again "That session is already voided." row 1 hours 4.5 -> 4.5 item 4.5 |    FAIL  D1 member "Only a Depart
+MP void hard-deletes the row ->    FAIL  D1 member "Only a Department Admin or Officer can void supervised time." other "That session is not in your department." blank "Say why it's being voided." again "That session is not in your department." row 0 hours 4.5 -> 3 item 4.5 |    FAIL  D1 member "Only a Department Admin or Office
+MQ training nights count future sessions ->    FAIL  T1 met/3 -> met/4 |    FAIL  T1 met/3 -> met/4 |    FAIL  T1 met/3 -> met/4 | ---- 53 passed, 3 failed, 5 skipped ----
+MR void lets a member void their own session (body + post-condition) ->    FAIL  D2 own void -> "OK" |    FAIL  D2 own void -> "OK" |    FAIL  D2 own void -> "OK" | ---- 53 passed, 3 failed, 5 skipped ----
+ML future start allowed ->    FAIL  S1 member "Only a Department Admin can set a probation start." future "OK" own "You can't set your own probation start — another Department Admin does." day 41 due 2026-10-08 / 2027-03-07 |    FAIL  S1 member "Only a Department Admin can set a probation start." future "OK" own "You can't set y
