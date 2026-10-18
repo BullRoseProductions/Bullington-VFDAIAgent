@@ -2,7 +2,10 @@
 -- RETEST for probation_2026-10-18.sql (Phase 3.1 #2). RAN on live 2026-10-18 (first run): 53 passed, 3 failed, 7 skipped —
 -- the 3 FAILs were all T1, a TEST bug: it hard-coded 2 -> 3 nights but training nights are all-time and live members
 -- have real attendance (IH 5, Lipan 1, NH 6). The live deltas were exactly +2 then +1 (the future night never counted),
--- so the function was right. T1 now measures the member's real count first and expects +2 / +1. Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
+-- so the function was right. T1 now measures the member's real count first and expects +2 / +1.
+-- RAN on live 2026-10-18 (second run, fixed T1): 56 passed, 0 failed, 7 skipped — IH / Lipan / North Hood all pass
+-- (T1 5+2->7->8, 1+2->3->4, 6+2->8->9); skips: Demo + Granbury (no plain members), S2 x3 (no pure Project Admin),
+-- B2 in IH + Lipan (no Board Member with a unique email). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
 -- run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE items / a fixture document / fixture
 -- statuses it sets itself. The final RAISE is the report. The "ERROR" IS the report.
 -- Per department (needs a DA and two plain members with unique emails; an Officer and another department's DA are
