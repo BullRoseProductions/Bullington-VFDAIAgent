@@ -1,6 +1,8 @@
 -- =====================================================================
 -- READ & SIGN — a DRAWN signature on every acknowledgment (matches equipment sign-out).
 -- Record: Claude gate review PASS 2026-10-17 (recorded BEFORE apply).
+-- APPLIED by hand 2026-10-17. State check: old_3arg false · new_4arg true · anon_exec false · cols 2 · append_only true ·
+-- total_policies 160. RETEST on live: 57 passed, 0 failed, 2 skipped (IH, Lipan, North Hood 19/19 incl. SG1 + A2).
 -- Test: sql/read_sign_RETEST.sql (updated: every sign passes a signature; SG1 blank / non-PNG refused; A2 checks the
 -- stored signature + the roster-name snapshot).
 --
