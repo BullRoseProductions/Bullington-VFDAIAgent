@@ -9,7 +9,7 @@ import {
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
-  Settings as SettingsIcon,
+  Settings as SettingsIcon, BadgeCheck, Grid3x3,
 } from "lucide-react";
 import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
@@ -1773,6 +1773,7 @@ const NAV = [
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: LEADERSHIP },   // Board/DA/Officer sign items; DA/PA edit the list; a member reaches their own read-only view from the dashboard card
   { key: "apparatus", label: "Apparatus", Icon: Truck, roles: ROLES },
+  { key: "qualifications", label: "Qualifications", Icon: BadgeCheck, roles: ROLES },   // members: their own; leadership: the matrix
   { key: "equipment", label: "Equipment", Icon: Briefcase, roles: LEADERSHIP },   // full log: leadership + active equipment managers (isEqMgr in App); members use My Equipment
   { key: "myequipment", label: "My Equipment", Icon: HardHat, roles: ROLES },
   { key: "stationhours", label: "Station Hours", Icon: Clock, roles: ROLES },
@@ -1803,7 +1804,7 @@ const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
 // EXCLUDED ON PURPOSE: dashboard (initial screen + the redirect target — disabling it would loop),
 // settings (support/legal/your-person, and where these toggles are configured), admin + adddept
 // (Project-Admin oversight, not department modules).
-const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
+const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "qualifications", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
 // "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
 // so it follows library's toggle. The sidebar already treats it as library's child for the active state.
 const SCREEN_PARENT = { packet: "library" };
@@ -3140,6 +3141,7 @@ export default function App() {
             ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} setDept={setDept} meId={myMemberId} go={go} />
             : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} go={go} dept={dept} />)}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
+          {screen === "qualifications" && <Qualifications S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
               deep-link, a stale screen) gets their own My Equipment instead — never the department log. */}
           {screen === "equipment" && ((isLeader(role) || isEqMgr)
@@ -20518,6 +20520,336 @@ const ONBOARD_TEMPLATE = [
   { group: "Training", items: ["Station orientation & safety walk-through", "SOG / policy review session", "Firefighter I enrollment (if applicable)", "CPR / BLS scheduled"] },
   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
 ];
+/* ---------------- Qualifications (Phase 3.1 #3) — who can do what ----------------
+   DB layer: sql/qualifications (qualification_types · member_qualifications; drives = supervised_sessions rows with
+   kind 'drive' + counts_toward = the type id). Reads: my_qualifications / dept_qualification_matrix + direct SELECTs of
+   qualification_types (department-readable) and supervised_sessions (leaders read the department's). Writes ONLY
+   through set_qualification_type (DA/PA) · sign_ / revoke_qualification + log_qualification_drive (DA/Officer) · the
+   existing void_supervised_session. Statuses, counts and dates only — no license numbers or documents, ever.
+   Honest by default: no types = "No qualifications set up yet"; nobody holding a type still renders it, all not started.
+   Custody: no sign / revoke / log / void control on the viewer's own record. A drive target never auto-qualifies. */
+const QUAL_KIND = { apparatus_driver: "Driver", apparatus_operator: "Operator", position: "Position" };
+const QUAL_DOT = {
+  qualified: { label: "Qualified", bg: FIRE.greenText, glow: "0 0 6px rgba(47,168,105,.6)" },
+  in_progress: { label: "In progress", bg: FIRE.amberText, glow: "0 0 6px rgba(204,158,82,.6)" },
+  not_started: { label: "Not started", bg: "#2a303a", glow: "none" },
+};
+const qualInitials = (n) => String(n || "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+const qualShort = (n) => { const p = String(n || "").trim().split(/\s+/); return p.length > 1 ? `${p[0][0]}. ${p[p.length - 1]}` : (p[0] || ""); };
+function QualDot({ status, size = 12 }) {
+  const d = QUAL_DOT[status] || QUAL_DOT.not_started;
+  return <i title={d.label} aria-label={d.label} style={{ display: "inline-block", width: size, height: size, borderRadius: "50%", background: d.bg, boxShadow: d.glow }} />;
+}
+function QualSection({ icon: Icon, label, color, right }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".09em", textTransform: "uppercase", margin: "6px 2px 11px", color }}>
+      <Icon size={14} />{label}<span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${color}, transparent)`, opacity: 0.4 }} />{right}
+    </div>
+  );
+}
+function Qualifications({ S, role, members, meId, notify }) {
+  const leader = hasAny(role, CANMANAGE_ROLES);          // the matrix: Board/DA/Officer — dept_qualification_matrix's gate
+  const ops = hasAny(role, CANMANAGE_OPS_ROLES);         // sign / revoke / log / void: DA/Officer — is_canmanage_ops()
+  const configurer = hasAny(role, DEPT_ADMIN_ROLES);     // set up the list: DA/PA — set_qualification_type's is_dept_admin()
+  const [mine, setMine] = useState(null);
+  const [mineErr, setMineErr] = useState(false);
+  const [mx, setMx] = useState(null);                    // { types, members, cells }
+  const [mxErr, setMxErr] = useState(false);
+  const [types, setTypes] = useState(null);              // every type incl. inactive (config list)
+  const [drives, setDrives] = useState(null);
+  const [apparatus, setApparatus] = useState([]);
+  const [tick, setTick] = useState(0);
+  const [selType, setSelType] = useState(null);
+  const reload = () => setTick((t) => t + 1);
+  useEffect(() => {
+    let alive = true;
+    supabase.rpc("my_qualifications").then(({ data, error }) => { if (!alive) return; if (error || !Array.isArray(data)) { setMineErr(true); return; } setMineErr(false); setMine(data); });
+    if (leader) supabase.rpc("dept_qualification_matrix").then(({ data, error }) => { if (!alive) return; if (error || !data || !Array.isArray(data.types)) { setMxErr(true); return; } setMxErr(false); setMx(data); });
+    supabase.from("qualification_types").select("id, name, kind, apparatus_id, threshold_drives, sort_order, active").order("sort_order").order("name")
+      .then(({ data, error }) => { if (alive && !error && Array.isArray(data)) setTypes(data); });
+    if (leader) supabase.from("supervised_sessions").select("id, member_id, apparatus_id, hours, occurred_on, supervisor_id, counts_toward, note, voided_at, voided_by, void_reason, created_at")
+      .eq("kind", "drive").neq("counts_toward", "probation").order("occurred_on", { ascending: false }).order("created_at", { ascending: false }).limit(40)
+      .then(({ data, error }) => { if (alive && !error && Array.isArray(data)) setDrives(data); });
+    return () => { alive = false; };
+  }, [tick, leader]);
+  useEffect(() => {   // apparatus names (all, incl. retired — a type or drive may point at one) for labels and pickers
+    supabase.from("apparatus").select("id, name, type, deleted_at").order("name").then(({ data, error }) => { if (!error && Array.isArray(data)) setApparatus(data); });
+  }, [tick]);
+  useReconnect(() => { if (mineErr || mxErr) reload(); });
+  const nameOf = (id) => (members || []).find((m) => m.id === id)?.name || (mx?.members || []).find((m) => m.member_id === id)?.name || "—";
+  const appName = (id) => apparatus.find((a) => a.id === id)?.name || "apparatus";
+  const activeTypes = mx?.types || [];
+  const cellOf = (mid, tid) => (mx?.cells || []).find((c) => c.member_id === mid && c.type_id === tid) || { status: "not_started", drives: 0 };
+  const sel = activeTypes.find((t) => t.id === selType) || activeTypes.find((t) => t.kind !== "position") || activeTypes[0] || null;
+
+  async function signOff(mid, tid) {
+    const note = await noirPrompt({ title: `Sign off ${nameOf(mid)}?`, body: "They'll show as qualified. A short officer note is optional — no license numbers or personal records.", label: "Note (optional)", initial: "", multiline: false, required: false, confirmLabel: "Sign off" });
+    if (note === null || note === undefined) return;
+    const { error } = await supabase.rpc("sign_qualification", { p_member_id: mid, p_qualification_type_id: tid, p_note: String(note).trim() || null });
+    if (error) { notify({ kind: "error", title: "Couldn't sign off", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: `${nameOf(mid)} signed off.` }); reload();
+  }
+  async function revoke(mid, tid) {
+    const reason = await noirPrompt({ title: `Revoke ${nameOf(mid)}'s qualification?`, body: "They'll no longer show as qualified. The sign-off and your reason stay on the record.", label: "Reason (required)", initial: "", multiline: false, required: true, confirmLabel: "Revoke" });
+    if (!reason || !String(reason).trim()) return;
+    const { error } = await supabase.rpc("revoke_qualification", { p_member_id: mid, p_qualification_type_id: tid, p_reason: String(reason).trim() });
+    if (error) { notify({ kind: "error", title: "Couldn't revoke", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: "Qualification revoked — the record keeps the reason." }); reload();
+  }
+  async function voidDrive(d) {
+    const reason = await noirPrompt({ title: "Void this drive?", body: "It stops counting toward the qualification. The entry stays on the log, marked void.", label: "Reason (required)", initial: "", multiline: false, required: true, confirmLabel: "Void" });
+    if (!reason || !String(reason).trim()) return;
+    const { error } = await supabase.rpc("void_supervised_session", { p_id: d.id, p_reason: String(reason).trim() });
+    if (error) { notify({ kind: "error", title: "Couldn't void the drive", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: "Drive voided." }); reload();
+  }
+  const mineList = Array.isArray(mine) ? mine : [];
+  return (
+    <PageShell band watermark="QUALS" kicker="QUALIFICATIONS" title={leader ? "Who can do what" : "Your qualifications"}
+      sub={leader ? "Every member's qualifications at a glance — driver & operator check-offs per apparatus, with supervised drives logged toward each one." : "What you're qualified on and what you're working toward. An officer signs each one off."}>
+      <NoirSkin>
+      {/* your own — everyone, read-only */}
+      <QualSection icon={BadgeCheck} label="Your qualifications" color="#6FD0E0" />
+      {mineErr && !mine ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.amberText }}>Couldn't load your qualifications. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
+        : mine === null ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
+        : mineList.length === 0 ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }}>No qualifications set up yet.</Card>
+        : <div style={{ ...FS.cardNoir, borderRadius: 14, padding: 0, overflow: "hidden", marginBottom: 19 }}>
+            {mineList.map((q, i) => {
+              const pct = q.threshold_drives ? Math.min(100, Math.round((q.drives / q.threshold_drives) * 100)) : null;
+              return (
+                <div key={q.type_id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", borderBottom: i === mineList.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+                  <QualDot status={q.status} />
+                  <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{q.name} <span style={{ fontWeight: 400, fontSize: 11, color: FIRE.textMuted }}>· {QUAL_KIND[q.kind]}{q.apparatus_name ? ` · ${q.apparatus_name}` : ""}</span></div>
+                    <div style={{ fontSize: 10.5, marginTop: 2, color: q.status === "qualified" ? FIRE.greenText : q.status === "in_progress" ? FIRE.amberText : FIRE.textMuted }}>
+                      {q.status === "qualified" ? `Qualified · signed off by ${q.signed_off_by_name || "an officer"}${q.signed_off_at ? ` · ${probDate(String(q.signed_off_at).slice(0, 10))}` : ""}`
+                        : q.status === "in_progress" ? `In progress · ${q.drives}${q.threshold_drives ? ` of ${q.threshold_drives}` : ""} supervised drive${q.drives === 1 ? "" : "s"}` : "Not started"}
+                    </div>
+                  </div>
+                  {pct != null && q.status !== "qualified" && <span style={{ width: 90, height: 7, borderRadius: 4, background: "rgba(255,255,255,.06)", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${pct}%`, borderRadius: 4, background: `linear-gradient(90deg, ${FIRE.amber || "#CC9E52"}, ${FIRE.amberText})` }} /></span>}
+                </div>
+              );
+            })}
+          </div>}
+
+      {/* the matrix + detail + drive log — leadership */}
+      {leader && (<>
+        <QualSection icon={Grid3x3} label="Qualification matrix" color="#6FD0E0" />
+        {mxErr && !mx ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.amberText }}>Couldn't load the matrix. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
+          : mx === null ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
+          : activeTypes.length === 0 ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }}>No qualifications set up yet.{configurer ? " Add your department's first one under Manage qualifications below." : " A Department Admin sets them up."}</Card>
+          : (<>
+            <div style={{ display: "flex", gap: 14, margin: "0 2px 12px", fontSize: 10, color: FIRE.textMuted }}>{["qualified", "in_progress", "not_started"].map((k) => <span key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}><QualDot status={k} size={9} />{QUAL_DOT[k].label}</span>)}</div>
+            <div style={{ ...FS.cardNoir, borderRadius: 14, padding: "4px 6px 6px", marginBottom: 19, overflowX: "auto" }}>
+              <div style={{ minWidth: 150 + activeTypes.length * 30 }}>
+                <div style={{ display: "grid", gridTemplateColumns: `minmax(130px, 1fr) repeat(${activeTypes.length}, 30px)`, alignItems: "end", padding: "10px 6px 9px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                  <div style={{ fontSize: 9, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".05em" }}>{mx.members.length} member{mx.members.length === 1 ? "" : "s"}</div>
+                  {activeTypes.map((t) => <button key={t.id} onClick={() => setSelType(t.id)} title={`${t.name}${t.apparatus_name ? ` · ${t.apparatus_name}` : ""}`}
+                    style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 9, color: sel?.id === t.id ? "#6FD0E0" : FIRE.textSecondary, writingMode: "vertical-rl", transform: "rotate(180deg)", justifySelf: "center", height: 64, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: "none", border: "none", padding: 0, cursor: "pointer" }}>{t.name}</button>)}
+                </div>
+                {mx.members.length === 0 ? <div style={{ padding: 12, fontSize: 12.5, color: FIRE.textMuted }}>No active members.</div> : mx.members.map((m, i) => (
+                  <div key={m.member_id} style={{ display: "grid", gridTemplateColumns: `minmax(130px, 1fr) repeat(${activeTypes.length}, 30px)`, alignItems: "center", padding: "8px 6px", borderBottom: i === mx.members.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <span style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10, color: "#E6C078", background: "linear-gradient(160deg, #1c2430, #11151b)", border: `1px solid ${FIRE.line2Noir}` }}>{qualInitials(m.name)}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: FIRE.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{qualShort(m.name)}</span>
+                    </div>
+                    {activeTypes.map((t) => <span key={t.id} style={{ display: "flex", justifyContent: "center" }}><QualDot status={cellOf(m.member_id, t.id).status} /></span>)}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {sel && <QualDetail type={sel} mx={mx} cellOf={cellOf} meId={meId} ops={ops} appName={appName} apparatus={apparatus} onSign={signOff} onRevoke={revoke} />}
+            {activeTypes.length > 1 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "-4px 0 18px" }}>{activeTypes.map((t) => <button key={t.id} onClick={() => setSelType(t.id)} style={{ ...FS.btn, padding: "4px 10px", fontSize: 11, borderColor: sel?.id === t.id ? "#6FD0E0" : undefined, color: sel?.id === t.id ? "#6FD0E0" : undefined }}>{t.name}</button>)}</div>}
+            <QualSection icon={Clock} label="Recent drive log" color={FIRE.textSecondary} />
+            <QualDriveLog drives={drives} activeTypes={types || []} nameOf={nameOf} appName={appName} meId={meId} ops={ops} onVoid={voidDrive} />
+            {ops && <QualLogDrive types={activeTypes.filter((t) => t.kind !== "position")} members={mx.members} meId={meId} notify={notify} onLogged={reload} />}
+          </>)}
+      </>)}
+
+      {configurer && <QualConfig types={types} apparatus={apparatus} notify={notify} onChanged={reload} />}
+      <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", margin: "14px 0 4px" }}>Statuses, counts &amp; dates only — no license numbers or documents are stored here.</div>
+      </NoirSkin>
+    </PageShell>
+  );
+}
+// One qualification's card: who's qualified (chips) and who's working toward it (n / target bars). Officers sign / revoke.
+function QualDetail({ type, mx, cellOf, meId, ops, appName, apparatus, onSign, onRevoke }) {
+  const rows = (mx.members || []).map((m) => ({ m, c: cellOf(m.member_id, type.id) }));
+  const qualified = rows.filter((r) => r.c.status === "qualified");
+  const working = rows.filter((r) => r.c.status === "in_progress").sort((a, b) => b.c.drives - a.c.drives);
+  const rest = rows.filter((r) => r.c.status === "not_started");
+  const rig = type.apparatus_id ? apparatus.find((a) => a.id === type.apparatus_id) : null;
+  const [pick, setPick] = useState("");
+  const isApp = type.kind !== "position";
+  return (<>
+    <QualSection icon={isApp ? Truck : BadgeCheck} label={`${type.name}${isApp ? ` · ${QUAL_KIND[type.kind].toLowerCase()}` : ""}`} color="#E6C078" />
+    <div style={{ position: "relative", overflow: "hidden", ...FS.cardNoir, borderRadius: 14, padding: 14, marginBottom: 11 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <span style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#E6C078", background: "linear-gradient(160deg, rgba(216,162,74,.22), rgba(216,162,74,.08))", border: "1px solid #E6C078", boxShadow: "0 0 16px rgba(216,162,74,.26)" }}>{isApp ? <Truck size={22} /> : <BadgeCheck size={22} />}</span>
+        <div><h3 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, margin: 0, lineHeight: 1.1, color: "#fff" }}>{isApp ? appName(type.apparatus_id) : type.name}</h3>
+          <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>{isApp ? [QUAL_KIND[type.kind], rig?.type, rig?.deleted_at ? "retired" : null, type.threshold_drives ? `target ${type.threshold_drives} drives` : "no drive target"].filter(Boolean).join(" · ") : "Position qualification"}</div></div>
+      </div>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textSecondary, margin: "13px 0 8px" }}>Checked off &amp; qualified</div>
+      {qualified.length === 0 ? <div style={{ fontSize: 12, color: FIRE.textMuted }}>Nobody yet.</div> : (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {qualified.map(({ m, c }) => (
+            <span key={m.member_id} title={c.signed_off_by_name ? `Signed off by ${c.signed_off_by_name}${c.signed_off_at ? ` · ${probDate(String(c.signed_off_at).slice(0, 10))}` : ""}` : undefined}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, borderRadius: 8, padding: "5px 9px 5px 6px", background: "rgba(47,168,105,.1)", border: "1px solid rgba(47,168,105,.38)", color: FIRE.greenText }}>
+              <span style={{ width: 19, height: 19, borderRadius: 6, background: "rgba(47,168,105,.2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 8.5 }}>{qualInitials(m.name)}</span>
+              {qualShort(m.name)}
+              {ops && m.member_id !== meId && <button title="Revoke" onClick={() => onRevoke(m.member_id, type.id)} style={{ background: "none", border: "none", padding: 0, marginLeft: 2, cursor: "pointer", color: FIRE.textMuted, display: "flex" }}><X size={12} /></button>}
+            </span>
+          ))}
+        </div>
+      )}
+      {isApp && (<>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 10, letterSpacing: ".06em", textTransform: "uppercase", color: FIRE.textSecondary, margin: "13px 0 4px" }}>Working toward qualification</div>
+        {working.length === 0 ? <div style={{ fontSize: 12, color: FIRE.textMuted }}>No one has logged a drive toward this yet.</div> : working.map(({ m, c }) => {
+          const pct = type.threshold_drives ? Math.min(100, Math.round((c.drives / type.threshold_drives) * 100)) : null;
+          return (
+            <div key={m.member_id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 0", borderTop: `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+              <span style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10, color: FIRE.amberText, background: "linear-gradient(160deg, #1c2430, #11151b)", border: "1px solid rgba(204,158,82,.4)" }}>{qualInitials(m.name)}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: FIRE.textPrimary, flexShrink: 0 }}>{qualShort(m.name)}</span>
+              <span style={{ flex: "1 1 60px", height: 7, borderRadius: 4, background: "rgba(255,255,255,.06)", overflow: "hidden" }}>{pct != null && <i style={{ display: "block", height: "100%", width: `${pct}%`, borderRadius: 4, background: `linear-gradient(90deg, #CC9E52, ${FIRE.amberText})` }} />}</span>
+              <span style={{ fontSize: 10.5, color: FIRE.amberText, fontWeight: 700, flexShrink: 0, textAlign: "right", ...FS.num }}>{c.drives}{type.threshold_drives ? ` / ${type.threshold_drives}` : ""} drv</span>
+              {ops && m.member_id !== meId && <button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11 }} onClick={() => onSign(m.member_id, type.id)}>Sign off</button>}
+            </div>
+          );
+        })}
+      </>)}
+      {ops && rest.filter((r) => r.m.member_id !== meId).length > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+          <select style={{ ...FS.input, padding: "5px 9px", fontSize: 12, width: "auto", maxWidth: 220 }} value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">Sign off someone else…</option>
+            {rest.filter((r) => r.m.member_id !== meId).map(({ m }) => <option key={m.member_id} value={m.member_id}>{m.name}</option>)}
+          </select>
+          <button style={FS.btn} disabled={!pick} onClick={() => { onSign(pick, type.id); setPick(""); }}>Sign off</button>
+          {isApp && <span style={{ fontSize: 10.5, color: FIRE.textMuted }}>The drive target is guidance — your judgment decides.</span>}
+        </div>
+      )}
+    </div>
+  </>);
+}
+function QualDriveLog({ drives, activeTypes, nameOf, appName, meId, ops, onVoid }) {
+  if (drives === null) return <Card padding={14} style={{ marginBottom: 12, fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>;
+  if (drives.length === 0) return <Card padding={14} style={{ marginBottom: 12, fontSize: 13, color: FIRE.textMuted }}>No supervised drives logged yet.</Card>;
+  return (
+    <div style={{ ...FS.cardNoir, borderRadius: 14, padding: 0, overflow: "hidden", marginBottom: 12 }}>
+      {drives.map((d, i) => {
+        const dt = new Date(`${String(d.occurred_on).slice(0, 10)}T12:00:00`);
+        const voided = !!d.voided_at;
+        const tname = activeTypes.find((t) => t.id === d.counts_toward)?.name;
+        return (
+          <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 14px", borderBottom: i === drives.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, opacity: voided ? 0.55 : 1, flexWrap: "wrap" }}>
+            <div style={{ width: 38, textAlign: "center", flexShrink: 0 }}>
+              <div style={{ fontSize: 8.5, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".05em" }}>{dt.toLocaleDateString("en-US", { month: "short" })}</div>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, lineHeight: 1, color: FIRE.textPrimary }}>{dt.getDate()}</div>
+            </div>
+            <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, textDecoration: voided ? "line-through" : "none" }}>{qualShort(nameOf(d.member_id))} · {appName(d.apparatus_id)}{tname ? <span style={{ fontWeight: 400, color: FIRE.textMuted }}> · {tname}</span> : null}</div>
+              <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>Supervised by {qualShort(nameOf(d.supervisor_id))} · {probNum(d.hours)} hr{d.note ? ` · ${d.note}` : ""}</div>
+              {voided && <div style={{ fontSize: 10.5, color: FIRE.redText, marginTop: 2 }}>Voided — {d.void_reason} · doesn't count</div>}
+            </div>
+            {!voided && <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, color: FIRE.greenText, background: "rgba(47,168,105,.1)", border: "1px solid rgba(47,168,105,.35)", borderRadius: 7, padding: "4px 8px", flexShrink: 0 }}>+1</span>}
+            {ops && !voided && d.member_id !== meId && <button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, color: FIRE.deleteRed }} onClick={() => onVoid(d)}>Void</button>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function QualLogDrive({ types, members, meId, notify, onLogged }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ member: "", type: "", hours: "", date: probTodayYMD(), supervisor: "", note: "" });
+  const [busy, setBusy] = useState(false);
+  useEditorOpen(open && (!!f.member || !!f.hours));
+  if (types.length === 0) return null;
+  const people = (members || []).filter((m) => m.member_id !== meId);
+  async function save() {
+    const hours = Number(f.hours);
+    if (!f.member || !f.type) { notify({ kind: "error", title: "Pick the member and the qualification" }); return; }
+    if (!(hours > 0 && hours <= 24)) { notify({ kind: "error", title: "Check the hours", text: "Hours must be more than 0 and at most 24." }); return; }
+    setBusy(true);
+    const { error } = await supabase.rpc("log_qualification_drive", { p_member_id: f.member, p_qualification_type_id: f.type, p_hours: hours, p_occurred_on: f.date, p_supervisor_id: f.supervisor || null, p_note: f.note.trim() || null });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't log the drive", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: "Drive logged." });
+    setF((x) => ({ ...x, member: "", hours: "", note: "" })); setOpen(false); onLogged();
+  }
+  const lab = { display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary };
+  const inp = { ...FS.input, padding: "6px 9px" };
+  if (!open) return (
+    <button onClick={() => setOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: "#3FB0C9", background: "rgba(63,176,201,.08)", border: "1px dashed rgba(63,176,201,.45)", borderRadius: 11, padding: 12, marginBottom: 19, cursor: "pointer" }}><Plus size={16} /> Log a supervised drive</button>
+  );
+  return (
+    <Card padding="12px 14px" style={{ marginBottom: 19, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label style={lab}>Member<select style={{ ...inp, maxWidth: 190 }} value={f.member} onChange={(e) => setF((x) => ({ ...x, member: e.target.value }))}><option value="">—</option>{people.map((m) => <option key={m.member_id} value={m.member_id}>{m.name}</option>)}</select></label>
+      <label style={lab}>Toward<select style={{ ...inp, maxWidth: 190 }} value={f.type} onChange={(e) => setF((x) => ({ ...x, type: e.target.value }))}><option value="">—</option>{types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.apparatus_name ? ` (${t.apparatus_name})` : ""}</option>)}</select></label>
+      <label style={{ ...lab, width: 80 }}>Hours<input type="number" min="0.25" max="24" step="0.25" style={inp} value={f.hours} onChange={(e) => setF((x) => ({ ...x, hours: e.target.value }))} /></label>
+      <label style={lab}>Date<input type="date" max={probTodayYMD()} style={inp} value={f.date} onChange={(e) => setF((x) => ({ ...x, date: e.target.value }))} /></label>
+      <label style={lab}>Supervisor<select style={{ ...inp, maxWidth: 170 }} value={f.supervisor} onChange={(e) => setF((x) => ({ ...x, supervisor: e.target.value }))}><option value="">Me</option>{people.filter((m) => m.member_id !== f.member).map((m) => <option key={m.member_id} value={m.member_id}>{m.name}</option>)}</select></label>
+      <label style={{ ...lab, flex: "1 1 160px" }}>Note (optional)<input style={inp} maxLength={500} value={f.note} onChange={(e) => setF((x) => ({ ...x, note: e.target.value }))} placeholder="e.g. drill night, backing & spotting" /></label>
+      <button style={FS.btnPrimary} disabled={busy} onClick={save}>{busy ? "Saving…" : "Log drive"}</button>
+      <button style={FS.btn} disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+    </Card>
+  );
+}
+/* DA / PA: the department's own list. Types are deactivated, never deleted. Kind + apparatus lock once used (the RPC
+   says so). Retired rigs are left out of the picker; a type already on one keeps showing it. */
+function QualConfig({ types, apparatus, notify, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState(null);   // a type row being edited, or { new: true }
+  const [busy, setBusy] = useState(false);
+  useEditorOpen(!!edit);
+  const live = apparatus.filter((a) => !a.deleted_at);
+  async function save() {
+    const t = edit;
+    if (!String(t.name || "").trim()) { notify({ kind: "error", title: "Give it a name" }); return; }
+    const isApp = t.kind !== "position";
+    const thr = t.threshold_drives === "" || t.threshold_drives == null ? null : Number(t.threshold_drives);
+    setBusy(true);
+    const { error } = await supabase.rpc("set_qualification_type", { p_id: t.new ? null : t.id, p_name: String(t.name).trim(), p_kind: t.kind,
+      p_apparatus_id: isApp ? (t.apparatus_id || null) : null, p_threshold_drives: isApp ? thr : null, p_sort_order: Number(t.sort_order) || 0, p_active: t.active !== false });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save the qualification", text: error.message || "Please try again." }); return; }
+    notify({ kind: "success", text: t.new ? "Qualification added." : "Qualification saved." }); setEdit(null); onChanged();
+  }
+  const inp = { ...FS.input, padding: "6px 9px", fontSize: 12 };
+  const lab = { display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary };
+  return (<>
+    <QualSection icon={Pencil} label="Manage qualifications" color={FIRE.textSecondary} right={<button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, textTransform: "none", letterSpacing: 0 }} onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Show"}</button>} />
+    {open && (
+      <Card padding="10px 14px" style={{ marginBottom: 14 }}>
+        {(types || []).length === 0 && !edit && <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "6px 0" }}>Your department hasn't set up any qualifications. Add driver / operator check-offs per apparatus, or positions like Interior or OIC.</div>}
+        {(types || []).map((t) => edit && !edit.new && edit.id === t.id ? null : (
+          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, opacity: t.active ? 1 : 0.55, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 200px", minWidth: 0, fontSize: 13, color: FIRE.textPrimary }}>{t.name} <span style={{ fontSize: 11, color: FIRE.textMuted }}>· {QUAL_KIND[t.kind]}{t.apparatus_id ? ` · ${apparatus.find((a) => a.id === t.apparatus_id)?.name || "apparatus"}` : ""}{t.threshold_drives ? ` · target ${t.threshold_drives}` : ""}{t.active ? "" : " · inactive"}</span></div>
+            <button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11 }} disabled={busy} onClick={() => setEdit({ ...t, threshold_drives: t.threshold_drives ?? "" })}>Edit</button>
+          </div>
+        ))}
+        {edit ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", padding: "10px 0 4px" }}>
+            <label style={{ ...lab, flex: "1 1 160px" }}>Name<input style={inp} maxLength={80} value={edit.name || ""} onChange={(e) => setEdit((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. Engine 1 driver" /></label>
+            <label style={lab}>Kind<select style={inp} value={edit.kind} onChange={(e) => setEdit((x) => ({ ...x, kind: e.target.value }))}>{Object.entries(QUAL_KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            {edit.kind !== "position" && (<>
+              <label style={lab}>Apparatus<select style={{ ...inp, maxWidth: 170 }} value={edit.apparatus_id || ""} onChange={(e) => setEdit((x) => ({ ...x, apparatus_id: e.target.value || null }))}>
+                <option value="">— Pick —</option>
+                {live.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {edit.apparatus_id && !live.some((a) => a.id === edit.apparatus_id) && <option value={edit.apparatus_id}>{apparatus.find((a) => a.id === edit.apparatus_id)?.name || "apparatus"} (retired)</option>}
+              </select></label>
+              <label style={{ ...lab, width: 90 }}>Drive target<input type="number" min="1" max="1000" style={inp} value={edit.threshold_drives ?? ""} onChange={(e) => setEdit((x) => ({ ...x, threshold_drives: e.target.value }))} placeholder="none" /></label>
+            </>)}
+            <label style={{ ...lab, width: 64 }}>Order<input type="number" style={inp} value={edit.sort_order ?? 0} onChange={(e) => setEdit((x) => ({ ...x, sort_order: e.target.value }))} /></label>
+            {!edit.new && <label style={{ ...lab, flexDirection: "row", alignItems: "center", gap: 6, paddingBottom: 8 }}><input type="checkbox" checked={edit.active !== false} onChange={(e) => setEdit((x) => ({ ...x, active: e.target.checked }))} /> Active</label>}
+            <button style={FS.btnPrimary} disabled={busy} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+            <button style={FS.btn} disabled={busy} onClick={() => setEdit(null)}>Cancel</button>
+          </div>
+        ) : <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => setEdit({ new: true, name: "", kind: "apparatus_driver", apparatus_id: null, threshold_drives: "", sort_order: (types || []).length + 1, active: true })}><Plus size={14} /> Add qualification</button>}
+        <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 8 }}>Once a qualification has sign-offs or drives, its kind and apparatus are locked — add a new one instead. Deactivating hides it without deleting anything.</div>
+      </Card>
+    )}
+  </>);
+}
 /* ---------------- Probation (Phase 3.1 #2) — the path to active ----------------
    DB layer: sql/probation_2026-10-18.sql (applied + RETEST 56/0/7). The UI only READS the computed status
    (my_probation_status / member_probation_status / dept_probation_board) and writes through the four RPCs
@@ -20763,7 +21095,7 @@ function ProbSupervisedLog({ memberId, members, meId, canLog, notify, onChanged 
       .then(({ data, error }) => { if (!alive) return; if (error || !Array.isArray(data)) { setErr(true); return; } setErr(false); setRows(data); });
     return () => { alive = false; };
   }, [memberId, tick]);
-  useEffect(() => { if (canLog) supabase.from("apparatus").select("id, name").order("name").then(({ data, error }) => { if (!error && Array.isArray(data)) setApparatus(data); }); }, [canLog]);
+  useEffect(() => { if (canLog) supabase.from("apparatus").select("id, name").is("deleted_at", null).order("name").then(({ data, error }) => { if (!error && Array.isArray(data)) setApparatus(data); }); }, [canLog]);   // retired rigs left out
   const nameOf = (id) => (members || []).find((m) => m.id === id)?.name || "—";
   const supervisors = (members || []).filter((m) => m.id !== memberId && m.status !== "Inactive" && isAssignable(m));
   async function log() {
@@ -21224,6 +21556,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
   // one member's completion: the featured member from live `checks`, everyone else from the overview read
   const progressOf = (m) => {
     if (!items || !items.length) return null;
+    if (probOn && canSign && boardRows === null && String(m.id) !== String(selId)) return null;   // wait for the board's computed status ("—"), never a low count
     const bd = !probOn || String(m.id) === String(selId) ? null : (boardRows || []).find((r) => r.member_id === m.id)?.detail;
     if (bd && Array.isArray(bd.items) && bd.items.length) {   // the server's computed status — auto kinds + legacy ticks included
       const byId = Object.fromEntries(items.map((it) => [it.id, it]));
@@ -21393,6 +21726,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
       )}
       {/* PROBATION BOARD — ready for the vote + every probationary member's gate (dept_probation_board) */}
       {!editMode && probOn && canSign && <ProbationBoard onPick={(id) => setSelId(id)} refreshKey={boardTick} onRows={setBoardRows} />}
+      {!editMode && probOn && !canSign && <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 12px" }}>Probation progress, reviews and supervised time are visible to the Board, Department Admins and Officers. You can set up the checklist and the gate here.</div>}
       {/* OVERVIEW is rendered here, above the featured member */}
       {/* OVERVIEW — tiles + a progress ring per probationary member (click to feature them) */}
       {!editMode && probMembers.length > 0 && items && items.length > 0 && (<>
