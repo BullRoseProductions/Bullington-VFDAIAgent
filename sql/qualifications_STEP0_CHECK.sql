@@ -2,6 +2,15 @@
 -- PHASE 3.1 #3 (Qualification matrix + driver/operator check-offs + drive log) — Step 0. READ-ONLY, one result set.
 -- Confirms what #3 reuses (supervised_sessions + its RPCs), the apparatus shape + RLS, that the new names are free,
 -- and how many supervised drives already exist (so reusing counts_toward can't collide with live data).
+-- RAN on live 2026-10-18. Findings: supervised_sessions as built (counts_toward text NOT NULL default 'probation', <= 60
+-- chars; kind CHECK includes 'drive'; void trio CHECK) and NO ROWS yet. log_/void_supervised_session gate on
+-- is_canmanage_ops(), anon revoked. apparatus: id, department_id, name, type, status, in_service, station_id, soft
+-- delete (deleted_at/by/name), costs; rows Demo 4 · Granbury 0 · IH 8 · Lipan 11 · NH 11. All 8 new names free.
+-- is_canmanage / is_canmanage_ops / is_dept_admin department-scoped; is_department_admin NOT (known). onboarding_items
+-- edit gate = is_dept_admin() + dept. Total policies 163.
+-- SIDE FINDING (not #3): apparatus UPDATE policy "members update apparatus" is department-only — ANY member of the
+-- department can update any apparatus column (costs, deleted_at, in_service). Possibly intended for member checks;
+-- record for a separate RLS-normalization look, don't fix in isolation.
 -- =====================================================================
 SELECT 1 AS ord, 'supervised_sessions col' AS what, column_name AS name,
        data_type || CASE WHEN is_nullable = 'NO' THEN ' NOT NULL' ELSE '' END || coalesce(' = ' || column_default, '') AS detail
