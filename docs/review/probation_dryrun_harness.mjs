@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 const R = "/Users/ashleabullington/projects/Bullington-VFDAIAgent/sql/";
 const rsBase = ["read_sign_2026-10-17.sql", "read_sign_da_only_2026-10-17.sql", "read_sign_signature_2026-10-17.sql", "read_sign_records_2026-10-18.sql"].map((f) => readFileSync(R + f, "utf8")).join("\n");
 const soi = readFileSync(R + "onboarding_selfsign_block.sql", "utf8");
-const mig = readFileSync(R + "probation_DRAFT.sql", "utf8"), ret = readFileSync(R + "probation_RETEST.sql", "utf8"), rsRet = readFileSync(R + "read_sign_RETEST.sql", "utf8");
+const mig = readFileSync(R + "probation_2026-10-18.sql", "utf8"), ret = readFileSync(R + "probation_RETEST.sql", "utf8"), rsRet = readFileSync(R + "read_sign_RETEST.sql", "utf8");
 const A = "00000000-0000-0000-0000-00000000000a", B = "00000000-0000-0000-0000-00000000000b", C = "00000000-0000-0000-0000-00000000000c";
 let mock = readFileSync(new URL("./rs.mjs", import.meta.url), "utf8").match(/const mock = `([\s\S]*?)`;/)[1].replaceAll("${A}", A).replaceAll("${B}", B);
 mock = mock.replace("CREATE TABLE members (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), department_id uuid, email text, name text, access text[], status text DEFAULT 'Active');",
@@ -34,6 +34,8 @@ INSERT INTO onboarding_items (department_id, category, label, sort_order) VALUES
 INSERT INTO onboarding_items (department_id, category, label, is_mentor) VALUES ('${C}','People & access','Mentor assigned',true);
 INSERT INTO onboarding_progress (department_id, member_id, item_id, done) SELECT '${C}', m.id, i.id, true FROM members m, onboarding_items i WHERE m.email='p1@c' AND i.label='Gear issued' AND i.department_id='${C}';
 INSERT INTO member_separation VALUES ((SELECT id FROM members WHERE email='gone@a'), '${A}', '2026-01-01');
+WITH t AS (INSERT INTO training_sessions (department_id, title, date) SELECT department_id, 'real night', date '2026-05-01' FROM members WHERE email IN ('m1@a','p1@c') RETURNING id, department_id)
+INSERT INTO session_attendance (department_id, session_id, member_id) SELECT t.department_id, t.id, m.id FROM t JOIN members m ON m.department_id = t.department_id AND m.email IN ('m1@a','p1@c');
 `;
 const show = (e) => e.message.split("\n").filter((l) => /PASS|FAIL|SKIP|passed|—/.test(l)).join("\n");
 const brief = (e) => e.message.split("\n").filter((l) => /FAIL|passed/.test(l)).join(" | ");

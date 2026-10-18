@@ -1,5 +1,8 @@
 -- =====================================================================
--- RETEST for probation_2026-10-18.sql (Phase 3.1 #2). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
+-- RETEST for probation_2026-10-18.sql (Phase 3.1 #2). RAN on live 2026-10-18 (first run): 53 passed, 3 failed, 7 skipped —
+-- the 3 FAILs were all T1, a TEST bug: it hard-coded 2 -> 3 nights but training nights are all-time and live members
+-- have real attendance (IH 5, Lipan 1, NH 6). The live deltas were exactly +2 then +1 (the future night never counted),
+-- so the function was right. T1 now measures the member's real count first and expects +2 / +1. Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
 -- run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE items / a fixture document / fixture
 -- statuses it sets itself. The final RAISE is the report. The "ERROR" IS the report.
 -- Per department (needs a DA and two plain members with unique emails; an Officer and another department's DA are
@@ -353,9 +356,13 @@ BEGIN
         v_pass := v_pass + 1; rpt := rpt || format('   PASS  K5 ack: outside the audience -> not_required; broken link -> not_configured, gate reopens%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  K5 audience %s link %s cleared %s%s', v_err, v_e2, v_js->>'cleared_to_run', chr(10)); END IF;
 
-      -- T1 training nights: counts sessions attended on/after the start, up to today (not before, not future)
+      -- T1 training nights: all-time, up to today (future never). RELATIVE to A's real attendance (live members have some):
+      -- baseline counted independently as the owner; two past + one future fixture night -> +2; one more past -> +1 = target.
+      SELECT count(DISTINCT a.session_id) INTO v_k FROM public.session_attendance a
+        JOIN public.training_sessions t ON t.id = a.session_id AND t.department_id = rec.dept_id
+       WHERE a.member_id = v_a_id AND t.date <= v_today;
       INSERT INTO public.onboarding_items (department_id, category, label, sort_order, phase, kind, hours_target, hours_source)
-        VALUES (rec.dept_id, 'RETEST', 'RETEST training nights', 9006, 'onboarding', 'hours', 3, 'training_nights') RETURNING id INTO v_doc;
+        VALUES (rec.dept_id, 'RETEST', 'RETEST training nights', 9006, 'onboarding', 'hours', v_k + 3, 'training_nights') RETURNING id INTO v_doc;
       WITH s AS (INSERT INTO public.training_sessions (department_id, title, date)
                  SELECT rec.dept_id, 'RETEST night ' || x, v_today + x FROM unnest(array[-50, -5, 3]) x RETURNING id)
       INSERT INTO public.session_attendance (department_id, session_id, member_id) SELECT rec.dept_id, s.id, v_a_id FROM s;
@@ -369,9 +376,9 @@ BEGIN
       v_js := public.my_probation_status();
       PERFORM set_config('role', 'postgres', true);
       v_e2 := (SELECT e->>'state' || '/' || (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_doc);
-      IF v_err = 'in_progress/2' AND v_e2 = 'met/3' THEN
-        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T1 training nights: all-time up to today (before the start counts, future doesn''t): 2 -> 3 = met%s', chr(10));
-      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T1 %s -> %s%s', v_err, v_e2, chr(10)); END IF;
+      IF v_err = format('in_progress/%s', v_k + 2) AND v_e2 = format('met/%s', v_k + 3) THEN
+        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T1 training nights: all-time, future never — %s real + 2 -> %s, +1 -> %s = met%s', v_k, v_k + 2, v_k + 3, chr(10));
+      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T1 baseline %s: %s -> %s (expected in_progress/%s -> met/%s)%s', v_k, v_err, v_e2, v_k + 2, v_k + 3, chr(10)); END IF;
       -- B2 a Board Member can't log supervised time (operational: DA / Officer only)
       IF v_board IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  B2 — no Board Member with a unique email%s', chr(10));
       ELSE
