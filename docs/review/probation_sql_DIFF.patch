@@ -1,0 +1,936 @@
+diff --git a/sql/probation_DRAFT.sql b/sql/probation_DRAFT.sql
+new file mode 100644
+index 0000000..0d802a4
+--- /dev/null
++++ b/sql/probation_DRAFT.sql
+@@ -0,0 +1,564 @@
++-- =====================================================================
++-- PHASE 3.1 #2 — ONBOARDING -> CLEARED-TO-RUN + PROBATION LIFECYCLE (DB layer).
++-- DRAFT — UNREVIEWED. Not applied. Test: sql/probation_RETEST.sql (run AFTER, separately).
++-- Brief: claude/B4C_Phase3.1_Onboarding_Probation_BuildOrder.md (+ decisions 2026-10-17). Step 0: sql/probation_STEP0_CHECK.sql.
++--
++-- EXTENDS the shipped onboarding — onboarding_items / onboarding_progress / set_onboarding_item are NOT rebuilt:
++--   set_onboarding_item's body, every existing policy and the onboarding_progress transition-state grant (authenticated
++--   INSERT/UPDATE, the deferred REVOKE) are left exactly as they are — post-conditions prove it.
++--
++-- WHAT CHANGES:
++--   1. onboarding_items + clears_to_run (default false) · phase ('onboarding' | 'probation', default 'onboarding') ·
++--      kind ('manual' | 'ack' | 'hours' | 'cert', default 'manual') · ack_series_id · hours_target · hours_source ·
++--      cert_name. All defaulted/nullable, so every existing item stays a manual onboarding item that is NOT in the gate.
++--      Still DA-edited through the table's existing DA policies (no new write path).
++--      Indian Harbor's "Probationary Period" items are pre-set to phase 'probation' (DAs can re-assign).
++--   2. member_probation (member_id PK, started_on NULLABLE, note) — the start anchor. Backfilled ONLY for Probationary
++--      members whose member_private.joined_date is set (Step 0: IH 2 of 7, North Hood 2 of 2); everyone else reads
++--      "Probation start not set" — never a made-up day count. DA sets the rest (set_member_probation).
++--   3. probation_milestones (30day / 60day / 90day / final; pending | on_track | needs_work | done; short officer note;
++--      signed_by / signed_at). due_on is COMPUTED at read from started_on (+30 / +60 / +90 / +180 days), not stored, so
++--      a corrected start date can never leave stale due dates behind (a deliberate divergence from the brief's column).
++--   4. supervised_sessions — the ride-along / drive / shift log (built here, reused by #3). Leader-logged (D4).
++--   All three new tables: RLS on, SELECT-only grant, ONE read policy each — own row, or Board/DA/Officer of the
++--   department (is_canmanage()); zero write policies, zero write grants. Writes go through the RPCs only.
++--
++--   RPCs (SECURITY DEFINER, department-scoped, never touch the locked verification column):
++--     set_member_probation(member, started_on, note)        — a DA of the department (is_dept_admin()); not self.
++--     set_probation_milestone(member, kind, status, note)    — Board/DA/Officer (is_canmanage()); not self; the member
++--                                                             must be Probationary in the caller's department.
++--     log_supervised_session(member, kind, hours, occurred_on, apparatus?, supervisor?, note?)
++--                                                           — Board/DA/Officer (is_canmanage()); not self; supervisor
++--                                                             (defaults to the caller) is in the department and is
++--                                                             never the member; apparatus (if any) in the department.
++--     my_probation_status()                                 — the caller's own path (jsonb).
++--     member_probation_status(member)                       — a leader viewing one member's path (to sign it); a
++--                                                             member may call it for themself only. (ADDITION to the
++--                                                             brief: the officer screen needs the per-member detail.)
++--     dept_probation_board()                                — Board/DA/Officer: every probationary member, honest
++--                                                             denominator (not Inactive, not former, not Project Admin),
++--                                                             with cleared_to_run + ready_for_vote. Read-time only.
++--   Internal (NOT callable by members): probation_item_states(member, dept), probation_status(member, dept).
++--
++-- RULES (computed at read, America/Chicago):
++--   item satisfied — manual: an onboarding_progress row done (mentor item: members.mentor_id set). A done row with no
++--     checked_by reads 'done_unrecorded' ("Done — sign-off not recorded"; legacy direct ticks — not backfilled).
++--     ack: Level 1 only — the linked series (this department, requires a signature, published) is signed at its CURRENT
++--     version (and within 12 months when annual) — the same rule as dept_read_sign_compliance. A member outside the
++--     document's audience can't sign it, so for them the item reads 'not_required' and counts as satisfied. A missing /
++--     unpublished link reads 'not_configured' and is NOT satisfied. No roster / crediting block (Level 2 is a follow-up).
++--     hours: hours_source 'supervised' (all logged sessions) | 'ride_along' | 'drive' | 'shift' (that kind) |
++--     'training_nights' (COUNT of training sessions attended on/after started_on, up to today) >= hours_target.
++--     cert: a cert named cert_name (case/space-insensitive) with a dated, unexpired exp ('YYYY-MM', the app's
++--     certStatus rule). Undated never counts.
++--   gate — the department's clears_to_run items. None marked -> configured false -> "Gate not configured" (never
++--     "cleared"). cleared_to_run = configured AND every gate item satisfied.
++--   ready_for_vote — status Probationary AND cleared_to_run AND every phase='probation' item satisfied AND all four
++--     milestones 'done'. Surface only (D5/D6): the Board votes; a DA flips the status in Edit member. No new status path.
++-- ONE STATEMENT. A single DO block — all-or-nothing. Re-running after success is refused by the guard.
++-- =====================================================================
++DO $migrate$
++DECLARE
++  v_pol_before text; v_pol_after text; v_soi_before text; v_n int; v_ih uuid; v_t text;
++  pol_sql constant text := $q$
++    SELECT coalesce(string_agg(format('%s|%s|%s|%s|%s|%s', tablename, policyname, cmd, roles::text, qual, with_check), E'\n' ORDER BY tablename, policyname, cmd), '')
++      FROM pg_policies WHERE schemaname = 'public' AND tablename NOT IN ('member_probation', 'probation_milestones', 'supervised_sessions')$q$;
++  NEW_TABLES constant text[] := array['member_probation', 'probation_milestones', 'supervised_sessions'];
++  PUBLIC_FNS constant text[] := array['public.set_member_probation(uuid,date,text)', 'public.set_probation_milestone(uuid,text,text,text)',
++    'public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)', 'public.my_probation_status()',
++    'public.member_probation_status(uuid)', 'public.dept_probation_board()'];
++  INTERNAL_FNS constant text[] := array['public.probation_item_states(uuid,uuid)', 'public.probation_status(uuid,uuid)'];
++BEGIN
++  -- ---------------------------------------------------------------- preconditions
++  IF to_regclass('public.member_probation') IS NOT NULL OR to_regclass('public.probation_milestones') IS NOT NULL
++     OR to_regclass('public.supervised_sessions') IS NOT NULL
++     OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'onboarding_items' AND column_name = 'clears_to_run') THEN
++    RAISE EXCEPTION 'Precondition failed: probation is already applied (a new table or onboarding_items.clears_to_run exists). Nothing changed.';
++  END IF;
++  FOREACH v_t IN ARRAY array['is_canmanage()', 'is_canmanage_ops()', 'is_dept_admin()'] LOOP
++    IF to_regprocedure('public.' || v_t) IS NULL OR position('my_department_id()' in pg_get_functiondef(('public.' || v_t)::regprocedure)) = 0 THEN
++      RAISE EXCEPTION 'Precondition failed: % is missing or no longer department-scoped — do not build on it.', v_t;
++    END IF;
++  END LOOP;
++  IF to_regprocedure('public.my_member_id()') IS NULL OR to_regprocedure('public.my_department_id()') IS NULL
++     OR to_regprocedure('public.rs_member_in_audience(uuid,text[])') IS NULL OR to_regclass('public.document_acknowledgments') IS NULL THEN
++    RAISE EXCEPTION 'Precondition failed: my_member_id / my_department_id / Read & Sign (rs_member_in_audience, document_acknowledgments) missing.';
++  END IF;
++  IF to_regprocedure('public.set_onboarding_item(uuid,uuid,boolean)') IS NULL
++     OR position('sign off your own onboarding' in pg_get_functiondef('public.set_onboarding_item(uuid,uuid,boolean)'::regprocedure)) = 0 THEN
++    RAISE EXCEPTION 'Precondition failed: set_onboarding_item (with the self-sign block) is not live.';
++  END IF;
++  -- the columns this reads, checked rather than assumed (schema.sql is stale)
++  FOR v_t IN SELECT x FROM unnest(array['member_private.joined_date:date', 'certs.exp:text', 'certs.name:text', 'certs.member_id:uuid',
++      'members.mentor_id:uuid', 'members.status:text', 'members.access:ARRAY', 'apparatus.department_id:uuid', 'session_attendance.session_id:uuid',
++      'session_attendance.member_id:uuid', 'training_sessions.date:date', 'training_sessions.department_id:uuid', 'member_separation.member_id:uuid',
++      'onboarding_items.is_mentor:boolean', 'onboarding_progress.checked_by:uuid']) x LOOP
++    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
++                     AND table_name = split_part(split_part(v_t, ':', 1), '.', 1) AND column_name = split_part(split_part(v_t, ':', 1), '.', 2)
++                     AND data_type = CASE split_part(v_t, ':', 2) WHEN 'ARRAY' THEN 'ARRAY' WHEN 'date' THEN 'date' WHEN 'text' THEN 'text'
++                                                                   WHEN 'uuid' THEN 'uuid' WHEN 'boolean' THEN 'boolean' END) THEN
++      RAISE EXCEPTION 'Precondition failed: column % is missing or not the expected type.', v_t;
++    END IF;
++  END LOOP;
++  SELECT count(*) INTO v_n FROM public.departments WHERE name ILIKE 'Indian Harbor%';
++  IF v_n <> 1 THEN RAISE EXCEPTION 'Precondition failed: expected exactly one Indian Harbor department, found %.', v_n; END IF;
++  SELECT id INTO v_ih FROM public.departments WHERE name ILIKE 'Indian Harbor%';
++  IF NOT has_table_privilege('authenticated', 'public.onboarding_progress', 'INSERT') OR NOT has_table_privilege('authenticated', 'public.onboarding_progress', 'UPDATE') THEN
++    RAISE EXCEPTION 'Precondition failed: the onboarding_progress transition-state grant is gone — the brief assumes it is still in place. Nothing changed.';
++  END IF;
++  EXECUTE pol_sql INTO v_pol_before;
++  v_soi_before := pg_get_functiondef('public.set_onboarding_item(uuid,uuid,boolean)'::regprocedure);
++
++  -- ---------------------------------------------------------------- 1. onboarding_items — additive config columns
++  ALTER TABLE public.onboarding_items
++    ADD COLUMN clears_to_run boolean NOT NULL DEFAULT false,
++    ADD COLUMN phase         text    NOT NULL DEFAULT 'onboarding',
++    ADD COLUMN kind          text    NOT NULL DEFAULT 'manual',
++    ADD COLUMN ack_series_id uuid,                -- no FK: a series removed later reads 'not_configured' rather than blocking the delete
++    ADD COLUMN hours_target  numeric,
++    ADD COLUMN hours_source  text,
++    ADD COLUMN cert_name     text;
++  ALTER TABLE public.onboarding_items
++    ADD CONSTRAINT onboarding_items_phase_chk  CHECK (phase IN ('onboarding', 'probation')),
++    ADD CONSTRAINT onboarding_items_kind_chk   CHECK (kind IN ('manual', 'ack', 'hours', 'cert')),
++    ADD CONSTRAINT onboarding_items_mentor_manual_chk CHECK (NOT is_mentor OR kind = 'manual'),
++    ADD CONSTRAINT onboarding_items_hours_chk  CHECK (hours_target IS NULL OR (hours_target > 0 AND hours_target <= 10000)),
++    ADD CONSTRAINT onboarding_items_source_chk CHECK (hours_source IS NULL OR hours_source IN ('supervised', 'ride_along', 'drive', 'shift', 'training_nights')),
++    ADD CONSTRAINT onboarding_items_cert_chk   CHECK (cert_name IS NULL OR length(cert_name) <= 120);
++  COMMENT ON COLUMN public.onboarding_items.clears_to_run IS 'B4C:probation — part of the cleared-to-run gate. None marked = "Gate not configured".';
++  COMMENT ON COLUMN public.onboarding_items.kind IS 'B4C:probation — manual (officer signs) | ack (Read & Sign current) | hours (>= hours_target from hours_source) | cert (current cert named cert_name).';
++  UPDATE public.onboarding_items SET phase = 'probation' WHERE department_id = v_ih AND category = 'Probationary Period';
++  GET DIAGNOSTICS v_n = ROW_COUNT;
++  IF v_n = 0 THEN RAISE EXCEPTION 'Precondition failed: Indian Harbor has no "Probationary Period" items to pre-set. Rolling back.'; END IF;
++
++  -- ---------------------------------------------------------------- 2-4. the new tables
++  CREATE TABLE public.member_probation (
++    member_id     uuid PRIMARY KEY REFERENCES public.members(id) ON DELETE CASCADE,
++    department_id uuid NOT NULL REFERENCES public.departments(id) ON DELETE CASCADE,
++    started_on    date,                                   -- NULL = "Probation start not set"
++    note          text CHECK (note IS NULL OR length(note) <= 500),
++    set_by        uuid,                                   -- members.id of the DA; NULL on the backfill
++    set_at        timestamptz NOT NULL DEFAULT now()
++  );
++  CREATE TABLE public.probation_milestones (
++    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++    department_id uuid NOT NULL REFERENCES public.departments(id) ON DELETE CASCADE,
++    member_id     uuid NOT NULL REFERENCES public.members(id) ON DELETE CASCADE,
++    kind          text NOT NULL CHECK (kind IN ('30day', '60day', '90day', 'final')),
++    status        text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'on_track', 'needs_work', 'done')),
++    note          text CHECK (note IS NULL OR length(note) <= 500),   -- a short officer note — never personal records
++    signed_by     uuid NOT NULL,
++    signed_at     timestamptz NOT NULL DEFAULT now(),
++    UNIQUE (member_id, kind)
++  );
++  CREATE TABLE public.supervised_sessions (
++    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++    department_id uuid NOT NULL REFERENCES public.departments(id) ON DELETE CASCADE,
++    member_id     uuid NOT NULL REFERENCES public.members(id) ON DELETE CASCADE,
++    kind          text NOT NULL CHECK (kind IN ('ride_along', 'drive', 'shift', 'other')),
++    apparatus_id  uuid,
++    hours         numeric NOT NULL CHECK (hours > 0 AND hours <= 24),
++    occurred_on   date NOT NULL,
++    supervisor_id uuid NOT NULL,
++    counts_toward text NOT NULL DEFAULT 'probation' CHECK (length(counts_toward) <= 60),
++    note          text CHECK (note IS NULL OR length(note) <= 500),
++    created_by    uuid NOT NULL,
++    created_at    timestamptz NOT NULL DEFAULT now()
++  );
++  CREATE INDEX supervised_sessions_member_idx ON public.supervised_sessions (member_id, kind);
++  CREATE INDEX probation_milestones_dept_idx ON public.probation_milestones (department_id);
++  COMMENT ON TABLE public.member_probation IS 'B4C:probation — the probation start anchor. Writes: set_member_probation only.';
++  COMMENT ON TABLE public.probation_milestones IS 'B4C:probation — officer-signed 30/60/90/final reviews. Writes: set_probation_milestone only.';
++  COMMENT ON TABLE public.supervised_sessions IS 'B4C:probation — the supervised hours ledger (ride-along / drive / shift); reused by #3. Writes: log_supervised_session only.';
++
++  FOREACH v_t IN ARRAY NEW_TABLES LOOP
++    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', v_t);
++    EXECUTE format('REVOKE ALL ON public.%I FROM anon, authenticated, public', v_t);
++    EXECUTE format('GRANT SELECT ON public.%I TO authenticated', v_t);
++    EXECUTE format($p$CREATE POLICY %I ON public.%I FOR SELECT TO authenticated
++                       USING (department_id = public.my_department_id() AND (member_id = public.my_member_id() OR public.is_canmanage()))$p$,
++                   v_t || '_read', v_t);
++  END LOOP;
++
++  -- backfill: Probationary members with a join date on file (the rest stay "not set")
++  INSERT INTO public.member_probation (member_id, department_id, started_on, note)
++  SELECT DISTINCT ON (m.id) m.id, m.department_id, mp.joined_date, 'Start taken from the join date on file (backfill 2026-10-18).'
++    FROM public.members m JOIN public.member_private mp ON mp.member_id = m.id
++   WHERE m.status = 'Probationary' AND mp.joined_date IS NOT NULL
++   ORDER BY m.id, mp.joined_date;
++
++  -- ---------------------------------------------------------------- internal: item states + the status document
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.probation_item_states(p_member uuid, p_dept uuid)
++ RETURNS TABLE(item_id uuid, label text, category text, phase text, kind text, clears_to_run boolean, sort_order integer,
++               satisfied boolean, state text, signed_by_name text, signed_at timestamptz, have numeric, target numeric)
++ LANGUAGE sql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation (internal) — every onboarding item of the department, resolved for one member. Read-only.
++  with mem as (select m.id, m.mentor_id from public.members m where m.id = p_member and m.department_id = p_dept),
++       pr as (select (select mp.started_on from public.member_probation mp where mp.member_id = p_member) as started_on),
++       td as (select (now() at time zone 'America/Chicago')::date as d)
++  select i.id, i.label, i.category, i.phase, i.kind, i.clears_to_run, i.sort_order,
++         case when i.kind = 'manual' and i.is_mentor then mem.mentor_id is not null
++              when i.kind = 'manual' then coalesce(pg.done, false)
++              when i.kind = 'ack'    then ak.series_id is not null and ak.published and (not ak.in_audience or ak.signed_current)
++              when i.kind = 'hours'  then i.hours_target is not null and i.hours_source is not null and hr.have >= i.hours_target
++              when i.kind = 'cert'   then nullif(btrim(coalesce(i.cert_name, '')), '') is not null and ct.current
++         end,
++         case when i.kind = 'manual' and i.is_mentor then case when mem.mentor_id is not null then 'mentor_assigned' else 'open' end
++              when i.kind = 'manual' then case when pg.done and pg.checked_by is not null then 'signed'
++                                               when pg.done then 'done_unrecorded' else 'open' end
++              when i.kind = 'ack' then case when ak.series_id is null or not ak.published then 'not_configured'
++                                            when not ak.in_audience then 'not_required'
++                                            when ak.signed_current then 'signed_current' else 'needs_signature' end
++              when i.kind = 'hours' then case when i.hours_target is null or i.hours_source is null then 'not_configured'
++                                              when hr.have >= i.hours_target then 'met' else 'in_progress' end
++              when i.kind = 'cert' then case when nullif(btrim(coalesce(i.cert_name, '')), '') is null then 'not_configured'
++                                             when ct.current then 'current' else 'missing' end
++         end,
++         case when i.kind = 'manual' and not i.is_mentor and pg.done then pg.signer end,
++         case when i.kind = 'manual' and not i.is_mentor and pg.done then pg.checked_at end,
++         case when i.kind = 'hours' then hr.have end,
++         case when i.kind = 'hours' then i.hours_target end
++    from public.onboarding_items i
++    cross join mem cross join pr cross join td
++    left join lateral (select p.done, p.checked_by, p.checked_at, cb.name as signer
++                         from public.onboarding_progress p left join public.members cb on cb.id = p.checked_by
++                        where p.member_id = p_member and p.item_id = i.id
++                        order by p.checked_at desc nulls last limit 1) pg on true
++    left join lateral (select s.series_id, (s.requires_ack and s.current_version > 0) as published,
++                              public.rs_member_in_audience(p_member, s.required_roles) as in_audience,
++                              exists (select 1 from public.document_acknowledgments k
++                                       where k.member_id = p_member and k.series_id = s.series_id and k.version = s.current_version
++                                         and (not s.annual_resign or (k.signed_at at time zone 'America/Chicago')::date + interval '12 months' > td.d)) as signed_current
++                         from public.document_series s
++                        where i.kind = 'ack' and s.series_id = i.ack_series_id and s.department_id = p_dept) ak on true
++    left join lateral (select case when i.hours_source = 'training_nights' then
++                                (select count(distinct a.session_id)::numeric from public.session_attendance a
++                                   join public.training_sessions t on t.id = a.session_id and t.department_id = p_dept
++                                  where a.member_id = p_member and t.date <= td.d and (pr.started_on is null or t.date >= pr.started_on))
++                              else
++                                (select coalesce(sum(ss.hours), 0) from public.supervised_sessions ss
++                                  where ss.member_id = p_member and ss.department_id = p_dept
++                                    and (i.hours_source = 'supervised' or ss.kind = i.hours_source))
++                              end as have
++                        where i.kind = 'hours') hr on true
++    left join lateral (select exists (select 1 from public.certs c
++                                        where c.member_id = p_member and lower(btrim(c.name)) = lower(btrim(i.cert_name))
++                                          and c.exp ~ '^\d{4}-(0[1-9]|1[0-2])$'
++                                          and split_part(c.exp, '-', 1)::int * 12 + split_part(c.exp, '-', 2)::int
++                                              >= extract(year from td.d)::int * 12 + extract(month from td.d)::int) as current
++                        where i.kind = 'cert') ct on true
++   where i.department_id = p_dept;
++$function$
++$ddl$;
++
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.probation_status(p_member uuid, p_dept uuid)
++ RETURNS jsonb
++ LANGUAGE sql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation (internal) — one member's path to active, computed at read (America/Chicago). Read-only.
++  with m as (select x.id, x.name, x.status from public.members x where x.id = p_member and x.department_id = p_dept),
++       td as (select (now() at time zone 'America/Chicago')::date as d),
++       pr as (select (select mp.started_on from public.member_probation mp where mp.member_id = p_member) as started_on),
++       it as (select * from public.probation_item_states(p_member, p_dept)),
++       ms as (select t.kind, t.ord, pr.started_on + t.days as due_on, coalesce(pm.status, 'pending') as status, pm.note,
++                     sb.name as signed_by_name, pm.signed_at
++                from (values ('30day', 30, 1), ('60day', 60, 2), ('90day', 90, 3), ('final', 180, 4)) t(kind, days, ord)
++                cross join pr
++                left join public.probation_milestones pm on pm.member_id = p_member and pm.department_id = p_dept and pm.kind = t.kind
++                left join public.members sb on sb.id = pm.signed_by),
++       g as (select count(*) filter (where it.clears_to_run) as req, count(*) filter (where it.clears_to_run and it.satisfied) as ok,
++                    count(*) filter (where it.phase = 'probation') as preq, count(*) filter (where it.phase = 'probation' and it.satisfied) as pok
++               from it),
++       h as (select coalesce(sum(ss.hours), 0) as hrs from public.supervised_sessions ss where ss.member_id = p_member and ss.department_id = p_dept)
++  select jsonb_build_object(
++           'member_id', m.id, 'name', m.name, 'status', m.status,
++           'started_on', pr.started_on,
++           'day_n', case when pr.started_on is null then null else greatest(0, td.d - pr.started_on + 1) end,
++           'target_days', 180,
++           'gate', jsonb_build_object('configured', g.req > 0, 'required', g.req, 'satisfied', g.ok, 'cleared', g.req > 0 and g.ok = g.req),
++           'probation', jsonb_build_object('required', g.preq, 'satisfied', g.pok),
++           'cleared_to_run', g.req > 0 and g.ok = g.req,
++           'items', coalesce((select jsonb_agg(to_jsonb(it) order by it.phase, it.category, it.sort_order, it.label) from it), '[]'::jsonb),
++           'milestones', (select jsonb_agg(jsonb_build_object('kind', ms.kind, 'due_on', ms.due_on, 'status', ms.status, 'note', ms.note,
++                                                              'signed_by_name', ms.signed_by_name, 'signed_at', ms.signed_at) order by ms.ord) from ms),
++           'milestones_done', (select count(*) from ms where ms.status = 'done'),
++           'supervised_hours', h.hrs,
++           'ready_for_vote', m.status = 'Probationary' and g.req > 0 and g.ok = g.req and g.pok = g.preq
++                             and (select count(*) from ms where ms.status = 'done') = 4)
++    from m cross join td cross join pr cross join g cross join h;
++$function$
++$ddl$;
++
++  -- ---------------------------------------------------------------- write RPCs
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.set_member_probation(p_member_id uuid, p_started_on date, p_note text DEFAULT NULL)
++ RETURNS public.member_probation
++ LANGUAGE plpgsql
++ SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — a Department Admin sets (or clears, with NULL) a member's probation start. Never touches the locked verification column.
++declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_row public.member_probation;
++begin
++  if v_dept is null or v_me is null or not coalesce(public.is_dept_admin(), false) then
++    raise exception 'Only a Department Admin can set a probation start.';
++  end if;
++  if p_member_id = v_me then raise exception 'You can''t set your own probation start — another Department Admin does.'; end if;
++  if not exists (select 1 from public.members where id = p_member_id and department_id = v_dept) then
++    raise exception 'That member is not in your department.';
++  end if;
++  if p_started_on is not null and (p_started_on < date '2000-01-01' or p_started_on > (now() at time zone 'America/Chicago')::date) then
++    raise exception 'The probation start must be a real date, and not in the future.';
++  end if;
++  if p_note is not null and length(p_note) > 500 then raise exception 'Keep the note under 500 characters.'; end if;
++  insert into public.member_probation (member_id, department_id, started_on, note, set_by, set_at)
++  values (p_member_id, v_dept, p_started_on, nullif(btrim(p_note), ''), v_me, now())
++  on conflict (member_id) do update set started_on = excluded.started_on, note = excluded.note, set_by = excluded.set_by, set_at = excluded.set_at
++  returning * into v_row;
++  return v_row;
++end;
++$function$
++$ddl$;
++
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.set_probation_milestone(p_member_id uuid, p_kind text, p_status text, p_note text DEFAULT NULL)
++ RETURNS public.probation_milestones
++ LANGUAGE plpgsql
++ SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — Board / DA / Officer signs a 30/60/90/final review for a probationary member of their department.
++-- Never their own (custody). Never touches the locked verification column.
++declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_row public.probation_milestones;
++begin
++  if v_dept is null or v_me is null or not coalesce(public.is_canmanage(), false) then
++    raise exception 'Only department leadership can sign a probation review.';
++  end if;
++  if p_member_id = v_me then raise exception 'You can''t sign your own probation review — an officer does.'; end if;
++  if not exists (select 1 from public.members where id = p_member_id and department_id = v_dept) then
++    raise exception 'That member is not in your department.';
++  end if;
++  if not exists (select 1 from public.members where id = p_member_id and status = 'Probationary') then
++    raise exception 'Probation reviews are for probationary members.';
++  end if;
++  if p_kind is null or p_kind not in ('30day', '60day', '90day', 'final') then raise exception 'Unknown review — use 30day, 60day, 90day or final.'; end if;
++  if p_status is null or p_status not in ('pending', 'on_track', 'needs_work', 'done') then raise exception 'Unknown status.'; end if;
++  if p_note is not null and length(p_note) > 500 then raise exception 'Keep the note under 500 characters.'; end if;
++  insert into public.probation_milestones (department_id, member_id, kind, status, note, signed_by, signed_at)
++  values (v_dept, p_member_id, p_kind, p_status, nullif(btrim(p_note), ''), v_me, now())
++  on conflict (member_id, kind) do update set status = excluded.status, note = excluded.note, signed_by = excluded.signed_by, signed_at = excluded.signed_at
++  returning * into v_row;
++  return v_row;
++end;
++$function$
++$ddl$;
++
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.log_supervised_session(p_member_id uuid, p_kind text, p_hours numeric, p_occurred_on date,
++    p_apparatus_id uuid DEFAULT NULL, p_supervisor_id uuid DEFAULT NULL, p_note text DEFAULT NULL)
++ RETURNS public.supervised_sessions
++ LANGUAGE plpgsql
++ SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — Board / DA / Officer logs a supervised ride-along / drive / shift for a member of their department.
++-- Never for themself; the supervisor (default: the caller) is in the department and is never the member. Never
++-- touches the locked verification column.
++declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id();
++        v_sup uuid := coalesce(p_supervisor_id, public.my_member_id()); v_row public.supervised_sessions;
++begin
++  if v_dept is null or v_me is null or not coalesce(public.is_canmanage(), false) then
++    raise exception 'Only department leadership can log supervised time.';
++  end if;
++  if p_member_id = v_me then raise exception 'You can''t log your own supervised time — an officer does.'; end if;
++  if not exists (select 1 from public.members where id = p_member_id and department_id = v_dept) then
++    raise exception 'That member is not in your department.';
++  end if;
++  if v_sup = p_member_id then raise exception 'A member can''t supervise themself.'; end if;
++  if not exists (select 1 from public.members where id = v_sup and department_id = v_dept) then
++    raise exception 'The supervisor must be a member of your department.';
++  end if;
++  if p_kind is null or p_kind not in ('ride_along', 'drive', 'shift', 'other') then raise exception 'Unknown session type.'; end if;
++  if p_hours is null or p_hours <= 0 or p_hours > 24 then raise exception 'Hours must be more than 0 and at most 24.'; end if;
++  if p_occurred_on is null or p_occurred_on < date '2000-01-01' or p_occurred_on > (now() at time zone 'America/Chicago')::date then
++    raise exception 'The date must be a real date, and not in the future.';
++  end if;
++  if p_apparatus_id is not null and not exists (select 1 from public.apparatus where id = p_apparatus_id and department_id = v_dept) then
++    raise exception 'That apparatus is not in your department.';
++  end if;
++  if p_note is not null and length(p_note) > 500 then raise exception 'Keep the note under 500 characters.'; end if;
++  insert into public.supervised_sessions (department_id, member_id, kind, apparatus_id, hours, occurred_on, supervisor_id, note, created_by)
++  values (v_dept, p_member_id, p_kind, p_apparatus_id, p_hours, p_occurred_on, v_sup, nullif(btrim(p_note), ''), v_me)
++  returning * into v_row;
++  return v_row;
++end;
++$function$
++$ddl$;
++
++  -- ---------------------------------------------------------------- read RPCs
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.my_probation_status()
++ RETURNS jsonb
++ LANGUAGE plpgsql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — the caller's own path to active. Read-only.
++declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id();
++begin
++  if v_dept is null or v_me is null then raise exception 'We could not match your login to a department.'; end if;
++  return public.probation_status(v_me, v_dept);
++end;
++$function$
++$ddl$;
++
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.member_probation_status(p_member_id uuid)
++ RETURNS jsonb
++ LANGUAGE plpgsql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — one member's path: themself, or (Board / DA / Officer) a member of their department. Read-only.
++declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id();
++begin
++  if v_dept is null or v_me is null then raise exception 'We could not match your login to a department.'; end if;
++  if p_member_id is distinct from v_me and not coalesce(public.is_canmanage(), false) then
++    raise exception 'Only department leadership can see another member''s probation.';
++  end if;
++  if not exists (select 1 from public.members where id = p_member_id and department_id = v_dept) then
++    raise exception 'That member is not in your department.';
++  end if;
++  return public.probation_status(p_member_id, v_dept);
++end;
++$function$
++$ddl$;
++
++  EXECUTE $ddl$
++CREATE OR REPLACE FUNCTION public.dept_probation_board()
++ RETURNS TABLE(member_id uuid, name text, started_on date, day_n integer, gate_configured boolean, cleared_to_run boolean,
++               ready_for_vote boolean, detail jsonb)
++ LANGUAGE plpgsql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++-- B4C:probation — Board / DA / Officer: every probationary member of the department (honest denominator: not
++-- Inactive, not former, not a Project Admin) with their gate + ready-for-vote state. Read-only; no push, no job.
++#variable_conflict use_column
++declare v_dept uuid := public.my_department_id();
++begin
++  if v_dept is null or not coalesce(public.is_canmanage(), false) then
++    raise exception 'Only department leadership can see the probation board.';
++  end if;
++  return query
++  select x.id, x.name, (d->>'started_on')::date, (d->>'day_n')::int, (d->'gate'->>'configured')::boolean,
++         (d->>'cleared_to_run')::boolean, (d->>'ready_for_vote')::boolean, d
++    from (select m.id, m.name, public.probation_status(m.id, v_dept) as d
++            from public.members m
++           where m.department_id = v_dept and m.status = 'Probationary'
++             and not coalesce(m.access && array['Project Admin']::text[], false)
++             and not exists (select 1 from public.member_separation s where s.member_id = m.id)) x
++   order by 7 desc, 2;
++end;
++$function$
++$ddl$;
++
++  FOREACH v_t IN ARRAY PUBLIC_FNS LOOP
++    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon, public', v_t);
++    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', v_t);
++  END LOOP;
++  FOREACH v_t IN ARRAY INTERNAL_FNS LOOP
++    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon, authenticated, public', v_t);
++  END LOOP;
++
++  -- ---------------------------------------------------------------- post-conditions (any failure undoes everything)
++  FOREACH v_t IN ARRAY NEW_TABLES LOOP
++    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = ('public.' || v_t)::regclass) THEN RAISE EXCEPTION 'Post-condition failed: RLS off on %.', v_t; END IF;
++    IF has_table_privilege('authenticated', 'public.' || v_t, 'INSERT') OR has_table_privilege('authenticated', 'public.' || v_t, 'UPDATE')
++       OR has_table_privilege('authenticated', 'public.' || v_t, 'DELETE') OR has_table_privilege('anon', 'public.' || v_t, 'SELECT') THEN
++      RAISE EXCEPTION 'Post-condition failed: % has a write grant for authenticated, or anon can read it.', v_t;
++    END IF;
++    IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = v_t) <> 1
++       OR (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = v_t AND cmd = 'SELECT'
++             AND position('my_department_id()' in qual) > 0 AND position('is_canmanage()' in qual) > 0 AND position('my_member_id()' in qual) > 0) <> 1 THEN
++      RAISE EXCEPTION 'Post-condition failed: % must have exactly one department-scoped SELECT policy and no write policy.', v_t;
++    END IF;
++  END LOOP;
++  FOREACH v_t IN ARRAY PUBLIC_FNS LOOP
++    IF has_function_privilege('anon', v_t, 'EXECUTE') OR NOT has_function_privilege('authenticated', v_t, 'EXECUTE') THEN
++      RAISE EXCEPTION 'Post-condition failed: % grants are wrong (anon must not, authenticated must).', v_t;
++    END IF;
++  END LOOP;
++  FOREACH v_t IN ARRAY INTERNAL_FNS LOOP
++    IF has_function_privilege('authenticated', v_t, 'EXECUTE') OR has_function_privilege('anon', v_t, 'EXECUTE') THEN
++      RAISE EXCEPTION 'Post-condition failed: the internal % is callable by members.', v_t;
++    END IF;
++  END LOOP;
++  IF position('p_member_id = v_me' in pg_get_functiondef('public.set_probation_milestone(uuid,text,text,text)'::regprocedure)) = 0
++     OR position('p_member_id = v_me' in pg_get_functiondef('public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)'::regprocedure)) = 0
++     OR position('p_member_id = v_me' in pg_get_functiondef('public.set_member_probation(uuid,date,text)'::regprocedure)) = 0 THEN
++    RAISE EXCEPTION 'Post-condition failed: a write RPC lost its not-self (custody) check.';
++  END IF;
++  IF position('is_leader()' in pg_get_functiondef('public.set_probation_milestone(uuid,text,text,text)'::regprocedure)
++                             || pg_get_functiondef('public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)'::regprocedure)
++                             || pg_get_functiondef('public.dept_probation_board()'::regprocedure)
++                             || pg_get_functiondef('public.member_probation_status(uuid)'::regprocedure)) > 0 THEN
++    RAISE EXCEPTION 'Post-condition failed: a gate uses the role-anywhere is_leader().';
++  END IF;
++  -- the shipped onboarding is untouched: set_onboarding_item byte-identical, transition-state grant still there,
++  -- and every pre-existing policy character for character
++  IF pg_get_functiondef('public.set_onboarding_item(uuid,uuid,boolean)'::regprocedure) IS DISTINCT FROM v_soi_before THEN
++    RAISE EXCEPTION 'Post-condition failed: set_onboarding_item changed.';
++  END IF;
++  IF NOT has_table_privilege('authenticated', 'public.onboarding_progress', 'INSERT') OR NOT has_table_privilege('authenticated', 'public.onboarding_progress', 'UPDATE') THEN
++    RAISE EXCEPTION 'Post-condition failed: the onboarding_progress transition-state grant was removed.';
++  END IF;
++  IF EXISTS (SELECT 1 FROM public.onboarding_items WHERE clears_to_run OR kind <> 'manual') THEN
++    RAISE EXCEPTION 'Post-condition failed: an existing item came out in the gate or as an auto kind (defaults must be manual / not in the gate).';
++  END IF;
++  EXECUTE pol_sql INTO v_pol_after;
++  IF v_pol_after IS DISTINCT FROM v_pol_before THEN RAISE EXCEPTION 'Post-condition failed: a pre-existing policy changed.'; END IF;
++END
++$migrate$;
++
++NOTIFY pgrst, 'reload schema';
++
++-- state check (read-only) — expect: tables 3 · rls true · new_policies 3 · item_cols 7 · ih_probation_items > 0 (the
++-- "Probationary Period" count) · in_gate 0 · backfilled = Probationary members with a join date (Step 0: 4) ·
++-- anon_rpc false · onboarding_progress_insert true (transition state kept) · total_policies 163 (160 + 3)
++SELECT (SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('public.member_probation'), to_regclass('public.probation_milestones'), to_regclass('public.supervised_sessions'))) AS tables,
++       (SELECT bool_and(relrowsecurity) FROM pg_class WHERE oid IN (to_regclass('public.member_probation'), to_regclass('public.probation_milestones'), to_regclass('public.supervised_sessions'))) AS rls,
++       (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('member_probation', 'probation_milestones', 'supervised_sessions')) AS new_policies,
++       (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'onboarding_items'
++          AND column_name IN ('clears_to_run', 'phase', 'kind', 'ack_series_id', 'hours_target', 'hours_source', 'cert_name')) AS item_cols,
++       (SELECT count(*) FROM public.onboarding_items WHERE phase = 'probation') AS ih_probation_items,
++       (SELECT count(*) FROM public.onboarding_items WHERE clears_to_run) AS in_gate,
++       (SELECT count(*) FROM public.member_probation) AS backfilled,
++       has_function_privilege('anon', 'public.my_probation_status()', 'EXECUTE') AS anon_rpc,
++       has_table_privilege('authenticated', 'public.onboarding_progress', 'INSERT') AS onboarding_progress_insert,
++       (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') AS total_policies;
++
++-- =====================================================================
++-- ROLLBACK (only if needed, separately). Drops the probation data (start dates, reviews, logged sessions) — export first.
++-- =====================================================================
++-- DO $rb$
++-- BEGIN
++--   DROP FUNCTION IF EXISTS public.dept_probation_board(), public.member_probation_status(uuid), public.my_probation_status(),
++--     public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text), public.set_probation_milestone(uuid,text,text,text),
++--     public.set_member_probation(uuid,date,text), public.probation_status(uuid,uuid), public.probation_item_states(uuid,uuid);
++--   DROP TABLE IF EXISTS public.supervised_sessions, public.probation_milestones, public.member_probation;
++--   ALTER TABLE public.onboarding_items DROP CONSTRAINT IF EXISTS onboarding_items_phase_chk, DROP CONSTRAINT IF EXISTS onboarding_items_kind_chk,
++--     DROP CONSTRAINT IF EXISTS onboarding_items_mentor_manual_chk, DROP CONSTRAINT IF EXISTS onboarding_items_hours_chk,
++--     DROP CONSTRAINT IF EXISTS onboarding_items_source_chk, DROP CONSTRAINT IF EXISTS onboarding_items_cert_chk,
++--     DROP COLUMN IF EXISTS clears_to_run, DROP COLUMN IF EXISTS phase, DROP COLUMN IF EXISTS kind, DROP COLUMN IF EXISTS ack_series_id,
++--     DROP COLUMN IF EXISTS hours_target, DROP COLUMN IF EXISTS hours_source, DROP COLUMN IF EXISTS cert_name;
++-- END
++-- $rb$;
++-- NOTIFY pgrst, 'reload schema';
+diff --git a/sql/probation_RETEST.sql b/sql/probation_RETEST.sql
+new file mode 100644
+index 0000000..313aa11
+--- /dev/null
++++ b/sql/probation_RETEST.sql
+@@ -0,0 +1,360 @@
++-- =====================================================================
++-- RETEST for probation (Phase 3.1 #2). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
++-- run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE items / a fixture document / fixture
++-- statuses it sets itself. The final RAISE is the report. The "ERROR" IS the report.
++-- Per department (needs a DA and two plain members with unique emails; an Officer and another department's DA are
++-- used when present, else that check SKIPs). Member A is made Probationary for the run.
++--   P0 (once) anon can't execute any public RPC; members can't execute the internal helpers
++--   G1 no item marked clears_to_run -> "Gate not configured": configured false, cleared false, never ready
++--   S1 the DA sets A's start (40 days ago) -> day 41, milestone due dates = start + 30/60/90/180; a future date refused;
++--      a member and an Officer refused (DA only); the DA can't set their own
++--   C1 custody: A can't sign / log for themself (member gate) and the DA can't sign their own review
++--   W1 a member's direct INSERT on each new table is refused
++--   K1 ack item: needs_signature (not satisfied, gate 0) -> A signs the fixture document -> signed_current (Level 1)
++--   K2 manual gate item: open -> the DA signs it (set_onboarding_item, unchanged) -> signed; gate cleared
++--   K3 hours item (supervised, target 2): 1.5 logged -> in_progress (have 1.5) -> +1 -> met; supervisor = the member
++--      refused; a future date refused
++--   K4 cert item: an expired and an undated cert don't count (missing); a dated unexpired one does (current)
++--   L1 a legacy done tick with no checked_by reads done_unrecorded (and counts)
++--   R1 three reviews done -> not ready; the final done -> ready_for_vote; reviews refused for a non-probationary member
++--   B1 board (as the DA): A listed + ready; a former probationary member (member_separation) and a Project Admin are
++--      not listed; the count equals an independent count; a member is refused the board
++--   V1 visibility: B sees none of A's rows in the three tables and can't read A's status; A reads only their own
++--   X1 another department's DA: can't set A's start / sign A's review / log for A / read A's status; their board has no A
++--   O1 an Officer signs a review and logs a session (is_canmanage), but can't set a start (DA only)
++--   K5 ack edge states: outside the document's audience -> not_required (satisfied); a broken link -> not_configured
++--   T1 training_nights counts sessions attended on/after the start and up to today only
++-- =====================================================================
++DO $retest$
++DECLARE
++  rec record; v_err text; v_e2 text; v_e3 text; v_n int; v_m int; v_k int; v_js jsonb; v_ok boolean; v_hash text;
++  v_da text; v_off text; v_a text; v_b text; v_other_da text; v_pa uuid;
++  v_da_id uuid; v_a_id uuid; v_b_id uuid;
++  v_doc uuid; v_series uuid; v_i_man uuid; v_i_ack uuid; v_i_hrs uuid; v_i_cert uuid; v_i_leg uuid;
++  v_today date := (now() at time zone 'America/Chicago')::date;
++  v_t text;
++  SIG constant text := 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
++  rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
++BEGIN
++  -- P0 grants (once)
++  v_ok := true;
++  FOREACH v_t IN ARRAY array['public.set_member_probation(uuid,date,text)', 'public.set_probation_milestone(uuid,text,text,text)',
++      'public.log_supervised_session(uuid,text,numeric,date,uuid,uuid,text)', 'public.my_probation_status()',
++      'public.member_probation_status(uuid)', 'public.dept_probation_board()'] LOOP
++    IF has_function_privilege('anon', v_t, 'EXECUTE') OR NOT has_function_privilege('authenticated', v_t, 'EXECUTE') THEN v_ok := false; END IF;
++  END LOOP;
++  BEGIN
++    PERFORM set_config('role', 'authenticated', true);
++    BEGIN PERFORM public.probation_status(gen_random_uuid(), gen_random_uuid()); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++    BEGIN PERFORM * FROM public.probation_item_states(gen_random_uuid(), gen_random_uuid()); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
++    PERFORM set_config('role', 'anon', true);
++    BEGIN PERFORM public.my_probation_status(); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
++    PERFORM set_config('role', 'postgres', true);
++  END;
++  IF v_ok AND v_err ILIKE '%permission denied%' AND v_e2 ILIKE '%permission denied%' AND v_e3 ILIKE '%permission denied%' THEN
++    v_pass := v_pass + 1; rpt := rpt || format('PASS  P0 anon can''t execute the RPCs; members can''t execute the internal helpers%s', chr(10));
++  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  P0 grants ok %s; internal "%s" / "%s"; anon "%s"%s', v_ok, v_err, v_e2, v_e3, chr(10)); END IF;
++
++  FOR rec IN SELECT d.id AS dept_id, d.name AS dept FROM public.departments d ORDER BY d.name LOOP
++    rpt := rpt || format('— %s%s', rec.dept, chr(10));
++    v_da := NULL; v_off := NULL; v_a := NULL; v_b := NULL; v_other_da := NULL; v_da_id := NULL; v_a_id := NULL; v_b_id := NULL; v_pa := NULL;
++    SELECT lower(m.email), m.id INTO v_da, v_da_id FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Department Admin']::text[]
++       AND NOT m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email) INTO v_off FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Officer']::text[]
++       AND NOT m.access && array['Department Admin','Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.id INTO v_a, v_a_id FROM public.members m WHERE m.department_id = rec.dept_id
++       AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
++       AND m.status IS DISTINCT FROM 'Inactive' AND NOT EXISTS (SELECT 1 FROM public.member_separation s WHERE s.member_id = m.id)
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.id INTO v_b, v_b_id FROM public.members m WHERE m.department_id = rec.dept_id AND m.id IS DISTINCT FROM v_a_id
++       AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
++       AND m.status IS DISTINCT FROM 'Inactive' AND NOT EXISTS (SELECT 1 FROM public.member_separation s WHERE s.member_id = m.id)
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email) INTO v_other_da FROM public.members m WHERE m.department_id <> rec.dept_id AND m.access && array['Department Admin']::text[]
++       AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    IF v_da IS NULL OR v_a IS NULL OR v_b IS NULL THEN
++      v_skip := v_skip + 1; rpt := rpt || format('   SKIP  all — needs a DA and two plain members with unique emails (DA %s, A %s, B %s)%s',
++        coalesce(v_da, 'none'), coalesce(v_a, 'none'), coalesce(v_b, 'none'), chr(10));
++      CONTINUE;
++    END IF;
++
++    BEGIN
++      -- ---------- fixtures (as the owner): A probationary; no existing item in the gate or the probation phase; no prior
++      -- probation rows for A; one item of each kind
++      UPDATE public.members SET status = 'Probationary' WHERE id = v_a_id;
++      UPDATE public.onboarding_items SET clears_to_run = false, phase = 'onboarding' WHERE department_id = rec.dept_id;
++      DELETE FROM public.member_probation WHERE member_id = v_a_id;
++      DELETE FROM public.probation_milestones WHERE member_id = v_a_id;
++      DELETE FROM public.supervised_sessions WHERE member_id = v_a_id;
++
++      -- G1 gate not configured
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      IF (v_js->'gate'->>'configured')::boolean = false AND (v_js->>'cleared_to_run')::boolean = false AND (v_js->>'ready_for_vote')::boolean = false
++         AND v_js->>'started_on' IS NULL AND v_js->>'day_n' IS NULL THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  G1 no gate items -> not configured, not cleared, not ready; start not set -> no day count%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  G1 %s%s', v_js - 'items' - 'milestones', chr(10)); END IF;
++
++      INSERT INTO public.onboarding_items (department_id, category, label, sort_order, clears_to_run, phase, kind)
++        VALUES (rec.dept_id, 'RETEST', 'RETEST manual gate item', 9001, true, 'onboarding', 'manual') RETURNING id INTO v_i_man;
++      INSERT INTO public.documents (department_id, name, type, storage_path, content_text)
++        VALUES (rec.dept_id, 'RETEST probation SOP', 'SOP', rec.dept_id || '/retest-' || gen_random_uuid() || '.pdf', 'Fixture text.')
++        RETURNING id, series_id INTO v_doc, v_series;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      PERFORM public.set_document_ack_config(v_doc, true, NULL, false);
++      PERFORM set_config('role', 'postgres', true);
++      INSERT INTO public.onboarding_items (department_id, category, label, sort_order, clears_to_run, phase, kind, ack_series_id)
++        VALUES (rec.dept_id, 'RETEST', 'RETEST ack gate item', 9002, true, 'onboarding', 'ack', v_series) RETURNING id INTO v_i_ack;
++      INSERT INTO public.onboarding_items (department_id, category, label, sort_order, phase, kind, hours_target, hours_source)
++        VALUES (rec.dept_id, 'RETEST', 'RETEST hours item', 9003, 'probation', 'hours', 2, 'supervised') RETURNING id INTO v_i_hrs;
++      INSERT INTO public.onboarding_items (department_id, category, label, sort_order, phase, kind, cert_name)
++        VALUES (rec.dept_id, 'RETEST', 'RETEST cert item', 9004, 'probation', 'cert', '  Retest Cert ') RETURNING id INTO v_i_cert;
++      INSERT INTO public.onboarding_items (department_id, category, label, sort_order, phase, kind)
++        VALUES (rec.dept_id, 'RETEST', 'RETEST legacy item', 9005, 'probation', 'manual') RETURNING id INTO v_i_leg;
++
++      -- S1 start date
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      BEGIN PERFORM public.set_member_probation(v_a_id, v_today - 40, NULL); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      BEGIN PERFORM public.set_member_probation(v_a_id, v_today + 1, NULL); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
++      BEGIN PERFORM public.set_member_probation(v_da_id, v_today - 5, NULL); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
++      PERFORM public.set_member_probation(v_a_id, v_today - 40, 'RETEST');
++      v_js := public.member_probation_status(v_a_id);
++      PERFORM set_config('role', 'postgres', true);
++      IF v_err LIKE 'Only a Department Admin%' AND v_e2 LIKE 'The probation start must be%' AND v_e3 LIKE 'You can''t set your own%'
++         AND (v_js->>'day_n')::int = 41 AND (v_js->>'started_on')::date = v_today - 40
++         AND (v_js->'milestones'->0->>'due_on')::date = v_today - 10 AND (v_js->'milestones'->3->>'due_on')::date = v_today + 140 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  S1 DA sets the start -> day 41, due dates from it; member / future / own refused%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  S1 member "%s" future "%s" own "%s" day %s due %s / %s%s', v_err, v_e2, v_e3,
++             v_js->>'day_n', v_js->'milestones'->0->>'due_on', v_js->'milestones'->3->>'due_on', chr(10)); END IF;
++
++      -- C1 custody
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      BEGIN PERFORM public.set_probation_milestone(v_a_id, '30day', 'done', NULL); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++      BEGIN PERFORM public.log_supervised_session(v_a_id, 'ride_along', 2, v_today); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      BEGIN PERFORM public.set_probation_milestone(v_da_id, '30day', 'done', NULL); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_err LIKE 'Only department leadership%' AND v_e2 LIKE 'Only department leadership%' AND v_e3 LIKE 'You can''t sign your own%' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  C1 a member can''t sign / log for themself; the DA can''t sign their own review%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  C1 member sign "%s" log "%s" DA own "%s"%s', v_err, v_e2, v_e3, chr(10)); END IF;
++
++      -- W1 direct writes refused
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      BEGIN INSERT INTO public.member_probation (member_id, department_id, started_on) VALUES (v_b_id, rec.dept_id, v_today); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++      BEGIN INSERT INTO public.probation_milestones (department_id, member_id, kind, status, signed_by) VALUES (rec.dept_id, v_a_id, 'final', 'done', v_b_id); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
++      BEGIN INSERT INTO public.supervised_sessions (department_id, member_id, kind, hours, occurred_on, supervisor_id, created_by)
++            VALUES (rec.dept_id, v_a_id, 'drive', 5, v_today, v_b_id, v_b_id); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_err ILIKE '%permission denied%' AND v_e2 ILIKE '%permission denied%' AND v_e3 ILIKE '%permission denied%' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  W1 direct INSERT refused on all three tables%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  W1 "%s" / "%s" / "%s"%s', v_err, v_e2, v_e3, chr(10)); END IF;
++
++      -- K1 ack item via Read & Sign
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      v_err := (SELECT e->>'state' || '/' || (e->>'satisfied') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_ack)
++               || '/' || (v_js->'gate'->>'satisfied');
++      SELECT q.content_hash INTO v_hash FROM public.my_read_sign_queue() q WHERE q.series_id = v_series;
++      PERFORM public.acknowledge_document((SELECT id FROM public.documents WHERE id = v_doc), 1, v_hash, SIG);
++      v_js := public.my_probation_status();
++      v_e2 := (SELECT e->>'state' || '/' || (e->>'satisfied') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_ack);
++      PERFORM set_config('role', 'postgres', true);
++      IF v_err = 'needs_signature/false/0' AND v_e2 = 'signed_current/true' AND (v_js->>'cleared_to_run')::boolean = false THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  K1 ack item: needs_signature -> signed via Read & Sign -> signed_current (gate still open)%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  K1 before %s after %s cleared %s%s', v_err, v_e2, v_js->>'cleared_to_run', chr(10)); END IF;
++
++      -- K2 manual gate item signed by the DA through the unchanged set_onboarding_item
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      PERFORM public.set_onboarding_item(v_a_id, v_i_man, true);
++      v_js := public.member_probation_status(v_a_id);
++      PERFORM set_config('role', 'postgres', true);
++      v_err := (SELECT e->>'state' || '/' || coalesce(e->>'signed_by_name', '-') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_man);
++      IF v_err = 'signed/' || (SELECT name FROM public.members WHERE id = v_da_id) AND (v_js->>'cleared_to_run')::boolean
++         AND (v_js->'gate'->>'required')::int = 2 AND (v_js->'gate'->>'satisfied')::int = 2 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  K2 manual gate item signed by the DA (name shown); gate 2 of 2 -> cleared to run%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  K2 state %s gate %s%s', v_err, v_js->'gate', chr(10)); END IF;
++
++      -- K3 hours
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      PERFORM public.log_supervised_session(v_a_id, 'ride_along', 1.5, v_today - 3);
++      v_js := public.member_probation_status(v_a_id);
++      v_err := (SELECT e->>'state' || '/' || (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_hrs);
++      BEGIN PERFORM public.log_supervised_session(v_a_id, 'drive', 1, v_today, NULL, v_a_id); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
++      BEGIN PERFORM public.log_supervised_session(v_a_id, 'drive', 1, v_today + 1); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
++      PERFORM public.log_supervised_session(v_a_id, 'drive', 1, v_today);
++      v_js := public.member_probation_status(v_a_id);
++      PERFORM set_config('role', 'postgres', true);
++      v_t := (SELECT e->>'state' || '/' || (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_hrs);
++      IF v_err = 'in_progress/1.5' AND v_t = 'met/2.5' AND v_e2 LIKE 'A member can''t supervise%' AND v_e3 LIKE 'The date must be%'
++         AND (v_js->>'supervised_hours')::numeric = 2.5 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  K3 hours: 1.5 -> in_progress, 2.5 -> met (target 2); self-supervised + future date refused%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  K3 %s -> %s; self-sup "%s" future "%s"%s', v_err, v_t, v_e2, v_e3, chr(10)); END IF;
++
++      -- K4 cert (fixture rows as the owner)
++      INSERT INTO public.certs (department_id, member_id, name, exp) VALUES (rec.dept_id, v_a_id, 'retest cert', to_char(v_today - interval '2 months', 'YYYY-MM'));
++      INSERT INTO public.certs (department_id, member_id, name, exp) VALUES (rec.dept_id, v_a_id, 'Retest Cert', NULL);
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      v_err := (SELECT e->>'state' FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_cert);
++      INSERT INTO public.certs (department_id, member_id, name, exp) VALUES (rec.dept_id, v_a_id, 'RETEST CERT', to_char(v_today + interval '14 months', 'YYYY-MM'));
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      v_e2 := (SELECT e->>'state' FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_cert);
++      IF v_err = 'missing' AND v_e2 = 'current' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  K4 cert: expired + undated -> missing; a dated, unexpired one -> current%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  K4 %s -> %s%s', v_err, v_e2, chr(10)); END IF;
++
++      -- L1 legacy tick (owner insert = the old direct-tick shape)
++      INSERT INTO public.onboarding_progress (department_id, member_id, item_id, done) VALUES (rec.dept_id, v_a_id, v_i_leg, true);
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      v_err := (SELECT e->>'state' || '/' || (e->>'satisfied') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_leg);
++      IF v_err = 'done_unrecorded/true' AND (v_js->'probation'->>'required')::int = 3 AND (v_js->'probation'->>'satisfied')::int = 3 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  L1 legacy tick -> done_unrecorded (counts); probation items 3 of 3%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  L1 %s probation %s%s', v_err, v_js->'probation', chr(10)); END IF;
++
++      -- R1 reviews -> ready
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      PERFORM public.set_probation_milestone(v_a_id, '30day', 'done', 'RETEST');
++      PERFORM public.set_probation_milestone(v_a_id, '60day', 'on_track', NULL);
++      PERFORM public.set_probation_milestone(v_a_id, '60day', 'done', NULL);
++      PERFORM public.set_probation_milestone(v_a_id, '90day', 'done', NULL);
++      v_ok := (public.member_probation_status(v_a_id)->>'ready_for_vote')::boolean;
++      PERFORM public.set_probation_milestone(v_a_id, 'final', 'done', NULL);
++      v_js := public.member_probation_status(v_a_id);
++      BEGIN PERFORM public.set_probation_milestone(v_b_id, '30day', 'done', NULL); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      SELECT count(*) INTO v_n FROM public.probation_milestones WHERE member_id = v_a_id AND signed_by = v_da_id;
++      IF NOT v_ok AND (v_js->>'ready_for_vote')::boolean AND (v_js->>'milestones_done')::int = 4 AND v_n = 4
++         AND (v_err LIKE 'Probation reviews are for probationary%' OR (SELECT status FROM public.members WHERE id = v_b_id) = 'Probationary') THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  R1 3 reviews -> not ready; final done -> ready_for_vote; review refused for a non-probationary member%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  R1 ready-before %s after %s done %s rows %s non-prob "%s"%s', v_ok, v_js->>'ready_for_vote', v_js->>'milestones_done', v_n, v_err, chr(10)); END IF;
++
++      -- B1 board: honest denominator. B becomes a FORMER probationary member; the PA (if any) is made probationary.
++      UPDATE public.members SET status = 'Probationary' WHERE id = v_b_id;
++      INSERT INTO public.member_separation (member_id, department_id, terminated_on) VALUES (v_b_id, rec.dept_id, v_today) ON CONFLICT (member_id) DO NOTHING;
++      SELECT m.id INTO v_pa FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Project Admin']::text[] LIMIT 1;
++      IF v_pa IS NOT NULL THEN UPDATE public.members SET status = 'Probationary' WHERE id = v_pa; END IF;
++      SELECT count(*) INTO v_m FROM public.members m WHERE m.department_id = rec.dept_id AND m.status = 'Probationary'
++         AND NOT coalesce(m.access && array['Project Admin']::text[], false)
++         AND NOT EXISTS (SELECT 1 FROM public.member_separation s WHERE s.member_id = m.id);
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      SELECT count(*), bool_or(b.member_id = v_a_id AND b.ready_for_vote AND b.cleared_to_run), bool_or(b.member_id = v_b_id), bool_or(b.member_id = v_pa)
++        INTO v_n, v_ok, v_err, v_e2 FROM public.dept_probation_board() b;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      BEGIN PERFORM * FROM public.dept_probation_board(); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_n = v_m AND v_ok AND NOT v_err::boolean AND coalesce(v_e2::boolean, false) = false AND v_e3 LIKE 'Only department leadership%' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  B1 board: %s listed = independent count; A ready; former + PA excluded; member refused%s', v_n, chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  B1 board %s vs %s, A ready %s, former listed %s, PA listed %s, member "%s"%s', v_n, v_m, v_ok, v_err, v_e2, v_e3, chr(10)); END IF;
++
++      -- V1 visibility
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_b, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      SELECT (SELECT count(*) FROM public.member_probation WHERE member_id = v_a_id) + (SELECT count(*) FROM public.probation_milestones WHERE member_id = v_a_id)
++             + (SELECT count(*) FROM public.supervised_sessions WHERE member_id = v_a_id) INTO v_n;
++      BEGIN PERFORM public.member_probation_status(v_a_id); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      SELECT (SELECT count(*) FROM public.member_probation) + (SELECT count(*) FROM public.probation_milestones) + (SELECT count(*) FROM public.supervised_sessions),
++             (SELECT count(*) FROM public.probation_milestones WHERE member_id <> v_a_id) + (SELECT count(*) FROM public.supervised_sessions WHERE member_id <> v_a_id)
++        INTO v_m, v_k;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_n = 0 AND v_err LIKE 'Only department leadership%' AND v_m = 1 + 4 + 2 AND v_k = 0 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  V1 B sees none of A''s rows and can''t read A''s status; A reads exactly their own 7%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  V1 B saw %s, B status "%s", A saw %s (others'' %s)%s', v_n, v_err, v_m, v_k, chr(10)); END IF;
++
++      -- X1 another department's DA
++      IF v_other_da IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  X1 — no other-department DA%s', chr(10));
++      ELSE
++        PERFORM set_config('request.jwt.claims', json_build_object('email', v_other_da, 'role', 'authenticated')::text, true);
++        PERFORM set_config('role', 'authenticated', true);
++        BEGIN PERFORM public.set_member_probation(v_a_id, v_today, NULL); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++        BEGIN PERFORM public.set_probation_milestone(v_a_id, '30day', 'needs_work', NULL); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
++        BEGIN PERFORM public.log_supervised_session(v_a_id, 'shift', 3, v_today); v_e3 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e3 := SQLERRM; END;
++        BEGIN PERFORM public.member_probation_status(v_a_id); v_t := 'OK'; EXCEPTION WHEN OTHERS THEN v_t := SQLERRM; END;
++        SELECT count(*) INTO v_n FROM public.dept_probation_board() b WHERE b.member_id = v_a_id;
++        SELECT count(*) INTO v_m FROM public.member_probation WHERE member_id = v_a_id;
++        PERFORM set_config('role', 'postgres', true);
++        IF v_err LIKE 'That member is not in your department%' AND v_e2 LIKE 'That member is not in your department%'
++           AND v_e3 LIKE 'That member is not in your department%' AND v_t LIKE 'That member is not in your department%' AND v_n = 0 AND v_m = 0 THEN
++          v_pass := v_pass + 1; rpt := rpt || format('   PASS  X1 another department''s DA: start / review / log / status refused; not on their board; no rows%s', chr(10));
++        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  X1 start "%s" review "%s" log "%s" status "%s" board %s rows %s%s', v_err, v_e2, v_e3, v_t, v_n, v_m, chr(10)); END IF;
++      END IF;
++
++      -- O1 Officer
++      IF v_off IS NULL THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  O1 — no Officer with a unique email%s', chr(10));
++      ELSE
++        PERFORM set_config('request.jwt.claims', json_build_object('email', v_off, 'role', 'authenticated')::text, true);
++        PERFORM set_config('role', 'authenticated', true);
++        BEGIN PERFORM public.set_probation_milestone(v_a_id, '30day', 'on_track', NULL); PERFORM public.log_supervised_session(v_a_id, 'shift', 2, v_today); v_err := 'OK';
++        EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
++        BEGIN PERFORM public.set_member_probation(v_a_id, v_today - 3, NULL); v_e2 := 'OK'; EXCEPTION WHEN OTHERS THEN v_e2 := SQLERRM; END;
++        PERFORM set_config('role', 'postgres', true);
++        IF v_err = 'OK' AND v_e2 LIKE 'Only a Department Admin%' THEN
++          v_pass := v_pass + 1; rpt := rpt || format('   PASS  O1 Officer signs a review + logs a session; can''t set a start%s', chr(10));
++        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  O1 sign/log "%s" start "%s"%s', v_err, v_e2, chr(10)); END IF;
++      END IF;
++      -- K5 ack item edge states: a document A isn't in the audience of reads not_required (satisfied); a link to no
++      -- published series reads not_configured (NOT satisfied)
++      UPDATE public.document_series SET required_roles = array['Board Member'] WHERE series_id = v_series;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      v_err := (SELECT e->>'state' || '/' || (e->>'satisfied') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_ack);
++      UPDATE public.onboarding_items SET ack_series_id = gen_random_uuid() WHERE id = v_i_ack;
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      v_e2 := (SELECT e->>'state' || '/' || (e->>'satisfied') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_i_ack);
++      IF v_err = 'not_required/true' AND v_e2 = 'not_configured/false' AND (v_js->>'cleared_to_run')::boolean = false THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  K5 ack: outside the audience -> not_required; broken link -> not_configured, gate reopens%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  K5 audience %s link %s cleared %s%s', v_err, v_e2, v_js->>'cleared_to_run', chr(10)); END IF;
++
++      -- T1 training nights: counts sessions attended on/after the start, up to today (not before, not future)
++      INSERT INTO public.onboarding_items (department_id, category, label, sort_order, phase, kind, hours_target, hours_source)
++        VALUES (rec.dept_id, 'RETEST', 'RETEST training nights', 9006, 'onboarding', 'hours', 2, 'training_nights') RETURNING id INTO v_doc;
++      WITH s AS (INSERT INTO public.training_sessions (department_id, title, date)
++                 SELECT rec.dept_id, 'RETEST night ' || x, v_today + x FROM unnest(array[-50, -5, 3]) x RETURNING id)
++      INSERT INTO public.session_attendance (department_id, session_id, member_id) SELECT rec.dept_id, s.id, v_a_id FROM s;
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      v_err := (SELECT e->>'state' || '/' || (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_doc);
++      WITH s AS (INSERT INTO public.training_sessions (department_id, title, date) VALUES (rec.dept_id, 'RETEST night -1', v_today - 1) RETURNING id)
++      INSERT INTO public.session_attendance (department_id, session_id, member_id) SELECT rec.dept_id, s.id, v_a_id FROM s;
++      PERFORM set_config('role', 'authenticated', true);
++      v_js := public.my_probation_status();
++      PERFORM set_config('role', 'postgres', true);
++      v_e2 := (SELECT e->>'state' || '/' || (e->>'have') FROM jsonb_array_elements(v_js->'items') e WHERE (e->>'item_id')::uuid = v_doc);
++      IF v_err = 'in_progress/1' AND v_e2 = 'met/2' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T1 training nights: only on/after the start and up to today count (1 -> 2 = met)%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T1 %s -> %s%s', v_err, v_e2, chr(10)); END IF;
++      RAISE EXCEPTION 'SENTINEL';
++    EXCEPTION WHEN OTHERS THEN
++      IF SQLERRM <> 'SENTINEL' THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  run aborted: %s%s', SQLERRM, chr(10)); END IF;
++    END;
++  END LOOP;
++
++  RAISE EXCEPTION E'%\n---- % passed, % failed, % skipped ----\n(this exception IS the rollback — nothing was changed)', rpt, v_pass, v_fail, v_skip;
++END
++$retest$;
