@@ -34,7 +34,7 @@ BEGIN
   END;
   IF v_n = 3 AND v_m = 3 AND v_ok AND v_err ILIKE '%permission denied%' THEN
     v_pass := v_pass + 1; rpt := rpt || format('PASS  T0 backfill = exactly IH / Lipan / North Hood on, all others off; anon denied; no verification column%s', chr(10));
-  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  T0 the-three-on %s, total-on %s, no-verified %s, anon "%s"%s', v_n, v_m, v_ok, v_err, chr(10)); END IF;
+  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  T0 the-three-on %s, total-on %s, clean-bodies %s, anon "%s"%s', v_n, v_m, v_ok, v_err, chr(10)); END IF;
 
   FOR rec IN SELECT d.id AS dept_id, d.name AS dept, d.probation_enabled AS was_on FROM public.departments d ORDER BY d.name LOOP
     rpt := rpt || format('— %s (%s)%s', rec.dept, CASE WHEN rec.was_on THEN 'on' ELSE 'off' END, chr(10));
