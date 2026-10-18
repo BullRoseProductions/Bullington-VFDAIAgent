@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for read_sign_records_2026-10-18.sql (dept_signed_records). Run AFTER the migration, separately. NOTHING CHANGES: each
+-- RETEST for read_sign_records_2026-10-18.sql (dept_signed_records). RAN on live 2026-10-18: 20 passed, 0 failed, 4 skipped
+-- (K0 pass; IH + Lipan 6/6 with K4 skipped — no Board Member with a unique email; North Hood 7/7 incl. K4; Demo + Granbury
+-- skip all — no plain members). PGlite dry run 13/0/2 with 8 mutations caught (see the commit a53087f). Run AFTER the migration, separately. NOTHING CHANGES: each
 -- department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on a FIXTURE document it
 -- creates itself — no real SOP is configured, published or signed. The final RAISE is the report. The "ERROR" IS the report.
 -- Per department (needs a DA and two plain members with unique emails; Officer / Board / another department's DA
