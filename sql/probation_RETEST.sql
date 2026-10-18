@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for probation (Phase 3.1 #2). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
+-- RETEST for probation_2026-10-18.sql (Phase 3.1 #2). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
 -- run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE items / a fixture document / fixture
 -- statuses it sets itself. The final RAISE is the report. The "ERROR" IS the report.
 -- Per department (needs a DA and two plain members with unique emails; an Officer and another department's DA are

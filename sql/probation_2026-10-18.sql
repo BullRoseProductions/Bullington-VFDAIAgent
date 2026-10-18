@@ -1,6 +1,8 @@
 -- =====================================================================
 -- PHASE 3.1 #2 — ONBOARDING -> CLEARED-TO-RUN + PROBATION LIFECYCLE (DB layer).
--- Record: Claude gate review PASS 2026-10-18 on rev 2 (b344546), recorded BEFORE apply. Not yet applied. Test: sql/probation_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-18 on rev 2 (b344546), recorded BEFORE apply.
+-- APPLIED by hand 2026-10-18. State check: tables 3 · rls true · new_policies 3 · item_cols 7 · ih_probation_items 13 ·
+-- in_gate 0 · backfilled 4 · anon_rpc false · onboarding_progress_insert true · total_policies 163. Test: sql/probation_RETEST.sql (run AFTER, separately).
 -- Brief: claude/B4C_Phase3.1_Onboarding_Probation_BuildOrder.md (+ decisions 2026-10-17). Step 0: sql/probation_STEP0_CHECK.sql.
 --
 -- EXTENDS the shipped onboarding — onboarding_items / onboarding_progress / set_onboarding_item are NOT rebuilt:
