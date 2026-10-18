@@ -1,5 +1,6 @@
 -- =====================================================================
--- READ & SIGN — a DRAWN signature on every acknowledgment (matches equipment sign-out). DRAFT — review, then apply.
+-- READ & SIGN — a DRAWN signature on every acknowledgment (matches equipment sign-out).
+-- Record: Claude gate review PASS 2026-10-17 (recorded BEFORE apply).
 -- Test: sql/read_sign_RETEST.sql (updated: every sign passes a signature; SG1 blank / non-PNG refused; A2 checks the
 -- stored signature + the roster-name snapshot).
 --
