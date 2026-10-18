@@ -1,0 +1,95 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Your path to active</title><style>
+:root{--page:#030406;--card2:#10141A;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.13);--tp:#ECEFF4;--ts:#A4ADBA;--tm:#6E7783;--tmd:#565E6A;--red:#C8323A;--redB:#E03A44;--redText:#E07982;--green:#2FA869;--greenT:#55BE87;--amber:#CC9E52;--amberT:#E0C285;--blue:#4F90D6;--blueT:#7FB2E6;--steel:#6D8CAC;--gold:#D8A24A;--goldT:#E6C078;--teal:#3FB0C9;--rose:#CE7BA0;--disp:'Oswald',sans-serif;--body:'Public Sans',sans-serif;--cardgrad:linear-gradient(180deg,#0F131A,#0B0E13)}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--tp);font-family:var(--body);font-size:13px;-webkit-font-smoothing:antialiased;padding:18px 16px;max-width:460px;margin:0 auto}
+.hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:17px;background:radial-gradient(120% 130% at 90% 0%,rgba(47,168,105,.28),transparent 48%),radial-gradient(90% 120% at 10% 100%,rgba(204,158,82,.12),transparent 55%),linear-gradient(100deg,#05070A,#0a0d12 60%,#081210);padding:19px 20px;margin-bottom:15px}
+.hero .emblem{position:absolute;right:-6px;top:-6px;width:116px;height:116px;color:rgba(47,168,105,.14);z-index:0}
+.hero>.z{position:relative;z-index:1}
+.kick{font-size:10.5px;font-weight:700;letter-spacing:.14em;color:var(--greenT);text-transform:uppercase;margin:0 0 5px}
+.hero h1{font-family:var(--disp);font-weight:700;font-size:26px;margin:0;line-height:1.02}
+.sub{font-size:12.5px;color:var(--ts);margin-top:8px;line-height:1.5;max-width:300px}
+.ptrack{margin-top:16px}
+.ptop{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+.ptop .d{font-family:var(--disp);font-weight:700;font-size:13px;color:var(--amberT)}
+.ptop .r{font-size:11px;color:var(--tm)}
+.ptrack .bar{height:9px;border-radius:5px;background:rgba(255,255,255,.07);overflow:hidden}
+.ptrack .bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--green),var(--greenT))}
+.ptop .pct{font-family:var(--disp);font-weight:700;font-size:13px;color:var(--greenT)}
+/* gate banner */
+.gate{display:flex;align-items:center;gap:13px;border-radius:15px;padding:14px 16px;margin-bottom:20px;position:relative;overflow:hidden;background:radial-gradient(120% 140% at 100% 0%,rgba(204,158,82,.2),transparent 60%),linear-gradient(180deg,rgba(204,158,82,.1),rgba(204,158,82,.02));border:1px solid rgba(204,158,82,.5)}
+.gate .gi{width:46px;height:46px;border-radius:13px;background:linear-gradient(160deg,rgba(204,158,82,.3),rgba(204,158,82,.08));border:1px solid rgba(224,194,133,.5);box-shadow:0 0 20px rgba(204,158,82,.3);color:var(--amberT);display:flex;align-items:center;justify-content:center;flex-shrink:0}.gate .gi svg{width:23px;height:23px}
+.gate .t{flex:1;min-width:0}.gate .t .h{font-family:var(--disp);font-weight:700;font-size:16px;color:#fff}.gate .t .d{font-size:11.5px;color:var(--ts);margin-top:2px;line-height:1.4}
+.sl{display:flex;align-items:center;gap:8px;font-family:var(--disp);font-weight:700;font-size:11px;letter-spacing:.09em;text-transform:uppercase;margin:0 2px 11px}
+.sl .ln{flex:1;height:1px;background:linear-gradient(90deg,currentColor,transparent);opacity:.4}
+.sl svg{width:14px;height:14px}.sl.a{color:var(--greenT)}.sl.b{color:var(--amberT)}.sl.c{color:var(--blueT)}
+.card{background:var(--cardgrad);border:1px solid var(--line2);border-radius:14px;overflow:hidden;margin-bottom:19px}
+.item{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:none}
+.ck{width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid}
+.ck svg{width:14px;height:14px}
+.ck.done{background:rgba(47,168,105,.16);border-color:rgba(47,168,105,.5);color:var(--greenT)}
+.ck.verified{background:rgba(79,144,214,.14);border-color:rgba(79,144,214,.5);color:var(--blueT)}
+.ck.pending{background:rgba(255,255,255,.03);border-color:var(--line2);color:var(--tmd)}
+.ck.over{background:rgba(200,50,58,.15);border-color:rgba(224,58,68,.5);color:var(--redText)}
+.it{flex:1;min-width:0}
+.it .a{font-size:12.5px;font-weight:600;color:var(--tp);line-height:1.25}
+.it.is-pending .a{color:var(--ts)}
+.it .b{font-size:10.5px;margin-top:3px;display:flex;align-items:center;gap:6px}
+.by{color:var(--blueT)}.ddue{color:var(--amberT)}.dover{color:var(--redText)}.dpend{color:var(--tm)}
+.soff{font-size:9px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;border-radius:5px;padding:3px 7px;flex-shrink:0;white-space:nowrap}
+.soff.off{color:var(--blueT);background:rgba(79,144,214,.12);border:1px solid rgba(79,144,214,.4)}
+.soff.self{color:var(--greenT);background:rgba(47,168,105,.1);border:1px solid rgba(47,168,105,.38)}
+/* milestones */
+.ms{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line)}
+.ms:last-child{border-bottom:none}
+.mnode{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:var(--disp);font-weight:700;font-size:11px;border:1.5px solid}
+.mnode.done{background:rgba(47,168,105,.14);border-color:var(--greenT);color:var(--greenT)}
+.mnode.now{background:rgba(204,158,82,.14);border-color:var(--amberT);color:var(--amberT);box-shadow:0 0 14px rgba(204,158,82,.35)}
+.mnode.next{background:rgba(255,255,255,.02);border-color:var(--line2);color:var(--tmd)}
+.mt{flex:1}.mt .a{font-size:12.5px;font-weight:600}.mt .b{font-size:10.5px;color:var(--tm);margin-top:2px}
+.mtag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-radius:5px;padding:3px 7px;flex-shrink:0}
+.mtag.ok{color:var(--greenT);background:rgba(47,168,105,.1);border:1px solid rgba(47,168,105,.38)}
+.mtag.wait{color:var(--amberT);background:rgba(204,158,82,.1);border:1px solid rgba(204,158,82,.4)}
+.mocktag{margin-top:6px;font-size:10px;color:var(--tm);text-align:center;line-height:1.55}.mocktag b{color:var(--greenT)}.mocktag .q{color:var(--amberT)}
+</style></head><body>
+
+<div class="hero">
+  <svg class="emblem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M12 2l2.5 5.5L20 8l-4 4 1 6-5-2.8L7 18l1-6-4-4 5.5-.5z"/></svg>
+  <div class="z"><p class="kick">Probation · Day 72 of 180</p><h1>Your path to active</h1><div class="sub">Everything you need to finish before the board votes you off probation. No surprises — it's all here from day one.</div>
+  <div class="ptrack"><div class="ptop"><span class="d">11 of 16 complete</span><span class="pct">69%</span></div><div class="bar"><i style="width:69%"></i></div></div>
+  </div>
+</div>
+
+<div class="gate">
+  <span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+  <div class="t"><div class="h">Cleared to run calls</div><div class="d">3 required items left before you can respond. You're not on the active roster until these are done.</div></div>
+</div>
+
+<div class="sl a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Before you run calls<span class="ln"></span></div>
+<div class="card">
+  <div class="item"><span class="ck done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span><div class="it"><div class="a">Sign SOGs &amp; station rules</div><div class="b"><span class="dpend">Signed v7 · Sep 2</span></div></div><span class="soff self">You</span></div>
+  <div class="item"><span class="ck verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg></span><div class="it"><div class="a">Gear issued &amp; fitted</div><div class="b"><span class="by">Verified by Capt. Mason</span></div></div><span class="soff off">Officer</span></div>
+  <div class="item"><span class="ck pending"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></span><div class="it is-pending"><div class="a">Sign Driving &amp; Apparatus Policy</div><div class="b"><span class="ddue">Required · due in 6 days</span></div></div><span class="soff self">You</span></div>
+  <div class="item"><span class="ck pending"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></span><div class="it is-pending"><div class="a">SCBA fit test on file</div><div class="b"><span class="dpend">Status only · no record stored</span></div></div><span class="soff off">Officer</span></div>
+  <div class="item"><span class="ck over"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v5M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg></span><div class="it"><div class="a">Emergency contact confirmed</div><div class="b"><span class="dover">Overdue · 2 days</span></div></div><span class="soff off">Officer</span></div>
+</div>
+
+<div class="sl b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>Probation tasks · by 6 months<span class="ln"></span></div>
+<div class="card">
+  <div class="item"><span class="ck done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span><div class="it"><div class="a">Firefighter I — module complete</div><div class="b"><span class="by">Verified by Training Officer</span></div></div><span class="soff off">Officer</span></div>
+  <div class="item"><span class="ck done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span><div class="it"><div class="a">10 training nights attended</div><div class="b"><span class="dpend">11 of 10 · auto-tracked</span></div></div><span class="soff self">Auto</span></div>
+  <div class="item"><span class="ck pending"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></span><div class="it is-pending"><div class="a">Interior firefighter check-off</div><div class="b"><span class="dpend">In progress · 2 evolutions left</span></div></div><span class="soff off">Officer</span></div>
+  <div class="item"><span class="ck pending"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></span><div class="it is-pending"><div class="a">Ride-along hours (20 min)</div><div class="b"><span class="dpend">14 of 20 hr logged</span></div></div><span class="soff self">Auto</span></div>
+</div>
+
+<div class="sl c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/></svg>Milestone reviews<span class="ln"></span></div>
+<div class="card">
+  <div class="ms"><span class="mnode done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span><div class="mt"><div class="a">30-day check-in</div><div class="b">On track · signed by Capt. Mason</div></div><span class="mtag ok">Done</span></div>
+  <div class="ms"><span class="mnode done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span><div class="mt"><div class="a">60-day check-in</div><div class="b">On track · signed by Capt. Mason</div></div><span class="mtag ok">Done</span></div>
+  <div class="ms"><span class="mnode now">90</span><div class="mt"><div class="a">90-day evaluation</div><div class="b">Due this week · officer to sign</div></div><span class="mtag wait">Due</span></div>
+  <div class="ms"><span class="mnode next">6mo</span><div class="mt"><div class="a">Final review → vote</div><div class="b">Auto-flags the board when all items clear</div></div></div>
+</div>
+
+<div class="mocktag"><b>Phase 3.1 · Onboarding &amp; Probation — mock · Industrial Noir</b> · required-items checklist with the cleared-to-run gate · officer sign-offs vs. self / auto-tracked · 30/60/90 + 6-mo milestones · auto-flags the board to vote off probation · <span class="q">personal paperwork is a verified status only — the document is never uploaded or stored</span> · read-only mock</div>
+</body></html>

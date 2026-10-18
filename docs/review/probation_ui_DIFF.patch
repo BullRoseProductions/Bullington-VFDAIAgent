@@ -1,0 +1,825 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 38180cd..a01958c 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -3137,8 +3137,8 @@ export default function App() {
+           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
+           {/* Signers (Board/DA/Officer) and list editors (DA/PA) get the officer screen; everyone else sees their own checklist, read-only. */}
+           {screen === "onboarding" && ((canManage(role) || isDeptAdmin(role))
+-            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} />
+-            : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} />)}
++            ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} meId={myMemberId} go={go} />
++            : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} go={go} />)}
+           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
+           {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
+               deep-link, a stale screen) gets their own My Equipment instead — never the department log. */}
+@@ -11523,6 +11523,17 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+   const [draft, setDraft] = useState({ name: "", exp: "" });
+   useEditorOpen(!!draft.name || !!draft.exp);   // half-typed cert
+   const [priv, setPriv] = useState(null);        // member_private (birthday/address/joined_date) — DA/PA only
++  // Probation start (member_probation, written only by set_member_probation): a real Department Admin of the
++  // department — not a Project Admin — and never on their own record. undefined = not loaded; null = not set.
++  const canSetProbStart = hasAny(role, ["Department Admin"]) && member.id !== meId;
++  const [probStart, setProbStart] = useState(undefined);
++  useEffect(() => {
++    if (!canSetProbStart) return;
++    let alive = true;
++    supabase.from("member_probation").select("started_on").eq("member_id", member.id).maybeSingle()
++      .then(({ data, error }) => { if (!alive) return; setProbStart(error ? undefined : (data?.started_on || null)); });   // a failed read hides the field rather than offering a blank
++    return () => { alive = false; };
++  }, [member.id, canSetProbStart]);
+   const [notes, setNotes] = useState([]);        // member_notes rows — DA/PA only (RLS-gated)
+   const [editing, setEditing] = useState(false);
+   useEditorOpen(editing);   // cert editor: a roster refresh must not swap the row being edited
+@@ -11556,7 +11567,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+       .then(({ data, error }) => { if (!isAlive()) return; if (error || !data) { setNotesErr(true); return; } setNotesErr(false); setNotes(data); });
+   }
+   function startEditForm() {
+-    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "" });
++    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "", prob_start: probStart || "" });
+     setEditing(true);
+   }
+   async function toggleActive() {
+@@ -11589,6 +11600,11 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
+     const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: deptId, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
+     if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
++    if (canSetProbStart && probStart !== undefined && (form.prob_start || null) !== (probStart || null)) {
++      const { data: pr, error: e3 } = await supabase.rpc("set_member_probation", { p_member_id: member.id, p_started_on: form.prob_start || null, p_note: null });
++      if (e3) { setSaving(false); notify({ kind: "error", title: "Profile saved, probation start didn't", text: e3.message || "Please try again." }); return; }
++      setProbStart(pr?.started_on || null);
++    }
+     setSaving(false);
+     onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, joinedOn: jd, mentorId: form.mentor_id || null, email });
+     setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
+@@ -11799,6 +11815,11 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+                   {(members || []).filter((m) => m.id !== member.id && m.status === "Active" && isAssignable(m)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                 </select></label>
+               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Joined (date)</span><input type="date" style={FS.input} value={form.joined_date || ""} onChange={(e) => setForm((f) => ({ ...f, joined_date: e.target.value }))} /></label>
++              {canSetProbStart && probStart !== undefined && (form.status === "Probationary" || probStart) && (
++                <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Probation start</span>
++                  <input type="date" max={probTodayYMD()} style={FS.input} value={form.prob_start || ""} onChange={(e) => setForm((f) => ({ ...f, prob_start: e.target.value }))} />
++                  <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{form.prob_start ? "Day 1 of their 180-day probation." : "Not set — their path shows \u201cProbation start not set\u201d."}</span></label>
++              )}
+               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
+               <label style={{ ...S.field, gridColumn: "1 / -1" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>
+             </div>
+@@ -20497,6 +20518,411 @@ const ONBOARD_TEMPLATE = [
+   { group: "Training", items: ["Station orientation & safety walk-through", "SOG / policy review session", "Firefighter I enrollment (if applicable)", "CPR / BLS scheduled"] },
+   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
+ ];
++/* ---------------- Probation (Phase 3.1 #2) — the path to active ----------------
++   DB layer: sql/probation_2026-10-18.sql (applied + RETEST 56/0/7). The UI only READS the computed status
++   (my_probation_status / member_probation_status / dept_probation_board) and writes through the four RPCs
++   (set_member_probation · set_probation_milestone · log_supervised_session · void_supervised_session) plus the
++   unchanged set_onboarding_item for manual ticks and the DA's existing direct edits of onboarding_items.
++   Honest by default: an empty gate reads "Gate not configured", never "cleared"; a legacy tick reads "Done — sign-off
++   not recorded"; no start date reads "Probation start not set", never a made-up day count. Status only — no personal
++   paperwork is ever shown or collected here. Custody: no sign / log / void control on the viewer's own record. */
++const PROB_MS = [
++  { kind: "30day", label: "30-day check-in", node: "30" },
++  { kind: "60day", label: "60-day check-in", node: "60" },
++  { kind: "90day", label: "90-day evaluation", node: "90" },
++  { kind: "final", label: "Final review → vote", node: "6mo" },
++];
++const PROB_MS_STATUS = { pending: "Pending", on_track: "On track", needs_work: "Needs work", done: "Done" };
++const PROB_SESSION_KIND = { ride_along: "Ride-along", drive: "Drive", shift: "Shift", other: "Other" };
++const PROB_HOURS_SOURCE = { supervised: "All supervised time", ride_along: "Ride-alongs", drive: "Drives", shift: "Shifts", training_nights: "Training nights attended" };
++const probDate = (ymd) => { if (!ymd) return ""; const d = new Date(`${String(ymd).slice(0, 10)}T12:00:00`); return isNaN(d) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
++const probTodayYMD = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" });   // YYYY-MM-DD, Central
++const probNum = (n) => { const x = Number(n); return Number.isFinite(x) ? (Math.round(x * 10) / 10).toString() : "0"; };
++// One member's computed path (the caller's own when memberId is null). A failed read keeps the last status.
++function useProbationStatus(memberId, enabled = true) {
++  const [st, setSt] = useState(null);
++  const [err, setErr] = useState(false);
++  const load = React.useCallback(() => {
++    if (!enabled) return Promise.resolve();
++    const q = memberId ? supabase.rpc("member_probation_status", { p_member_id: memberId }) : supabase.rpc("my_probation_status");
++    return q.then(({ data, error }) => {
++      if (error || !data || typeof data !== "object") { setErr(true); return; }
++      setErr(false); setSt(data);
++    });
++  }, [memberId, enabled]);
++  useEffect(() => { setSt(null); load(); }, [load]);
++  useEffect(() => { window.addEventListener(RS_CHANGED, load); return () => window.removeEventListener(RS_CHANGED, load); }, [load]);   // an ack item can satisfy on a signature
++  useReconnect(() => { if (err) load(); });
++  return { st, err, reload: load };
++}
++// The item config the status JSON doesn't carry (the hours unit, the linked document) — dept-readable onboarding_items.
++function useProbItemConfig(enabled = true) {
++  const [cfg, setCfg] = useState({});
++  useEffect(() => {
++    if (!enabled) return;
++    supabase.from("onboarding_items").select("id, is_mentor, hours_source, ack_series_id").then(({ data, error }) => {
++      if (!error && Array.isArray(data)) setCfg(Object.fromEntries(data.map((r) => [r.id, r])));   // a failed read just drops the unit
++    });
++  }, [enabled]);
++  return cfg;
++}
++/* How an item reads, by kind + state. who: "officer" (signed off by an officer), "you" (the member signs it in
++   Read & Sign), "auto" (counted / matched by the app). tone: done | todo | warn | muted. */
++function probItemView(it, cfg, self) {
++  const unit = cfg?.hours_source === "training_nights" ? "nights" : "hr";
++  const signedOn = it.signed_at ? probDate(String(it.signed_at).slice(0, 10)) : "";
++  switch (it.state) {
++    case "signed": return { who: "officer", tone: "done", text: `Signed by ${it.signed_by_name || "an officer"}${signedOn ? ` · ${signedOn}` : ""}` };
++    case "done_unrecorded": return { who: "officer", tone: "done", text: "Done — sign-off not recorded" };
++    case "mentor_assigned": return { who: "officer", tone: "done", text: "Mentor assigned" };
++    case "open": return { who: "officer", tone: "todo", text: cfg?.is_mentor ? "No mentor assigned yet" : "Open — an officer signs this off" };
++    case "signed_current": return { who: "you", tone: "done", text: "Signed — current version" };
++    case "needs_signature": return { who: "you", tone: "warn", text: self ? "Needs your signature" : "Needs their signature", link: true };
++    case "not_required": return { who: "you", tone: "muted", text: "Not required for this role" };
++    case "met": return { who: "auto", tone: "done", text: `${probNum(it.have)} of ${probNum(it.target)} ${unit} · auto-tracked` };
++    case "in_progress": return { who: "auto", tone: "todo", text: `${probNum(it.have)} of ${probNum(it.target)} ${unit} so far` };
++    case "current": return { who: "auto", tone: "done", text: "Current cert on file" };
++    case "missing": return { who: "auto", tone: "warn", text: "No current cert on file" };
++    case "not_configured": return { who: it.kind === "ack" ? "you" : "auto", tone: "muted", text: "Not set up yet — the Department Admin finishes this item" };
++    default: return { who: "officer", tone: "todo", text: "Open" };
++  }
++}
++const PROB_WHO = {
++  officer: { label: "Officer", color: FIRE.blueText, bg: "rgba(79,144,214,.12)", bd: "rgba(79,144,214,.4)" },
++  you: { label: "You", color: FIRE.greenText, bg: "rgba(47,168,105,.1)", bd: "rgba(47,168,105,.38)" },
++  auto: { label: "Auto", color: FIRE.greenText, bg: "rgba(47,168,105,.1)", bd: "rgba(47,168,105,.38)" },
++};
++function ProbItemRow({ it, cfg, self, go, last, action }) {
++  const v = probItemView(it, cfg, self);
++  const who = PROB_WHO[v.who];
++  const ok = !!it.satisfied;
++  const lineColor = v.tone === "warn" ? FIRE.amberText : v.tone === "done" && it.state === "signed" ? FIRE.blueText : FIRE.textMuted;
++  return (
++    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: last ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
++      <CheckMark state={ok ? "pass" : "todo"} size={22} />
++      <div style={{ flex: "1 1 180px", minWidth: 0 }}>
++        <div style={{ fontSize: 12.5, fontWeight: 600, color: ok ? FIRE.textPrimary : FIRE.textSecondary, lineHeight: 1.25, overflowWrap: "anywhere" }}>{it.label}</div>
++        <div style={{ fontSize: 10.5, marginTop: 3, color: lineColor }}>
++          {v.text}
++          {v.link && go && <button onClick={() => go("readsign")} style={{ marginLeft: 6, background: "none", border: "none", padding: 0, color: FIRE.blueText, textDecoration: "underline", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>Open Read &amp; Sign</button>}
++        </div>
++      </div>
++      {action}
++      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", borderRadius: 5, padding: "3px 7px", flexShrink: 0, whiteSpace: "nowrap", color: who.color, background: who.bg, border: `1px solid ${who.bd}` }}>{who.label}</span>
++    </div>
++  );
++}
++// The cleared-to-run banner. Empty gate = "Gate not configured" (neutral) — never "cleared".
++function ProbGateBanner({ st, self, go }) {
++  const g = st?.gate || {};
++  const left = Math.max(0, (g.required || 0) - (g.satisfied || 0));
++  const needsSig = (st?.items || []).some((it) => it.clears_to_run && it.state === "needs_signature");
++  const kind = !g.configured ? "none" : st.cleared_to_run ? "ok" : "no";
++  const tone = { none: { c: FIRE.textSecondary, rgb: "164,173,186" }, ok: { c: FIRE.greenText, rgb: "47,168,105" }, no: { c: FIRE.amberText, rgb: "204,158,82" } }[kind];
++  const head = kind === "none" ? "Gate not configured" : kind === "ok" ? "Cleared to run calls" : `Not cleared to run — ${left} required item${left === 1 ? "" : "s"} left`;
++  const body = kind === "none" ? "The Department Admin hasn't marked which items clear a member to run calls yet. Nobody reads as cleared until they do."
++    : kind === "ok" ? `Every required item is done${self ? " — you're cleared to respond" : ""}.`
++    : `${self ? "You're" : "They're"} not cleared to run calls until these are done.`;
++  return (
++    <div style={{ display: "flex", alignItems: "center", gap: 13, borderRadius: 15, padding: "14px 16px", marginBottom: 20, background: `radial-gradient(120% 140% at 100% 0%, rgba(${tone.rgb},.2), transparent 60%), linear-gradient(180deg, rgba(${tone.rgb},.1), rgba(${tone.rgb},.02))`, border: `1px solid rgba(${tone.rgb},.5)` }}>
++      <span style={{ width: 46, height: 46, borderRadius: 13, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: tone.c, background: `linear-gradient(160deg, rgba(${tone.rgb},.3), rgba(${tone.rgb},.08))`, border: `1px solid rgba(${tone.rgb},.5)` }}>{kind === "ok" ? <CheckCircle2 size={23} /> : <Lock size={23} />}</span>
++      <div style={{ flex: 1, minWidth: 0 }}>
++        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: "#fff" }}>{head}</div>
++        <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 2, lineHeight: 1.4 }}>
++          {body}
++          {kind === "no" && needsSig && self && go && <> <button onClick={() => go("readsign")} style={{ background: "none", border: "none", padding: 0, color: FIRE.blueText, textDecoration: "underline", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Sign your required reading</button></>}
++        </div>
++      </div>
++    </div>
++  );
++}
++function ProbSection({ icon: Icon, label, color, children }) {
++  return (<>
++    <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".09em", textTransform: "uppercase", margin: "0 2px 11px", color }}>
++      <Icon size={14} />{label}<span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${color}, transparent)`, opacity: 0.4 }} />
++    </div>
++    <div style={{ ...FS.cardNoir, borderRadius: 14, overflow: "hidden", marginBottom: 19, padding: 0 }}>{children}</div>
++  </>);
++}
++// The milestone rail. signer: { canSign, onSave(kind, status, note) } for an officer on someone else's record.
++function ProbMilestones({ st, signer }) {
++  const ms = Array.isArray(st?.milestones) ? st.milestones : [];
++  const today = probTodayYMD();
++  const firstOpen = PROB_MS.findIndex((p) => (ms.find((m) => m.kind === p.kind)?.status || "pending") !== "done");
++  const [editing, setEditing] = useState(null);
++  const [draft, setDraft] = useState({ status: "on_track", note: "" });
++  const [busy, setBusy] = useState(false);
++  useEditorOpen(!!editing);
++  return (
++    <ProbSection icon={Clock} label="Milestone reviews" color={FIRE.blueText}>
++      {PROB_MS.map((p, i) => {
++        const m = ms.find((x) => x.kind === p.kind) || { status: "pending" };
++        const done = m.status === "done";
++        const overdue = !done && m.due_on && String(m.due_on).slice(0, 10) < today;
++        const node = done ? "done" : i === firstOpen ? "now" : "next";
++        const nodeStyle = {
++          done: { background: "rgba(47,168,105,.14)", borderColor: FIRE.greenText, color: FIRE.greenText },
++          now: { background: "rgba(204,158,82,.14)", borderColor: FIRE.amberText, color: FIRE.amberText, boxShadow: "0 0 14px rgba(204,158,82,.35)" },
++          next: { background: "rgba(255,255,255,.02)", borderColor: FIRE.line2Noir, color: FIRE.textMuted },
++        }[node];
++        const signedLine = m.signed_by_name ? `${PROB_MS_STATUS[m.status] || m.status} · signed by ${m.signed_by_name}${m.signed_at ? ` · ${probDate(String(m.signed_at).slice(0, 10))}` : ""}` : null;
++        const dueLine = m.due_on ? `${overdue ? "Was due" : "Due"} ${probDate(m.due_on)}` : (st?.started_on ? null : "Due date set once the probation start is set");
++        const sub = [signedLine || (p.kind === "final" ? "Clears the way for the board's vote" : "Officer to sign"), !done ? dueLine : null].filter(Boolean).join(" · ");
++        const tag = done ? ["Done", FIRE.greenText, "47,168,105"] : overdue ? ["Overdue", FIRE.redText, "200,50,58"] : m.status === "needs_work" ? ["Needs work", FIRE.amberText, "204,158,82"] : node === "now" ? ["Due", FIRE.amberText, "204,158,82"] : null;
++        const open = editing === p.kind;
++        return (
++          <div key={p.kind} style={{ padding: "13px 14px", borderBottom: i === PROB_MS.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
++            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
++              <span style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, border: "1.5px solid", ...nodeStyle }}>{done ? <Check size={15} strokeWidth={3} /> : p.node}</span>
++              <div style={{ flex: "1 1 160px", minWidth: 0 }}>
++                <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary }}>{p.label}</div>
++                <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>{sub}</div>
++                {m.note && <div style={{ fontSize: 11, color: FIRE.textSecondary, marginTop: 4, fontStyle: "italic", overflowWrap: "anywhere" }}>&ldquo;{m.note}&rdquo;</div>}
++              </div>
++              {signer?.canSign && !open && <button style={{ ...FS.btn, padding: "4px 10px", fontSize: 11 }} onClick={() => { setEditing(p.kind); setDraft({ status: m.status === "pending" ? "on_track" : m.status, note: m.note || "" }); }}>{m.signed_by_name ? "Update" : "Sign"}</button>}
++              {tag && <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: 5, padding: "3px 7px", flexShrink: 0, color: tag[1], background: `rgba(${tag[2]},.1)`, border: `1px solid rgba(${tag[2]},.4)` }}>{tag[0]}</span>}
++            </div>
++            {open && (
++              <div style={{ marginTop: 10, marginLeft: 46, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
++                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary }}>Status
++                  <select style={{ ...FS.input, padding: "6px 9px" }} value={draft.status} onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}>
++                    {["on_track", "needs_work", "done", "pending"].map((k) => <option key={k} value={k}>{PROB_MS_STATUS[k]}</option>)}
++                  </select></label>
++                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary, flex: "1 1 200px" }}>Short officer note (optional — no personal records)
++                  <input style={{ ...FS.input, padding: "6px 9px" }} maxLength={500} value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} /></label>
++                <button style={FS.btnPrimary} disabled={busy} onClick={async () => { setBusy(true); const ok = await signer.onSave(p.kind, draft.status, draft.note); setBusy(false); if (ok) setEditing(null); }}>{busy ? "Saving…" : "Save"}</button>
++                <button style={FS.btn} disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
++              </div>
++            )}
++          </div>
++        );
++      })}
++      <div style={{ padding: "10px 14px", fontSize: 10.5, color: FIRE.textMuted, borderTop: `1px solid ${FIRE.lineNoir}` }}>
++        Supervised time logged: <b style={{ color: FIRE.textSecondary }}>{probNum(st?.supervised_hours)} hr</b> · when every item and review is done, the board sees {signer ? "this member" : "you"} as ready for the vote.
++      </div>
++    </ProbSection>
++  );
++}
++/* THE PATH — hero, gate banner, the two item groups (+ the rest of the checklist, so nothing an officer set up
++   disappears before the DA sorts items into the gate / probation), the milestone rail. Read-only unless an officer
++   passes actions for someone else's record. */
++function ProbationPath({ st, cfg, self, go, signer, itemAction }) {
++  const items = Array.isArray(st?.items) ? st.items : [];
++  const prob = st?.status === "Probationary";
++  const gateItems = items.filter((it) => it.clears_to_run);
++  const probItems = items.filter((it) => !it.clears_to_run && it.phase === "probation");
++  const rest = items.filter((it) => !it.clears_to_run && it.phase !== "probation");
++  const done = items.filter((it) => it.satisfied).length;
++  const pct = items.length ? Math.round((done / items.length) * 100) : 0;
++  const kicker = prob ? (st?.started_on && st?.day_n != null ? `Probation · Day ${st.day_n} of ${st.target_days || 180}` : "Probation · start not set") : "Onboarding";
++  const restGroups = groupOnboarding(rest);
++  const rows = (list) => list.map((it, i) => <ProbItemRow key={it.item_id} it={it} cfg={cfg[it.item_id]} self={self} go={go} last={i === list.length - 1} action={itemAction ? itemAction(it) : null} />);
++  return (<>
++    <div style={{ position: "relative", overflow: "hidden", border: `1px solid ${FIRE.lineNoir}`, borderRadius: 17, padding: "19px 20px", marginBottom: 15, background: "radial-gradient(120% 130% at 90% 0%, rgba(47,168,105,.28), transparent 48%), radial-gradient(90% 120% at 10% 100%, rgba(204,158,82,.12), transparent 55%), linear-gradient(100deg, #05070A, #0a0d12 60%, #081210)" }}>
++      <Award size={116} strokeWidth={1.2} style={{ position: "absolute", right: -6, top: -6, color: "rgba(47,168,105,.14)" }} aria-hidden="true" />
++      <div style={{ position: "relative" }}>
++        <p style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".14em", color: FIRE.greenText, textTransform: "uppercase", margin: "0 0 5px" }}>{kicker}</p>
++        <h1 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, margin: 0, lineHeight: 1.02, color: FIRE.textPrimary }}>{self ? "Your path to active" : `${st?.name || "Member"}'s path to active`}</h1>
++        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 8, lineHeight: 1.5, maxWidth: 340 }}>
++          {prob && !st?.started_on ? "The Department Admin hasn't set a probation start date yet, so there's no day count — everything else below is live."
++            : self ? "Everything you need to finish before the board votes you off probation. No surprises — it's all here from day one." : "Everything they need to finish before the board votes them off probation."}
++        </div>
++        <div style={{ marginTop: 16 }}>
++          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 7 }}>
++            <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, color: FIRE.amberText, ...FS.num }}>{done} of {items.length} complete</span>
++            <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, color: FIRE.greenText, ...FS.num }}>{pct}%</span>
++          </div>
++          <div style={{ height: 9, borderRadius: 5, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${pct}%`, borderRadius: 5, background: `linear-gradient(90deg, ${FIRE.green}, ${FIRE.greenText})` }} /></div>
++        </div>
++        {st?.ready_for_vote && <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600, color: FIRE.greenText }}>Everything is clear — ready for the board's vote.</div>}
++      </div>
++    </div>
++    <ProbGateBanner st={st} self={self} go={go} />
++    {gateItems.length > 0 && <ProbSection icon={Lock} label="Before you run calls" color={FIRE.greenText}>{rows(gateItems)}</ProbSection>}
++    {probItems.length > 0 && <ProbSection icon={ClipboardCheck} label="Probation tasks · by 6 months" color={FIRE.amberText}>{rows(probItems)}</ProbSection>}
++    {restGroups.map((g) => <ProbSection key={g.category} icon={ClipboardList} label={g.category} color={FIRE.textSecondary}>{rows(g.items)}</ProbSection>)}
++    {prob && <ProbMilestones st={st} signer={signer} />}
++  </>);
++}
++/* OFFICER ACTIONS on someone else's record: the milestone signer (Board/DA/Officer) and the supervised-time log
++   (DA/Officer) with void. Never offered on the viewer's own record. */
++function ProbSupervisedLog({ memberId, members, meId, canLog, notify, onChanged }) {
++  const [rows, setRows] = useState(null);
++  const [err, setErr] = useState(false);
++  const [tick, setTick] = useState(0);
++  const [form, setForm] = useState({ kind: "ride_along", hours: "", date: probTodayYMD(), apparatus: "", supervisor: "", note: "" });
++  const [busy, setBusy] = useState(false);
++  const [voiding, setVoiding] = useState(null);
++  const [reason, setReason] = useState("");
++  const [apparatus, setApparatus] = useState([]);
++  useEditorOpen(!!form.hours || !!voiding);
++  useEffect(() => {
++    let alive = true;
++    supabase.from("supervised_sessions").select("id, kind, apparatus_id, hours, occurred_on, supervisor_id, note, created_by, created_at, voided_at, voided_by, void_reason")
++      .eq("member_id", memberId).order("occurred_on", { ascending: false }).order("created_at", { ascending: false })
++      .then(({ data, error }) => { if (!alive) return; if (error || !Array.isArray(data)) { setErr(true); return; } setErr(false); setRows(data); });
++    return () => { alive = false; };
++  }, [memberId, tick]);
++  useEffect(() => { if (canLog) supabase.from("apparatus").select("id, name").order("name").then(({ data, error }) => { if (!error && Array.isArray(data)) setApparatus(data); }); }, [canLog]);
++  const nameOf = (id) => (members || []).find((m) => m.id === id)?.name || "—";
++  const supervisors = (members || []).filter((m) => m.id !== memberId && m.status !== "Inactive" && isAssignable(m));
++  async function log() {
++    const hours = Number(form.hours);
++    if (!(hours > 0 && hours <= 24)) { notify({ kind: "error", title: "Check the hours", text: "Hours must be more than 0 and at most 24." }); return; }
++    setBusy(true);
++    const { error } = await supabase.rpc("log_supervised_session", { p_member_id: memberId, p_kind: form.kind, p_hours: hours, p_occurred_on: form.date,
++      p_apparatus_id: form.apparatus || null, p_supervisor_id: form.supervisor || null, p_note: form.note.trim() || null });
++    setBusy(false);
++    if (error) { notify({ kind: "error", title: "Couldn't log the session", text: error.message || "Please try again." }); return; }
++    notify({ kind: "success", text: `Logged ${probNum(hours)} hr ${PROB_SESSION_KIND[form.kind].toLowerCase()}.` });
++    setForm((f) => ({ ...f, hours: "", note: "" })); setTick((t) => t + 1); onChanged();
++  }
++  async function voidIt(id) {
++    if (!reason.trim()) { notify({ kind: "error", title: "Say why", text: "A reason is required to void a session." }); return; }
++    setBusy(true);
++    const { error } = await supabase.rpc("void_supervised_session", { p_id: id, p_reason: reason.trim() });
++    setBusy(false);
++    if (error) { notify({ kind: "error", title: "Couldn't void the session", text: error.message || "Please try again." }); return; }
++    notify({ kind: "success", text: "Session voided — it no longer counts. The entry stays on the log." });
++    setVoiding(null); setReason(""); setTick((t) => t + 1); onChanged();
++  }
++  return (
++    <ProbSection icon={Truck} label="Supervised time" color={FIRE.blueText}>
++      {canLog && (
++        <div style={{ padding: "12px 14px", borderBottom: `1px solid ${FIRE.lineNoir}`, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
++          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary }}>Type
++            <select style={{ ...FS.input, padding: "6px 9px" }} value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}>{["ride_along", "drive", "shift"].map((k) => <option key={k} value={k}>{PROB_SESSION_KIND[k]}</option>)}</select></label>
++          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary, width: 80 }}>Hours
++            <input type="number" min="0.25" max="24" step="0.25" style={{ ...FS.input, padding: "6px 9px" }} value={form.hours} onChange={(e) => setForm((f) => ({ ...f, hours: e.target.value }))} /></label>
++          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary }}>Date
++            <input type="date" max={probTodayYMD()} style={{ ...FS.input, padding: "6px 9px" }} value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} /></label>
++          {apparatus.length > 0 && <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary }}>Apparatus
++            <select style={{ ...FS.input, padding: "6px 9px", maxWidth: 160 }} value={form.apparatus} onChange={(e) => setForm((f) => ({ ...f, apparatus: e.target.value }))}><option value="">—</option>{apparatus.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>}
++          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary }}>Supervisor
++            <select style={{ ...FS.input, padding: "6px 9px", maxWidth: 170 }} value={form.supervisor} onChange={(e) => setForm((f) => ({ ...f, supervisor: e.target.value }))}><option value="">Me</option>{supervisors.filter((m) => m.id !== meId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
++          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary, flex: "1 1 160px" }}>Note (optional)
++            <input style={{ ...FS.input, padding: "6px 9px" }} maxLength={500} value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} /></label>
++          <button style={FS.btnPrimary} disabled={busy || !form.hours} onClick={log}><Plus size={14} /> Log</button>
++        </div>
++      )}
++      {err && !rows ? <div style={{ padding: "12px 14px", fontSize: 12.5, color: FIRE.amberText }}>Couldn't load the log. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setTick((t) => t + 1)}>Retry</button></div>
++        : rows === null ? <div style={{ padding: "12px 14px", fontSize: 12.5, color: FIRE.textMuted }}>Loading…</div>
++        : rows.length === 0 ? <div style={{ padding: "12px 14px", fontSize: 12.5, color: FIRE.textMuted }}>No supervised time logged yet.</div>
++        : rows.map((r, i) => {
++          const voided = !!r.voided_at;
++          return (
++            <div key={r.id} style={{ padding: "10px 14px", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, opacity: voided ? 0.6 : 1 }}>
++              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
++                <div style={{ flex: "1 1 200px", minWidth: 0, fontSize: 12.5, color: FIRE.textPrimary, textDecoration: voided ? "line-through" : "none" }}>
++                  {probNum(r.hours)} hr · {PROB_SESSION_KIND[r.kind] || r.kind}{r.apparatus_id ? ` · ${apparatus.find((a) => a.id === r.apparatus_id)?.name || "apparatus"}` : ""}
++                  <span style={{ color: FIRE.textMuted }}> · {probDate(r.occurred_on)} · supervised by {nameOf(r.supervisor_id)}</span>
++                </div>
++                {canLog && !voided && voiding !== r.id && <button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, color: FIRE.deleteRed }} onClick={() => { setVoiding(r.id); setReason(""); }}>Void</button>}
++              </div>
++              {r.note && <div style={{ fontSize: 11, color: FIRE.textSecondary, marginTop: 3, overflowWrap: "anywhere" }}>{r.note}</div>}
++              {voided && <div style={{ fontSize: 11, color: FIRE.redText, marginTop: 3 }}>Voided by {nameOf(r.voided_by)} · {probDate(String(r.voided_at).slice(0, 10))} — {r.void_reason} · doesn't count</div>}
++              {voiding === r.id && (
++                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
++                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary, flex: "1 1 220px" }}>Why is it being voided? (required — it stays on the log, marked void)
++                    <input style={{ ...FS.input, padding: "6px 9px" }} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
++                  <button style={{ ...FS.btn, color: FIRE.deleteRed }} disabled={busy || !reason.trim()} onClick={() => voidIt(r.id)}>Void session</button>
++                  <button style={FS.btn} disabled={busy} onClick={() => setVoiding(null)}>Cancel</button>
++                </div>
++              )}
++            </div>
++          );
++        })}
++    </ProbSection>
++  );
++}
++/* READY FOR THE VOTE — Board / DA / Officer. dept_probation_board() (honest denominator server-side). The Board votes;
++   a Department Admin changes the status to Active in Edit member — the card drops off once they're Active. */
++function ProbationBoard({ onPick, refreshKey, onRows }) {
++  const [rows, setRows] = useState(null);
++  const [err, setErr] = useState(false);
++  const [tick, setTick] = useState(0);
++  useEffect(() => {
++    let alive = true;
++    supabase.rpc("dept_probation_board").then(({ data, error }) => {
++      if (!alive) return;
++      if (error || !Array.isArray(data)) { setErr(true); return; }   // keeps the last board
++      setErr(false); setRows(data); if (onRows) onRows(data);
++    });
++    return () => { alive = false; };
++  }, [refreshKey, tick]);   // eslint-disable-line react-hooks/exhaustive-deps
++  useReconnect(() => { if (err) setTick((t) => t + 1); });
++  if (err && !rows) return <Card padding={12} style={{ marginBottom: 12, fontSize: 13, color: FIRE.amberText }}>Couldn't load the probation board. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setTick((t) => t + 1)}>Retry</button></Card>;
++  if (!rows || rows.length === 0) return null;
++  const ready = rows.filter((r) => r.ready_for_vote);
++  const chip = (r) => !r.gate_configured ? ["Gate not configured", FIRE.textSecondary, "164,173,186"] : r.cleared_to_run ? ["Cleared to run", FIRE.greenText, "47,168,105"] : ["Not cleared to run", FIRE.redText, "200,50,58"];
++  return (<>
++    {ready.length > 0 && (
++      <Card padding="14px 16px" style={{ marginBottom: 12, border: "1px solid rgba(47,168,105,.5)", background: "radial-gradient(120% 140% at 100% 0%, rgba(47,168,105,.18), transparent 60%), linear-gradient(180deg, #0F131A, #0B0E13)" }}>
++        <CardHead icon={Award} title={`Ready for the vote · ${ready.length}`} />
++        {ready.map((r) => <button key={r.member_id} onClick={() => onPick(r.member_id)} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: "6px 0", cursor: "pointer", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{r.name} <span style={{ fontWeight: 400, fontSize: 12, color: FIRE.textMuted }}>{r.day_n != null ? `· day ${r.day_n}` : ""} · every item and review done</span></button>)}
++        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>The board votes. After the vote, a Department Admin changes their status to Active in Edit member.</div>
++      </Card>
++    )}
++    <Card padding="12px 16px" style={{ marginBottom: 12 }}>
++      <CardHead icon={UserPlus} title={`On probation · ${rows.length}`} />
++      {err && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 6 }}>Couldn't refresh — showing what was last loaded.</div>}
++      {rows.map((r, i) => {
++        const [t, c, rgb] = chip(r);
++        const d = r.detail || {};
++        const items = Array.isArray(d.items) ? d.items : [];
++        const done = items.filter((it) => it.satisfied).length;
++        return (
++          <button key={r.member_id} onClick={() => onPick(r.member_id)} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, padding: "9px 0", cursor: "pointer", fontFamily: "inherit" }}>
++            <div style={{ flex: "1 1 160px", minWidth: 0 }}>
++              <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{r.name}</div>
++              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...FS.num }}>{r.started_on ? `Day ${r.day_n} of 180` : "Probation start not set"} · {done} of {items.length} items · {d.milestones_done ?? 0} of 4 reviews</div>
++            </div>
++            <span style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: 5, padding: "3px 7px", color: c, background: `rgba(${rgb},.1)`, border: `1px solid rgba(${rgb},.4)` }}>{t}</span>
++            {r.ready_for_vote && <span style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: 5, padding: "3px 7px", color: FIRE.greenText, background: "rgba(47,168,105,.1)", border: "1px solid rgba(47,168,105,.4)" }}>Ready for the vote</span>}
++          </button>
++        );
++      })}
++    </Card>
++  </>);
++}
++// Small tags on an item: in the cleared-to-run gate, a probation task, and how it's satisfied when not a manual sign-off.
++function ProbItemTags({ it }) {
++  const tag = (t, c, rgb) => <span key={t} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: c, background: `rgba(${rgb},.1)`, border: `1px solid rgba(${rgb},.35)`, borderRadius: 5, padding: "1px 6px", marginLeft: 6, verticalAlign: "1px" }}>{t}</span>;
++  const kind = { ack: "Read & Sign", hours: "Hours", cert: "Cert" }[it.kind];
++  return (<>
++    {it.clears_to_run && tag("Clears to run", FIRE.greenText, "47,168,105")}
++    {it.phase === "probation" && tag("Probation", FIRE.amberText, "204,158,82")}
++    {kind && tag(kind, FIRE.blueText, "79,144,214")}
++  </>);
++}
++/* DA item config (edit mode): in the gate? which phase? how is it satisfied? An ack item points at a document that
++   already requires a signature (Read & Sign); hours at a target + source; cert at a cert name. The mentor item stays a
++   manual item (the database refuses anything else). */
++function ProbItemConfig({ it, docs, busy, onSave }) {
++  const [target, setTarget] = useState(it.hours_target ?? "");
++  const [cert, setCert] = useState(it.cert_name || "");
++  useEffect(() => { setTarget(it.hours_target ?? ""); setCert(it.cert_name || ""); }, [it.hours_target, it.cert_name]);
++  const sel = { ...FS.input, padding: "4px 8px", fontSize: 12, width: "auto" };
++  const lab = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: FIRE.textSecondary };
++  return (
++    <div style={{ flexBasis: "100%", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", padding: "4px 0 6px 74px" }}>
++      <label style={lab}><input type="checkbox" checked={!!it.clears_to_run} disabled={busy} onChange={(e) => onSave({ clears_to_run: e.target.checked })} /> Required to run calls</label>
++      <label style={lab}>Phase <select style={sel} value={it.phase || "onboarding"} disabled={busy} onChange={(e) => onSave({ phase: e.target.value })}><option value="onboarding">Onboarding</option><option value="probation">Probation task</option></select></label>
++      <label style={lab}>Done when <select style={sel} value={it.kind || "manual"} disabled={busy || it.is_mentor} onChange={(e) => onSave({ kind: e.target.value })}>
++        <option value="manual">An officer signs it off</option><option value="ack">A document is signed (Read &amp; Sign)</option><option value="hours">Hours / nights reach a target</option><option value="cert">A current cert is on file</option></select></label>
++      {it.kind === "ack" && <label style={lab}>Document <select style={sel} value={it.ack_series_id || ""} disabled={busy} onChange={(e) => onSave({ ack_series_id: e.target.value || null })}>
++        <option value="">— Pick a document that requires a signature —</option>
++        {docs.map((d) => <option key={d.series_id} value={d.series_id}>{d.title} (v{d.current_version})</option>)}
++        {it.ack_series_id && !docs.some((d) => d.series_id === it.ack_series_id) && <option value={it.ack_series_id}>(no longer requires a signature)</option>}
++      </select></label>}
++      {it.kind === "hours" && (<>
++        <label style={lab}>Counts <select style={sel} value={it.hours_source || ""} disabled={busy} onChange={(e) => onSave({ hours_source: e.target.value || null })}><option value="">— Pick —</option>{Object.entries(PROB_HOURS_SOURCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
++        <label style={lab}>Target <input type="number" min="0.5" step="0.5" style={{ ...sel, width: 70 }} value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)} onBlur={() => { if (String(target) !== String(it.hours_target ?? "")) onSave({ hours_target: target === "" ? null : Number(target) }); }} /> {it.hours_source === "training_nights" ? "nights" : "hr"}</label>
++      </>)}
++      {it.kind === "cert" && <label style={lab}>Cert name <input style={{ ...sel, width: 160 }} maxLength={120} value={cert} disabled={busy} placeholder="e.g. Firefighter I" onChange={(e) => setCert(e.target.value)} onBlur={() => { if (cert.trim() !== (it.cert_name || "")) onSave({ cert_name: cert.trim() || null }); }} /></label>}
++    </div>
++  );
++}
+ // Onboarding completion — ONE rule for the officer screen, the member's own view and the dashboard card.
+ // The mentor item is done when a mentor is assigned (members.mentor_id), never from a progress row.
+ const onboardingDone = (it, person, progById) => (it.is_mentor ? !!person?.mentorId : !!progById?.[it.id]?.done);
+@@ -20505,122 +20931,85 @@ const groupOnboarding = (items) => {   // categories in first-appearance order;
+   (items || []).forEach((it) => { let g = grouped.find((x) => x.category === it.category); if (!g) { g = { category: it.category, items: [] }; grouped.push(g); } g.items.push(it); });
+   return grouped;
+ };
+-// "Signed by <name> · <date>". A done row with no stamp predates sign-off — say "Done", never invent a signer.
++// "Signed by <name> · <date>". A done row with no stamp predates sign-off — say so, never invent a signer.
+ const onboardingSignedLine = (row, members) => {
+   if (!row?.done) return null;
+-  if (!row.checked_by) return "Done";
++  if (!row.checked_by) return "Done — sign-off not recorded";
+   const who = (members || []).find((m) => m.id === row.checked_by)?.name || "an officer";
+   const when = row.checked_at ? new Date(row.checked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+   return `Signed by ${who}${when ? ` · ${when}` : ""}`;
+ };
+-// The signed-in member's own checklist + progress. RLS: dept members read onboarding_items; a member reads
+-// only their OWN onboarding_progress rows. A failed read sets err and keeps the last-known data.
+-function useMyOnboarding(meId) {
+-  const [items, setItems] = useState(null);   // null = loading
+-  const [prog, setProg] = useState({});
+-  const [err, setErr] = useState(false);
+-  const load = () => {
+-    if (!meId) return;
+-    Promise.all([
+-      supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true }),
+-      supabase.from("onboarding_progress").select("item_id, done, checked_by, checked_at").eq("member_id", meId),
+-    ]).then(([iRes, pRes]) => {
+-      if (iRes.error || !iRes.data || pRes.error || !pRes.data) { setErr(true); return; }
+-      setErr(false); setItems(iRes.data); setProg(Object.fromEntries(pRes.data.map((r) => [r.item_id, r])));
+-    });
+-  };
+-  useEffect(() => { load(); }, [meId]);   // eslint-disable-line react-hooks/exhaustive-deps
+-  useReconnect(() => { if (err) load(); });
+-  return { items, prog, err, reload: load };
+-}
+ // MemberDashboard card: checklist incomplete AND (Probationary OR already started) → progress + next
+ // open items. A member promoted mid-checklist keeps it until done; one never onboarded never sees it.
+ function OnboardingCard({ S, me, go, dept }) {
+   const noir = React.useContext(NoirCtx);   // Noir dashboards: CardHead header
+   const moduleOn = moduleEnabled("onboarding", dept?.disabled_modules);
+-  const { items, prog, err, reload } = useMyOnboarding(moduleOn ? me?.id : null);
++  // The SAME computed status as "Your path to active" (my_probation_status) — gate, auto items and legacy ticks
++  // resolved server-side, so the card can't disagree with the screen it opens.
++  const { st, err, reload } = useProbationStatus(null, moduleOn && !!me?.id);
+   if (!moduleOn) return null;
+   // Retry card only for Probationary: for anyone else a failed read can't say whether they've started,
+   // and a long-time member shouldn't get an onboarding error on every flaky resume.
+-  if (err && !items) return me?.status !== "Probationary" ? null : (
++  if (err && !st) return me?.status !== "Probationary" ? null : (
+     <Card padding={16} style={{ marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>
+-      Couldn't load your onboarding checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button>
++      Couldn't load your path to active. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button>
+     </Card>
+   );
++  const items = Array.isArray(st?.items) ? st.items : null;
+   if (!items || items.length === 0) return null;
+-  const open = items.filter((it) => !onboardingDone(it, me, prog));
+-  if (open.length === 0) return null;
++  const prob = st.status === "Probationary";
++  const open = items.filter((it) => !it.satisfied);
+   const done = items.length - open.length;
+-  if (me?.status !== "Probationary" && done === 0) return null;
++  // Probationary: shown until they go Active (the path includes the reviews and the vote). Anyone else: only while a
++  // checklist they've started is unfinished. Never onboarded = never shown.
++  if (!prob && (open.length === 0 || done === 0)) return null;
+   const pct = Math.round((done / items.length) * 100);
++  const g = st.gate || {};
++  const left = Math.max(0, (g.required || 0) - (g.satisfied || 0));
++  const gateLine = !g.configured ? ["Gate not configured", FIRE.textSecondary] : st.cleared_to_run ? ["Cleared to run calls", FIRE.greenText] : [`Not cleared to run — ${left} required item${left === 1 ? "" : "s"} left`, FIRE.redText];
++  const nextUp = [...open.filter((it) => it.clears_to_run), ...open.filter((it) => !it.clears_to_run)].slice(0, 3);
++  const dayLine = prob ? (st.started_on && st.day_n != null ? `Day ${st.day_n} of ${st.target_days || 180}` : "Probation start not set") : null;
+   return (
+     <Card as="button" onClick={() => go("onboarding")} padding={16} style={{ marginBottom: 14, width: "100%", textAlign: "left", cursor: "pointer", display: "block" }}>
+-      {noir ? <CardHead icon={UserPlus} title="Your onboarding" /> : <SectionLabel style={{ marginBottom: 8 }}><UserPlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />YOUR ONBOARDING</SectionLabel>}
++      {noir ? <CardHead icon={UserPlus} title={prob ? "Your path to active" : "Your onboarding"} /> : <SectionLabel style={{ marginBottom: 8 }}><UserPlus size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />{prob ? "YOUR PATH TO ACTIVE" : "YOUR ONBOARDING"}</SectionLabel>}
++      {dayLine && <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.greenText, marginBottom: 6 }}>{dayLine}</div>}
++      <div style={{ fontSize: 12.5, fontWeight: 600, color: gateLine[1], marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>{st.cleared_to_run ? <CheckCircle2 size={14} /> : <Lock size={14} />}{gateLine[0]}</div>
+       <div style={{ fontSize: 13, color: FIRE.textSecondary, display: "flex", justifyContent: "space-between", ...FS.num }}><span>{done} of {items.length} complete</span><span>{pct}%</span></div>
+-      <ProgressBar pct={pct} tone={pct >= 50 ? "amber" : "red"} />
+-      <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: FIRE.textMuted, letterSpacing: ".06em" }}>NEXT UP</div>
+-      {open.slice(0, 3).map((it) => <div key={it.id} style={{ fontSize: 13.5, color: FIRE.textPrimary, padding: "3px 0" }}>· {it.label}</div>)}
+-      <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 4 }}>See your full checklist <ChevronRight size={14} color={FIRE.btnIcon} /></div>
++      <ProgressBar pct={pct} tone={pct >= 100 ? "green" : pct >= 50 ? "amber" : "red"} />
++      {st.ready_for_vote ? <div style={{ marginTop: 10, fontSize: 13, fontWeight: 600, color: FIRE.greenText }}>Everything is clear — ready for the board's vote.</div> : nextUp.length > 0 && (<>
++        <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: FIRE.textMuted, letterSpacing: ".06em" }}>NEXT UP</div>
++        {nextUp.map((it) => <div key={it.item_id} style={{ fontSize: 13.5, color: FIRE.textPrimary, padding: "3px 0" }}>· {it.label}{it.clears_to_run ? <span style={{ fontSize: 11, color: FIRE.amberText }}> · required to run calls</span> : null}</div>)}
++      </>)}
++      <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 4 }}>See your full path <ChevronRight size={14} color={FIRE.btnIcon} /></div>
+     </Card>
+   );
+ }
+-// The member's own checklist, read-only. Officers sign items on the Onboarding screen; nothing here writes.
+-function MyOnboarding({ S, me, members }) {
+-  const { items, prog, err, reload } = useMyOnboarding(me?.id);
+-  const mentorName = me?.mentorId ? (members || []).find((m) => m.id === me.mentorId)?.name : null;
+-  const done = (items || []).filter((it) => onboardingDone(it, me, prog)).length;
+-  const total = (items || []).length;
+-  const pct = total ? Math.round((done / total) * 100) : 0;
++// The member's own path to active, read-only (my_probation_status). Officers sign on the Onboarding screen; the only
++// thing a member does here is follow the link to sign their required reading in Read & Sign.
++function MyOnboarding({ S, me, members, go }) {
++  const { st, err, reload } = useProbationStatus(null, !!me?.id);
++  const cfg = useProbItemConfig(!!me?.id);
++  const items = Array.isArray(st?.items) ? st.items : null;
+   return (
+-    <PageShell band watermark="INTAKE" kicker="YOUR ONBOARDING" title="Getting started" sub="Your new-member checklist. An officer signs each item off as you complete it.">
++    <PageShell band watermark="INTAKE" kicker={me?.status === "Probationary" ? "PROBATION" : "YOUR ONBOARDING"} title="Your path to active" sub="Your new-member checklist, the items that clear you to run calls, and your probation reviews. Officers sign each step.">
+       <NoirSkin>
+-      {err && !items ? (
+-        <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Couldn't load your checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
+-      ) : items === null ? (
+-        <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading checklist…</Card>
+-      ) : total === 0 ? (
++      <div style={{ maxWidth: 640 }}>
++      {err && !st ? (
++        <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Couldn't load your path. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
++      ) : st === null ? (
++        <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading…</Card>
++      ) : items.length === 0 && st.status !== "Probationary" ? (
+         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Your department hasn't set up an onboarding checklist yet.</Card>
+       ) : (<>
+-        <Card padding="16px 18px" style={{ marginBottom: 14 }}>
+-          {/* Featured progress (the onboarding mock's head card): big Oswald %, the count, then the bar. */}
+-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+-            <div>
+-              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 6 }}>Your progress</div>
+-              <div style={{ fontSize: 13, color: FIRE.textSecondary, ...FS.num }}>{done} of {total} signed off</div>
+-            </div>
+-            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 34, lineHeight: 1, color: pct >= 100 ? FIRE.greenText : FIRE.textPrimary, ...FS.num }}>{pct}%</div>
+-          </div>
+-          <Bar S={S} pct={pct} color={pct >= 100 ? FIRE.green : pct >= 50 ? FIRE.amberText : FIRE.redText} track={FIRE.track} />
+-          {err && <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={reload}>Retry</button></div>}
+-        </Card>
+-        {groupOnboarding(items).map((g) => {
+-          const gDone = g.items.filter((it) => onboardingDone(it, me, prog)).length;
+-          return (
+-          <Card key={g.category} padding="14px 16px" style={{ marginBottom: 12 }}>
+-            <CardHead icon={ClipboardCheck} title={g.category} right={<span style={{ color: gDone === g.items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{gDone}/{g.items.length}</span>} />
+-            {g.items.map((it, i) => {
+-              const ok = onboardingDone(it, me, prog);
+-              const sub = it.is_mentor ? (mentorName ? `Mentor: ${mentorName}` : null) : onboardingSignedLine(prog[it.id], members);
+-              return (
+-                <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+-                  {/* Signed off = an earned green check; open = the neutral ring (the shared CheckMark). */}
+-                  <CheckMark state={ok ? "pass" : "todo"} size={20} />
+-                  <div style={{ flex: 1, minWidth: 0 }}>
+-                    <div style={{ color: ok ? FIRE.textSecondary : FIRE.textPrimary, fontSize: 13.5 }}>{it.label}</div>
+-                    <div style={{ fontSize: 11.5, color: ok ? FIRE.textMuted : FIRE.amberText, marginTop: 1 }}>{ok ? sub : "Open"}</div>
+-                  </div>
+-                </div>
+-              );
+-            })}
+-          </Card>
+-          );
+-        })}
++        {err && <div style={{ marginBottom: 10, fontSize: 12.5, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={reload}>Retry</button></div>}
++        <ProbationPath st={st} cfg={cfg} self go={go} />
+       </>)}
++      </div>
+       </NoirSkin>
+     </PageShell>
+   );
+ }
+-function Onboarding({ S, members, setMembers, notify, role, dept }) {
++function Onboarding({ S, members, setMembers, notify, role, dept, meId, go }) {
+   // PROGRESS, NOT PASS/FAIL (Ashlea's call): in-progress onboarding fills in a neutral tone — never red for a
+   // new member, never green before it's earned. Green only at 100%. The 90/70 attendance rule does NOT apply here.
+   const progTone = (p) => (p != null && p >= 100 ? FIRE.greenText : FIRE.textSecondary);
+@@ -20628,6 +21017,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+ 
+   const canEditItems = hasAny(role, DEPT_ADMIN_ROLES);   // add/rename/reorder/delete items + assign mentor: PA/DA — same set as is_dept_admin() (RLS enforces server-side)
+   const canSign = canManage(role);                       // check/sign items: Board/DA/Officer — set_onboarding_item is gated is_canmanage() (no PA)
++  const canLogTime = hasAny(role, CANMANAGE_OPS_ROLES);  // supervised time log / void: DA/Officer — is_canmanage_ops()
+   const assignable = assignableMembers(members);
+   const candidates = assignable.length ? assignable : [{ id: 0, name: "New member", role: "Firefighter" }];
+   const probI = candidates.findIndex((m) => m.status === "Probationary");
+@@ -20642,9 +21032,20 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+   const [editId, setEditId] = useState(null); const [eLabel, setELabel] = useState(""); const [eCat, setECat] = useState("");   // inline edit
+   const [busy, setBusy] = useState(false);
+   const person = candidates.find((m) => String(m.id) === String(selId)) || candidates[0];
++  const isSelf = !!meId && String(person?.id) === String(meId);   // custody: no sign / log / void on your own record
++  // The featured member's COMPUTED path (member_probation_status) — resolves the auto kinds (ack / hours / cert) and
++  // drives the gate banner, the reviews and the supervised-time log below the checklist.
++  const pathFor = person?.id && person.id !== 0 ? person.id : null;
++  const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor);
++  const pstById = Object.fromEntries((pst?.items || []).map((it) => [it.item_id, it]));
++  const [boardTick, setBoardTick] = useState(0);
++  const [boardRows, setBoardRows] = useState(null);
++  const refreshPath = () => { reloadPst(); setBoardTick((t) => t + 1); };
++  // manual items: the progress row (as before); auto kinds: the server's computed answer
++  const doneOf = (it) => (it.kind && it.kind !== "manual" ? !!pstById[it.id]?.satisfied : onboardingDone(it, person, checks));
+   // group DB items by category (categories in first-appearance order; items already ordered by sort_order)
+   const grouped = groupOnboarding(items);
+-  const doneCount = (items || []).filter((it) => onboardingDone(it, person, checks)).length;   // mentor item = real mentor_id
++  const doneCount = (items || []).filter(doneOf).length;   // mentor item = real mentor_id
+   const pct = (items && items.length) ? Math.round((doneCount / items.length) * 100) : 0;
+   const categories = [...new Set((items || []).map((it) => it.category))];
+   const [loadErr, setLoadErr] = useState(false);
+@@ -20652,7 +21053,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+     .then(({ data, error }) => { if (error) { setLoadErr(true); return; } setDeptId(data || null); });
+   useEffect(() => { loadDeptId(); }, []);
+   async function loadItems() {   // RLS scopes to my_department_id(); re-fetched after every edit
+-    const { data, error } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order").order("sort_order", { ascending: true });
++    const { data, error } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order, clears_to_run, phase, kind, ack_series_id, hours_target, hours_source, cert_name").order("sort_order", { ascending: true });
+     if (error || !data) { setLoadErr(true); return; }   // a failed READ is not "no checklist"
+     setLoadErr(false); setItems(data);
+   }
+@@ -20698,12 +21099,19 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+   // one member's completion: the featured member from live `checks`, everyone else from the overview read
+   const progressOf = (m) => {
+     if (!items || !items.length) return null;
++    const bd = String(m.id) === String(selId) ? null : (boardRows || []).find((r) => r.member_id === m.id)?.detail;
++    if (bd && Array.isArray(bd.items) && bd.items.length) {   // the server's computed status — auto kinds + legacy ticks included
++      const byId = Object.fromEntries(items.map((it) => [it.id, it]));
++      const openD = bd.items.filter((x) => !x.satisfied).map((x) => byId[x.item_id] || { id: x.item_id, label: x.label, is_mentor: false });
++      const doneD = bd.items.length - openD.length;
++      return { pct: Math.round((doneD / bd.items.length) * 100), doneN: doneD, open: openD, openSignable: openD.filter((it) => !it.is_mentor && (!it.kind || it.kind === "manual")).length };
++    }
+     const doneIds = String(m.id) === String(selId) ? null : (allProg ? (allProg.get(m.id) || new Set()) : undefined);
+     if (doneIds === undefined) return null;
+-    const isDone = (it) => (it.is_mentor ? !!m.mentorId : doneIds ? doneIds.has(it.id) : !!checks[it.id]?.done);
++    const isDone = (it) => (doneIds ? (it.is_mentor ? !!m.mentorId : doneIds.has(it.id)) : doneOf(it));
+     const doneN = items.filter(isDone).length;
+     const open = items.filter((it) => !isDone(it));
+-    return { pct: Math.round((doneN / items.length) * 100), doneN, open, openSignable: open.filter((it) => !it.is_mentor).length };
++    return { pct: Math.round((doneN / items.length) * 100), doneN, open, openSignable: open.filter((it) => !it.is_mentor && (!it.kind || it.kind === "manual")).length };
+   };
+   const overview = probMembers.map((m) => ({ m, p: progressOf(m) }));
+   const known = overview.filter((o) => o.p);
+@@ -20711,13 +21119,37 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+   const awaiting = known.length === overview.length ? known.reduce((t, o) => t + o.p.openSignable, 0) : null;
+ 
+   async function toggle(itemId) {   // sign / un-sign through the RPC — it stamps checked_by + checked_at server-side
+-    if (!canSign || !selId) return;
++    if (!canSign || !selId || isSelf) return;   // the RPC refuses a self-sign; the control isn't offered either
+     const prev = checks[itemId];
+     const next = !prev?.done;
+     setChecks((c) => ({ ...c, [itemId]: { ...(prev || {}), done: next } }));   // optimistic; the stamp arrives with the server's row
+     const { data, error } = await supabase.rpc("set_onboarding_item", { p_member_id: selId, p_item_id: itemId, p_done: next });
+     if (error) { setChecks((c) => ({ ...c, [itemId]: prev })); notify({ kind: "error", title: "Couldn't save", text: "That didn't save — please try again.", details: error.message }); return; }
+     if (data) setChecks((c) => ({ ...c, [itemId]: data }));   // trust the server's answer over the optimistic one
++    refreshPath();
++  }
++  async function signMilestone(kind, status, note) {
++    const { error } = await supabase.rpc("set_probation_milestone", { p_member_id: person.id, p_kind: kind, p_status: status, p_note: (note || "").trim() || null });
++    if (error) { notify({ kind: "error", title: "Couldn't save the review", text: error.message || "Please try again." }); return false; }
++    notify({ kind: "success", text: "Review saved." });
++    refreshPath();
++    return true;
++  }
++  // DA config: which items clear a member to run calls, their phase, and how each is satisfied. Direct update of
++  // onboarding_items through its existing DA policy — the same write path as rename / reorder.
++  const [rsDocs, setRsDocs] = useState([]);
++  useEffect(() => {
++    if (!editMode) return;
++    supabase.from("document_series").select("series_id, title, current_version").eq("requires_ack", true).gt("current_version", 0).order("title")
++      .then(({ data, error }) => { if (!error && Array.isArray(data)) setRsDocs(data); });
++  }, [editMode]);
++  async function setItemConfig(it, patch) {
++    if (patch.hours_target != null && !(Number(patch.hours_target) > 0 && Number(patch.hours_target) <= 10000)) { notify({ kind: "error", title: "Check the target", text: "The target must be more than 0." }); return; }
++    setBusy(true);
++    const { error } = await supabase.from("onboarding_items").update(patch).eq("id", it.id);
++    setBusy(false);
++    if (error) { notify({ kind: "error", title: "Couldn't save that setting", text: "Please try again.", details: error.message }); return; }
++    await loadItems(); refreshPath();
+   }
+   async function assignMentor(mentorId) {   // writes members.mentor_id — SAME path/RLS as the edit form (single-sourced)
+     if (!person?.id) return;
+@@ -20824,6 +21256,8 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+           {canEditItems && <button style={FS.btn} onClick={() => { setEditMode((v) => !v); setEditId(null); }}><Pencil size={14} color={FIRE.btnIcon} /> {editMode ? "Done editing" : "Edit checklist"}</button>}
+         </div>}>
+       <NoirSkin>
++      {/* PROBATION BOARD — ready for the vote + every probationary member's gate (dept_probation_board) */}
++      {!editMode && <ProbationBoard onPick={(id) => setSelId(id)} refreshKey={boardTick} onRows={setBoardRows} />}
+       {/* OVERVIEW is rendered here, above the featured member */}
+       {/* OVERVIEW — tiles + a progress ring per probationary member (click to feature them) */}
+       {!editMode && probMembers.length > 0 && items && items.length > 0 && (<>
+@@ -20900,11 +21334,12 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+                       <button style={FS.btnPrimary} onClick={saveEdit} disabled={busy}>Save</button>
+                       <button style={FS.btn} onClick={() => setEditId(null)}>Cancel</button>
+                     </>) : (<>
+-                      <span style={{ flex: 1, minWidth: 0, color: FIRE.textPrimary, fontSize: 14 }}>{it.label}{it.is_mentor && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55`, borderRadius: 4, padding: "1px 5px" }}>MENTOR</span>}</span>
++                      <span style={{ flex: 1, minWidth: 0, color: FIRE.textPrimary, fontSize: 14 }}>{it.label}{it.is_mentor && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", color: FIRE.amberText, border: `1px solid ${FIRE.amberText}55`, borderRadius: 4, padding: "1px 5px" }}>MENTOR</span>}<ProbItemTags it={it} /></span>
+                       <button style={{ ...FS.btn, padding: "5px 9px" }} onClick={() => startEdit(it)}>Edit</button>
+                       {it.is_mentor
+                         ? <button style={{ ...FS.btn, padding: "5px 9px", opacity: 0.45, cursor: "not-allowed" }} disabled title="Required — reflects the assigned mentor">Remove</button>
+                         : canDeleteShared ? <button style={{ ...FS.btn, padding: "5px 9px", color: FIRE.deleteRed }} onClick={() => removeItem(it)} disabled={busy}>Remove</button> : null}
++                      {!editing && <ProbItemConfig it={it} docs={rsDocs} busy={busy} onSave={(patch) => setItemConfig(it, patch)} />}
+                     </>)}
+                   </div>
+                 );
+@@ -20939,16 +21374,18 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+               <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden", margin: "14px 0 18px" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: pct >= 100 ? `linear-gradient(90deg, ${FIRE.greenText}, #55BE87)` : progTone(pct) }} /></div>
+             </>);
+           })()}
++          {isSelf && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-6px 0 12px" }}>This is your own record — another officer signs your items, reviews and supervised time.</div>}
+           {grouped.map((g) => {
+-            const gDone = g.items.filter((it) => onboardingDone(it, person, checks)).length;
++            const gDone = g.items.filter(doneOf).length;
+             return (
+               <div key={g.category} style={{ marginBottom: 16 }}>
+                 <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".09em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{g.category}<span style={{ fontSize: 10, color: FIRE.textSecondary, fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>{gDone} of {g.items.length}</span></div>
+                 {g.items.map((it, i) => {
+                   const mentor = !!it.is_mentor;
+-                  const done = onboardingDone(it, person, checks);
+-                  const signable = !mentor && canSign && !progErr;
+-                  const signed = mentor ? null : onboardingSignedLine(checks[it.id], members);
++                  const auto = !!it.kind && it.kind !== "manual";   // ack / hours / cert: computed, never ticked
++                  const done = doneOf(it);
++                  const signable = !mentor && !auto && canSign && !progErr && !isSelf;
++                  const signed = mentor ? null : auto ? (pstById[it.id] ? probItemView(pstById[it.id], it, false).text : "Checking…") : onboardingSignedLine(checks[it.id], members);
+                   return (
+                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+                       <button onClick={signable && done ? () => toggle(it.id) : undefined} disabled={!(signable && done)} title={mentor ? "Reflects the assigned mentor" : done ? (signable ? "Undo sign-off" : "Signed off") : "Not yet signed off"}
+@@ -20956,7 +21393,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+                         {done && <Check size={12} strokeWidth={3} color={FIRE.greenText} />}
+                       </button>
+                       <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+-                        <div style={{ fontSize: 13, fontWeight: 600, color: done ? FIRE.textPrimary : FIRE.textSecondary }}>{it.label}{mentor && <span style={{ fontSize: 10, fontWeight: 700, color: FIRE.amberText, background: "rgba(204,158,82,.12)", border: "1px solid rgba(204,158,82,.3)", borderRadius: 5, padding: "2px 7px", marginLeft: 8, letterSpacing: ".03em" }}>MENTOR</span>}</div>
++                        <div style={{ fontSize: 13, fontWeight: 600, color: done ? FIRE.textPrimary : FIRE.textSecondary }}>{it.label}{mentor && <span style={{ fontSize: 10, fontWeight: 700, color: FIRE.amberText, background: "rgba(204,158,82,.12)", border: "1px solid rgba(204,158,82,.3)", borderRadius: 5, padding: "2px 7px", marginLeft: 8, letterSpacing: ".03em" }}>MENTOR</span>}<ProbItemTags it={it} /></div>
+                         {mentor ? (
+                           canEditItems ? (
+                             <select style={{ ...FS.input, maxWidth: 240, padding: "5px 9px", marginTop: 4 }} value={person?.mentorId || ""} onChange={(e) => assignMentor(e.target.value)}>
+@@ -20964,7 +21401,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+                               {(members || []).filter((m) => m.id !== person?.id && m.status === "Active" && isAssignable(m)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                             </select>
+                           ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{person?.mentorId ? <>Mentor <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{(members || []).find((m) => m.id === person.mentorId)?.name || "Assigned"}</b></> : "No mentor yet"}</div>
+-                        ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{signed || "Not yet signed off"}</div>}
++                        ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{signed || (auto ? "" : "Not yet signed off")}</div>}
+                       </div>
+                       {!done && signable && <button onClick={() => toggle(it.id)} style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: FIRE.redText, background: "rgba(200,50,58,.12)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 7, padding: "6px 12px" }}>Sign off</button>}
+                     </div>
+@@ -20976,6 +21413,15 @@ function Onboarding({ S, members, setMembers, notify, role, dept }) {
+           <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 6, paddingTop: 12, borderTop: `1px solid ${FIRE.lineNoir}` }}>Members see this as a read-only checklist on their own dashboard — officers and admins sign each step.</div>
+         </Card>
+       )}
++      {/* PATH TO ACTIVE for the featured probationary member: the gate, the reviews (Board/DA/Officer sign) and the
++          supervised-time log (DA/Officer log + void). Never on your own record. */}
++      {!editMode && pst && person?.status === "Probationary" && (
++        <div style={{ marginTop: 14 }}>
++          <ProbGateBanner st={pst} self={false} go={go} />
++          <ProbMilestones st={pst} signer={canSign && !isSelf ? { canSign: true, onSave: signMilestone } : null} />
++          <ProbSupervisedLog memberId={person.id} members={members} meId={meId} canLog={canLogTime && !isSelf} notify={notify} onChanged={refreshPath} />
++        </div>
++      )}
+       <Card padding={18} style={{ marginTop: 10 }}>
+         <div style={{ flex: 1 }}>
+           <CardHead icon={Sparkles} title="AI welcome & 30-day plan" />
