@@ -1,6 +1,6 @@
 -- =====================================================================
 -- PHASE 3.1 #2 — PER-DEPARTMENT PROBATION TOGGLE (DB layer).
--- DRAFT — UNREVIEWED. Not applied. Test: sql/probation_toggle_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-18 (recorded BEFORE apply). Not yet applied. Test: sql/probation_toggle_RETEST.sql (run AFTER, separately).
 -- Builds on sql/probation_2026-10-18.sql (applied, RETEST 56/0/7). Does not change the status RPCs.
 --
 -- WHAT CHANGES:
