@@ -1,6 +1,10 @@
 -- =====================================================================
 -- PHASE 3.1 #2 — PER-DEPARTMENT PROBATION TOGGLE (DB layer).
--- Record: Claude gate review PASS 2026-10-18 (recorded BEFORE apply). Not yet applied. Test: sql/probation_toggle_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-18 (recorded BEFORE apply).
+-- APPLIED by hand 2026-10-18. State check: col true · fn true · anon_exec false · guard true · total_policies 163.
+-- ON: Indian Harbor Volunteer Fire Department = 6fbb2d91-62d1-4c4a-997e-ad54c0569974 · Lipan Volunteer Fire Department =
+-- a8dbabd1-541d-435e-a8cf-5eebc80f2576 · North Hood County Volunteer Fire Department = 6d51b00a-bdb0-4807-8e45-70bb53d4dcff.
+-- OFF: B4C Demo Department · Granbury Fire Station. Test: sql/probation_toggle_RETEST.sql (run AFTER, separately).
 -- Builds on sql/probation_2026-10-18.sql (applied, RETEST 56/0/7). Does not change the status RPCs.
 --
 -- WHAT CHANGES:

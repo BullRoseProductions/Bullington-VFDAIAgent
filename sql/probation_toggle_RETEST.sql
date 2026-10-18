@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for probation_toggle (departments.probation_enabled + set_probation_enabled + the board guard). Run AFTER
+-- RETEST for probation_toggle_2026-10-18.sql (departments.probation_enabled + set_probation_enabled + the board guard). Run AFTER
 -- the migration, separately. NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE
 -- 'SENTINEL' (rolled back). The final RAISE is the report. The "ERROR" IS the report.
 --   T0 (once) backfill = exactly Indian Harbor, Lipan, North Hood ON; every other department OFF; anon can't execute;
