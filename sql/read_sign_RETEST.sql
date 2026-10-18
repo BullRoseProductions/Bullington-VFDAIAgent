@@ -10,7 +10,8 @@
 --   C1 a member can't configure                   C2 another department's DA can't configure this document
 --   C3 the DA turns requires_ack on -> v1 published with a sha256 fingerprint
 --   Q1 member A's queue: needs, with the v1 fingerprint
---   A1 wrong fingerprint / wrong version refused  A2 signing works; signing again is idempotent (one row)
+--   A1 wrong fingerprint / wrong version refused  SG1 a blank or non-PNG signature is refused
+--   A2 signing works with a drawn signature (stored, with the server's roster-name snapshot); again = idempotent (one row)
 --   R1 member B can't see A's signature; A sees their own
 --   R2 a member's direct INSERT / UPDATE / DELETE on document_acknowledgments is refused
 --   R3 append-only: even the owner's UPDATE / DELETE is refused by the trigger
@@ -32,12 +33,17 @@
 -- 2026-10-17 + read_sign_da_only: O1 added (Officer refused config + publish), P2 publishes as the DA, refusal checks match
 -- "Only a Department Admin…". Dry run base + da_only: 18 passed / 0 failed / 1 skipped. da_only mutations: department check
 -- dropped -> its post-condition rolls back · Officer gate kept -> O1 FAIL · re-run alone -> refused by its guard.
+-- 2026-10-17 + read_sign_signature: every sign passes a drawn signature (SIG, a 1x1 PNG data URL); SG1 added (blank /
+-- non-PNG refused); A2 also checks signature_data + the server's signed_name snapshot. Dry run base + da_only + signature:
+-- 19 passed / 0 failed / 1 skipped. Signature mutations: signature check removed -> SG1 FAIL · 3-arg left as an overload
+-- -> rolls back · anon left executable -> rolls back · signature not stored -> A2 FAIL · re-run -> refused.
 -- =====================================================================
 DO $retest$
 DECLARE
   rec record; v_err text; v_res jsonb; v_n int; v_hash text; v_ver int; v_st text; v_bout boolean; v_acur boolean;
   v_da text; v_off text; v_a text; v_b text; v_other_da text; v_a_id uuid; v_b_id uuid;
   v_doc uuid; v_doc2 uuid; v_series uuid;
+  SIG constant text := 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
   rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
 BEGIN
   FOR rec IN SELECT d.id AS dept_id, d.name AS dept FROM public.departments d ORDER BY d.name LOOP
@@ -128,16 +134,22 @@ BEGIN
       IF v_st = 'needs' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  Q1 member queue: needs v1%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  Q1 status %s%s', coalesce(v_st, 'missing'), chr(10)); END IF;
       -- A1 bad fingerprint / version
-      BEGIN PERFORM public.acknowledge_document(v_doc2, 1, repeat('0', 64)); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-      BEGIN PERFORM public.acknowledge_document(v_doc2, 2, v_hash); v_st := 'OK'; EXCEPTION WHEN OTHERS THEN v_st := SQLERRM; END;
+      BEGIN PERFORM public.acknowledge_document(v_doc2, 1, repeat('0', 64), SIG); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+      BEGIN PERFORM public.acknowledge_document(v_doc2, 2, v_hash, SIG); v_st := 'OK'; EXCEPTION WHEN OTHERS THEN v_st := SQLERRM; END;
       IF v_err LIKE 'The document changed%' AND v_st LIKE 'A newer version%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  A1 wrong fingerprint / version refused%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  A1 hash -> "%s", version -> "%s"%s', v_err, v_st, chr(10)); END IF;
       -- A2 sign + idempotent
-      BEGIN PERFORM public.acknowledge_document(v_doc2, 1, v_hash); PERFORM public.acknowledge_document(v_doc2, 1, v_hash); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+      -- SG1 a blank or non-PNG signature is refused (nothing recorded)
+      BEGIN PERFORM public.acknowledge_document(v_doc2, 1, v_hash, ''); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+      BEGIN PERFORM public.acknowledge_document(v_doc2, 1, v_hash, 'data:text/html;base64,PHNjcmlwdD4='); v_st := 'OK'; EXCEPTION WHEN OTHERS THEN v_st := SQLERRM; END;
+      IF v_err LIKE 'Draw your signature%' AND v_st LIKE 'That signature didn%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  SG1 blank / non-PNG signature refused%s', chr(10));
+      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  SG1 blank "%s" non-PNG "%s"%s', v_err, v_st, chr(10)); END IF;
+      BEGIN PERFORM public.acknowledge_document(v_doc2, 1, v_hash, SIG); PERFORM public.acknowledge_document(v_doc2, 1, v_hash, SIG); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
       PERFORM set_config('role', 'postgres', true);
       SELECT count(*) INTO v_n FROM public.document_acknowledgments WHERE member_id = v_a_id AND series_id = v_series AND version = 1 AND content_hash = v_hash
-         AND ack_statement = 'I have read and understand RETEST fixture SOP (v1) and agree to comply.';
-      IF v_err = 'OK' AND v_n = 1 THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  A2 signed once (idempotent), wording snapshotted%s', chr(10));
+         AND ack_statement = 'I have read and understand RETEST fixture SOP (v1) and agree to comply.'
+         AND signature_data = SIG AND signed_name = (SELECT name FROM public.members WHERE id = v_a_id);
+      IF v_err = 'OK' AND v_n = 1 THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  A2 signed once (idempotent); wording, drawn signature + roster name stored%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  A2 -> "%s", rows %s%s', v_err, v_n, chr(10)); END IF;
       -- R1 visibility
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_b, 'role', 'authenticated')::text, true);
@@ -175,7 +187,7 @@ BEGIN
       BEGIN v_res := public.publish_document_version(v_doc2); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
       SELECT q.status, q.content_hash INTO v_st, v_hash FROM public.my_read_sign_queue() q WHERE q.series_id = v_series;
-      BEGIN PERFORM public.acknowledge_document(v_doc2, 2, v_hash); EXCEPTION WHEN OTHERS THEN v_err := v_err || ' / resign: ' || SQLERRM; END;
+      BEGIN PERFORM public.acknowledge_document(v_doc2, 2, v_hash, SIG); EXCEPTION WHEN OTHERS THEN v_err := v_err || ' / resign: ' || SQLERRM; END;
       PERFORM set_config('role', 'postgres', true);
       SELECT count(*) INTO v_n FROM public.document_acknowledgments WHERE member_id = v_a_id AND series_id = v_series;
       IF v_err = 'OK' AND (v_res->>'current_version')::int = 2 AND v_st = 'resign' AND v_n = 2 THEN
@@ -222,7 +234,7 @@ BEGIN
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_a, 'role', 'authenticated')::text, true);
       PERFORM set_config('role', 'authenticated', true);
       SELECT count(*) INTO v_n FROM public.my_read_sign_queue() q WHERE q.series_id = v_series;
-      BEGIN PERFORM public.acknowledge_document(v_doc2, 2, v_hash); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+      BEGIN PERFORM public.acknowledge_document(v_doc2, 2, v_hash, SIG); v_err := 'OK'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
       PERFORM set_config('role', 'postgres', true);
       IF v_n = 0 AND v_err LIKE 'This document isn''t required for you%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  N1 role audience: A drops out and can''t sign%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  N1 queue rows %s, sign "%s"%s', v_n, v_err, chr(10)); END IF;

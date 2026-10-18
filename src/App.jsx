@@ -6492,41 +6492,59 @@ const rsOutstanding = (rows) => (rows || []).filter((r) => r.status !== "current
 // Fired after a signature lands, so every queue on screen (nav badge, dashboard card, Documents list, Read & Sign) reloads.
 const RS_CHANGED = "b4c:readsign-changed";
 // Sign the CURRENT published version the queue row describes. Returns true on success. Never writes the tables directly.
-async function rsSignRow(row, notify) {
-  const { error } = await supabase.rpc("acknowledge_document", { p_document_id: row.document_id, p_version: row.version, p_content_hash: row.content_hash });
+async function rsSignRow(row, notify, signature) {
+  const { error } = await supabase.rpc("acknowledge_document", { p_document_id: row.document_id, p_version: row.version, p_content_hash: row.content_hash, p_signature_data: signature });
   if (error) { notify({ kind: "error", title: "Couldn't record your signature", text: error.message || "Please try again." }); window.dispatchEvent(new Event(RS_CHANGED)); return false; }
   notify({ kind: "success", text: `Signed — ${row.title} (v${row.version}).` });
   window.dispatchEvent(new Event(RS_CHANGED));
   return true;
 }
-/* The read -> attest -> sign footer, shown INSIDE the document viewer (and the text fallback) when the member owes a
-   signature on what they're reading. The wording matches the server's snapshot. */
-function RsSignFooter({ row, notify }) {
-  const [agree, setAgree] = useState(false);
+/* The read -> attest -> SIGN step, shown INSIDE the document viewer (footer) and inline on the Read & Sign card: the
+   attestation wording (the server's snapshot) above the SignaturePad — the same pad equipment sign-out uses. "Sign now"
+   enables once a signature is drawn; the drawing IS the attestation. No witness: a member signing their own
+   read-receipt isn't self-issue custody. The server stamps the roster name and the time. */
+function RsSignFooter({ row, notify, inline = false }) {
+  const [sig, setSig] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  async function go() { setBusy(true); const ok = await rsSignRow(row, notify); setBusy(false); if (ok) setDone(true); }
+  useEditorOpen(!!sig && !done);   // a drawn, unsent signature holds off an auto-update reload
+  async function go() { setBusy(true); const ok = await rsSignRow(row, notify, sig); setBusy(false); if (ok) setDone(true); }
+  const shell = inline
+    ? { marginTop: 12, background: "rgba(79,144,214,.05)", border: "1px solid rgba(79,144,214,.28)", borderRadius: 11, padding: 12 }
+    : { flexShrink: 0, padding: "12px 14px calc(12px + env(safe-area-inset-bottom))", background: FIRE.card2Noir, borderTop: "1px solid rgba(79,144,214,.35)", maxHeight: "55vh", overflowY: "auto" };
   return (
-    <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, padding: "12px 14px calc(12px + env(safe-area-inset-bottom))", background: FIRE.card2Noir, borderTop: "1px solid rgba(79,144,214,.35)" }}>
+    <div onClick={(e) => e.stopPropagation()} style={shell}>
       {done ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: FIRE.greenText, fontSize: 13.5, fontWeight: 600 }}>
           <CheckCircle2 size={17} /> Signed v{row.version} — your signature is recorded against this version.
         </div>
       ) : (<>
-        <label style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer" }}>
-          <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 18, height: 18, marginTop: 1, accentColor: NOIR_AI.blue, flexShrink: 0 }} />
-          <span style={{ fontSize: 12.5, color: FIRE.textPrimary, lineHeight: 1.45 }}>I have <b style={{ color: "#fff" }}>read and understand</b> {row.title} (v{row.version}) and agree to comply.</span>
-        </label>
-        <button disabled={!agree || busy} onClick={go}
-          style={{ marginTop: 10, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, letterSpacing: ".04em", textTransform: "uppercase", color: "#fff", background: "linear-gradient(180deg,#2E6DB0,#234f82)", border: "1px solid rgba(127,178,230,.55)", borderRadius: 10, padding: 11, cursor: agree && !busy ? "pointer" : "not-allowed", opacity: agree && !busy ? 1 : 0.5 }}>
+        <div style={{ fontSize: 12.5, color: FIRE.textPrimary, lineHeight: 1.45, marginBottom: 10 }}>
+          I have <b style={{ color: "#fff" }}>read and understand</b> {row.title} (v{row.version}) and agree to comply.
+        </div>
+        <SignaturePad key={row.series_id + "-" + row.version} onChange={setSig} height={inline ? 130 : 120} />
+        <button disabled={!sig || busy} onClick={go}
+          style={{ marginTop: 10, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, letterSpacing: ".04em", textTransform: "uppercase", color: "#fff", background: "linear-gradient(180deg,#2E6DB0,#234f82)", border: "1px solid rgba(127,178,230,.55)", borderRadius: 10, padding: 11, cursor: sig && !busy ? "pointer" : "not-allowed", opacity: sig && !busy ? 1 : 0.5 }}>
           {busy ? <><Loader2 size={16} className="spin" /> Signing…</> : <><PenLine size={16} /> Sign now</>}
         </button>
       </>)}
     </div>
   );
 }
-
-// Open the exact published file in the in-app viewer (signed URL, private bucket). No file -> the extracted text.
+/* The RECEIPT footer — read-only, never a Sign button: the member's own stored acknowledgment for the version they
+   signed (wording + drawn signature + roster name + time). A signature from before drawn signatures shows as in-app. */
+function RsReceiptFooter({ ack }) {
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, padding: "12px 14px calc(12px + env(safe-area-inset-bottom))", background: FIRE.card2Noir, borderTop: `1px solid ${FIRE.greenText}55` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.greenText, marginBottom: 6 }}><FileCheck size={14} /> Your signed acknowledgment</div>
+      <div style={{ fontSize: 12.5, color: FIRE.textPrimary, lineHeight: 1.45 }}>{ack.ack_statement}</div>
+      {ack.signature_data
+        ? <img src={ack.signature_data} alt={`Signature of ${ack.signed_name || "the signer"}`} style={{ display: "block", marginTop: 8, maxWidth: 320, width: "100%", height: "auto", background: "#fff", borderRadius: 8, border: `1px solid ${FIRE.line2Noir}` }} />
+        : <div style={{ marginTop: 8, fontSize: 12, color: FIRE.textMuted }}>Signed in-app (before drawn signatures were collected).</div>}
+      <div style={{ marginTop: 6, fontSize: 11.5, color: FIRE.textMuted }}>{ack.signed_name ? `${ack.signed_name} · ` : ""}v{ack.version} · {rsDateTime(ack.signed_at)}</div>
+    </div>
+  );
+}
 function useRsOpener(notify) {
   const [viewer, setViewer] = useState(null);   // {url,name,path,sign?} | {text,name,sign?}
   /* TWO MODES, kept distinct:
@@ -6535,12 +6553,13 @@ function useRsOpener(notify) {
        receipt  — openSigned(row) opens the version they signed, READ-ONLY: it never passes sign, so no footer is possible. */
   async function open(row, opts = {}) {
     const sign = opts.sign && (row.status === "needs" || row.status === "resign") ? row : null;
+    const receipt = sign ? null : (opts.receipt || null);   // the two modes never mix
     if (row.storage_path) {
       const { data, error } = await supabase.storage.from("station-documents").createSignedUrl(row.storage_path, 3600);
-      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title, path: row.storage_path, sign }); return; }
+      if (!error && data?.signedUrl) { setViewer({ url: data.signedUrl, name: row.title, path: row.storage_path, sign, receipt }); return; }
     }
     const { data } = await supabase.from("documents").select("content_text").eq("id", row.document_id).maybeSingle();
-    if (data?.content_text) { setViewer({ text: data.content_text, name: row.title, sign }); return; }
+    if (data?.content_text) { setViewer({ text: data.content_text, name: row.title, sign, receipt }); return; }
     notify({ kind: "error", title: "Couldn't open the document", text: "Please try again, or ask an officer for a copy." });
   }
   /* THE RECEIPT: open the exact version this member signed — that version's own snapshot (document_versions keeps the
@@ -6548,14 +6567,21 @@ function useRsOpener(notify) {
      either way, a later file replace never changes what opens here. */
   async function openSigned(row) {
     if (!row.signed_version) return;
-    const { data, error } = await supabase.from("document_versions").select("document_id, storage_path, title")
-      .eq("series_id", row.series_id).eq("version", row.signed_version).maybeSingle();
+    const [{ data, error }, { data: me }] = await Promise.all([
+      supabase.from("document_versions").select("document_id, storage_path, title").eq("series_id", row.series_id).eq("version", row.signed_version).maybeSingle(),
+      supabase.rpc("my_member_id"),
+    ]);
     if (error || !data) { notify({ kind: "error", title: "Couldn't open the signed version", text: "Please try again." }); return; }
-    return open({ document_id: data.document_id, storage_path: data.storage_path, title: `${data.title} (v${row.signed_version} — the version you signed)` });
+    // the member's OWN acknowledgment row for that version (RLS lets leaders read others — so filter to me explicitly)
+    const { data: ack } = me ? await supabase.from("document_acknowledgments")
+      .select("version, ack_statement, signature_data, signed_name, signed_at")
+      .eq("series_id", row.series_id).eq("version", row.signed_version).eq("member_id", me).maybeSingle() : { data: null };
+    return open({ document_id: data.document_id, storage_path: data.storage_path, title: `${data.title} (v${row.signed_version} — the version you signed)` }, { receipt: ack || null });
   }
   const mount = viewer ? (viewer.url
     ? <DocViewer url={viewer.url} name={viewer.name} path={viewer.path} onClose={() => setViewer(null)}
-        footer={viewer.sign ? <RsSignFooter key={viewer.sign.series_id + viewer.sign.version} row={viewer.sign} notify={notify} /> : null} />
+        footer={viewer.sign ? <RsSignFooter key={viewer.sign.series_id + viewer.sign.version} row={viewer.sign} notify={notify} />
+          : viewer.receipt ? <RsReceiptFooter ack={viewer.receipt} /> : null} />
     : createPortal(
       <div onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(8,10,16,.78)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
         <div role="dialog" aria-modal="true" aria-label={viewer.name} onClick={(e) => e.stopPropagation()} style={{ ...FS.cardNoir, width: "100%", maxWidth: 720, margin: "24px 0", padding: 18 }}>
@@ -6565,6 +6591,7 @@ function useRsOpener(notify) {
           </div>
           <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6, color: FIRE.textSecondary }}>{viewer.text}</div>
           {viewer.sign && <div style={{ marginTop: 14, marginLeft: -18, marginRight: -18, marginBottom: -18 }}><RsSignFooter key={viewer.sign.series_id + viewer.sign.version} row={viewer.sign} notify={notify} /></div>}
+          {!viewer.sign && viewer.receipt && <div style={{ marginTop: 14, marginLeft: -18, marginRight: -18, marginBottom: -18 }}><RsReceiptFooter ack={viewer.receipt} /></div>}
         </div>
       </div>, document.body)) : null;
   return { open, openSigned, mount };
@@ -6580,8 +6607,7 @@ function RsTag({ children, tone = "role" }) {
   const t = tone === "annual" ? { c: "#6D8CAC", rgb: "109,140,172" } : { c: NOIR_AI.blueText, rgb: "79,144,214" };
   return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", borderRadius: 5, padding: "3px 7px", whiteSpace: "nowrap", color: t.c, background: `rgba(${t.rgb},.12)`, border: `1px solid rgba(${t.rgb},.4)` }}>{children}</span>;
 }
-function RsDocCard({ row, open, onToggle, onRead, onReadSigned, onSign, busy }) {
-  const [agree, setAgree] = useState(false);
+function RsDocCard({ row, open, onToggle, onRead, onReadSigned, notify }) {
   const actionable = row.status !== "current";
   const lapsed = row.status === "resign" && row.signed_version === row.version;   // annual re-sign, same version
   const tone = row.status === "current" ? RS_TONE.current : row.status === "resign" ? RS_TONE.resign : open ? RS_TONE.needs : RS_TONE.await;
@@ -6608,16 +6634,7 @@ function RsDocCard({ row, open, onToggle, onRead, onReadSigned, onSign, busy }) 
         <button onClick={() => onRead(row)} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: NOIR_AI.blueText, marginTop: 10, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
           <Eye size={13} /> Read the full policy
         </button>
-        <div style={{ marginTop: 12, background: "rgba(79,144,214,.05)", border: "1px solid rgba(79,144,214,.28)", borderRadius: 11, padding: 12 }}>
-          <label style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer" }}>
-            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 18, height: 18, marginTop: 1, accentColor: NOIR_AI.blue, flexShrink: 0 }} />
-            <span style={{ fontSize: 12, color: FIRE.textPrimary, lineHeight: 1.45 }}>I have <b style={{ color: "#fff" }}>read and understand</b> {row.title} (v{row.version}) and agree to comply.</span>
-          </label>
-          <button disabled={!agree || busy} onClick={() => onSign(row)}
-            style={{ marginTop: 11, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, letterSpacing: ".04em", textTransform: "uppercase", color: "#fff", background: "linear-gradient(180deg,#2E6DB0,#234f82)", border: "1px solid rgba(127,178,230,.55)", borderRadius: 10, padding: 11, cursor: agree && !busy ? "pointer" : "not-allowed", opacity: agree && !busy ? 1 : 0.5 }}>
-            {busy ? <><Loader2 size={16} className="spin" /> Signing…</> : <><PenLine size={16} /> Sign now</>}
-          </button>
-        </div>
+        <RsSignFooter inline key={row.series_id + "-" + row.version} row={row} notify={notify} />
       </>) : (
         <button onClick={actionable ? onToggle : undefined} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", marginTop: 12, paddingTop: 11, borderTop: `1px solid ${FIRE.lineNoir}`, fontSize: 11.5, color: tone.c, background: "none", borderLeft: "none", borderRight: "none", borderBottom: "none", paddingLeft: 0, paddingRight: 0, paddingBottom: 0, cursor: actionable ? "pointer" : "default", textAlign: "left", fontFamily: "inherit" }}>
           {row.status === "current" ? <CheckCircle2 size={15} /> : row.status === "resign" ? <RefreshCw size={15} /> : <Clock size={15} />}
@@ -6651,20 +6668,13 @@ function ReadSign({ notify, onCountChange }) {
   const { rows, err, reload } = useReadSignQueue(true);
   const { open: openFile, openSigned, mount } = useRsOpener(notify);
   const [openId, setOpenId] = useState(null);
-  const [busy, setBusy] = useState(null);
   const needs = (rows || []).filter((r) => r.status === "needs");
   const resign = (rows || []).filter((r) => r.status === "resign");
   const current = (rows || []).filter((r) => r.status === "current");
   const firstOpen = openId ?? (needs[0] || resign[0])?.series_id ?? null;   // the first thing to sign starts open
   useEffect(() => { if (rows) onCountChange?.(rsOutstanding(rows)); }, [rows]);   // keep the nav badge honest
-  async function sign(row) {
-    setBusy(row.series_id);
-    const ok = await rsSignRow(row, notify);   // fires RS_CHANGED -> this queue (and the badge/card) reload
-    setBusy(null);
-    if (ok) setOpenId(null);
-  }
-  const card = (r) => <RsDocCard key={r.series_id} row={r} open={firstOpen === r.series_id} busy={busy === r.series_id}
-    onToggle={() => setOpenId(r.series_id)} onRead={(row) => openFile(row, { sign: true })} onReadSigned={openSigned} onSign={sign} />;
+  const card = (r) => <RsDocCard key={r.series_id} row={r} open={firstOpen === r.series_id} notify={notify}
+    onToggle={() => setOpenId(r.series_id)} onRead={(row) => openFile(row, { sign: true })} onReadSigned={openSigned} />;
   return (
     <PageShell band kicker="REQUIRED READING" title="Read & sign"
       sub="Documents your role requires you to read and attest. Your signature is recorded against the exact version — the document itself is never stored on you."
