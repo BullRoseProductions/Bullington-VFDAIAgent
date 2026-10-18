@@ -1,5 +1,8 @@
 -- =====================================================================
 -- RETEST for probation_toggle_2026-10-18.sql (departments.probation_enabled + set_probation_enabled + the board guard). Run AFTER
+-- RAN on live 2026-10-18: 16 passed, 0 failed, 5 skipped — T0 pass; IH / Lipan / North Hood Q1-Q4 + Q6 pass; Q5 skipped x3
+-- (no pure Project Admin with a unique email — the PA refusal is covered by the post-condition + dry-run mutation MB);
+-- Demo + Granbury skip all (no plain member).
 -- the migration, separately. NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE
 -- 'SENTINEL' (rolled back). The final RAISE is the report. The "ERROR" IS the report.
 --   T0 (once) backfill = exactly Indian Harbor, Lipan, North Hood ON; every other department OFF; anon can't execute;
