@@ -3132,7 +3132,7 @@ export default function App() {
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
           {screen === "readsign" && <ReadSign notify={notify} onCountChange={() => rsQueue.reload()} />}
-          {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
+          {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} dept={dept} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
           {screen === "roster" && <Roster S={S} role={role} members={members} setMembers={setMembers} sessions={trainingSessions} plan={trainingPlan} notify={notify} meId={myMemberId} initialTab={navArg} dept={dept} />}
           {/* Signers (Board/DA/Officer) and list editors (DA/PA) get the officer screen; everyone else sees their own checklist, read-only. */}
@@ -6777,7 +6777,102 @@ function RsDocControls({ doc, series, canConfig, notify, onChanged }) {
   );
 }
 // Board / DA / Officer: who's current on each required document. Honest denominator — audience 0 is "not applicable".
-function RsCompliance({ refreshKey }) {
+/* SIGNED RECORDS — Board / DA / Officer: each member's signed version of a required document (the stored signature,
+   the wording they attested, the version, the file fingerprint, the time), for the station's own audit copy. Reads ONLY
+   dept_signed_records() (sql/read_sign_records — leadership-gated + department-scoped in the database; a member is
+   refused there, and this sits inside RsCompliance, which only leadership renders). Read-only: nothing here writes.
+   Print / PDF goes through printDocument, the app's one print path (web print sheet; native PDF via the share sheet). */
+// A stored signature is a PNG data URL (acknowledge_document refuses anything else); re-checked before it is drawn or printed.
+const rsSafeSig = (s) => (typeof s === "string" && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(s) ? s : null);
+const rsSigner = (rec) => rec.signed_name || rec.name || "Unknown member";
+// One signed record as print blocks. withHead: a heading per signer (the per-document roster).
+function rsRecordBlocks(rec, withHead) {
+  const sig = rsSafeSig(rec.signature_data);
+  return [
+    ...(withHead ? [{ type: "h2", text: `${rsSigner(rec)} — v${rec.version}` }] : []),
+    { type: "p", text: `**Document:** ${rec.title} (v${rec.version})` },
+    { type: "p", text: `**Signed by:** ${rsSigner(rec)}${rec.signed_name && rec.name && rec.name !== rec.signed_name ? ` (roster name now ${rec.name})` : ""}` },
+    { type: "p", text: `**Signed:** ${rsDateTime(rec.signed_at)} (Central)` },
+    { type: "p", text: `**File fingerprint (SHA-256):** ${rec.content_hash}` },
+    { type: "p", text: `**Attestation:** ${rec.ack_statement}` },
+    sig ? { type: "sig", src: sig, caption: `Signature of ${rsSigner(rec)}` } : { type: "p", text: "Signed in-app (before drawn signatures were collected)." },
+  ];
+}
+function RsSignedRecords({ seriesId, title, currentVersion, dept, notify, refreshKey }) {
+  const [recs, setRecs] = useState(null);   // null = loading
+  const [err, setErr] = useState(false);
+  const [openKey, setOpenKey] = useState(null);   // the record whose signature is showing
+  const [busy, setBusy] = useState(null);         // a record key, or "all", while printing
+  const keyOf = (rec) => `${rec.member_id}-${rec.version}-${rec.signed_at}`;
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      let { data, error } = await supabase.rpc("dept_signed_records", { p_document_id: seriesId });
+      // The series id is its first document's id. If that row is gone, read the department's records and keep this series.
+      if (error && /isn't in your department/.test(error.message || "")) ({ data, error } = await supabase.rpc("dept_signed_records", { p_document_id: null }));
+      if (!live) return;
+      if (error || !Array.isArray(data)) { setErr(true); return; }   // a failed read keeps the last list
+      setErr(false); setRecs(data.filter((d) => d.series_id === seriesId));
+    })();
+    return () => { live = false; };
+  }, [seriesId, refreshKey]);
+  // window.open has to happen before any await (printHTML), so nothing is awaited ahead of printDocument.
+  async function print(list, key) {
+    setBusy(key);
+    const one = list.length === 1 && key !== "all";
+    const blocks = one ? rsRecordBlocks(list[0], false) : list.flatMap((rec) => rsRecordBlocks(rec, true));
+    const n = printFailureNotice(await printDocument(one ? `Signed record — ${title}` : `Signed records — ${title}`, blocks, dept,
+      { meta: one ? `${rsSigner(list[0])} · v${list[0].version}` : `${list.length} signature${list.length === 1 ? "" : "s"}` }));
+    setBusy(null);
+    if (n) notify(n);
+  }
+  const btn = { display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, padding: "4px 9px", fontSize: 11.5, fontWeight: 600, color: FIRE.textSecondary, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <div style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>
+          Signed records{recs ? ` (${recs.length})` : ""}
+        </div>
+        {recs && recs.length > 0 && (
+          <button style={btn} disabled={!!busy} onClick={() => print(recs, "all")}>
+            {busy === "all" ? <Loader2 size={13} className="spin" /> : <Printer size={13} />} Print all
+          </button>
+        )}
+      </div>
+      {!recs ? (
+        <div style={{ fontSize: 12.5, color: err ? FIRE.redText : FIRE.textMuted }}>{err ? "Couldn't load the signed records — try again shortly." : "Loading…"}</div>
+      ) : recs.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>No one has signed this document yet.</div>
+      ) : recs.map((rec) => {
+        const k = keyOf(rec);
+        const sig = rsSafeSig(rec.signature_data);
+        const earlier = rec.version < currentVersion;
+        return (
+          <div key={k} style={{ padding: "7px 0", borderTop: `1px solid ${FIRE.lineNoir}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 180px", minWidth: 0, fontSize: 12.5, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>
+                {rec.name || rsSigner(rec)} <span style={{ color: FIRE.textMuted }}>· v{rec.version}{earlier ? " (earlier version)" : ""} · {rsDateTime(rec.signed_at)}</span>
+              </div>
+              <button style={btn} aria-expanded={openKey === k} onClick={() => setOpenKey(openKey === k ? null : k)}><Eye size={13} /> {openKey === k ? "Hide signature" : "View signature"}</button>
+              <button style={btn} disabled={!!busy} onClick={() => print([rec], k)}>{busy === k ? <Loader2 size={13} className="spin" /> : <Printer size={13} />} Print</button>
+            </div>
+            {openKey === k && (
+              <div style={{ marginTop: 8, background: "rgba(79,144,214,.05)", border: "1px solid rgba(79,144,214,.28)", borderRadius: 10, padding: 10 }}>
+                <div style={{ fontSize: 12.5, color: FIRE.textPrimary, lineHeight: 1.45 }}>{rec.ack_statement}</div>
+                {sig
+                  ? <img src={sig} alt={`Signature of ${rsSigner(rec)}`} style={{ display: "block", marginTop: 8, maxWidth: 320, width: "100%", height: "auto", background: "#fff", borderRadius: 8, border: `1px solid ${FIRE.line2Noir}` }} />
+                  : <div style={{ marginTop: 8, fontSize: 12, color: FIRE.textMuted }}>Signed in-app (before drawn signatures were collected).</div>}
+                <div style={{ marginTop: 6, fontSize: 11.5, color: FIRE.textMuted }}>{rsSigner(rec)} · v{rec.version} · {rsDateTime(rec.signed_at)}</div>
+                <div style={{ marginTop: 3, fontSize: 10.5, color: FIRE.textMuted, overflowWrap: "anywhere", fontFamily: "ui-monospace, Menlo, monospace" }}>Fingerprint {rec.content_hash}</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function RsCompliance({ refreshKey, dept, notify }) {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState(false);
   const [openSeries, setOpenSeries] = useState(null);
@@ -6801,27 +6896,28 @@ function RsCompliance({ refreshKey }) {
         const tone = na ? FIRE.textMuted : pct === 100 ? FIRE.greenText : pct >= 50 ? FIRE.amberText : FIRE.redText;
         return (
           <div key={r.series_id} style={{ padding: "10px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
-            <button onClick={() => setOpenSeries(openSeries === r.series_id ? null : r.series_id)} disabled={na || out.length === 0}
-              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", cursor: na || out.length === 0 ? "default" : "pointer", fontFamily: "inherit" }}>
+            <button onClick={() => setOpenSeries(openSeries === r.series_id ? null : r.series_id)} aria-expanded={openSeries === r.series_id}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{r.title} <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 12 }}>v{r.version} · {rsAudience(r.required_roles)}{r.annual_resign ? " · annual" : ""}</span></div>
               </div>
               <span style={{ fontSize: 12.5, fontWeight: 700, color: tone, ...FS.num, whiteSpace: "nowrap" }}>{na ? "Not applicable" : `${r.current_count} of ${r.audience} current`}</span>
-              {!na && out.length > 0 && (openSeries === r.series_id ? <ChevronUp size={14} color={FIRE.textMuted} /> : <ChevronDown size={14} color={FIRE.textMuted} />)}
+              {openSeries === r.series_id ? <ChevronUp size={14} color={FIRE.textMuted} /> : <ChevronDown size={14} color={FIRE.textMuted} />}
             </button>
             {!na && <ProgressBar pct={pct} tone={pct === 100 ? "green" : pct >= 50 ? "amber" : "red"} />}
-            {openSeries === r.series_id && out.length > 0 && (
+            {openSeries === r.series_id && !na && out.length > 0 && (
               <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.textSecondary }}>
                 <span style={{ color: FIRE.textMuted }}>Outstanding ({out.length}): </span>{out.map((o) => o.name).join(", ")}
               </div>
             )}
+            {openSeries === r.series_id && <RsSignedRecords seriesId={r.series_id} title={r.title} currentVersion={r.version} dept={dept} notify={notify} refreshKey={signedTick} />}
           </div>
         );
       })}
     </Card>
   </>);
 }
-function Documents({ S, role, notify, uploaderName, members }) {
+function Documents({ S, role, notify, uploaderName, members, dept }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const leader = isLeader(role);
@@ -7092,7 +7188,7 @@ function Documents({ S, role, notify, uploaderName, members }) {
         </>)}
       </>)}
 
-      {canSeeCompliance && <RsCompliance refreshKey={rsTick} />}
+      {canSeeCompliance && <RsCompliance refreshKey={rsTick} dept={dept} notify={notify} />}
       <CardHead icon={FolderOpen} title="Your document library" style={{ marginTop: 14 }} />
       {!docsLoading && docs.length === 0 ? (
         <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>
@@ -10998,6 +11094,7 @@ async function printHTML(title, bodyHtml, dept, opts = {}) {
     /* Keep a heading with the block under it — a section title alone at the foot of a page is the
        classic print artefact, and on an agenda it reads as an empty item. */
     h2{break-after:avoid;page-break-after:avoid} ul,ol,p{break-inside:avoid-page}
+    .sig{margin:2px 0 14px;break-inside:avoid-page} .sig img{display:block;max-width:300px;max-height:140px;height:auto;border:1px solid #aaa;border-radius:4px} .sig figcaption{font-size:11px;color:#333;margin-top:3px}
     @media print{body{margin:.5in}}
   </style></head><body>
     <div class="head">${crest}<div><h1>${esc(deptName)} &mdash; ${esc(title)}</h1><div class="sub">${sub}</div></div></div>
@@ -11111,6 +11208,8 @@ function blocksToHtml(blocks) {
   const out = (blocks || []).map((b) => {
     if (b.type === "h2") return `<h2>${inline(b.text)}</h2>`;
     if (b.type === "p") return `<p>${inline(b.text)}</p>`;
+    // A drawn signature (Read & Sign signed records). Only a PNG data URL is ever drawn.
+    if (b.type === "sig") { const src = rsSafeSig(b.src); return src ? `<figure class="sig"><img src="${src}" alt="${esc(b.caption)}"><figcaption>${esc(b.caption)}</figcaption></figure>` : ""; }
     if (b.type === "list") { const tag = b.ordered ? "ol" : "ul"; return `<${tag}>${b.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${tag}>`; }
     if (b.type === "table") {
       const head = `<thead><tr>${(b.head || []).map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>`;

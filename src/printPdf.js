@@ -139,6 +139,31 @@ export function buildPrintPdf({ title, deptName, meta, printedOn, logo, monogram
       y += 8 * PX;                             // p margin-bottom: 8px
       continue;
     }
+    if (b.type === "sig") {
+      // A drawn signature (Read & Sign signed records): .sig img { max-width: 300px; max-height: 140px }, kept whole on
+      // one page. The caller passes only a PNG data URL; one that won't draw prints a note instead of losing the record.
+      let w = 300 * PX, h = w / 3;
+      try { const ip = doc.getImageProperties(b.src); h = w * (ip.height / ip.width); if (h > 140 * PX) { h = 140 * PX; w = h * (ip.width / ip.height); } } catch { /* keep the default box */ }
+      y = ensure(h + 3 * PX + 11 * PX * 1.5 + 14 * PX, y);
+      y += 2 * PX;                             // .sig margin-top: 2px
+      try {
+        doc.addImage(b.src, "PNG", M, y, w, h, undefined, "FAST");
+        doc.setDrawColor(...RULE); doc.setLineWidth(1 * PX); doc.rect(M, y, w, h);
+        y += h;
+      } catch {
+        doc.setFont("times", "italic"); doc.setFontSize(12 * PX); doc.setTextColor(...SUB);
+        doc.text("(The signature image could not be drawn.)", M, y + 12 * PX);
+        y += 12 * PX * 1.5;
+      }
+      if (b.caption) {
+        y += 3 * PX;                           // figcaption margin-top: 3px
+        doc.setFont("times", "normal"); doc.setFontSize(11 * PX); doc.setTextColor(...SUB);
+        doc.text(doc.splitTextToSize(String(b.caption), CW)[0] ?? "", M, y + 11 * PX);
+        y += 11 * PX * 1.5;
+      }
+      y += 14 * PX;                            // .sig margin-bottom: 14px
+      continue;
+    }
     if (b.type === "list") {
       const size = 13 * PX, indent = 22 * PX;  // ul/ol padding-left: 22px
       (b.items || []).forEach((item, i) => {
