@@ -1,6 +1,8 @@
 -- =====================================================================
 -- PHASE 3.1 #3 — QUALIFICATION MATRIX + DRIVER/OPERATOR CHECK-OFFS + DRIVE LOG (DB layer).
--- DRAFT — UNREVIEWED. Not applied. Test: sql/qualifications_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-18 on 0e4cf60 (no SQL changes), recorded BEFORE apply. Not yet applied.
+-- Decisions #1 / #2 shipped as their defaults (qualification drives also count as probation supervised time;
+-- set_qualification_type gated is_dept_admin()). Test: sql/qualifications_RETEST.sql (run AFTER, separately).
 -- Brief: Build Order #3 (2026-10-18). Step 0: sql/qualifications_STEP0_CHECK.sql (ran on live 2026-10-18).
 --
 -- REUSES the probation drive store — supervised_sessions + void_supervised_session — and does NOT change them: a drive
