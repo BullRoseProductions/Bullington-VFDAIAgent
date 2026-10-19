@@ -1,7 +1,9 @@
 -- =====================================================================
 -- PHASE 3.1 #4 — EXPIRATIONS (DB slice): member credentials + turnout gear lifecycle + apparatus annual tests, and one
 -- ranked expirations read that UNIONs them with the EXISTING certs.
--- Record: Claude gate review PASS 2026-10-18 on a0c8ac2 (recorded BEFORE apply). Not yet applied. Call-outs ruled:
+-- Record: Claude gate review PASS 2026-10-18 on a0c8ac2 (recorded BEFORE apply).
+-- APPLIED by hand 2026-10-18. State check: tables 3 · rls true · new_policies 3 · fns 9 · all_definer true · anon_exec false ·
+-- internal_exec false · guardrail_cols 0 · total_policies 168. Call-outs ruled:
 -- undated -> no_date everywhere (keep); gear/apparatus dept-wide vs credentials own-or-leadership (accepted); the 30-day
 -- 'soon' vs the 3-month cert badge -> the UI aligns off days_until; fixed result vocabulary (agreed). Test: sql/expirations_RETEST.sql (run AFTER, separately).
 -- Build order: claude/B4C_Phase3.1_Expirations_BuildOrder.md (decisions Oct 19). Step 0: sql/expirations_STEP0_CHECK.sql.
