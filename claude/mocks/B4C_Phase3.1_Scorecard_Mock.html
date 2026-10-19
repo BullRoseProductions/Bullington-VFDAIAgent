@@ -1,0 +1,83 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Member readiness</title><style>
+:root{--page:#030406;--card2:#10141A;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.13);--tp:#ECEFF4;--ts:#A4ADBA;--tm:#6E7783;--tmd:#565E6A;--red:#C8323A;--redB:#E03A44;--redText:#E07982;--green:#2FA869;--greenT:#55BE87;--amber:#CC9E52;--amberT:#E0C285;--blue:#4F90D6;--blueT:#7FB2E6;--steel:#6D8CAC;--gold:#D8A24A;--goldT:#E6C078;--teal:#3FB0C9;--rose:#CE7BA0;--disp:'Oswald',sans-serif;--body:'Public Sans',sans-serif;--cardgrad:linear-gradient(180deg,#0F131A,#0B0E13)}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--tp);font-family:var(--body);font-size:13px;-webkit-font-smoothing:antialiased;padding:18px 16px;max-width:460px;margin:0 auto}
+/* member hero */
+.hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:17px;background:radial-gradient(120% 130% at 90% 0%,rgba(47,168,105,.26),transparent 50%),linear-gradient(100deg,#05070A,#0a0d12 60%,#081210);padding:18px;margin-bottom:15px}
+.mh{display:flex;gap:14px;align-items:center;position:relative;z-index:1}
+.big{width:62px;height:62px;border-radius:16px;flex-shrink:0;background:linear-gradient(160deg,#20303f,#121820);border:1px solid rgba(85,190,135,.45);box-shadow:0 0 22px rgba(47,168,105,.25);display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:700;font-size:23px;color:var(--greenT)}
+.mi{flex:1;min-width:0}
+.mi .kick{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--greenT);text-transform:uppercase;margin:0 0 3px}
+.mi h1{font-family:var(--disp);font-weight:700;font-size:24px;margin:0;line-height:1.05}
+.mi .role{font-size:11.5px;color:var(--ts);margin-top:3px}
+.verdict{display:flex;align-items:center;gap:10px;margin-top:15px;padding:12px 14px;border-radius:13px;position:relative;z-index:1;background:radial-gradient(120% 140% at 100% 0%,rgba(47,168,105,.2),transparent 60%),linear-gradient(180deg,rgba(47,168,105,.1),rgba(47,168,105,.02));border:1px solid rgba(47,168,105,.5)}
+.verdict .vi{width:38px;height:38px;border-radius:11px;background:rgba(47,168,105,.2);border:1px solid rgba(85,190,135,.5);display:flex;align-items:center;justify-content:center;color:var(--greenT);flex-shrink:0}.verdict .vi svg{width:21px;height:21px}
+.verdict .vt{flex:1}.verdict .vt .h{font-family:var(--disp);font-weight:700;font-size:16px;color:#fff}.verdict .vt .d{font-size:11px;color:var(--ts);margin-top:1px}
+.verdict .score{font-family:var(--disp);font-weight:700;font-size:26px;color:var(--greenT);flex-shrink:0;line-height:1}
+.sl{display:flex;align-items:center;gap:8px;font-family:var(--disp);font-weight:700;font-size:11px;letter-spacing:.09em;text-transform:uppercase;margin:0 2px 10px}
+.sl .ln{flex:1;height:1px;background:linear-gradient(90deg,currentColor,transparent);opacity:.4}
+.sl svg{width:14px;height:14px}.sl.a{color:var(--goldT)}.sl.b{color:var(--blueT)}.sl.c{color:var(--amberT)}.sl.d{color:var(--ts)}
+.qchips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:19px}
+.qc{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;border-radius:9px;padding:7px 11px;background:rgba(47,168,105,.1);border:1px solid rgba(47,168,105,.38);color:var(--greenT)}
+.qc svg{width:13px;height:13px}
+.qc.pend{background:rgba(204,158,82,.1);border-color:rgba(204,158,82,.4);color:var(--amberT)}
+.card{background:var(--cardgrad);border:1px solid var(--line2);border-radius:14px;overflow:hidden;margin-bottom:19px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.ri{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:linear-gradient(160deg,var(--bg2,rgba(79,144,214,.2)),var(--bg1,rgba(79,144,214,.06)));border:1px solid var(--bc,rgba(79,144,214,.4));color:var(--bc,var(--blueT))}.ri svg{width:17px;height:17px}
+.rt{flex:1;min-width:0}.rt .a{font-size:12.5px;font-weight:600;color:var(--tp)}.rt .b{font-size:10.5px;color:var(--tm);margin-top:2px}
+.pill{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-radius:6px;padding:4px 8px;flex-shrink:0;white-space:nowrap}
+.pill.ok{color:var(--greenT);background:rgba(47,168,105,.1);border:1px solid rgba(47,168,105,.38)}
+.pill.soon{color:var(--amberT);background:rgba(204,158,82,.1);border:1px solid rgba(204,158,82,.42)}
+.pill.exp{color:var(--redText);background:rgba(200,50,58,.12);border:1px solid rgba(224,58,68,.45)}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:19px}
+.st{background:var(--cardgrad);border:1px solid var(--line2);border-radius:13px;padding:13px 11px;text-align:center}
+.st .n{font-family:var(--disp);font-weight:700;font-size:23px;line-height:1}.st .l{font-size:9px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-top:5px}
+.st .n.g{color:var(--greenT)}.st .n.b{color:var(--blueT)}.st .n.a{color:var(--amberT)}
+.mocktag{margin-top:6px;font-size:10px;color:var(--tm);text-align:center;line-height:1.55}.mocktag b{color:var(--greenT)}.mocktag .q{color:var(--amberT)}
+</style></head><body>
+
+<div class="hero">
+  <div class="mh"><span class="big">DK</span><div class="mi"><p class="kick">Member readiness</p><h1>D. Kerr</h1><div class="role">Active · FF/EMT · 4 yrs</div></div></div>
+  <div class="verdict"><span class="vi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></span><div class="vt"><div class="h">Ready to respond</div><div class="d">All required items current</div></div><span class="score">100%</span></div>
+</div>
+
+<div class="stats">
+  <div class="st"><div class="n g">6</div><div class="l">Quals</div></div>
+  <div class="st"><div class="n b">5</div><div class="l">Certs</div></div>
+  <div class="st"><div class="n a">1</div><div class="l">Expiring</div></div>
+</div>
+
+<div class="sl a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>Qualifications<span class="ln"></span></div>
+<div class="qchips">
+  <span class="qc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Engine 1 driver</span>
+  <span class="qc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Tanker driver</span>
+  <span class="qc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Interior</span>
+  <span class="qc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>EMS lead</span>
+  <span class="qc pend"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Pump op · 8/10</span>
+</div>
+
+<div class="sl b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M8.5 13.5 7 22l5-3 5 3-1.5-8.5"/></svg>Certifications &amp; credentials<span class="ln"></span></div>
+<div class="card">
+  <div class="row"><span class="ri" style="--bc:var(--blueT);--bg1:rgba(79,144,214,.06);--bg2:rgba(79,144,214,.2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M8.5 13.5 7 22l5-3 5 3-1.5-8.5"/></svg></span><div class="rt"><div class="a">Firefighter II</div><div class="b">State cert</div></div><span class="pill ok">Current</span></div>
+  <div class="row"><span class="ri" style="--bc:var(--blueT);--bg1:rgba(79,144,214,.06);--bg2:rgba(79,144,214,.2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 12h4l2-6 4 12 2-6h4"/></svg></span><div class="rt"><div class="a">EMT-Basic</div><div class="b">Expires Mar 2027</div></div><span class="pill ok">Current</span></div>
+  <div class="row"><span class="ri" style="--bc:var(--amberT);--bg1:rgba(204,158,82,.06);--bg2:rgba(204,158,82,.2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg></span><div class="rt"><div class="a">Driver's license · Class C</div><div class="b">Expires Dec 2026 · date only</div></div><span class="pill soon">62 days</span></div>
+  <div class="row"><span class="ri" style="--bc:var(--greenT);--bg1:rgba(47,168,105,.06);--bg2:rgba(47,168,105,.2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2a5 5 0 0 0-5 5v4H5l1 9h12l1-9h-2V7a5 5 0 0 0-5-5z"/></svg></span><div class="rt"><div class="a">SCBA fit test</div><div class="b">Passed Aug 2026</div></div><span class="pill ok">Current</span></div>
+</div>
+
+<div class="sl c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Acknowledgments<span class="ln"></span></div>
+<div class="card">
+  <div class="row"><span class="ri" style="--bc:var(--greenT);--bg1:rgba(47,168,105,.06);--bg2:rgba(47,168,105,.2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rt"><div class="a">6 of 7 documents signed &amp; current</div><div class="b">SOGs v7 · Driving v3 · Mayday v4 · +3</div></div><span class="pill ok">Current</span></div>
+  <div class="row"><span class="ri" style="--bc:var(--amberT);--bg1:rgba(204,158,82,.06);--bg2:rgba(204,158,82,.2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/></svg></span><div class="rt"><div class="a">Hazmat Awareness policy</div><div class="b">New version — re-sign needed</div></div><span class="pill soon">Re-sign</span></div>
+</div>
+
+<div class="sl d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/></svg>Activity this year<span class="ln"></span></div>
+<div class="stats" style="margin-bottom:6px">
+  <div class="st"><div class="n b">41</div><div class="l">Calls run</div></div>
+  <div class="st"><div class="n g">28</div><div class="l">Train hrs</div></div>
+  <div class="st"><div class="n a">12</div><div class="l">Drives logged</div></div>
+</div>
+
+<div class="mocktag"><b>Phase 3.1 · Member Readiness Scorecard — mock · Industrial Noir</b> · one &ldquo;is this person current&rdquo; view — quals, certs, acknowledgments, expirations &amp; hours · drives the ready-to-respond verdict · <span class="q">expiry dates &amp; pass/fail status only — no license numbers, scans, or medical records</span> · read-only mock</div>
+</body></html>
