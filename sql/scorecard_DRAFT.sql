@@ -1,6 +1,8 @@
 -- =====================================================================
 -- PHASE 3.1 #5 — READINESS SCORECARD + ISO PACKET (DB slice).
--- DRAFT — UNREVIEWED. Not applied. Test: sql/scorecard_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-19 on 6506908 (recorded BEFORE apply). Not yet applied. Pending Ashlea (not
+-- blocking apply): whether 'expiring soon' stays not_ready (as built) or reads 'Ready, renewals due' — a readiness_items
+-- body change, made separately if she chooses it. Test: sql/scorecard_RETEST.sql (run AFTER, separately).
 -- Build order: claude/B4C_Phase3.1_Scorecard_DB_BuildOrder.md (option 3 ruled Oct 19). Step 0: sql/scorecard_STEP0_CHECK.sql.
 --
 -- HONEST BY DEFAULT: a department with NO requirements reads 'not_set' (never ready, never not-ready). 'ready' only
