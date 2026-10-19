@@ -1,5 +1,7 @@
 -- =====================================================================
 -- RETEST for scorecard_2026-10-19.sql (Phase 3.1 #5 DB, rev 2). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
+-- RAN on live 2026-10-19: 20 passed, 0 failed, 2 skipped — S0 + W0 pass; IH (37 counted) / Lipan (28) / North Hood (27) all
+-- 6/6 incl. V1 "Ready, renewals due" + P1 honest counts; Demo + Granbury skip all (no plain members).
 -- run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE requirements / a fixture qualification
 -- type / a fixture document / fixture credentials it creates itself. The final RAISE is the report. The "ERROR" IS the report.
 --   S0 (once) anon can't execute; members can't execute the internal helpers; a 'cert' kind is refused by the table
