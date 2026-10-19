@@ -1,0 +1,68 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Expirations</title><style>
+:root{--page:#030406;--card2:#10141A;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.13);--tp:#ECEFF4;--ts:#A4ADBA;--tm:#6E7783;--tmd:#565E6A;--red:#C8323A;--redB:#E03A44;--redText:#E07982;--green:#2FA869;--greenT:#55BE87;--amber:#CC9E52;--amberT:#E0C285;--blue:#4F90D6;--blueT:#7FB2E6;--steel:#6D8CAC;--gold:#D8A24A;--goldT:#E6C078;--teal:#3FB0C9;--rose:#CE7BA0;--disp:'Oswald',sans-serif;--body:'Public Sans',sans-serif;--cardgrad:linear-gradient(180deg,#0F131A,#0B0E13)}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--tp);font-family:var(--body);font-size:13px;-webkit-font-smoothing:antialiased;padding:18px 16px;max-width:460px;margin:0 auto}
+.hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:17px;background:radial-gradient(120% 130% at 90% 0%,rgba(200,50,58,.3),transparent 48%),radial-gradient(90% 120% at 10% 100%,rgba(204,158,82,.12),transparent 55%),linear-gradient(100deg,#05070A,#0a0d12 60%,#120a0c);padding:19px 20px;margin-bottom:15px}
+.hero .emblem{position:absolute;right:-6px;top:-6px;width:116px;height:116px;color:rgba(224,58,68,.13);z-index:0}
+.hero>.z{position:relative;z-index:1}
+.kick{font-size:10.5px;font-weight:700;letter-spacing:.14em;color:var(--redText);text-transform:uppercase;margin:0 0 5px}
+.hero h1{font-family:var(--disp);font-weight:700;font-size:27px;margin:0;line-height:1.02}
+.sub{font-size:12.5px;color:var(--ts);margin-top:8px;line-height:1.5;max-width:310px}
+.summ{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:16px}
+.sc{border-radius:12px;padding:11px 10px;text-align:center;border:1px solid}
+.sc .n{font-family:var(--disp);font-weight:700;font-size:24px;line-height:1}.sc .l{font-size:9px;text-transform:uppercase;letter-spacing:.05em;margin-top:4px}
+.sc.exp{background:rgba(200,50,58,.1);border-color:rgba(224,58,68,.42)}.sc.exp .n{color:var(--redText)}.sc.exp .l{color:var(--redText)}
+.sc.soon{background:rgba(204,158,82,.09);border-color:rgba(204,158,82,.4)}.sc.soon .n{color:var(--amberT)}.sc.soon .l{color:var(--amberT)}
+.sc.ok{background:rgba(47,168,105,.08);border-color:rgba(47,168,105,.36)}.sc.ok .n{color:var(--greenT)}.sc.ok .l{color:var(--greenT)}
+.remind{display:flex;align-items:center;gap:8px;justify-content:center;font-family:var(--disp);font-weight:700;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--blueT);background:rgba(79,144,214,.08);border:1px solid rgba(79,144,214,.42);border-radius:11px;padding:11px;margin-bottom:20px}.remind svg{width:15px;height:15px}
+.sl{display:flex;align-items:center;gap:8px;font-family:var(--disp);font-weight:700;font-size:11px;letter-spacing:.09em;text-transform:uppercase;margin:0 2px 10px}
+.sl .ln{flex:1;height:1px;background:linear-gradient(90deg,currentColor,transparent);opacity:.4}
+.sl svg{width:14px;height:14px}.sl.exp{color:var(--redText)}.sl.soon{color:var(--amberT)}.sl.ok{color:var(--greenT)}
+.card{background:var(--cardgrad);border:1px solid var(--line2);border-radius:14px;overflow:hidden;margin-bottom:19px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.ava{width:34px;height:34px;border-radius:10px;background:linear-gradient(160deg,#1c2430,#11151b);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:700;font-size:11px;color:var(--ts);flex-shrink:0}
+.rt{flex:1;min-width:0}.rt .a{font-size:12.5px;font-weight:600;color:var(--tp)}
+.rt .b{font-size:10.5px;color:var(--tm);margin-top:2px;display:flex;align-items:center;gap:6px}
+.typ{font-size:9px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;border-radius:4px;padding:2px 6px;color:var(--ts);background:rgba(255,255,255,.05);border:1px solid var(--line2)}
+.when{text-align:right;flex-shrink:0}
+.when .d{font-family:var(--disp);font-weight:700;font-size:13px;line-height:1}
+.when .s{font-size:9.5px;margin-top:3px}
+.when.exp .d{color:var(--redText)}.when.exp .s{color:var(--redText)}
+.when.soon .d{color:var(--amberT)}.when.soon .s{color:var(--amberT)}
+.when.ok .d{color:var(--greenT)}.when.ok .s{color:var(--tm)}
+.mocktag{margin-top:6px;font-size:10px;color:var(--tm);text-align:center;line-height:1.55}.mocktag b{color:var(--redText)}.mocktag .q{color:var(--amberT)}
+</style></head><body>
+
+<div class="hero">
+  <svg class="emblem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6M12 5V2"/></svg>
+  <div class="z"><p class="kick">Compliance</p><h1>Expirations</h1><div class="sub">Every cert, license, med card, fit test, and gear check across the department — so nothing lapses without warning.</div>
+  <div class="summ"><div class="sc exp"><div class="n">2</div><div class="l">Expired</div></div><div class="sc soon"><div class="n">4</div><div class="l">30 days</div></div><div class="sc ok"><div class="n">38</div><div class="l">Current</div></div></div>
+  </div>
+</div>
+
+<div class="remind"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9z"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>Send reminders to flagged members</div>
+
+<div class="sl exp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l10 18H2z"/><path d="M12 9v5M12 17h.01"/></svg>Expired · act now<span class="ln"></span></div>
+<div class="card">
+  <div class="row"><span class="ava">TW</span><div class="rt"><div class="a">T. Walsh</div><div class="b"><span class="typ">Med card</span>DOT medical · class only</div></div><div class="when exp"><div class="d">−11 d</div><div class="s">Oct 6</div></div></div>
+  <div class="row"><span class="ava">E1</span><div class="rt"><div class="a">Engine 1 · pump test</div><div class="b"><span class="typ">Apparatus</span>Annual pump certification</div></div><div class="when exp"><div class="d">−3 d</div><div class="s">Oct 14</div></div></div>
+</div>
+
+<div class="sl soon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Expiring within 30 days<span class="ln"></span></div>
+<div class="card">
+  <div class="row"><span class="ava">DK</span><div class="rt"><div class="a">D. Kerr</div><div class="b"><span class="typ">License</span>Driver's license · Class C</div></div><div class="when soon"><div class="d">12 d</div><div class="s">Oct 29</div></div></div>
+  <div class="row"><span class="ava">RM</span><div class="rt"><div class="a">R. Mason</div><div class="b"><span class="typ">Cert</span>EMT-Basic renewal</div></div><div class="when soon"><div class="d">18 d</div><div class="s">Nov 4</div></div></div>
+  <div class="row"><span class="ava">AT</span><div class="rt"><div class="a">A. Tran</div><div class="b"><span class="typ">Fit test</span>SCBA annual fit test</div></div><div class="when soon"><div class="d">24 d</div><div class="s">Nov 10</div></div></div>
+  <div class="row"><span class="ava">JB</span><div class="rt"><div class="a">J. Boyd</div><div class="b"><span class="typ">Gear</span>Turnout gear · annual inspection</div></div><div class="when soon"><div class="d">29 d</div><div class="s">Nov 15</div></div></div>
+</div>
+
+<div class="sl ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Next up · current<span class="ln"></span></div>
+<div class="card">
+  <div class="row"><span class="ava">LS</span><div class="rt"><div class="a">L. Silva</div><div class="b"><span class="typ">Cert</span>Firefighter I</div></div><div class="when ok"><div class="d">Feb 27</div><div class="s">133 days</div></div></div>
+  <div class="row"><span class="ava">T2</span><div class="rt"><div class="a">Tanker 2 · ladder test</div><div class="b"><span class="typ">Apparatus</span>Annual aerial inspection</div></div><div class="when ok"><div class="d">Apr 27</div><div class="s">192 days</div></div></div>
+</div>
+
+<div class="mocktag"><b>Phase 3.1 · Expirations Dashboard — mock · Industrial Noir</b> · certs, licenses, med cards, fit tests &amp; gear in one place · ranked expired &rarr; expiring &rarr; current · one tap sends push reminders (push already ships) · generalizes the existing expiring-certs logic · <span class="q">expiry dates &amp; class only — never the number, scan, or medical detail</span> · read-only mock</div>
+</body></html>
