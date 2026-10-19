@@ -1,6 +1,8 @@
 -- =====================================================================
 -- PHASE 3.1 #5 — READINESS SCORECARD + ISO PACKET (DB slice).
--- Record: Claude gate review PASS 2026-10-19 on 6506908 (recorded BEFORE apply). Not yet applied.
+-- Record: Claude gate review PASS 2026-10-19 on 6506908 (recorded BEFORE apply).
+-- APPLIED by hand 2026-10-19 (rev 2). State check: table true · rls true · policies_on_table 1 · fns 4 · all_definer true ·
+-- anon_exec false · internal_exec false · requirements 0 · total_policies 169.
 -- AMENDED AFTER THAT PASS, delta RE-REVIEWED PASS 2026-10-19 on c651875 (docs/review/scorecard_db_rev2_DIFF.patch): Ashlea ruled
 -- 'expiring soon' = "Ready, renewals due" — a required credential still valid but inside the badge's 3-month window now
 -- COUNTS as satisfied (status 'expiring'), and the verdict lists it under renewals_due. Expired / no_date / missing still

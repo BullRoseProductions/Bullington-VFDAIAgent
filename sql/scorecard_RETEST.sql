@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for scorecard (Phase 3.1 #5 DB). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
+-- RETEST for scorecard_2026-10-19.sql (Phase 3.1 #5 DB, rev 2). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
 -- run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE requirements / a fixture qualification
 -- type / a fixture document / fixture credentials it creates itself. The final RAISE is the report. The "ERROR" IS the report.
 --   S0 (once) anon can't execute; members can't execute the internal helpers; a 'cert' kind is refused by the table
