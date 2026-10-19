@@ -1,6 +1,6 @@
 -- =====================================================================
 -- SECURITY FIX — apparatus UPDATE gate: Department Admin + Officer only (is_canmanage_ops()), department-scoped.
--- DRAFT — UNREVIEWED. Not applied. Test: sql/apparatus_update_gate_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-18 (recorded BEFORE apply). Not yet applied. Test: sql/apparatus_update_gate_RETEST.sql (run AFTER, separately).
 -- Brief: claude/B4C_Apparatus_UpdateGate_Fix_BuildOrder.md. Found in #3 Step 0 (3c38ac1).
 -- Step 0: sql/apparatus_update_gate_STEP0_CHECK.sql — RAN on live 2026-10-18:
 --   * the live UPDATE policy "members update apparatus" is department-only — ANY member can update any apparatus column
