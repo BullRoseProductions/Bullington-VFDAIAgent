@@ -1,0 +1,30 @@
+state: [{"update_policies":1,"gate":true,"old_gone":true,"invoker_writers":0,"triggers":1,"total_policies":5,"check_tables_rls":"apparatus_check_results=rls on · apparatus_checks=rls on"}]
+re-run -> Precondition failed: "ops update apparatus" already exists — already applied. Nothing changed.
+PASS  G0 one apparatus UPDATE policy: department AND is_canmanage_ops(); the member-wide one is gone
+— Granbury Fire Station
+   SKIP  all — needs a DA and a plain member with unique emails (DA none, member none)
+— Lipan
+   PASS  K1 a member runs a full check (start -> mark -> finalize); the rig reads Pass, checked by them
+   PASS  U1 a member's direct UPDATE changes nothing (name / in_service / deleted_at: 0 rows)
+   PASS  U2 the DA's direct edit of their department's rig works (1 row)
+   SKIP  U3 — no Officer with a unique email
+   SKIP  U4 — no Board Member with a unique email
+   PASS  U5 another department's DA can't edit this rig (0 rows)
+   PASS  R1 check-interval setter + take-out-of-service still work (definer RPCs)
+— North Hood
+   PASS  K1 a member runs a full check (start -> mark -> finalize); the rig reads Pass, checked by them
+   PASS  U1 a member's direct UPDATE changes nothing (name / in_service / deleted_at: 0 rows)
+   PASS  U2 the DA's direct edit of their department's rig works (1 row)
+   PASS  U3 an Officer's direct edit works (1 row)
+   PASS  U4 a Board Member's direct edit changes nothing (0 rows)
+   PASS  U5 another department's DA can't edit this rig (0 rows)
+   PASS  R1 check-interval setter + take-out-of-service still work (definer RPCs)
+---- 13 passed, 0 failed, 3 skipped ----
+(this exception IS the rollback — nothing was changed)
+BEFORE the fix -> FAIL  G0 apparatus UPDATE policies are not as expected |    FAIL  U1 member updated 3 row(s); name hijacked in_service f deleted_at 2026-10-19 00:12:43.531+00 |    FAIL  U1 member updated 3 row(s); name hijacked in_service f deleted_at 2026-10-19 00:12:43.531+00
+MA new policy dept-only (gate dropped, + post) -> FAIL  G0 apparatus UPDATE policies are not as expected |    FAIL  U1 member updated 3 row(s); name hijacked in_service f deleted_at 2026-10-19 00:12:44.015+00 |    FAIL  U1 member updated 3 row(s); name hijacked in_service f delet
+MB gate without the department (+ post) -> FAIL  G0 apparatus UPDATE policies are not as expected | ---- 12 passed, 1 failed, 3 skipped ----
+MC old policy left in place -> migration Post-condition failed: apparatus must have exactly one UPDATE policy, department-scoped AND is_canmanage_ops() on both sides.
+MD another table's policy touched -> migration Post-condition failed: a policy other than the apparatus UPDATE changed.
+ME an INVOKER apparatus writer present -> migration Precondition failed: 1 SECURITY INVOKER function(s) write apparatus — a member flow could depend on the broad policy. STOP: use per-column guard triggers instead.
+MF the check RPC drifts -> migration Post-condition failed: a check / service RPC changed.

@@ -9,6 +9,12 @@
 --   5 which apparatus-related tables members can write directly (a direct write that fires a #4 trigger = a break)
 --   6 triggers on apparatus itself (the check-interval guard)    7 total policies
 -- STOP RULE: any INVOKER row in 3, or a 4-trigger on a table members write directly in 5 -> report, don't tighten.
+-- RAN on live 2026-10-18: all 7 apparatus writers SECURITY DEFINER (finalize_check, resolve_apparatus_failure,
+-- retire_/restore_apparatus, take_/return_apparatus_to_service, set_apparatus_check_interval); NO trigger writes
+-- apparatus; UPDATE policy "members update apparatus" = department-only (confirmed). => tighten the policy.
+-- Side findings (not this fix): apparatus_maintenance has the same department-only member UPDATE policy;
+-- apparatus_checks / _check_results / _service_periods hold member write grants with no write policy (safe iff RLS on —
+-- the fix's state check reports it). Total policies 165.
 -- =====================================================================
 SELECT 1 AS ord, 'apparatus policy' AS what, policyname || ' [' || cmd || '] ' || roles::text AS name,
        coalesce(qual, '') || coalesce(' | CHECK ' || with_check, '') AS detail
