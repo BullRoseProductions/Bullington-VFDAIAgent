@@ -11,7 +11,8 @@
 --      document id -> mapped to the series); a 'cert' kind, a ref on a credential kind, and another department's
 --      qualification type are all refused
 --   V1 verdict: nothing met -> not_ready naming all three; qualified + current license + signed -> ready; the license
---      expiring (within the badge window) / undated / expired -> not_ready with that status; required = false drops it
+--      expiring (within the badge window) -> STILL ready, listed in renewals_due ("Ready, renewals due"); undated /
+--      expired -> not_ready with that status; required = false drops it
 --   V2 certs are listed (with their window status) but never move the verdict
 --   G1 gates: another member can't read A's scorecard; A reads their own; an Officer reads A's; another department's DA
 --      can't; a member is refused the packet
@@ -141,7 +142,8 @@ BEGIN
       UPDATE public.member_credentials SET expires_on = v_today + 20 WHERE id = v_cred;
       PERFORM set_config('role', 'authenticated', true);
       v_js := public.member_scorecard(v_a_id);
-      v_e3 := v_js->>'state' || '/' || (SELECT x->>'status' FROM jsonb_array_elements(v_js->'items') x WHERE x->>'kind' = 'credential_license');
+      v_e3 := v_js->>'state' || '/' || (SELECT x->>'status' FROM jsonb_array_elements(v_js->'items') x WHERE x->>'kind' = 'credential_license')
+              || '/renewals:' || jsonb_array_length(v_js->'renewals_due');
       PERFORM set_config('role', 'postgres', true);
       UPDATE public.member_credentials SET expires_on = NULL WHERE id = v_cred;
       PERFORM set_config('role', 'authenticated', true);
@@ -157,9 +159,9 @@ BEGIN
       PERFORM public.set_readiness_requirement('credential_license', NULL, false);
       v_js := public.member_scorecard(v_a_id);
       PERFORM set_config('role', 'postgres', true);
-      IF v_t = 'not_ready/3' AND v_e2 = 'ready' AND v_e3 = 'not_ready/expiring,not_ready/no_date,not_ready/expired'
+      IF v_t = 'not_ready/3' AND v_e2 = 'ready' AND v_e3 = 'ready/expiring/renewals:1,not_ready/no_date,not_ready/expired'
          AND v_js->>'state' = 'ready' AND (v_js->>'required')::int = 2 THEN
-        v_pass := v_pass + 1; rpt := rpt || format('   PASS  V1 not_ready naming 3 -> ready; license expiring / no_date / expired -> not_ready; required=false drops it -> ready%s', chr(10));
+        v_pass := v_pass + 1; rpt := rpt || format('   PASS  V1 not_ready naming 3 -> ready; license expiring -> ready + renewals due; no_date / expired -> not_ready; required=false drops it%s', chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  V1 start %s met %s license %s after-drop %s/%s%s', v_t, v_e2, v_e3, v_js->>'state', v_js->>'required', chr(10)); END IF;
 
       -- V2 certs listed, never the verdict

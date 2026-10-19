@@ -1,17 +1,22 @@
 diff --git a/sql/scorecard_DRAFT.sql b/sql/scorecard_DRAFT.sql
 new file mode 100644
-index 0000000..4550f5e
+index 0000000..1a4cdb9
 --- /dev/null
 +++ b/sql/scorecard_DRAFT.sql
-@@ -0,0 +1,445 @@
+@@ -0,0 +1,452 @@
 +-- =====================================================================
 +-- PHASE 3.1 #5 — READINESS SCORECARD + ISO PACKET (DB slice).
-+-- DRAFT — UNREVIEWED. Not applied. Test: sql/scorecard_RETEST.sql (run AFTER, separately).
++-- Record: Claude gate review PASS 2026-10-19 on 6506908 (recorded BEFORE apply). Not yet applied.
++-- AMENDED AFTER THAT PASS (needs re-review of the delta — docs/review/scorecard_db_rev2_DIFF.patch): Ashlea ruled
++-- 'expiring soon' = "Ready, renewals due" — a required credential still valid but inside the badge's 3-month window now
++-- COUNTS as satisfied (status 'expiring'), and the verdict lists it under renewals_due. Expired / no_date / missing still
++-- read not_ready. Nothing else changed. Test: sql/scorecard_RETEST.sql (run AFTER, separately).
 +-- Build order: claude/B4C_Phase3.1_Scorecard_DB_BuildOrder.md (option 3 ruled Oct 19). Step 0: sql/scorecard_STEP0_CHECK.sql.
 +--
 +-- HONEST BY DEFAULT: a department with NO requirements reads 'not_set' (never ready, never not-ready). 'ready' only
-+-- when EVERY required item is satisfied right now; missing / expired / no_date / expiring-soon / unsigned / a requirement
-+-- that can't be met -> 'not_ready', with the item named. Display-only in v1 (it blocks nothing). Never touches the
++-- when EVERY required item is satisfied right now; missing / expired / no_date / unsigned / a requirement that can't be
++-- met -> 'not_ready', with the item named. A required credential still valid but expiring within the badge window is
++-- satisfied — 'ready' with it listed under renewals_due ("Ready, renewals due"). Display-only in v1 (it blocks nothing). Never touches the
 +-- locked verification column.
 +--
 +-- WHAT CHANGES:
@@ -39,7 +44,8 @@ index 0000000..4550f5e
 +--   qualification_type -> qualification_cells(dept, member).status (qualified / in_progress / not_started).
 +--   credential_*       -> expiration_rows(dept, member) source 'credential' of that kind (the member's best row), then
 +--                         readiness_window = the SQL mirror of shared/expiry.js (expired / no_date stand; expiry MONTH
-+--                         within 3 of this month = expiring, else current). Expiring counts as NOT satisfied (order §5).
++--                         within 3 of this month = expiring, else current). Expiring COUNTS as satisfied — "Ready,
++--                         renewals due" (Ashlea, Oct 19) — and is listed in the verdict's renewals_due.
 +--   document           -> rs_member_in_audience + the dept_read_sign_compliance rule (current version signed; within
 +--                         12 months when annual). Outside the audience = not_required (satisfied).
 +--   certs (visibility) -> expiration_rows source 'cert', bucketed by readiness_window.
@@ -164,7 +170,7 @@ index 0000000..4550f5e
 +         coalesce(case when r.kind = 'qualification_type' then coalesce(qt.active, false) and q.status = 'qualified'
 +              when r.kind = 'document' then ds.series_id is not null and ds.requires_ack and ds.current_version > 0
 +                                            and (not public.rs_member_in_audience(p_member, ds.required_roles) or ack.ok)
-+              else bc.w = 'current' end, false),
++              else bc.w in ('current', 'soon') end, false),   -- expiring = still valid: satisfied, flagged in renewals_due
 +         -- status
 +         case when r.kind = 'qualification_type' then
 +                case when qt.id is null or not qt.active then 'not_configured'
@@ -208,6 +214,7 @@ index 0000000..4550f5e
 +    'satisfied', (select count(*) from it where it.satisfied),
 +    'items', coalesce((select jsonb_agg(to_jsonb(it)) from it), '[]'::jsonb),
 +    'outstanding', coalesce((select jsonb_agg(it.label || ' — ' || replace(it.status, '_', ' ')) from it where not it.satisfied), '[]'::jsonb),
++    'renewals_due', coalesce((select jsonb_agg(jsonb_build_object('label', it.label, 'expires_on', it.expires_on)) from it where it.satisfied and it.status = 'expiring'), '[]'::jsonb),
 +    'certs', coalesce((select jsonb_agg(jsonb_build_object('label', e.label, 'expires_on', e.expires_on,
 +                                                           'status', public.readiness_window(e.bucket, e.expires_on)) order by e.expires_on nulls first)
 +                         from public.expiration_rows(p_dept, p_member) e where e.source = 'cert'), '[]'::jsonb),
@@ -451,10 +458,10 @@ index 0000000..4550f5e
 +-- NOTIFY pgrst, 'reload schema';
 diff --git a/sql/scorecard_RETEST.sql b/sql/scorecard_RETEST.sql
 new file mode 100644
-index 0000000..fec6e65
+index 0000000..b04250e
 --- /dev/null
 +++ b/sql/scorecard_RETEST.sql
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,222 @@
 +-- =====================================================================
 +-- RETEST for scorecard (Phase 3.1 #5 DB). Run AFTER the migration, separately. NOTHING CHANGES: each department's checks
 +-- run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE requirements / a fixture qualification
@@ -468,7 +475,8 @@ index 0000000..fec6e65
 +--      document id -> mapped to the series); a 'cert' kind, a ref on a credential kind, and another department's
 +--      qualification type are all refused
 +--   V1 verdict: nothing met -> not_ready naming all three; qualified + current license + signed -> ready; the license
-+--      expiring (within the badge window) / undated / expired -> not_ready with that status; required = false drops it
++--      expiring (within the badge window) -> STILL ready, listed in renewals_due ("Ready, renewals due"); undated /
++--      expired -> not_ready with that status; required = false drops it
 +--   V2 certs are listed (with their window status) but never move the verdict
 +--   G1 gates: another member can't read A's scorecard; A reads their own; an Officer reads A's; another department's DA
 +--      can't; a member is refused the packet
@@ -598,7 +606,8 @@ index 0000000..fec6e65
 +      UPDATE public.member_credentials SET expires_on = v_today + 20 WHERE id = v_cred;
 +      PERFORM set_config('role', 'authenticated', true);
 +      v_js := public.member_scorecard(v_a_id);
-+      v_e3 := v_js->>'state' || '/' || (SELECT x->>'status' FROM jsonb_array_elements(v_js->'items') x WHERE x->>'kind' = 'credential_license');
++      v_e3 := v_js->>'state' || '/' || (SELECT x->>'status' FROM jsonb_array_elements(v_js->'items') x WHERE x->>'kind' = 'credential_license')
++              || '/renewals:' || jsonb_array_length(v_js->'renewals_due');
 +      PERFORM set_config('role', 'postgres', true);
 +      UPDATE public.member_credentials SET expires_on = NULL WHERE id = v_cred;
 +      PERFORM set_config('role', 'authenticated', true);
@@ -614,9 +623,9 @@ index 0000000..fec6e65
 +      PERFORM public.set_readiness_requirement('credential_license', NULL, false);
 +      v_js := public.member_scorecard(v_a_id);
 +      PERFORM set_config('role', 'postgres', true);
-+      IF v_t = 'not_ready/3' AND v_e2 = 'ready' AND v_e3 = 'not_ready/expiring,not_ready/no_date,not_ready/expired'
++      IF v_t = 'not_ready/3' AND v_e2 = 'ready' AND v_e3 = 'ready/expiring/renewals:1,not_ready/no_date,not_ready/expired'
 +         AND v_js->>'state' = 'ready' AND (v_js->>'required')::int = 2 THEN
-+        v_pass := v_pass + 1; rpt := rpt || format('   PASS  V1 not_ready naming 3 -> ready; license expiring / no_date / expired -> not_ready; required=false drops it -> ready%s', chr(10));
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  V1 not_ready naming 3 -> ready; license expiring -> ready + renewals due; no_date / expired -> not_ready; required=false drops it%s', chr(10));
 +      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  V1 start %s met %s license %s after-drop %s/%s%s', v_t, v_e2, v_e3, v_js->>'state', v_js->>'required', chr(10)); END IF;
 +
 +      -- V2 certs listed, never the verdict

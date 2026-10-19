@@ -1,13 +1,16 @@
 -- =====================================================================
 -- PHASE 3.1 #5 — READINESS SCORECARD + ISO PACKET (DB slice).
--- Record: Claude gate review PASS 2026-10-19 on 6506908 (recorded BEFORE apply). Not yet applied. Pending Ashlea (not
--- blocking apply): whether 'expiring soon' stays not_ready (as built) or reads 'Ready, renewals due' — a readiness_items
--- body change, made separately if she chooses it. Test: sql/scorecard_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-19 on 6506908 (recorded BEFORE apply). Not yet applied.
+-- AMENDED AFTER THAT PASS (needs re-review of the delta — docs/review/scorecard_db_rev2_DIFF.patch): Ashlea ruled
+-- 'expiring soon' = "Ready, renewals due" — a required credential still valid but inside the badge's 3-month window now
+-- COUNTS as satisfied (status 'expiring'), and the verdict lists it under renewals_due. Expired / no_date / missing still
+-- read not_ready. Nothing else changed. Test: sql/scorecard_RETEST.sql (run AFTER, separately).
 -- Build order: claude/B4C_Phase3.1_Scorecard_DB_BuildOrder.md (option 3 ruled Oct 19). Step 0: sql/scorecard_STEP0_CHECK.sql.
 --
 -- HONEST BY DEFAULT: a department with NO requirements reads 'not_set' (never ready, never not-ready). 'ready' only
--- when EVERY required item is satisfied right now; missing / expired / no_date / expiring-soon / unsigned / a requirement
--- that can't be met -> 'not_ready', with the item named. Display-only in v1 (it blocks nothing). Never touches the
+-- when EVERY required item is satisfied right now; missing / expired / no_date / unsigned / a requirement that can't be
+-- met -> 'not_ready', with the item named. A required credential still valid but expiring within the badge window is
+-- satisfied — 'ready' with it listed under renewals_due ("Ready, renewals due"). Display-only in v1 (it blocks nothing). Never touches the
 -- locked verification column.
 --
 -- WHAT CHANGES:
@@ -35,7 +38,8 @@
 --   qualification_type -> qualification_cells(dept, member).status (qualified / in_progress / not_started).
 --   credential_*       -> expiration_rows(dept, member) source 'credential' of that kind (the member's best row), then
 --                         readiness_window = the SQL mirror of shared/expiry.js (expired / no_date stand; expiry MONTH
---                         within 3 of this month = expiring, else current). Expiring counts as NOT satisfied (order §5).
+--                         within 3 of this month = expiring, else current). Expiring COUNTS as satisfied — "Ready,
+--                         renewals due" (Ashlea, Oct 19) — and is listed in the verdict's renewals_due.
 --   document           -> rs_member_in_audience + the dept_read_sign_compliance rule (current version signed; within
 --                         12 months when annual). Outside the audience = not_required (satisfied).
 --   certs (visibility) -> expiration_rows source 'cert', bucketed by readiness_window.
@@ -160,7 +164,7 @@ AS $function$
          coalesce(case when r.kind = 'qualification_type' then coalesce(qt.active, false) and q.status = 'qualified'
               when r.kind = 'document' then ds.series_id is not null and ds.requires_ack and ds.current_version > 0
                                             and (not public.rs_member_in_audience(p_member, ds.required_roles) or ack.ok)
-              else bc.w = 'current' end, false),
+              else bc.w in ('current', 'soon') end, false),   -- expiring = still valid: satisfied, flagged in renewals_due
          -- status
          case when r.kind = 'qualification_type' then
                 case when qt.id is null or not qt.active then 'not_configured'
@@ -204,6 +208,7 @@ AS $function$
     'satisfied', (select count(*) from it where it.satisfied),
     'items', coalesce((select jsonb_agg(to_jsonb(it)) from it), '[]'::jsonb),
     'outstanding', coalesce((select jsonb_agg(it.label || ' — ' || replace(it.status, '_', ' ')) from it where not it.satisfied), '[]'::jsonb),
+    'renewals_due', coalesce((select jsonb_agg(jsonb_build_object('label', it.label, 'expires_on', it.expires_on)) from it where it.satisfied and it.status = 'expiring'), '[]'::jsonb),
     'certs', coalesce((select jsonb_agg(jsonb_build_object('label', e.label, 'expires_on', e.expires_on,
                                                            'status', public.readiness_window(e.bucket, e.expires_on)) order by e.expires_on nulls first)
                          from public.expiration_rows(p_dept, p_member) e where e.source = 'cert'), '[]'::jsonb),
