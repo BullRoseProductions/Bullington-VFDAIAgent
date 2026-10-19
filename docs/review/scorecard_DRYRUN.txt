@@ -1,0 +1,42 @@
+state: [{"table":true,"rls":true,"policies_on_table":1,"fns":4,"all_definer":true,"anon_exec":false,"internal_exec":false,"requirements":0,"total_policies":22}]
+re-run -> Precondition failed: readiness_requirements / member_scorecard already exists — already applied. Nothing changed.
+PASS  S0 grants right; internal helpers not callable; a cert kind is refused by the table
+PASS  W0 the window matches shared/expiry.js for every month -2..+8 (and no_date stands)
+— Granbury Fire Station
+   SKIP  all — needs a DA and two plain members with unique emails (DA none, A none, B none)
+— Indian Harbor Volunteer Fire Department
+   PASS  N1 no requirements -> not_set on the scorecard and for all 5 in the packet
+   PASS  C1 member + Officer refused; DA sets 3 requirements (document id -> series); cert kind / ref on a credential / other dept's qual refused
+   PASS  V1 not_ready naming 3 -> ready; license expiring / no_date / expired -> not_ready; required=false drops it -> ready
+   PASS  V2 an expired cert is listed (status expired) but the verdict stays ready
+   PASS  G1 another member refused; member refused the packet; Officer reads A; other dept's DA refused
+   PASS  P1 packet: 5 counted = honest count; A ready; rollups carry the fixture qual + document; expirations has its 4 counts
+— Lipan
+   PASS  N1 no requirements -> not_set on the scorecard and for all 3 in the packet
+   PASS  C1 member refused; DA sets 3 requirements (document id -> series); cert kind / ref on a credential / other dept's qual refused
+   PASS  V1 not_ready naming 3 -> ready; license expiring / no_date / expired -> not_ready; required=false drops it -> ready
+   PASS  V2 an expired cert is listed (status expired) but the verdict stays ready
+   PASS  G1 another member refused; member refused the packet; other dept's DA refused
+   PASS  P1 packet: 3 counted = honest count; A ready; rollups carry the fixture qual + document; expirations has its 4 counts
+— North Hood
+   PASS  N1 no requirements -> not_set on the scorecard and for all 5 in the packet
+   PASS  C1 member + Officer refused; DA sets 3 requirements (document id -> series); cert kind / ref on a credential / other dept's qual refused
+   PASS  V1 not_ready naming 3 -> ready; license expiring / no_date / expired -> not_ready; required=false drops it -> ready
+   PASS  V2 an expired cert is listed (status expired) but the verdict stays ready
+   PASS  G1 another member refused; member refused the packet; Officer reads A; other dept's DA refused
+   PASS  P1 packet: 5 counted = honest count; A ready; rollups carry the fixture qual + document; expirations has its 4 counts
+---- 20 passed, 0 failed, 1 skipped ----
+(this exception IS the rollback — nothing was changed)
+(a) a plain member through the config gate ->    FAIL  C1 member "OK" officer "OK" bad-refused 3 of 3 |    FAIL  C1 member "OK" officer "n/a" bad-refused 3 of 3 |    FAIL  C1 member "OK" officer "OK" bad-refused 3 of 3 | ---- 17 passed, 3 failed, 1 skipped ----
+(b) a member reads another member's scorecard ->    FAIL  G1 B "OK" packet "Only department leadership can open the readiness packet." officer "ready" other-DA "That member is not in your department." |    FAIL  G1 B "OK" packet "Only department leadership can open the readiness packet." officer "n/
+(c) a member opens the packet ->    FAIL  G1 B "Only department leadership can see another member's scorecard." packet "Only department leadership can see the qualification matrix." officer "ready" other-DA "That member is not in your department." |    FAIL  G1 B "Only department leadership can see 
+(d) another department's qualification as a ref ->    FAIL  C1 member "Only a Department Admin can set the readiness standard." officer "Only a Department Admin can set the readiness standard." bad-refused 2 of 3 |    FAIL  V1 start not_ready/4 met not_ready license not_ready/expiring,not_ready/no_d
+(e) an unconfigured department scored ready ->    FAIL  N1 state ready; packet not_set 0 of 5 |    FAIL  N1 state ready; packet not_set 0 of 3 |    FAIL  N1 state ready; packet not_set 0 of 5 | ---- 17 passed, 3 failed, 1 skipped ----
+(f1) an expired / undated credential counted satisfied ->    FAIL  V1 start not_ready/3 met ready license ready/expiring,ready/no_date,ready/expired after-drop ready/2 |    FAIL  V1 start not_ready/3 met ready license ready/expiring,ready/no_date,ready/expired after-drop ready/2 |    FAIL  V1 start 
+(f2) expiring-soon counted current (30-day window) -> FAIL  W0 mismatches: 1:current/soon 2:current/soon 3:current/soon |    FAIL  V1 start not_ready/3 met ready license ready/current,not_ready/no_date,not_ready/expired after-drop ready/2 |    FAIL  V1 start not_ready/3 met ready license ready/curre
+(g) a cert kind allowed (table + RPC) -> FAIL  S0 grants t; cert kind -> "OK" |    FAIL  C1 member "Only a Department Admin can set the readiness standard." officer "Only a Department Admin can set the readiness standard." bad-refused 2 of 3 |    FAIL  C1 member "Only a Department Admin can set the 
+(h) satisfied left nullable (the bool_and hole) ->    FAIL  V1 start not_ready/2 met ready license not_ready/expiring,not_ready/no_date,not_ready/expired after-drop ready/2 |    FAIL  V1 start not_ready/2 met ready license not_ready/expiring,not_ready/no_date,not_ready/expired after-drop ready/2 |  
+(i) packet counts separated members ->    FAIL  P1 counted 6 vs 5; readiness {"ready": 1, "counted": 6, "not_set": 0, "not_ready": 5} | ---- 19 passed, 1 failed, 1 skipped ----
+(j) an unsigned document counted satisfied ->    FAIL  V1 start not_ready/2 met ready license not_ready/expiring,not_ready/no_date,not_ready/expired after-drop ready/2 |    FAIL  V1 start not_ready/2 met ready license not_ready/expiring,not_ready/no_date,not_ready/expired after-drop ready/2 |    FAI
+(k) a cert moves the verdict ->    FAIL  V2 state not_ready certs [{"label": "RETEST expired cert", "status": "expired", "expires_on": "2026-07-31"}] |    FAIL  G1 B "Only department leadership can see another member's scorecard." packet "Only department leadership can open the readiness packet." of
+(l) internal verdict left callable -> migration Post-condition failed: the internal public.readiness_window(text,date) is callable by members.
