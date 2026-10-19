@@ -1,6 +1,8 @@
 -- =====================================================================
 -- SECURITY FIX — apparatus_maintenance UPDATE gate: Department Admin + Officer only (is_canmanage_ops()), dept-scoped.
--- Record: Claude gate review PASS 2026-10-18 on 7bdaa2f (recorded BEFORE apply). Not applied. Live Step 0 ran 2026-10-18 and matches every precondition
+-- Record: Claude gate review PASS 2026-10-18 on 7bdaa2f (recorded BEFORE apply).
+-- APPLIED by hand 2026-10-18. State check: update_policies 1 · gate true · old_gone true · invoker_writers 0 ·
+-- apparatus_gate_kept true · total_policies 165. Live Step 0 ran 2026-10-18 and matches every precondition
 -- (sql/apparatus_maintenance_gate_STEP0_CHECK.sql); the preconditions re-check it at apply time anyway. Test: sql/apparatus_maintenance_gate_RETEST.sql (run AFTER, separately).
 -- Built from the reviewed + applied sql/apparatus_update_gate_2026-10-18.sql — same shape, the table swapped.
 -- Found in #3 Step 0 (3c38ac1); left out of the apparatus fix's scope; Ashlea asked to close it 2026-10-18.
