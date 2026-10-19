@@ -1,5 +1,8 @@
 -- =====================================================================
--- RETEST for apparatus_update_gate (the apparatus UPDATE policy -> DA / Officer only). Run AFTER the migration,
+-- RETEST for apparatus_update_gate_2026-10-18.sql (the apparatus UPDATE policy -> DA / Officer only). Run AFTER the migration,
+-- RAN on live 2026-10-18: 20 passed, 0 failed, 4 skipped — IH / Lipan / NH: K1 (a member's real start -> mark -> finalize)
+-- U1 U2 U3 U5 R1 pass; U4 passes in NH, skipped in IH + Lipan (no Board Member with a unique email); Demo + Granbury
+-- skip all (no plain member).
 -- separately. NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled
 -- back), on a FIXTURE rig + checklist item it creates itself — no real truck or open check is touched. The final RAISE
 -- is the report. The "ERROR" IS the report.

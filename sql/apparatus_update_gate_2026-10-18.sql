@@ -1,6 +1,10 @@
 -- =====================================================================
 -- SECURITY FIX — apparatus UPDATE gate: Department Admin + Officer only (is_canmanage_ops()), department-scoped.
--- DRAFT — UNREVIEWED. Not applied. Test: sql/apparatus_update_gate_RETEST.sql (run AFTER, separately).
+-- Record: Claude gate review PASS 2026-10-18 (recorded BEFORE apply).
+-- APPLIED by hand 2026-10-18. State check: update_policies 1 · gate true · old_gone true · invoker_writers 0 · triggers 3 ·
+-- total_policies 165 · check tables RLS ON (apparatus_checks, apparatus_check_results, apparatus_service_periods) — so
+-- the Step 0 side finding about their member write grants is CLOSED: with RLS on and no write policy, direct writes
+-- are refused. Test: sql/apparatus_update_gate_RETEST.sql (run AFTER, separately).
 -- Brief: claude/B4C_Apparatus_UpdateGate_Fix_BuildOrder.md. Found in #3 Step 0 (3c38ac1).
 -- Step 0: sql/apparatus_update_gate_STEP0_CHECK.sql — RAN on live 2026-10-18:
 --   * the live UPDATE policy "members update apparatus" is department-only — ANY member can update any apparatus column

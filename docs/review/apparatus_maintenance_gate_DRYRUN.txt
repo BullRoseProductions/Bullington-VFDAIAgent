@@ -1,0 +1,25 @@
+state: [{"update_policies":1,"gate":true,"old_gone":true,"invoker_writers":0,"apparatus_gate_kept":true,"total_policies":10}]
+re-run -> Precondition failed: "ops update apparatus_maintenance" already exists — already applied. Nothing changed.
+PASS  G0 one maintenance UPDATE policy: department AND is_canmanage_ops(); member-wide one gone; apparatus fix kept
+— Granbury Fire Station
+   SKIP  all — needs a DA and a plain member with unique emails (DA none, member none)
+— Lipan
+   PASS  M1 a member's direct UPDATE changes nothing (task / cadence / last_done_at: 0 rows)
+   PASS  M2 the DA's Mark done (log + reset) and edit both work
+   SKIP  M3 — no Officer with a unique email
+   SKIP  M4 — no Board Member with a unique email
+   PASS  M5 another department's DA can't edit this task (0 rows)
+— North Hood
+   PASS  M1 a member's direct UPDATE changes nothing (task / cadence / last_done_at: 0 rows)
+   PASS  M2 the DA's Mark done (log + reset) and edit both work
+   PASS  M3 an Officer's edit works (1 row)
+   PASS  M4 a Board Member's edit changes nothing (0 rows)
+   PASS  M5 another department's DA can't edit this task (0 rows)
+---- 9 passed, 0 failed, 3 skipped ----
+(this exception IS the rollback — nothing was changed)
+apparatus RETEST still: ---- 13 passed, 0 failed, 3 skipped ----
+BEFORE the fix -> FAIL  G0 apparatus_maintenance UPDATE policies are not as expected |    FAIL  M1 member updated 3 row(s); task hijacked cadence Annual last_done 2026-10-19 00:45:14.858+00 |    FAIL  M1 member updated 3 row(s); task hijacked cadence Annual last_done 2026-10-19 0
+MA new policy dept-only (gate dropped) -> FAIL  G0 apparatus_maintenance UPDATE policies are not as expected |    FAIL  M1 member updated 3 row(s); task hijacked cadence Annual last_done 2026-10-19 00:45:15.35+00 |    FAIL  M1 member updated 3 row(s); task hijacked cadence Annual
+MB old policy left in place -> migration Post-condition failed: apparatus_maintenance must have exactly one UPDATE policy, department-scoped AND is_canmanage_ops() on both sides.
+MC another table's policy touched (the apparatus fix) -> migration Post-condition failed: a policy other than the apparatus_maintenance UPDATE changed.
+MD an INVOKER maintenance writer present -> migration Precondition failed: 1 SECURITY INVOKER function(s) update apparatus_maintenance — a member flow could depend on the broad policy. STOP and report.
