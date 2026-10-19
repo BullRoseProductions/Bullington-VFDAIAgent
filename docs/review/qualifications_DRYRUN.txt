@@ -1,0 +1,55 @@
+migration state: [{"tables":2,"rls":true,"new_policies":2,"fns":6,"anon_exec":false,"internal_exec":false,"types":0,"signoffs":0,"total_policies":18}]
+re-run -> Precondition failed: a qualifications table already exists — already applied. Nothing changed.
+PASS  Z0 anon can't execute the RPCs; members can't execute qualification_cells
+— Granbury Fire Station
+   SKIP  all — needs a DA, two plain members with unique emails and an apparatus (DA none, A none, B none, apparatus none)
+— Indian Harbor Volunteer Fire Department
+   PASS  C1 member + Officer refused; DA creates a driver + a position type; 5 bad shapes refused
+   PASS  M1 matrix: both types, A not_started on both; 5 members = honest count; member refused
+   PASS  D1 member refused; DA logs -> in_progress/1 (drive row on the type's apparatus); 3 bad drives refused; void -> not_started/0
+   PASS  S1 member + own sign-off refused; DA signs A -> qualified (qualified/1/C DA); double sign refused
+   PASS  R1 blank reason refused; revoke -> in_progress, row kept with the reason; re-sign -> qualified
+   PASS  L1 used type: apparatus locked, rename ok; deactivated type hidden + refuses sign-off
+   PASS  V1 B can't read A's sign-off but reads the types; A reads their own; direct INSERTs refused
+   PASS  X1 another department's DA: sign / revoke / log / edit refused; A and the type not on their matrix
+   PASS  O1 an Officer logs + signs off
+   PASS  P1 qualification drives count as probation supervised time (2 h; the voided one doesn't)
+— Lipan
+   PASS  C1 member refused; DA creates a driver + a position type; 5 bad shapes refused
+   PASS  M1 matrix: both types, A not_started on both; 3 members = honest count; member refused
+   PASS  D1 member refused; DA logs -> in_progress/1 (drive row on the type's apparatus); 3 bad drives refused; void -> not_started/0
+   PASS  S1 member + own sign-off refused; DA signs A -> qualified (qualified/1/B DA); double sign refused
+   PASS  R1 blank reason refused; revoke -> in_progress, row kept with the reason; re-sign -> qualified
+   PASS  L1 used type: apparatus locked (n/a — one apparatus), rename ok; deactivated type hidden + refuses sign-off
+   PASS  V1 B can't read A's sign-off but reads the types; A reads their own; direct INSERTs refused
+   PASS  X1 another department's DA: sign / revoke / log / edit refused; A and the type not on their matrix
+   SKIP  O1 — no Officer with a unique email
+   PASS  P1 qualification drives count as probation supervised time (2 h; the voided one doesn't)
+— North Hood
+   PASS  C1 member + Officer refused; DA creates a driver + a position type; 5 bad shapes refused
+   PASS  M1 matrix: both types, A not_started on both; 5 members = honest count; member refused
+   PASS  D1 member refused; DA logs -> in_progress/1 (drive row on the type's apparatus); 3 bad drives refused; void -> not_started/0
+   PASS  S1 member + own sign-off refused; DA signs A -> qualified (qualified/1/A DA); double sign refused
+   PASS  R1 blank reason refused; revoke -> in_progress, row kept with the reason; re-sign -> qualified
+   PASS  L1 used type: apparatus locked, rename ok; deactivated type hidden + refuses sign-off
+   PASS  V1 B can't read A's sign-off but reads the types; A reads their own; direct INSERTs refused
+   PASS  X1 another department's DA: sign / revoke / log / edit refused; A and the type not on their matrix
+   PASS  O1 an Officer logs + signs off; a Board Member can't revoke
+   PASS  P1 qualification drives count as probation supervised time (2 h; the voided one doesn't)
+---- 30 passed, 0 failed, 2 skipped ----
+(this exception IS the rollback — nothing was changed)
+probation RETEST still: ---- 56 passed, 0 failed, 6 skipped ----
+toggle RETEST still: ---- 17 passed, 0 failed, 3 skipped ----
+MA sign gate removed ->    FAIL  S1 member "You can't sign off your own qualification — another officer does." own "You can't sign off your own qualification — another officer does." again "They're already signed off on this qualification." mine qualified/1/C DA |    FAIL  S1 member "You can't sign 
+MB sign not-self removed (+post) ->    FAIL  S1 member "Only a Department Admin or Officer can sign off a qualification." own "OK" again "They're already signed off on this qualification." mine qualified/1/C DA |    FAIL  S1 member "Only a Department Admin or Officer can sign off a qualification." o
+MC log: supervisor may be the member (+post) ->    FAIL  D1 member "Only a Department Admin or Officer can log supervised time." after-log in_progress/1 (other type not_started/0) bad-refused 2 after-void in_progress/1 |    FAIL  S1 member "Only a Department Admin or Officer can sign off a qualifica
+MD voided drives count (+post) ->    FAIL  D1 member "Only a Department Admin or Officer can log supervised time." after-log in_progress/1 (other type not_started/0) bad-refused 3 after-void in_progress/1 |    FAIL  S1 member "Only a Department Admin or Officer can sign off a qualification." own "Yo
+ME revoked still counts as qualified ->    FAIL  R1 blank "Say why it's being revoked." after-revoke qualified trail 1 after-resign qualified |    FAIL  R1 blank "Say why it's being revoked." after-revoke qualified trail 1 after-resign qualified |    FAIL  R1 blank "Say why it's being revoked." afte
+MF matrix counts former members ->    FAIL  M1 A-not-started 2 members 6 vs 5 member "Only department leadership can see the qualification matrix." | ---- 29 passed, 1 failed, 2 skipped ----
+MG config gate open to Officers ->    FAIL  C1 member "Only a Department Admin can set up qualifications." officer "OK" types d420dec0-b551-4ddd-af2f-83436008cb6c/3b92a26b-bd20-4b10-87b9-1b5143e318e7 bad-refused 5 of 5 |    FAIL  C1 member "Only a Department Admin can set up qualifications." officer
+MH used type's apparatus can change ->    FAIL  L1 change-apparatus "OK" rename "OK" inactive-sign "That qualification is not set up in your department." mine 0 |    FAIL  L1 change-apparatus "OK" rename "OK" inactive-sign "That qualification is not set up in your department." mine 0 | ---- 28 passe
+MI other-department apparatus accepted ->    FAIL  C1 member "Only a Department Admin can set up qualifications." officer "Only a Department Admin can set up qualifications." types a3f752f2-7b7d-4050-8ac1-adf679c30d9a/84b75b62-e84d-4e5d-a56b-6e0b0837fc0c bad-refused 4 of 5 |    FAIL  C1 member "Only
+MJ sign-off read open to all members (policy) -> migration Post-condition failed: member_qualifications must be own-row or leadership only.
+MK drive counts toward every type (counts_toward ignored) ->    FAIL  D1 member "Only a Department Admin or Officer can log supervised time." after-log in_progress/1 (other type in_progress/1) bad-refused 3 after-void not_started/0 |    FAIL  D1 member "Only a Department Admin or Officer can log sup
+ML internal helper left callable -> migration Post-condition failed: the internal qualification_cells is callable by members.
+MM inactive type still signable ->    FAIL  L1 change-apparatus "This qualification already has sign-offs or drives — its kind and apparatus can't change. Create a new one instead." rename "OK" inactive-sign "OK" mine 0 |    FAIL  V1 B-sees-A 0 B-types 2 A-own 2 insert "permission denied for table m
