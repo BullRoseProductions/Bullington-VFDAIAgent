@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for apparatus_update_gate (the apparatus UPDATE policy -> DA / Officer only). Run AFTER the migration,
+-- RETEST for apparatus_update_gate_2026-10-18.sql (the apparatus UPDATE policy -> DA / Officer only). Run AFTER the migration,
 -- separately. NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled
 -- back), on a FIXTURE rig + checklist item it creates itself — no real truck or open check is touched. The final RAISE
 -- is the report. The "ERROR" IS the report.
