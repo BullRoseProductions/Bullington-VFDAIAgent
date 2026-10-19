@@ -7,6 +7,9 @@
 --   4 triggers on ANY table whose function writes apparatus_maintenance (a trigger runs as the CALLER)
 --   5 triggers on apparatus_maintenance itself           6 RLS on the two tables      7 total policies
 -- STOP RULE: any INVOKER row in 3, or a 4-trigger on a table members can write directly -> report, don't tighten.
+-- RAN on live 2026-10-18: UPDATE policy "members update apparatus_maintenance" = department-only (USING + CHECK);
+-- INSERT / DELETE already department AND is_canmanage_ops(); aml_insert (log) already is_canmanage_ops(); NO function
+-- writes apparatus_maintenance; NO trigger on it or writing it; RLS on both tables; total policies 165. => tighten.
 -- Code side (src/App.jsx, 2026-10-18): the only client writes are the maintenance card's add / Mark done / edit / remove
 -- (17642 / 17668 / 17677 / 17683), every control gated canManage = CANMANAGE_OPS_ROLES (DA / Officer); Mark done first
 -- INSERTs apparatus_maintenance_log, whose policy is already is_canmanage_ops().
