@@ -1,51 +1,50 @@
 # B4C — Phase 3.1 #5 Readiness Scorecard + ISO packet — DB BUILD ORDER (for CC)
 
 **For:** CC · Repo BullRoseProductions/Bullington-VFDAIAgent · branch `theme/industrial-noir` · Supabase `ifeptqnlucmvhlvadcpj`.
-**This order = the DB slice only.** UI order follows after this passes gate review + is applied (same rhythm as #2/#3/#4). Concept: B4C_Phase3.1_MemberReadiness_Concept. Approved mock: B4C_Phase3.1_Scorecard_Mock (materialized to disk alongside this order). #4 Expirations is LIVE — this reads its data.
+**This order = the DB slice only.** UI order follows after this passes gate review + is applied. Concept: B4C_Phase3.1_MemberReadiness_Concept. Approved mock: B4C_Phase3.1_Scorecard_Mock. #4 Expirations is LIVE — this reads its data.
 **Settled decisions (Ashlea, Oct 19):**
-- The readiness "required set" is **department-configurable by type/category** — a DA ticks which qualification types, which credential kinds (license/med card/fit test), and which documents count toward "ready." **Nothing is pre-seeded.**
-- The ISO/audit packet is an **in-app printable report** (rendered in-app, browser-print, like Signed-records) — NO .docx/PDF generation pipeline in v1. So the DB only needs a read that assembles the packet data; the printable is the UI order.
+- Required set is **department-configurable by type/category**; nothing pre-seeded.
+- ISO/audit packet is an **in-app printable report** (browser-print, like Signed-records) — no .docx/PDF pipeline in v1.
+- **Cert requirement — RULED OPTION 3 (Claude, Oct 19, from the Step 0 evidence):** there is **no `cert` requirement kind** in v1. Requirements are qualification types, credential kinds, and documents only. Certs still **show** on the scorecard (and the Expirations screen) so they're visible, but they **do not affect the verdict.** A department that needs a cert to gate readiness expresses it as a **qualification type** (exact, officer-signed-once) until the option-4 cert catalog exists.
+  - *Why:* Step 0 §3 — only Indian Harbor (and Demo) hold certs; IH has ~100 distinct names for 37 members, with **semantic** variants a spelling list can't collapse (IS-100 / ICS 100 / NIMS ICS 100 / FEMA IS 100 = one credential; Firefighter I has 6+ names; etc.), AND **many certs never expire** (IS/ICS/NIMS, L-180, Courage to be Safe). Under the honest rule `no_date` is never "satisfied," so a required non-expiring cert would keep even holders permanently "Not ready." That's a data-model gap, not a spelling one — it belongs to option 4.
 
-## Honest-by-default (the spine of this feature — get it exactly right)
-The scorecard's whole value is that "Ready to respond" means something. So:
-- **A department with no requirements configured reads "Readiness standard not set" — NOT "Ready" and NOT "Not ready."** An empty standard can't certify anyone. (Mirrors "Gate not configured" / "No qualifications set up yet.")
-- Green **"Ready" only when every REQUIRED item is satisfied** right now. A required item that is missing, expired, or `no_date` makes the member **"Not ready,"** and the scorecard names what's outstanding. `no_date`/unknown is never counted as satisfied.
-- **One window, shared.** "Current" for certs/credentials uses the SAME expiry rule as #4 (`shared/expiry.js` / the cert-badge window) — reuse the existing `expiration_rows` / `my_expirations` logic, don't re-derive — so a member can't read "Ready" here while a cert reads "Expiring" on the dashboard.
-- The verdict is **display-only in v1** — it informs, it does not block any action.
+## Honest-by-default (the spine — get it exactly right)
+- A department with **no requirements configured reads "Readiness standard not set"** — NOT "Ready" and NOT "Not ready."
+- Green **"Ready" only when every REQUIRED item is satisfied** now; a missing / expired / `no_date` required item → **"Not ready,"** naming what's outstanding. `no_date`/unknown is never satisfied.
+- **One window, shared:** "current" for credentials uses the same `shared/expiry.js` / cert-badge window as #4 — reuse `expiration_rows` / `my_expirations`, don't re-derive.
+- Verdict is **display-only in v1**.
 - `verified` is never referenced or written.
 
-## 0. STEP 0 — CC confirms BEFORE writing (read-only, paste the rows)
-1. **The inputs the scorecard aggregates, and their existing reads** — so the scorecard reuses them, not re-implements:
-   - Quals: `my_qualifications` / `dept_qualification_matrix` + `qualification_types` (per-dept). How "qualified vs in progress" is expressed; the type id.
-   - Certs + credentials + gear: `dept_expirations()` / `my_expirations()` / the internal `expiration_rows` (from #4) and `shared/expiry.js`.
-   - Acknowledgments: the Read & Sign reads (`my_read_sign_queue` / `dept_read_sign_compliance`) + how a document/series id and "signed & current" are expressed.
-   - Activity (informational only, not the verdict): calls / training hours / drives — the existing reads.
-   Paste each one's shape + the id columns the requirements table will reference.
-2. **Gate + identity helpers** confirmed: `is_dept_admin()` (DA/PA), `is_canmanage()` (Board/DA/Officer), `my_member_id()`, `my_department_id()`; the honest denominator (`members.status` + `member_separation` + Project-Admin exclusion).
-3. **Total policy count** now, and confirm the new table name is free.
-- If certs have no stable "type" to mark required (the #4 finding: `certs.exp` is free text, certs aren't typed), **STOP and report** — we decide how "required cert" is expressed (e.g. a named cert requirement vs skipping cert-level requirements in v1) before building the config table.
+## 0. STEP 0 — DONE (CC ran it Oct 19). Findings:
+- **Reuse reads all exist and are SECURITY DEFINER:** quals (`my_qualifications` / `dept_qualification_matrix` / `qualification_types`), #4 expirations (`dept_expirations` / `my_expirations`; `expiration_rows` internal, members can't call it), Read & Sign (queue + compliance reads; `rs_member_in_audience` internal). Reuse them; don't re-implement.
+- **Requirement targets:** `qualification_types.id` for a qualification; `document_series.series_id` for a document (a document's id maps to its series via `documents.series_id`). Credential kinds need no ref.
+- **Helpers:** `is_dept_admin()` (DA/PA) and `is_canmanage()` are department-scoped; `my_member_id()` / `my_department_id()` honour the multi-station active department and only Active/Probationary members.
+- **Honest denominator:** `members.status` Active/Probationary; exclude the 1 separated member and 2 Project Admins.
+- **Activity (informational only):** station hours, `session_attendance` + `training_sessions` (training nights), `supervised_sessions` (drives). **No calls/incident table exists — "calls run" can't be counted in v1**; the activity row is hours, trainings, drives (the mock's "Calls run" tile is dropped or relabelled in the UI order).
+- **Housekeeping:** all 5 new names free; `total_policies` 168 → **169** after the new table.
 
 ## 1. Schema — one RLS-locked, department-scoped, RPC-only config table
-**`readiness_requirements`** — what a department requires for "ready." RLS ON, zero write policies, dept-scoped SELECT for authenticated, `department_id` NOT NULL, audit columns.
-- `id` uuid pk, `department_id` fk, `kind` text check in ('credential_license','credential_med_card','credential_fit_test','qualification_type','document'), `ref_id` uuid null (the `qualification_type` id or the document/series id; NULL for the credential-kind rows — the kind itself is the requirement), `required` boolean not null default true, audit columns. Unique (`department_id`, `kind`, `ref_id`). A row present + `required=true` = required; the config RPC can set `required=false` or remove it to drop a requirement.
-- (If Step 0 resolves a "required cert" representation, add the matching kind; otherwise v1 omits cert-level requirements and the scorecard treats required certs as out of scope — state which.)
+**`readiness_requirements`** — RLS ON, zero write policies, dept-scoped SELECT for authenticated, `department_id` NOT NULL, audit columns.
+- `id` uuid pk, `department_id` fk, `kind` text check in **('credential_license','credential_med_card','credential_fit_test','qualification_type','document')** — **no `cert`**, `ref_id` uuid null (`qualification_types.id` or `document_series.series_id`; NULL for the credential-kind rows), `required` boolean not null default true, audit columns. Unique (`department_id`, `kind`, `ref_id`). Row present + `required=true` = required.
 
 ## 2. Writes — one config RPC (SECURITY DEFINER, `is_dept_admin()`, dept-scoped)
-- `set_readiness_requirement(p_kind, p_ref_id, p_required)` — upsert; gated `is_dept_admin()` (DA/PA — same as `set_qualification_type`, since this is defining the department's standard, not an ops action); validates the kind, and that a non-null `ref_id` names a `qualification_type` / document in the **caller's** department. `SECURITY DEFINER`, `search_path` pinned, `verified` never touched.
-- (No other writes — this slice adds no per-member writes; the scorecard is all reads over data that already has its own write RPCs.)
+- `set_readiness_requirement(p_kind, p_ref_id, p_required)` — upsert; `is_dept_admin()` (DA/PA, like `set_qualification_type`); validates the kind and that a non-null `ref_id` names a `qualification_type` / `document_series` in the **caller's** department. `SECURITY DEFINER`, `search_path` pinned, `verified` never touched.
 
 ## 3. Reads (all SECURITY DEFINER, honest verdict)
-- `dept_readiness_requirements()` — the configured standard for the caller's department (for the config UI + the scorecard). Dept-scoped.
-- `member_scorecard(p_member_id)` — one member's verdict + breakdown. Gated: **own row (`p_member_id = my_member_id()`) OR `is_canmanage()`**. Returns: the overall state ('not_set' | 'ready' | 'not_ready'), and per-required-item rows (kind, label, satisfied bool, status detail — qualified/current/expired/no_date/missing/unsigned), plus the informational activity counts. "not_set" when the department has no requirements. Reuses the qual / expiration / read-sign logic so it stays in lockstep with those screens.
-- `dept_readiness_packet()` — the ISO/audit printable's data. Gated `is_canmanage()` (leadership). Department-wide, honest denominator (exclude Inactive / separated / Project-Admin): every active member's verdict + the outstanding items, plus the three rollups the packet shows — qualification matrix summary, expirations summary (expired / no_date / expiring / current counts), and acknowledgment compliance. One call that assembles what the printable needs; the UI renders + browser-prints it, no file generation.
+- `dept_readiness_requirements()` — the configured standard (dept-scoped).
+- `member_scorecard(p_member_id)` — own row OR `is_canmanage()`. Returns overall state ('not_set' | 'ready' | 'not_ready') + per-required-item rows (kind, label, satisfied, status: qualified/current/expired/no_date/missing/unsigned) + the informational activity counts (hours, trainings, drives — no calls). **Certs are listed for visibility but are NOT required items and never change the verdict.** 'not_set' when the dept has no requirements. Reuses the qual / expiration / read-sign logic for lockstep.
+- `dept_readiness_packet()` — `is_canmanage()`, department-wide, honest denominator (exclude Inactive / separated / Project-Admin): every active member's verdict + outstanding items + the three rollups (qualification matrix summary, expirations summary, acknowledgment compliance). One call for the in-app printable; the UI renders + browser-prints, no file generation.
 
-## 4. Migration discipline (same as every prior slice)
-Single all-or-nothing DO block, re-run-safe (precondition refuses if the table/reads already exist). Preconditions: helpers exist + dept-scoped; the inputs from Step 0 exist. Post-conditions: `readiness_requirements` exists with RLS ON, zero write policies, exactly one dept-scoped SELECT policy; the config RPC + all reads `SECURITY DEFINER`, `is_dept_admin()` on the write and `is_canmanage()`/own-row on the leadership/member reads, no `is_leader()`; every pre-existing policy byte-identical (snapshot before/after); `verified` untouched; `total_policies` +1. State check at the end.
+## 4. Migration discipline
+Single all-or-nothing DO block, re-run-safe. Post-conditions: `readiness_requirements` RLS ON, zero write policies, one dept-scoped SELECT policy; config RPC + reads `SECURITY DEFINER`, `is_dept_admin()` on the write, `is_canmanage()`/own-row on the reads, no `is_leader()`; the `kind` check set contains no `cert`; every pre-existing policy byte-identical (snapshot before/after); `verified` untouched; `total_policies` 168 → 169. State check at the end.
 
-## 5. Prove it — PGlite dry run (mutations) + a live RETEST
-- **Dry run (PGlite):** seed two departments, a DA, a member with a mix (one required qual qualified, one required credential expired, one required document unsigned), and a department with NO requirements. Assert: the no-requirements dept → `not_set` (never ready/not-ready); the member with an expired required credential → `not_ready` with that item named; a member meeting every requirement → `ready`; `member_scorecard` own-or-leadership gating; `dept_readiness_packet()` leadership-only, honest denominator (Inactive/separated/PA excluded); the shared expiry window matches #4 (a credential that is "expiring soon" on the dashboard is not counted "current/ready" here).
-- **Mutations, each caught:** a plain member calling `set_readiness_requirement` → refused; a member reading another member's scorecard → refused; a member calling `dept_readiness_packet()` → refused; a requirement `ref_id` from another department → refused; an unconfigured dept scored as "ready" → the honest-empty assertion fails; counting a `no_date`/expired item as satisfied → assertion fails.
-- **RETEST (live, separate, SENTINEL-rolled-back):** per department — the config write gated to DA/PA, the member/leadership read gates, the honest verdict on real data, `verified` untouched.
+## 5. Prove it — PGlite dry run (mutations) + live RETEST
+- **Dry run:** two depts, a DA, a member with a mix (required qual qualified, required credential expired, required document unsigned), and a dept with NO requirements. Assert: no-requirements dept → `not_set`; the expired-required-credential member → `not_ready` naming it; a fully-satisfied member → `ready`; **a cert (dated or not) never changes the verdict** (it's not a requirement kind); own-or-leadership gating on `member_scorecard`; `dept_readiness_packet()` leadership-only + honest denominator; shared expiry window matches #4.
+- **Mutations, each caught:** a member calling `set_readiness_requirement` → refused; a member reading another's scorecard → refused; a member calling `dept_readiness_packet()` → refused; a `ref_id` from another department → refused; a `kind='cert'` (or any kind off the set) → refused by the check; an unconfigured dept scored "ready" → honest-empty assertion fails; a `no_date`/expired required item counted satisfied → assertion fails.
+- **RETEST (live, separate, SENTINEL-rolled-back):** per dept — the config write gated to DA/PA, the member/leadership read gates, the honest verdict on real data, `verified` untouched.
 
 ## 6. Deliverables for gate review (BEFORE apply)
-`docs/review/scorecard_db_DIFF.patch` (or DRAFT sql) + the RETEST + the PGlite dry-run output, for line-by-line gate review. **Do not apply or deploy.** After PASS: Ashlea applies + runs the RETEST; then the #5 UI order (the scorecard screen, the requirements config, the in-app printable ISO packet).
+`docs/review/scorecard_db_DIFF.patch` (or DRAFT sql) + RETEST + PGlite dry-run output, for line-by-line review. Do not apply or deploy. After PASS: Ashlea applies + runs the RETEST; then the #5 UI order (scorecard screen, requirements config, in-app printable ISO packet; drop/relabel the mock's "Calls run" tile since there's no calls source).
+
+## Deferred — the cert catalog (option 4, its own project, NOT #5)
+A per-department cert catalog (cert types, existing certs mapped onto them) with a **"doesn't expire" status** so non-expiring certs (IS/ICS/NIMS, L-180, Courage to be Safe) read correctly instead of as a `no_date` gap. This is what would let a cert gate readiness honestly, and it also improves the #4 Expirations screen's treatment of certs that genuinely never expire. Scope it as its own build order when Ashlea wants it.
