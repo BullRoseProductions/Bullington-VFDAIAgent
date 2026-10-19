@@ -116,13 +116,32 @@ function canAttempt(id) {
   return Date.now() - (a.at || 0) > Math.pow(2, a.n) * 60 * 1000;   // back-off: 2, 4 min…
 }
 
+/* WHERE THE SCROLL ACTUALLY IS. The app never scrolls the window: App's content panel (S.main) scrolls, and on wide
+   screens a fitToScreen page scrolls its own body region inside it. Both carry data-b4c-scroll="main" / "fit"; the
+   window is kept as a fallback key. Only non-zero positions are saved. (Before this, window.scrollY was saved — always
+   0 — so a restore always landed at the top.) */
+function readScroll() {
+  const out = {};
+  if (typeof document === "undefined") return out;
+  try {
+    document.querySelectorAll("[data-b4c-scroll]").forEach((el) => {
+      const k = el.getAttribute("data-b4c-scroll");
+      const y = Math.round(el.scrollTop || 0);
+      if (k && y > 0) out[k] = y;
+    });
+    const w = Math.round(window.scrollY || 0);
+    if (w > 0) out.window = w;
+  } catch { /* best-effort */ }
+  return out;
+}
+
 function persistPlace(place, keepScroll) {
   const p = place || {};
   writeJSON(ss(), RESTORE_KEY, {
     screen: p.screen || null, packetId: p.packetId ?? null, navArg: p.navArg ?? null,
     ask: p.ask ?? null,                                              // the Ask B4C panel: open?, conversation, draft
     subviews: keepScroll ? Object.fromEntries(liveSubviews) : {},    // a boundary swap is going somewhere new
-    scrollY: keepScroll && typeof window !== "undefined" ? Math.round(window.scrollY || 0) : 0,
+    scroll: keepScroll ? readScroll() : {},                          // { main?, fit?, window? } — see readScroll
     at: Date.now(), from: BUILD_ID,
   });
 }
@@ -155,20 +174,44 @@ export function takeRestoredPlace() {
   bootPlace = r && Date.now() - (r.at || 0) < RESTORE_MAX_AGE_MS ? r : null;
   if (bootPlace) {
     restoredSubviews = { ...(bootPlace.subviews || {}) };
-    const y = Number(bootPlace.scrollY) || 0;
-    if (y > 0) restoreScroll(y);
+    // `scroll` (this build on) or the old `scrollY` (an entry written by the previous build just before this reload)
+    const sc = bootPlace.scroll && typeof bootPlace.scroll === "object" ? bootPlace.scroll
+      : (Number(bootPlace.scrollY) > 0 ? { window: Number(bootPlace.scrollY) } : {});
+    restoreScroll(sc);
   }
   return bootPlace;
 }
-/* Best-effort: the page grows as its data loads, so retry briefly until the target is reachable. */
-function restoreScroll(y) {
+/* Best-effort: the screen grows as its data loads, so retry briefly until each saved position is reachable. Stops the
+   moment the person scrolls, taps, clicks or types (its own listeners — `interacted` also gates the load-time update
+   and stays exactly as it was), so it never fights someone who's already moving. A scroller that never mounts (the
+   screen changed shape) is skipped; one that never grows tall enough lands as far down as it can. */
+function restoreScroll(map) {
+  const keys = Object.keys(map || {}).filter((k) => Number(map[k]) > 0);
+  if (!keys.length || typeof document === "undefined") return;
+  let cancelled = false;
+  const cancel = () => { cancelled = true; };
+  const evs = ["pointerdown", "keydown", "wheel", "touchstart"];
+  evs.forEach((e) => window.addEventListener(e, cancel, { capture: true, passive: true }));
+  const done = () => evs.forEach((e) => window.removeEventListener(e, cancel, { capture: true }));
+  const elOf = (k) => (k === "window" ? null : document.querySelector(`[data-b4c-scroll="${k}"]`));
+  const maxOf = (el) => (el ? el.scrollHeight - el.clientHeight : document.documentElement.scrollHeight - window.innerHeight);
+  const put = (el, y) => { if (el) el.scrollTop = y; else window.scrollTo(0, y); };
+  const pending = new Set(keys);
   const started = Date.now();
   const tick = () => {
-    if (interacted) return;                           // they've started using the page — leave it alone
-    const max = document.documentElement.scrollHeight - window.innerHeight;
-    if (max >= y - 4) { window.scrollTo(0, y); return; }
-    if (Date.now() - started < 4000) setTimeout(tick, 150);
-    else window.scrollTo(0, Math.max(0, max));
+    if (cancelled || interacted) { done(); return; }
+    try {
+      for (const k of [...pending]) {
+        const el = elOf(k);
+        if (k !== "window" && !el) continue;                 // not mounted yet
+        const y = Number(map[k]);
+        if (maxOf(el) >= y - 4) { put(el, y); pending.delete(k); }
+      }
+      if (!pending.size) { done(); return; }
+      if (Date.now() - started < 6000) { setTimeout(tick, 150); return; }
+      for (const k of pending) { const el = elOf(k); if (k === "window" || el) put(el, Math.max(0, Math.min(Number(map[k]), maxOf(el)))); }
+    } catch { /* best-effort */ }
+    done();
   };
   setTimeout(tick, 120);
 }

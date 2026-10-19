@@ -141,7 +141,7 @@ function PageShell({ kicker, title, sub, lead, actions, above, fitToScreen, band
         {actions}
       </div>
       )}
-      <div ref={bodyRef} style={fit || undefined}>{children}</div>
+      <div ref={bodyRef} style={fit || undefined} data-b4c-scroll={fit ? "fit" : undefined}>{children}</div>
     </div>
   );
 }
@@ -3083,7 +3083,7 @@ export default function App() {
         </div>
       </aside>
 
-      <div style={S.main}>
+      <div style={S.main} data-b4c-scroll="main">{/* the app's scroller — src/appUpdate.js saves + restores its position */}
         <header style={S.topbar}>
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={{ flex: 1 }} />
