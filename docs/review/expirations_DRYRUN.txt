@@ -1,0 +1,40 @@
+state: [{"tables":3,"rls":true,"new_policies":3,"fns":9,"all_definer":true,"anon_exec":false,"internal_exec":false,"guardrail_cols":0,"total_policies":9}]
+re-run -> Precondition failed: an expirations table or read already exists — already applied. Nothing changed.
+PASS  E0 grants right; internal read not callable; member_credentials = dates + class only
+— Granbury Fire Station
+   SKIP  all — needs a DA and two plain members with unique emails (DA none, A none, B none)
+— Lipan
+   PASS  W1 a plain member is refused all 7 writes
+   PASS  W2 DA records a license (class only), med card, fit test, two gear (inspection rolls +1 yr), a pump test
+   PASS  W3 bad kind / test type / result, a number as class, a deleted rig refused; another department's DA refused write / edit / delete
+   PASS  O1 an Officer can record a credential
+   PASS  D1 buckets right; ranked expired > no_date > soon > current; YYYY-MM -> 2026-12-31 (month end); blank -> no_date; no submission; no deleted rig
+   PASS  D2 an Inactive member's rows drop out of the dashboard
+   PASS  M1 my_expirations = only A's own (5 rows, incl. their certs + gear); a member is refused the dashboard
+   PASS  V1 B can't read A's credentials; A reads their own 2; direct INSERT refused on all three tables
+— North Hood
+   PASS  W1 a plain member is refused all 7 writes
+   PASS  W2 DA records a license (class only), med card, fit test, two gear (inspection rolls +1 yr), a pump test
+   PASS  W3 bad kind / test type / result, a number as class, a deleted rig refused; another department's DA refused write / edit / delete
+   PASS  O1 an Officer can record a credential
+   PASS  D1 buckets right; ranked expired > no_date > soon > current; YYYY-MM -> 2026-12-31 (month end); blank -> no_date; no submission; no deleted rig
+   PASS  D2 an Inactive member's rows drop out of the dashboard
+   PASS  M1 my_expirations = only A's own (5 rows, incl. their certs + gear); a member is refused the dashboard
+   PASS  V1 B can't read A's credentials; A reads their own 2; direct INSERT refused on all three tables
+---- 17 passed, 0 failed, 1 skipped ----
+(this exception IS the rollback — nothing was changed)
+(a) a member passes a write gate (set_gear_item) ->    FAIL  W1 refused 6 of 7 |    FAIL  W1 refused 6 of 7 | ---- 15 passed, 2 failed, 1 skipped ----
+(b) credential for another department's member ->    FAIL  W3 refused 5 of 5; cross-dept 2 of 3 |    FAIL  W3 refused 5 of 5; cross-dept 2 of 3 | ---- 15 passed, 2 failed, 1 skipped ----
+(c1) test on a deleted rig accepted (write) ->    FAIL  W3 refused 4 of 5; cross-dept 3 of 3 |    FAIL  W3 refused 4 of 5; cross-dept 3 of 3 | ---- 15 passed, 2 failed, 1 skipped ----
+(c2) deleted rig's test shown (read) ->    FAIL  D1 buckets ok f, out-of-order rows 0, fixtures: pump test=expired, RETEST coat (old)=expired, RETEST DOT med card=expired, RETEST SCBA fit test=no_date, RETEST cert undated=no_date, RETEST driver license=soon, RETEST cert month=current, RETEST pool helmet=current |    FA
+(d) kind off the check set accepted ->    FAIL  W3 refused 4 of 5; cross-dept 3 of 3 |    FAIL  V1 B-sees-A 0 A-own 3 inserts-refused 3 of 3 |    FAIL  W3 refused 4 of 5; cross-dept 3 of 3 |    FAIL  V1 B-sees-A 0 A-own 3 inserts-refused 3 of 3 | ---- 13 passed, 4 failed, 1 skipped ----
+(e1) cert_submissions unioned in (post-condition kept) -> migration Post-condition failed: the expirations read references cert_submissions (it must UNION certs only).
+(e2) cert_submissions unioned in (post-condition removed) ->    FAIL  D1 buckets ok f, out-of-order rows 0, fixtures: pump test=expired, RETEST coat (old)=expired, RETEST DOT med card=expired, RETEST cert undated=no_date, RETEST SCBA fit test=no_date, RETEST driver license=soon, RETEST cert month=current, RETEST pool h
+(f) a notes column on member_credentials -> migration Post-condition failed (guardrail): member_credentials has a number / scan / document / notes-style column. Dates + class ONLY. Rolling back.
+(f2) a license_number column -> migration Post-condition failed (guardrail): member_credentials has a number / scan / document / notes-style column. Dates + class ONLY. Rolling back.
+(g) number-in-class guard removed ->    FAIL  W3 refused 4 of 5; cross-dept 3 of 3 |    FAIL  V1 B-sees-A 0 A-own 3 inserts-refused 3 of 3 |    FAIL  W3 refused 4 of 5; cross-dept 3 of 3 |    FAIL  V1 B-sees-A 0 A-own 3 inserts-refused 3 of 3 | ---- 13 passed, 4 failed, 1 skipped ----
+(h) Inactive members counted ->    FAIL  D2 Inactive member still has 2 row(s) |    FAIL  D2 Inactive member still has 2 row(s) | ---- 15 passed, 2 failed, 1 skipped ----
+(i) YYYY-MM -> the FIRST of the month ->    FAIL  D1 buckets ok f, out-of-order rows 0, fixtures: pump test=expired, RETEST coat (old)=expired, RETEST DOT med card=expired, RETEST SCBA fit test=no_date, RETEST cert undated=no_date, RETEST driver license=soon, RETEST cert month=current, RETEST pool helmet=current |    F
+(j) undated reads current ->    FAIL  D1 buckets ok f, out-of-order rows 1, fixtures: pump test=expired, RETEST coat (old)=expired, RETEST DOT med card=expired, RETEST SCBA fit test=current, RETEST cert undated=current, RETEST driver license=soon, RETEST cert month=current, RETEST pool helmet=current |    FAIL  D1 buck
+(k) the 10-year gear rule dropped ->    FAIL  D1 buckets ok f, out-of-order rows 0, fixtures: pump test=expired, RETEST DOT med card=expired, RETEST SCBA fit test=no_date, RETEST cert undated=no_date, RETEST driver license=soon, RETEST cert month=current, RETEST coat (old)=current, RETEST pool helmet=current |    FAIL 
+(l) a write RPC left as INVOKER -> migration Post-condition failed: public.delete_apparatus_test(uuid) is not SECURITY DEFINER.

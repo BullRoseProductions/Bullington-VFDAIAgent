@@ -1,0 +1,525 @@
+diff --git a/api/expiration-reminders.js b/api/expiration-reminders.js
+new file mode 100644
+index 0000000..068d1f5
+--- /dev/null
++++ b/api/expiration-reminders.js
+@@ -0,0 +1,122 @@
++// POST /api/expiration-reminders — "Send reminders to flagged members" on the Expirations dashboard (Phase 3.1 #4).
++//
++// WHO: a Board Member / Department Admin / Officer of the department. Not decided here — the database decides, AS THE
++//   CALLER: dept_expirations() is is_canmanage()-gated and department-scoped, so a caller it refuses gets a 403 and
++//   nothing is read or sent, and a caller it allows only ever sees their own department's rows.
++// WHAT: every flagged item (expired, or expiring within the cert badge's window — shared/expiry.js, so the reminder,
++//   the dashboard and the roster badge can't disagree) that belongs to a member — their certs, credentials and
++//   assigned gear. Pool gear and apparatus tests have no one person to remind; leadership already sees them on the
++//   dashboard. Each member gets ONE notification per flagged item per day (subject_ref = item + today, so a second
++//   press the same day restacks nothing — the notifications de-dupe index does it).
++// HOW: the EXISTING channel only — api/_push.js insertNotifications() (the in-app inbox) + sendPush() (FCM), behind
++//   the same strict PUSH_ENABLED === "1" flag as pulse. Muted families are honoured through is_muted() (certs / gear),
++//   failing closed. Push reaches only members on app 2.2+ who allowed notifications; the response says how many.
++// NOT api/notify-session.js (the held-back Notify Crew) — nothing is imported from it.
++import { createClient } from "@supabase/supabase-js";
++import { cors } from "./_cors.js";
++import { requireUser } from "./_auth.js";
++import { insertNotifications, sendPush } from "./_push.js";
++import { expiryBucket, monthIndex } from "../shared/expiry.js";
++
++const TZ = "America/Chicago";
++const PUSH_ENABLED = process.env.PUSH_ENABLED === "1";            // same strict flag as pulse / digest
++const KIND_LABEL = { license: "License", med_card: "Med card", fit_test: "Fit test", other: "Credential", cert: "Cert", gear: "Gear" };
++
++const todayYMD = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
++const fmtDate = (ymd) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(new Date(`${ymd}T00:00:00Z`));
++
++function compose(row, bucket) {
++  const what = `${row.label}${row.cls ? ` (${row.cls})` : ""}`;
++  const kind = KIND_LABEL[row.source === "gear" ? "gear" : row.kind] || "Item";
++  if (bucket === "expired") {
++    return { title: `${kind} expired`, body: `${what} expired ${fmtDate(row.expires_on)}. Please get it renewed and let an officer know.`, severity: "critical" };
++  }
++  return { title: `${kind} expiring soon`, body: `${what} expires ${fmtDate(row.expires_on)}. Please renew it before then.`, severity: "warning" };
++}
++
++/* The pure part — which rows get a reminder and what it says. Exported so it can be tested without a network:
++   flagged = expired or expiring-soon on the badge window, owned by a member, with a date. */
++export function planReminders(rows, today) {
++  const todayYM = monthIndex(today);
++  return (rows || [])
++    .map((r) => ({ ...r, ui_bucket: expiryBucket(r, todayYM) }))
++    .filter((r) => (r.ui_bucket === "expired" || r.ui_bucket === "soon") && r.member_id && r.expires_on)
++    .map((r) => ({ ...r, ...compose(r, r.ui_bucket), family: r.source === "gear" ? "gear" : "certs",
++                   type: r.source === "gear" ? "gear_reminder" : "cert_reminder", subject_ref: `exp:${r.item_id}:${today}` }));
++}
++
++export default async function handler(req, res) {
++  if (cors(req, res)) return;
++  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
++
++  const user = await requireUser(req, res);
++  if (!user) return;
++
++  const supabaseUrl = process.env.SUPABASE_URL;
++  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
++  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
++  const missing = [!supabaseUrl && "SUPABASE_URL", !serviceKey && "SUPABASE_SERVICE_ROLE_KEY", !anonKey && "SUPABASE_ANON_KEY"].filter(Boolean);
++  if (missing.length) return res.status(500).json({ error: `Not configured here: ${missing.join(", ")}`, note: "Nothing was read or sent." });
++
++  // ---- AUTHORIZATION + THE ROWS, both from the database AS THE CALLER (their JWT + the anon key) ----
++  const jwt = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
++  const asUser = createClient(supabaseUrl, anonKey, { auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${jwt}` } } });
++  const [{ data: myDept, error: dErr }, { data: rows, error: eErr }] = await Promise.all([
++    asUser.rpc("my_department_id"), asUser.rpc("dept_expirations"),
++  ]);
++  if (eErr || dErr || !myDept) {
++    return res.status(403).json({ error: "Only Board, Department Admins and Officers can send expiration reminders.", detail: (eErr || dErr)?.message });
++  }
++
++  const today = todayYMD();
++  const flagged = planReminders(rows, today);
++  if (!flagged.length) return res.status(200).json({ flagged: 0, members: 0, inserted: 0, push: { enabled: PUSH_ENABLED, sent: 0 }, note: "Nothing expired or expiring soon belongs to a member." });
++
++  const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
++
++  // ---- MUTE GATE: is_muted(member, family), fail closed (an error = skip that member, never "not muted") ----
++  const familyOf = (r) => r.family;
++  const pairs = [...new Set(flagged.map((r) => `${r.member_id}|${familyOf(r)}`))];
++  const muted = new Set(); let muteErrors = 0;
++  await Promise.all(pairs.map(async (p) => {
++    const [member_id, family] = p.split("|");
++    const { data, error } = await sb.rpc("is_muted", { p_member: member_id, p_family: family });
++    if (error) { muteErrors += 1; muted.add(p); return; }
++    if (data === true) muted.add(p);
++  }));
++  const toSend = flagged.filter((r) => !muted.has(`${r.member_id}|${familyOf(r)}`));
++
++  // type prefix -> the inbox icon (cert / gear); subject_ref = item + today -> once per item per day
++  const notifRows = toSend.map((r) => ({ department_id: myDept, member_id: r.member_id, type: r.type, title: r.title, body: r.body, severity: r.severity, subject_ref: r.subject_ref }));
++
++  let inserted = { inserted: 0, rows: [] };
++  try { inserted = await insertNotifications(sb, notifRows); }
++  catch (e) { return res.status(500).json({ error: "Couldn't record the reminders.", detail: String(e.message || e) }); }
++
++  // ---- PUSH: only the genuinely new rows, only behind PUSH_ENABLED, only to members with a registered device ----
++  const push = { enabled: PUSH_ENABLED, sent: 0, failed: 0, members_with_device: 0 };
++  if (inserted.rows.length) {
++    const memberIds = [...new Set(inserted.rows.map((n) => n.member_id))];
++    const { data: devices } = await sb.from("member_devices").select("member_id, token").in("member_id", memberIds);
++    const tokensByMember = new Map();
++    for (const d of devices || []) {
++      if (!tokensByMember.has(d.member_id)) tokensByMember.set(d.member_id, []);
++      tokensByMember.get(d.member_id).push(d.token);
++    }
++    push.members_with_device = memberIds.filter((id) => (tokensByMember.get(id) || []).length).length;
++    const sendable = inserted.rows.filter((n) => (tokensByMember.get(n.member_id) || []).length);
++    if (PUSH_ENABLED && sendable.length) {
++      const r = await sendPush(sb, sendable, tokensByMember);
++      Object.assign(push, { sent: r.sent || 0, failed: r.failed || 0 }, r.skipped ? { skipped: r.skipped } : {}, r.error ? { error: r.error } : {});
++    }
++  }
++
++  return res.status(200).json({
++    flagged: flagged.length,
++    members: new Set(toSend.map((r) => r.member_id)).size,
++    muted: flagged.length - toSend.length,
++    mute_check_errors: muteErrors,
++    inserted: inserted.inserted,                 // new inbox notifications (a same-day repeat adds 0)
++    push,
++  });
++}
+diff --git a/shared/expiry.js b/shared/expiry.js
+new file mode 100644
+index 0000000..a6d407e
+--- /dev/null
++++ b/shared/expiry.js
+@@ -0,0 +1,33 @@
++/* THE "EXPIRING SOON" WINDOW — one definition, imported by the Vite client (the roster's cert badge via certStatus(),
++ * the Expirations dashboard) and the Vercel function (api/expiration-reminders.js).
++ *
++ * Framework-agnostic on purpose (no React, no browser globals, no imports), like shared/roles.js.
++ *
++ * WHY. The roster's cert badge has always read EXPIRING when a cert's expiry MONTH is 0–3 months after the current
++ * month (certStatus(): month-index diff <= 3). The expirations read (dept_expirations()) returns a raw `days_until`
++ * and its own 30-day "soon". Two windows would let one cert read "Expiring" on the roster and "Current" on the
++ * dashboard. Ruled Oct 19: the dashboard uses the BADGE's window. So the rule lives here once, and certStatus,
++ * the dashboard and the reminder sender all call it. Calendar-month counting, not days — same as the badge.
++ */
++export const EXPIRING_MONTHS = 3;
++
++// "YYYY-MM…" -> a month index (y*12 + m). Anything else -> NaN.
++export function monthIndex(ymd) {
++  const m = /^(\d{4})-(\d{2})/.exec(String(ymd || ""));
++  return m ? Number(m[1]) * 12 + Number(m[2]) : NaN;
++}
++
++/* One expirations row (dept_expirations / my_expirations) -> the bucket the UI shows.
++ * The database's `expired` and `no_date` stand as they are (exact dates, and an undated item is a gap, never current).
++ * Everything else is re-bucketed on the badge's month window: soon when the expiry month is within EXPIRING_MONTHS
++ * of `todayYM` (a month index), else current. */
++export function expiryBucket(row, todayYM) {
++  if (!row) return "no_date";
++  if (row.bucket === "expired" || row.bucket === "no_date") return row.bucket;
++  const mi = monthIndex(row.expires_on);
++  if (!Number.isFinite(mi)) return "no_date";
++  return mi - todayYM <= EXPIRING_MONTHS ? "soon" : "current";
++}
++
++// The rank the dashboard sorts by — expired, then no date, then expiring soon, then current (the DB's order).
++export const BUCKET_RANK = { expired: 0, no_date: 1, soon: 2, current: 3 };
+diff --git a/src/App.jsx b/src/App.jsx
+index bc030ca..0e06b7f 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -9,7 +9,7 @@ import {
+   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
+   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
+   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
+-  Settings as SettingsIcon, BadgeCheck, Grid3x3,
++  Settings as SettingsIcon, BadgeCheck, Grid3x3, Bell,
+ } from "lucide-react";
+ import { FIRE } from "./theme.js";
+ import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
+@@ -394,6 +394,7 @@ import {
+   hasAny, isLeader, isDeptAdmin, isBoard, canManage, isTrainingLeader,
+ } from "../shared/roles.js";
+ import { isDoneThisPeriod, weekStartKey } from "../shared/duty-period.js";
++import { EXPIRING_MONTHS, expiryBucket, BUCKET_RANK } from "../shared/expiry.js";
+ // Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
+ // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
+ // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
+@@ -1783,6 +1784,7 @@ const NAV = [
+   { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
+   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
+   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },   // DA/PA land on the generator; Board/Officer on read-only BoardStats (routed in App)
++  { key: "expirations", label: "Expirations", Icon: Clock, roles: CANMANAGE_ROLES },   // dept_expirations()'s is_canmanage() gate
+   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
+   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
+   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
+@@ -1804,7 +1806,7 @@ const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
+ // EXCLUDED ON PURPOSE: dashboard (initial screen + the redirect target — disabling it would loop),
+ // settings (support/legal/your-person, and where these toggles are configured), admin + adddept
+ // (Project-Admin oversight, not department modules).
+-const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "qualifications", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
++const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "qualifications", "expirations", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
+ // "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
+ // so it follows library's toggle. The sidebar already treats it as library's child for the active state.
+ const SCREEN_PARENT = { packet: "library" };
+@@ -3142,6 +3144,7 @@ export default function App() {
+             : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} go={go} dept={dept} />)}
+           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
+           {screen === "qualifications" && <Qualifications S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
++          {screen === "expirations" && <Expirations S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
+           {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
+               deep-link, a stale screen) gets their own My Equipment instead — never the department log. */}
+           {screen === "equipment" && ((isLeader(role) || isEqMgr)
+@@ -4997,6 +5000,8 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
+       <ReadSignCard go={go} />
+       {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
+       <StationFundraiserCard />
++      {/* Your upcoming expirations (my_expirations) — certs, credentials, assigned gear; hidden when there are none */}
++      <MyExpirationsCard />
+       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
+       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, marginBottom: 8 }}>
+         {/* attendance ring (per-CALENDAR-MONTH rate) + supporting stats; muted "No drills yet" state, not a red 0% */}
+@@ -10907,12 +10912,13 @@ const MEMBERS = [
+ // current year-month index (1-indexed month, matches "YYYY-MM" cert expiry) — real "today"; replaces the old hardcoded June-2026 baseline
+ function nowYM() { const d = new Date(); return d.getFullYear() * 12 + (d.getMonth() + 1); }
+ function certStatus(exp) {
+-  // Cert-status rule is ALSO replicated in SQL dept_cert_readiness() — keep in lockstep (≤3mo = EXPIRING).
++  // Cert-status rule is ALSO replicated in SQL dept_cert_readiness() — keep in lockstep (≤3mo = EXPIRING). The window
++  // is EXPIRING_MONTHS from shared/expiry.js — the Expirations dashboard + reminders use the same one.
+   if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };
+   const [y, m] = exp.split("-").map(Number);
+   const diff = (y * 12 + m) - nowYM();
+   if (diff < 0) return { label: "EXPIRED", color: "#B11E2A", rank: 0 };
+-  if (diff <= 3) return { label: "EXPIRING", color: "#9A6B12", rank: 1 };
++  if (diff <= EXPIRING_MONTHS) return { label: "EXPIRING", color: "#9A6B12", rank: 1 };
+   return { label: "CURRENT", color: "#2E7D52", rank: 2 };
+ }
+ /* ROSTER COVERAGE — the compliance headline, Phase 1.
+@@ -20520,6 +20526,286 @@ const ONBOARD_TEMPLATE = [
+   { group: "Training", items: ["Station orientation & safety walk-through", "SOG / policy review session", "Firefighter I enrollment (if applicable)", "CPR / BLS scheduled"] },
+   { group: "People & access", items: ["Mentor assigned", "Added to paging / contact roster", "Platform login created"] },
+ ];
++/* ---------------- Expirations (Phase 3.1 #4) — everything that lapses, in one ranked list ----------------
++   DB layer: sql/expirations_2026-10-18.sql (applied, RETEST 25/0/2). Reads dept_expirations() (Board/DA/Officer) and
++   my_expirations() (the member's own); writes ONLY through the seven RPCs (DA/Officer). "Expiring soon" is the cert
++   badge's window — shared/expiry.js (expiryBucket / EXPIRING_MONTHS), the same rule certStatus() uses — so one cert
++   never reads two ways. Dates, class and pass/fail ONLY: no field anywhere for a number, a scan or a note. */
++const EXP_TYPE = { cert: "Cert", license: "License", med_card: "Med card", fit_test: "Fit test", other: "Credential", gear: "Gear", pump: "Apparatus", ladder: "Apparatus", hose: "Apparatus" };
++const EXP_KIND_OPTS = [["license", "Driver's license"], ["med_card", "Med card"], ["fit_test", "Fit test"], ["other", "Other"]];
++const EXP_TEST_OPTS = [["pump", "Pump"], ["ladder", "Ladder"], ["hose", "Hose"], ["other", "Other"]];
++const EXP_RESULT_OPTS = [["pass", "Pass"], ["fail", "Fail"], ["pass_with_repairs", "Pass with repairs"]];
++const EXP_SECTION = {
++  expired: { label: "Expired · act now", color: FIRE.redText, rgb: "200,50,58", Icon: AlertTriangle },
++  no_date: { label: "No date · fix the record", color: FIRE.amberText, rgb: "204,158,82", Icon: AlertTriangle },
++  soon: { label: `Expiring soon · within ${EXPIRING_MONTHS} months`, color: FIRE.amberText, rgb: "204,158,82", Icon: Clock },
++  current: { label: "Current", color: FIRE.greenText, rgb: "47,168,105", Icon: CheckCircle2 },
++};
++const EXP_GUARD = "Class and dates only — never a license or card number.";
++const expDate = (ymd) => (ymd ? new Date(`${String(ymd).slice(0, 10)}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "");
++const expInitials = (s) => String(s || "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "—";
++// rows from the read, re-bucketed on the badge window and ordered expired -> no date -> soon -> current, soonest first
++function expRank(rows) {
++  const ym = nowYM();
++  return (rows || []).map((r) => ({ ...r, ui: expiryBucket(r, ym) }))
++    .sort((a, b) => (BUCKET_RANK[a.ui] - BUCKET_RANK[b.ui]) || String(a.expires_on || "9").localeCompare(String(b.expires_on || "9")) || String(a.subject).localeCompare(String(b.subject)));
++}
++function ExpRow({ r, last }) {
++  const sec = EXP_SECTION[r.ui];
++  const d = r.days_until;
++  const big = r.ui === "no_date" ? "No date" : r.ui === "current" ? expDate(r.expires_on).replace(/, \d{4}$/, "") : `${d < 0 ? "−" : ""}${Math.abs(d)} d`;
++  const small = r.ui === "no_date" ? "add an expiry" : r.ui === "current" ? `${d} days` : expDate(r.expires_on).replace(/, \d{4}$/, "");
++  return (
++    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", borderBottom: last ? "none" : `1px solid ${FIRE.lineNoir}` }}>
++      <span style={{ width: 32, height: 32, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, color: FIRE.textSecondary, background: "linear-gradient(160deg, #1c2430, #11151b)", border: `1px solid ${FIRE.line2Noir}` }}>{r.scope === "apparatus" ? <Truck size={15} /> : expInitials(r.subject)}</span>
++      <div style={{ flex: 1, minWidth: 0 }}>
++        <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{r.subject}{r.scope === "apparatus" ? ` · ${r.label}` : ""}</div>
++        <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
++          <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", borderRadius: 5, padding: "1px 6px", color: FIRE.textSecondary, border: `1px solid ${FIRE.line2Noir}` }}>{EXP_TYPE[r.kind] || EXP_TYPE[r.source] || "Item"}</span>
++          {r.scope === "apparatus" ? "Annual test" : `${r.label}${r.cls ? ` · ${r.cls}` : ""}`}
++        </div>
++      </div>
++      <div style={{ textAlign: "right", flexShrink: 0 }}>
++        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13, color: sec.color, ...FS.num }}>{big}</div>
++        <div style={{ fontSize: 10, color: FIRE.textMuted, marginTop: 1 }}>{small}</div>
++      </div>
++    </div>
++  );
++}
++function ExpSections({ ranked }) {
++  return ["expired", "no_date", "soon", "current"].map((b) => {
++    const list = ranked.filter((r) => r.ui === b);
++    if (!list.length) return null;
++    const sec = EXP_SECTION[b];
++    return (
++      <React.Fragment key={b}>
++        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".09em", textTransform: "uppercase", margin: "6px 2px 11px", color: sec.color }}>
++          <sec.Icon size={14} />{sec.label} · {list.length}<span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${sec.color}, transparent)`, opacity: 0.4 }} />
++        </div>
++        <div style={{ ...FS.cardNoir, borderRadius: 14, padding: 0, overflow: "hidden", marginBottom: 18 }}>{list.map((r, i) => <ExpRow key={`${r.source}-${r.item_id}`} r={r} last={i === list.length - 1} />)}</div>
++      </React.Fragment>
++    );
++  });
++}
++function Expirations({ S, role, members, meId, notify }) {
++  const leader = hasAny(role, CANMANAGE_ROLES);          // dept_expirations()'s is_canmanage() gate
++  const ops = hasAny(role, CANMANAGE_OPS_ROLES);         // the seven writes: is_canmanage_ops()
++  const [rows, setRows] = useState(null);
++  const [err, setErr] = useState(false);
++  const [tick, setTick] = useState(0);
++  const [sending, setSending] = useState(false);
++  const reload = () => setTick((t) => t + 1);
++  useEffect(() => {
++    if (!leader) return;
++    let alive = true;
++    supabase.rpc("dept_expirations").then(({ data, error }) => { if (!alive) return; if (error || !Array.isArray(data)) { setErr(true); return; } setErr(false); setRows(data); });
++    return () => { alive = false; };
++  }, [tick, leader]);
++  useReconnect(() => { if (err) reload(); });
++  if (!leader) return <MyExpirationsPage />;
++  const ranked = expRank(rows);
++  const count = (b) => ranked.filter((r) => r.ui === b).length;
++  const flaggedMembers = new Set(ranked.filter((r) => (r.ui === "expired" || r.ui === "soon") && r.member_id).map((r) => r.member_id)).size;
++  async function sendReminders() {
++    if (!flaggedMembers) { notify({ kind: "success", text: "Nobody has anything expired or expiring soon — nothing to send." }); return; }
++    if (!(await noirConfirm({ title: `Remind ${flaggedMembers} member${flaggedMembers === 1 ? "" : "s"}?`,
++      body: `Each gets a reminder about their own expired or expiring-soon certs, credentials and gear — once per item per day. Push reaches members on app 2.2+ who turned notifications on; everyone else sees it in their B4C notifications.`,
++      confirmLabel: "Send reminders" }))) return;
++    setSending(true);
++    try {
++      const res = await authedFetch("/api/expiration-reminders", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
++      const out = await res.json().catch(() => ({}));
++      if (!res.ok) { notify({ kind: "error", title: "Couldn't send reminders", text: out.error || "Please try again." }); return; }
++      const pushed = out.push?.enabled ? ` · ${out.push.sent || 0} push${out.push.sent === 1 ? "" : "es"} delivered to devices` : " · push isn't switched on yet, so they're in-app only";
++      notify({ kind: "success", title: "Reminders sent", text: `${out.inserted || 0} new reminder${out.inserted === 1 ? "" : "s"} to ${out.members || 0} member${out.members === 1 ? "" : "s"}${out.muted ? ` (${out.muted} muted by the member)` : ""}${pushed}.${out.inserted === 0 && out.flagged ? " (Already reminded today.)" : ""}` });
++    } catch (e) { notify({ kind: "error", title: "Couldn't send reminders", text: e.message || "Please try again." }); }
++    finally { setSending(false); }
++  }
++  return (
++    <PageShell band watermark="EXPIRY" kicker="COMPLIANCE" title="Expirations" sub="Every cert, license, med card, fit test, gear check and apparatus test across the department — so nothing lapses without warning.">
++      <NoirSkin>
++      {err && !rows ? <Card padding={14} style={{ fontSize: 13, color: FIRE.amberText }}>Couldn't load expirations. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
++        : rows === null ? <Card padding={14} style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
++        : (<>
++          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
++            {[["expired", "Expired"], ["no_date", "No date"], ["soon", `Within ${EXPIRING_MONTHS} mo`], ["current", "Current"]].map(([b, l]) => (
++              <div key={b} style={{ ...FS.cardNoir, borderRadius: 12, padding: "12px 14px", border: `1px solid rgba(${EXP_SECTION[b].rgb},.35)` }}>
++                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: count(b) ? EXP_SECTION[b].color : FIRE.textMuted, ...FS.num }}>{count(b)}</div>
++                <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{l}</div>
++              </div>
++            ))}
++          </div>
++          <button onClick={sendReminders} disabled={sending} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.redText, background: "rgba(200,50,58,.08)", border: "1px dashed rgba(200,50,58,.45)", borderRadius: 11, padding: 12, marginBottom: 6, cursor: sending ? "default" : "pointer" }}>
++            {sending ? <Loader2 size={16} className="spin" /> : <Bell size={16} />} Send reminders to flagged members{flaggedMembers ? ` · ${flaggedMembers}` : ""}
++          </button>
++          <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", marginBottom: 18 }}>Push reaches members on app 2.2+ who turned notifications on; everyone else sees it in their B4C notifications.</div>
++          {ranked.length === 0
++            ? <Card padding={16} style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 14 }}>Nothing's expiring — add credentials, gear and apparatus tests to track them.</Card>
++            : <ExpSections ranked={ranked} />}
++          {err && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 10 }}>Couldn't refresh — showing what was last loaded.</div>}
++        </>)}
++      {ops && <ExpManage members={members} meId={meId} notify={notify} onChanged={reload} />}
++      <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", margin: "14px 0 4px" }}>Expiry dates, class and pass/fail only — never the number, the scan, or any medical detail.</div>
++      </NoirSkin>
++    </PageShell>
++  );
++}
++/* DA / Officer: add / edit / remove the records behind the list. Every write is an RPC; the database refuses anyone
++   else and refuses a 5+ digit run in a label or class — that message is shown inline, never swallowed. */
++function ExpManage({ members, meId, notify, onChanged }) {
++  const [tab, setTab] = useState("cred");
++  const [creds, setCreds] = useState(null); const [gear, setGear] = useState(null); const [tests, setTests] = useState(null);
++  const [apparatus, setApparatus] = useState([]);
++  const [form, setForm] = useState(null);       // the record being added / edited
++  const [formErr, setFormErr] = useState("");
++  const [busy, setBusy] = useState(false);
++  const [tick, setTick] = useState(0);
++  useEditorOpen(!!form);
++  useEffect(() => {
++    supabase.from("member_credentials").select("id, member_id, kind, label, cls, issued_on, expires_on").order("expires_on", { ascending: true, nullsFirst: true }).then(({ data, error }) => { if (!error) setCreds(data || []); });
++    supabase.from("gear_items").select("id, member_id, label, in_service_on, last_inspected_on, next_inspection_on").is("retired_at", null).order("label").then(({ data, error }) => { if (!error) setGear(data || []); });
++    supabase.from("apparatus_tests").select("id, apparatus_id, test_type, tested_on, next_due_on, result").order("next_due_on", { ascending: true, nullsFirst: true }).then(({ data, error }) => { if (!error) setTests(data || []); });
++    supabase.from("apparatus").select("id, name, deleted_at").order("name").then(({ data, error }) => { if (!error) setApparatus(data || []); });
++  }, [tick]);
++  const people = (members || []).filter((m) => m.status !== "Inactive" && isAssignable(m));
++  const nameOf = (id) => (members || []).find((m) => m.id === id)?.name || "—";
++  const rigOf = (id) => apparatus.find((a) => a.id === id)?.name || "apparatus";
++  const done = (msg) => { notify({ kind: "success", text: msg }); setForm(null); setFormErr(""); setTick((t) => t + 1); onChanged(); };
++  async function call(fn, args, msg) {
++    setBusy(true); setFormErr("");
++    const { error } = await supabase.rpc(fn, args);
++    setBusy(false);
++    if (error) { setFormErr(error.message || "That didn't save — please try again."); return false; }
++    done(msg); return true;
++  }
++  async function quick(fn, args, msg, confirm) {
++    if (confirm && !(await noirConfirm(confirm))) return;
++    const { error } = await supabase.rpc(fn, args);
++    if (error) { notify({ kind: "error", title: "Couldn't save", text: error.message || "Please try again." }); return; }
++    done(msg);
++  }
++  const lab = { display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary };
++  const inp = { ...FS.input, padding: "6px 9px", fontSize: 12.5 };
++  const rowS = { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" };
++  const small = { ...FS.btn, padding: "3px 9px", fontSize: 11 };
++  const nn = (v) => (v === "" || v == null ? null : v);
++  const saveCred = () => call("set_member_credential", { p_id: form.id || null, p_member_id: form.member_id, p_kind: form.kind, p_label: form.label, p_cls: nn(form.cls), p_issued_on: nn(form.issued_on), p_expires_on: nn(form.expires_on) }, form.id ? "Credential saved." : "Credential added.");
++  const saveGear = () => call("set_gear_item", { p_id: form.id || null, p_member_id: nn(form.member_id), p_label: form.label, p_in_service_on: nn(form.in_service_on), p_last_inspected_on: nn(form.last_inspected_on), p_next_inspection_on: nn(form.next_inspection_on) }, form.id ? "Gear saved." : "Gear added.");
++  const saveTest = () => call("set_apparatus_test", { p_id: form.id || null, p_apparatus_id: form.apparatus_id, p_test_type: form.test_type, p_tested_on: nn(form.tested_on), p_next_due_on: nn(form.next_due_on), p_result: form.result }, form.id ? "Test saved." : "Test recorded.");
++  const tabs = [["cred", "Credentials"], ["gear", "Gear"], ["test", "Apparatus tests"]];
++  return (
++    <Card padding="12px 14px" style={{ marginTop: 6 }}>
++      <CardHead icon={Pencil} title="Manage records" />
++      <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>{tabs.map(([k, l]) => <button key={k} onClick={() => { setTab(k); setForm(null); setFormErr(""); }} style={{ ...small, borderColor: tab === k ? FIRE.redText : undefined, color: tab === k ? FIRE.textPrimary : undefined }}>{l}</button>)}</div>
++      {tab === "cred" && (<>
++        {(creds || []).length === 0 && !form && <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "4px 0" }}>No licenses, med cards or fit tests recorded yet.</div>}
++        {(creds || []).map((c) => form?.id === c.id ? null : (
++          <div key={c.id} style={rowS}>
++            <div style={{ flex: "1 1 200px", minWidth: 0, fontSize: 12.5, color: FIRE.textPrimary }}>{nameOf(c.member_id)} · {c.label}{c.cls ? ` · ${c.cls}` : ""} <span style={{ color: FIRE.textMuted }}>· {c.expires_on ? `expires ${expDate(c.expires_on)}` : "no expiry date"}</span></div>
++            <button style={small} onClick={() => setForm({ ...c, cls: c.cls || "", issued_on: c.issued_on || "", expires_on: c.expires_on || "" })}>Edit</button>
++            <button style={{ ...small, color: FIRE.deleteRed }} onClick={() => quick("delete_member_credential", { p_id: c.id }, "Credential removed.", { title: "Remove this credential?", body: `${nameOf(c.member_id)} · ${c.label}`, confirmLabel: "Remove", danger: true })}>Remove</button>
++          </div>
++        ))}
++        {form ? (
++          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", paddingTop: 10 }}>
++            <label style={lab}>Member<select style={{ ...inp, maxWidth: 190 }} value={form.member_id || ""} onChange={(e) => setForm((f) => ({ ...f, member_id: e.target.value }))}><option value="">—</option>{people.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
++            <label style={lab}>Type<select style={inp} value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}>{EXP_KIND_OPTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
++            <label style={{ ...lab, flex: "1 1 150px" }}>Name<input style={inp} maxLength={80} value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. Driver's license" /></label>
++            <label style={{ ...lab, width: 110 }}>Class (optional)<input style={inp} maxLength={40} value={form.cls} onChange={(e) => setForm((f) => ({ ...f, cls: e.target.value }))} placeholder="e.g. Class C" /></label>
++            <label style={lab}>Issued<input type="date" style={inp} value={form.issued_on} onChange={(e) => setForm((f) => ({ ...f, issued_on: e.target.value }))} /></label>
++            <label style={lab}>Expires<input type="date" style={inp} value={form.expires_on} onChange={(e) => setForm((f) => ({ ...f, expires_on: e.target.value }))} /></label>
++            <button style={FS.btnPrimary} disabled={busy || !form.member_id || !form.label.trim()} onClick={saveCred}>{busy ? "Saving…" : "Save"}</button>
++            <button style={FS.btn} disabled={busy} onClick={() => { setForm(null); setFormErr(""); }}>Cancel</button>
++            <div style={{ flexBasis: "100%", fontSize: 11, color: FIRE.textMuted }}>{EXP_GUARD}</div>
++          </div>
++        ) : <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => setForm({ member_id: "", kind: "license", label: "", cls: "", issued_on: "", expires_on: "" })}><Plus size={14} /> Add a credential</button>}
++      </>)}
++      {tab === "gear" && (<>
++        {(gear || []).length === 0 && !form && <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "4px 0" }}>No turnout gear recorded yet.</div>}
++        {(gear || []).map((g) => form?.id === g.id ? null : (
++          <div key={g.id} style={rowS}>
++            <div style={{ flex: "1 1 200px", minWidth: 0, fontSize: 12.5, color: FIRE.textPrimary }}>{g.label} · {g.member_id ? nameOf(g.member_id) : "Pool gear"} <span style={{ color: FIRE.textMuted }}>· {g.in_service_on ? `in service ${expDate(g.in_service_on)}` : "no in-service date"}{g.next_inspection_on ? ` · next inspection ${expDate(g.next_inspection_on)}` : ""}</span></div>
++            <button style={small} onClick={async () => { const d = await noirPrompt({ title: "Log the annual inspection", body: `${g.label} — the next inspection is set one year later.`, label: "Inspected on (YYYY-MM-DD)", initial: probTodayYMD(), multiline: false, required: true, confirmLabel: "Log inspection" }); if (d) quick("log_gear_inspection", { p_id: g.id, p_inspected_on: d }, "Inspection logged — next one in a year."); }}>Log inspection</button>
++            <button style={small} onClick={() => setForm({ ...g, member_id: g.member_id || "", in_service_on: g.in_service_on || "", last_inspected_on: g.last_inspected_on || "", next_inspection_on: g.next_inspection_on || "" })}>Edit</button>
++            <button style={{ ...small, color: FIRE.deleteRed }} onClick={() => quick("retire_gear_item", { p_id: g.id }, "Gear retired.", { title: "Retire this gear?", body: `${g.label} drops off the expirations list. The record is kept.`, confirmLabel: "Retire" })}>Retire</button>
++          </div>
++        ))}
++        {form ? (
++          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", paddingTop: 10 }}>
++            <label style={{ ...lab, flex: "1 1 150px" }}>Item<input style={inp} maxLength={80} value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. Turnout coat" /></label>
++            <label style={lab}>Assigned to<select style={{ ...inp, maxWidth: 190 }} value={form.member_id || ""} onChange={(e) => setForm((f) => ({ ...f, member_id: e.target.value }))}><option value="">Pool gear (unassigned)</option>{people.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
++            <label style={lab}>In service<input type="date" max={probTodayYMD()} style={inp} value={form.in_service_on} onChange={(e) => setForm((f) => ({ ...f, in_service_on: e.target.value }))} /></label>
++            <label style={lab}>Last inspected<input type="date" max={probTodayYMD()} style={inp} value={form.last_inspected_on} onChange={(e) => setForm((f) => ({ ...f, last_inspected_on: e.target.value }))} /></label>
++            <label style={lab}>Next inspection<input type="date" style={inp} value={form.next_inspection_on} onChange={(e) => setForm((f) => ({ ...f, next_inspection_on: e.target.value }))} /></label>
++            <button style={FS.btnPrimary} disabled={busy || !form.label.trim()} onClick={saveGear}>{busy ? "Saving…" : "Save"}</button>
++            <button style={FS.btn} disabled={busy} onClick={() => { setForm(null); setFormErr(""); }}>Cancel</button>
++            <div style={{ flexBasis: "100%", fontSize: 11, color: FIRE.textMuted }}>NFPA 1851: gear retires 10 years after its in-service date; inspect it every year.</div>
++          </div>
++        ) : <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => setForm({ label: "", member_id: "", in_service_on: "", last_inspected_on: "", next_inspection_on: "" })}><Plus size={14} /> Add gear</button>}
++      </>)}
++      {tab === "test" && (<>
++        {(tests || []).length === 0 && !form && <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "4px 0" }}>No apparatus tests recorded yet.</div>}
++        {(tests || []).map((t) => form?.id === t.id ? null : (
++          <div key={t.id} style={rowS}>
++            <div style={{ flex: "1 1 200px", minWidth: 0, fontSize: 12.5, color: FIRE.textPrimary }}>{rigOf(t.apparatus_id)} · {t.test_type} test · {EXP_RESULT_OPTS.find(([k]) => k === t.result)?.[1] || t.result} <span style={{ color: FIRE.textMuted }}>· tested {expDate(t.tested_on)}{t.next_due_on ? ` · next due ${expDate(t.next_due_on)}` : ""}</span></div>
++            <button style={small} onClick={() => setForm({ ...t, next_due_on: t.next_due_on || "" })}>Edit</button>
++            <button style={{ ...small, color: FIRE.deleteRed }} onClick={() => quick("delete_apparatus_test", { p_id: t.id }, "Test removed.", { title: "Remove this test record?", body: `${rigOf(t.apparatus_id)} · ${t.test_type} test`, confirmLabel: "Remove", danger: true })}>Remove</button>
++          </div>
++        ))}
++        {form ? (
++          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", paddingTop: 10 }}>
++            <label style={lab}>Apparatus<select style={{ ...inp, maxWidth: 180 }} value={form.apparatus_id || ""} onChange={(e) => setForm((f) => ({ ...f, apparatus_id: e.target.value }))}><option value="">—</option>{apparatus.filter((a) => !a.deleted_at).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
++            <label style={lab}>Test<select style={inp} value={form.test_type} onChange={(e) => setForm((f) => ({ ...f, test_type: e.target.value }))}>{EXP_TEST_OPTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
++            <label style={lab}>Tested on<input type="date" max={probTodayYMD()} style={inp} value={form.tested_on || ""} onChange={(e) => setForm((f) => ({ ...f, tested_on: e.target.value }))} /></label>
++            <label style={lab}>Next due<input type="date" style={inp} value={form.next_due_on} onChange={(e) => setForm((f) => ({ ...f, next_due_on: e.target.value }))} /></label>
++            <label style={lab}>Result<select style={inp} value={form.result} onChange={(e) => setForm((f) => ({ ...f, result: e.target.value }))}>{EXP_RESULT_OPTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
++            <button style={FS.btnPrimary} disabled={busy || !form.apparatus_id || !form.tested_on} onClick={saveTest}>{busy ? "Saving…" : "Save"}</button>
++            <button style={FS.btn} disabled={busy} onClick={() => { setForm(null); setFormErr(""); }}>Cancel</button>
++          </div>
++        ) : <button style={{ ...FS.btn, marginTop: 10 }} onClick={() => setForm({ apparatus_id: "", test_type: "pump", tested_on: probTodayYMD(), next_due_on: "", result: "pass" })}><Plus size={14} /> Record a test</button>}
++      </>)}
++      {formErr && <div role="alert" style={{ marginTop: 8, fontSize: 12.5, color: FIRE.redText }}>{formErr}</div>}
++    </Card>
++  );
++}
++// The member's own (my_expirations): their certs, credentials and assigned gear. Read-only. Hidden when they have none.
++function useMyExpirations(enabled = true) {
++  const [rows, setRows] = useState(null);
++  const [err, setErr] = useState(false);
++  const load = React.useCallback(() => {
++    if (!enabled) return;
++    supabase.rpc("my_expirations").then(({ data, error }) => { if (error || !Array.isArray(data)) { setErr(true); return; } setErr(false); setRows(data); });
++  }, [enabled]);
++  useEffect(() => { load(); }, [load]);
++  useReconnect(() => { if (err) load(); });
++  return { rows, err, reload: load };
++}
++function MyExpirationsCard() {
++  const { rows } = useMyExpirations(true);
++  const ranked = expRank(rows);
++  if (!ranked.length) return null;
++  const attention = ranked.filter((r) => r.ui !== "current").length;
++  return (
++    <Card padding="14px 16px" style={{ marginBottom: 14 }}>
++      <CardHead icon={Clock} title="Your upcoming expirations" right={attention ? <span style={{ color: FIRE.amberText, ...FS.num }}>{attention} need attention</span> : <span style={{ color: FIRE.greenText }}>All current</span>} />
++      <div style={{ margin: "0 -16px -14px" }}>{ranked.slice(0, 5).map((r, i) => <ExpRow key={`${r.source}-${r.item_id}`} r={r} last={i === Math.min(ranked.length, 5) - 1} />)}</div>
++    </Card>
++  );
++}
++function MyExpirationsPage() {
++  const { rows, err, reload } = useMyExpirations(true);
++  const ranked = expRank(rows);
++  return (
++    <PageShell band watermark="EXPIRY" kicker="COMPLIANCE" title="Your expirations" sub="Your certs, credentials and gear — what's current and what's coming up. Officers keep these records.">
++      <NoirSkin>
++      {err && !rows ? <Card padding={14} style={{ fontSize: 13, color: FIRE.amberText }}>Couldn't load your expirations. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
++        : rows === null ? <Card padding={14} style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
++        : ranked.length === 0 ? <Card padding={14} style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing on file for you yet.</Card>
++        : <ExpSections ranked={ranked} />}
++      </NoirSkin>
++    </PageShell>
++  );
++}
+ /* ---------------- Qualifications (Phase 3.1 #3) — who can do what ----------------
+    DB layer: sql/qualifications_2026-10-18.sql (qualification_types · member_qualifications; drives = supervised_sessions rows with
+    kind 'drive' + counts_toward = the type id). Reads: my_qualifications / dept_qualification_matrix + direct SELECTs of
