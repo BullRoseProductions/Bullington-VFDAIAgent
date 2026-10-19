@@ -1,5 +1,7 @@
 -- =====================================================================
 -- RETEST for expirations_2026-10-18.sql (Phase 3.1 #4 DB). Run AFTER the migration, separately. NOTHING CHANGES: each department's
+-- RAN on live 2026-10-18: 25 passed, 0 failed, 2 skipped — IH / Lipan / North Hood all 8/8 (IH M1 = 28 rows: the test member's
+-- real certs + the fixtures); Demo + Granbury skip all (no plain members).
 -- checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE rows it creates itself. The
 -- final RAISE is the report. The "ERROR" IS the report.
 --   E0 (once) anon can't execute; members can't execute the internal expiration_rows; member_credentials columns are
