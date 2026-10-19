@@ -1,5 +1,7 @@
 -- =====================================================================
 -- RETEST for apparatus_maintenance_gate_2026-10-18.sql (the apparatus_maintenance UPDATE policy -> DA / Officer only). Run AFTER the
+-- RAN on live 2026-10-18: 14 passed, 0 failed, 4 skipped — IH / Lipan / NH: M1 M2 M3 M5 pass; M4 passes in NH, skipped in
+-- IH + Lipan (no Board Member with a unique email); Demo + Granbury skip all (no plain member).
 -- migration, separately. NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL'
 -- (rolled back), on a FIXTURE rig + maintenance task it creates itself. The final RAISE is the report.
 -- The "ERROR" IS the report.
