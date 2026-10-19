@@ -9,7 +9,7 @@ import {
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
-  Settings as SettingsIcon, BadgeCheck, Grid3x3, Bell,
+  Settings as SettingsIcon, BadgeCheck, Grid3x3, Bell, ShieldCheck, Activity, CreditCard,
 } from "lucide-react";
 import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
@@ -1785,6 +1785,7 @@ const NAV = [
   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },   // DA/PA land on the generator; Board/Officer on read-only BoardStats (routed in App)
   { key: "expirations", label: "Expirations", Icon: Clock, roles: CANMANAGE_ROLES },   // dept_expirations()'s is_canmanage() gate
+  { key: "readiness", label: "Readiness", Icon: ShieldCheck, roles: ROLES },   // members: their own scorecard; Board/DA/Officer: the department + packet (is_canmanage()); DA/PA: the standard
   { key: "study", label: "Study Session", Icon: BookOpen, roles: ROLES },
   { key: "qanda", label: "Station Q&A", Icon: MessageSquare, roles: ROLES },
   { key: "documents", label: "Station Documents", Icon: FolderOpen, roles: ROLES },
@@ -1806,7 +1807,7 @@ const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
 // EXCLUDED ON PURPOSE: dashboard (initial screen + the redirect target — disabling it would loop),
 // settings (support/legal/your-person, and where these toggles are configured), admin + adddept
 // (Project-Admin oversight, not department modules).
-const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "qualifications", "expirations", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
+const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "qualifications", "expirations", "readiness", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
 // "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
 // so it follows library's toggle. The sidebar already treats it as library's child for the active state.
 const SCREEN_PARENT = { packet: "library" };
@@ -3145,6 +3146,7 @@ export default function App() {
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
           {screen === "qualifications" && <Qualifications S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "expirations" && <Expirations S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
+          {screen === "readiness" && <Readiness S={S} role={role} meId={myMemberId} notify={notify} dept={dept} />}
           {/* Full equipment log is leadership + active equipment managers. Anyone else who lands here (old link, a
               deep-link, a stale screen) gets their own My Equipment instead — never the department log. */}
           {screen === "equipment" && ((isLeader(role) || isEqMgr)
@@ -20805,6 +20807,367 @@ function MyExpirationsPage() {
       </NoirSkin>
     </PageShell>
   );
+}
+/* ---------------- Readiness scorecard (Phase 3.1 #5) — is this person ready to respond ----------------
+   DB layer: sql/scorecard_2026-10-19.sql (applied, RETEST 20/0/2). Reads member_scorecard() (your own, or Board/DA/Officer
+   for their department), dept_readiness_packet() (Board/DA/Officer: every counted member's verdict plus the rollups —
+   it feeds BOTH the department list and the printable packet, so the two can't disagree) and dept_readiness_requirements().
+   The one write is set_readiness_requirement() (DA/PA — is_dept_admin()). The verdict is the DATABASE's; nothing here
+   re-decides it. Honest by default: no standard = "Readiness standard not set", never Ready and never Not ready. An
+   expiring required credential still counts (ruled Oct 19) and is listed under "Renewals due", never under Outstanding.
+   Certs are shown for visibility and never change the verdict (option 3). Activity is information only — closed station
+   shifts, training nights attended, supervised drives, last 12 months; there is no calls source, so there is no calls
+   tile. Dates and pass/fail only: no numbers, scans or medical detail. */
+const RD_GROUPS = [
+  { key: "qual", label: "Qualifications", Icon: BadgeCheck, test: (k) => k === "qualification_type" },
+  { key: "cred", label: "Credentials", Icon: CreditCard, test: (k) => String(k).startsWith("credential_") },
+  { key: "doc", label: "Acknowledgments", Icon: FileCheck, test: (k) => k === "document" },
+];
+// item status -> [label, tone]. tone: good | warn | bad | muted (green good, amber warn, red bad)
+const RD_STATUS = {
+  qualified: ["Qualified", "good"], in_progress: ["In progress", "warn"], missing: ["Missing", "bad"], not_configured: ["Not set up", "bad"],
+  signed: ["Signed", "good"], unsigned: ["Needs signature", "bad"], not_required: ["Not required for role", "muted"],
+  current: ["Current", "good"], expiring: ["Renewal due", "warn"], expired: ["Expired", "bad"], no_date: ["No date on file", "bad"],
+};
+const RD_TONE = {
+  good: { color: FIRE.greenText, rgb: "47,168,105" },
+  warn: { color: FIRE.amberText, rgb: "204,158,82" },
+  bad: { color: FIRE.redText, rgb: "200,50,58" },
+  muted: { color: FIRE.textMuted, rgb: null },
+};
+// cert rows carry readiness_window()'s bucket (expired / no_date / soon / current)
+const RD_CERT = { expired: ["Expired", "bad"], no_date: ["No date", "warn"], soon: ["Expiring", "warn"], current: ["Current", "good"] };
+const rdPlural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/* The verdict as words. Pure — the screen, the department list and the packet all read it, so "Ready, renewals due"
+   is spelled once. An unrecognised state is never shown as ready. */
+function rdVerdict(sc) {
+  const n = Number(sc?.required) || 0, s = Number(sc?.satisfied) || 0, due = Array.isArray(sc?.renewals_due) ? sc.renewals_due.length : 0;
+  if (sc?.state === "not_set") return { tone: "muted", title: "Readiness standard not set", short: "Standard not set", text: "The department hasn't chosen what counts toward readiness yet, so there's no verdict." };
+  if (sc?.state === "ready" && due) return { tone: "good", title: "Ready, renewals due", short: "Ready, renewals due", text: `All ${rdPlural(n, "required item")} met · ${rdPlural(due, "renewal")} due` };
+  if (sc?.state === "ready") return { tone: "good", title: "Ready to respond", short: "Ready", text: `All ${rdPlural(n, "required item")} current` };
+  if (sc?.state === "not_ready") return { tone: "bad", title: "Not ready", short: "Not ready", text: `${s} of ${rdPlural(n, "required item")} met · ${n - s} outstanding` };
+  return { tone: "muted", title: "Readiness unavailable", short: "Unavailable", text: "This scorecard couldn't be read." };
+}
+// One item's second line — the date where there is one.
+function rdItemDetail(it) {
+  const d = it.expires_on ? expDate(it.expires_on) : "";
+  if (it.status === "expiring") return `Renew by ${d}`;
+  if (it.status === "expired") return `Expired ${d}`;
+  if (it.status === "current") return d ? `Expires ${d}` : "Current";
+  if (it.status === "no_date") return "On file without an expiry date";
+  if (it.status === "missing") return it.kind === "qualification_type" ? "Not signed off" : "Nothing on file";
+  if (it.status === "in_progress") return "Working toward it — not yet signed off";
+  if (it.status === "not_configured") return it.kind === "document" ? "This document no longer collects signatures" : "This qualification is inactive";
+  if (it.status === "unsigned") return "Current version not signed";
+  if (it.status === "signed") return "Current version signed";
+  if (it.status === "not_required") return "Doesn't apply to this member's role";
+  if (it.status === "qualified") return "Signed off";
+  return "";
+}
+function RdPill({ label, tone }) {
+  const t = RD_TONE[tone] || RD_TONE.muted;
+  return <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap",
+    color: t.color, background: t.rgb ? `rgba(${t.rgb},.1)` : "none", border: `1px solid ${t.rgb ? `rgba(${t.rgb},.4)` : FIRE.line2Noir}` }}>{label}</span>;
+}
+function RdRow({ title, detail, pill, last }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: last ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{title}</div>
+        {detail && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>{detail}</div>}
+      </div>
+      {pill}
+    </div>
+  );
+}
+const rdListCard = { ...FS.cardNoir, borderRadius: 14, padding: 0, overflow: "hidden", marginBottom: 18 };
+/* One member's scorecard — from member_scorecard() or a dept_readiness_packet() member (the same readiness_verdict()). */
+function RdScorecard({ sc, self }) {
+  const v = rdVerdict(sc);
+  const tone = RD_TONE[v.tone];
+  const items = Array.isArray(sc?.items) ? sc.items : [];
+  const outstanding = items.filter((it) => !it.satisfied);
+  const renewals = Array.isArray(sc?.renewals_due) ? sc.renewals_due : [];
+  const certs = Array.isArray(sc?.certs) ? sc.certs : [];
+  const act = sc?.activity || {};
+  const VIcon = v.tone === "good" ? CheckCircle2 : v.tone === "bad" ? AlertTriangle : ShieldCheck;
+  return (<>
+    <div style={{ ...FS.cardNoir, borderRadius: 16, padding: "16px 16px 14px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <span style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textSecondary, background: "linear-gradient(160deg, #1c2430, #11151b)", border: `1px solid ${FIRE.line2Noir}` }}>{expInitials(sc?.name)}</span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.textMuted }}>{self ? "Your readiness" : "Member readiness"}</div>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 19, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{sc?.name || "—"}</div>
+          {sc?.status && <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{sc.status}</div>}
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 11, borderRadius: 12, padding: "11px 13px", background: tone.rgb ? `rgba(${tone.rgb},.08)` : "none", border: `1px solid ${tone.rgb ? `rgba(${tone.rgb},.4)` : FIRE.line2Noir}` }}>
+        <VIcon size={22} color={tone.color} style={{ flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: tone.color }}>{v.title}</div>
+          <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 2 }}>{v.text}</div>
+        </div>
+        {sc?.state !== "not_set" && Number(sc?.required) > 0 && <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: tone.color, ...FS.num }}>{Number(sc.satisfied) || 0}/{Number(sc.required)}</span>}
+      </div>
+    </div>
+
+    {outstanding.length > 0 && (<>
+      <QualSection icon={AlertTriangle} label={`Outstanding · ${outstanding.length}`} color={FIRE.redText} />
+      <div style={rdListCard}>{outstanding.map((it, i) => <RdRow key={it.requirement_id} title={it.label} detail={rdItemDetail(it)} pill={<RdPill label={(RD_STATUS[it.status] || [it.status, "bad"])[0]} tone={(RD_STATUS[it.status] || [0, "bad"])[1]} />} last={i === outstanding.length - 1} />)}</div>
+    </>)}
+    {renewals.length > 0 && (<>
+      <QualSection icon={Clock} label={`Renewals due · ${renewals.length}`} color={FIRE.amberText} />
+      <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "-4px 2px 9px" }}>Still valid and counted as met — renew before the date to stay ready.</div>
+      <div style={rdListCard}>{renewals.map((r, i) => <RdRow key={`${r.label}-${i}`} title={r.label} detail={`Renew by ${expDate(r.expires_on)}`} pill={<RdPill label="Renewal due" tone="warn" />} last={i === renewals.length - 1} />)}</div>
+    </>)}
+
+    {sc?.state === "not_set" ? (
+      <Card padding={14} style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>No required items yet. Once a Department Admin sets the readiness standard, each one shows here with its status.</Card>
+    ) : RD_GROUPS.map((g) => {
+      const list = items.filter((it) => g.test(it.kind));
+      if (!list.length) return null;
+      return (
+        <React.Fragment key={g.key}>
+          <QualSection icon={g.Icon} label={`Required ${g.label.toLowerCase()} · ${list.filter((it) => it.satisfied).length}/${list.length}`} color={FIRE.textSecondary} />
+          <div style={rdListCard}>{list.map((it, i) => { const [l, t] = RD_STATUS[it.status] || [it.status, it.satisfied ? "good" : "bad"]; return <RdRow key={it.requirement_id} title={it.label} detail={rdItemDetail(it)} pill={<RdPill label={l} tone={t} />} last={i === list.length - 1} />; })}</div>
+        </React.Fragment>
+      );
+    })}
+
+    <QualSection icon={Award} label={`Certifications · ${certs.length}`} color={FIRE.textSecondary} />
+    <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "-4px 2px 9px" }}>Shown so they're visible — certs don't count toward the readiness verdict.</div>
+    {certs.length === 0
+      ? <Card padding={14} style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>No certs on file.</Card>
+      : <div style={rdListCard}>{certs.map((c, i) => { const [l, t] = RD_CERT[c.status] || ["No date", "warn"]; return <RdRow key={`${c.label}-${i}`} title={c.label} detail={c.expires_on ? `${c.status === "expired" ? "Expired" : "Expires"} ${expDate(c.expires_on)}` : "No expiry date on file"} pill={<RdPill label={l} tone={t} />} last={i === certs.length - 1} />; })}</div>}
+
+    <QualSection icon={Activity} label="Activity · last 12 months" color={FIRE.textSecondary} />
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 6 }}>
+      {[[probNum(act.station_hours), "Station hours"], [Number(act.trainings) || 0, "Trainings"], [Number(act.drives) || 0, "Drives"]].map(([n, l]) => (
+        <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{n}</div>
+          <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 5 }}>{l}</div>
+        </div>
+      ))}
+    </div>
+    <div style={{ fontSize: 10.5, color: FIRE.textMuted, margin: "0 2px 18px" }}>For information only — activity never changes the verdict. Station hours are closed station shifts as logged (auto-closed shifts left out), not ISO-credited hours; trainings are training nights attended; drives are supervised drives logged.</div>
+  </>);
+}
+/* The printable ISO / audit packet, as print blocks (printDocument: web print sheet, native PDF). Pure — built only
+   from dept_readiness_packet(), the same read the department list shows. */
+function rdPacketBlocks(pk) {
+  const members = Array.isArray(pk?.members) ? pk.members : [];
+  const reqs = Array.isArray(pk?.requirements) ? pk.requirements : [];
+  const rd = pk?.readiness || {};
+  const exp = pk?.expirations || {};
+  const blocks = [];
+  blocks.push({ type: "h2", text: "Readiness standard" });
+  if (!pk?.standard_set || !reqs.length) blocks.push({ type: "p", text: "**Readiness standard not set.** The department has not chosen what counts toward readiness, so no member is scored ready or not ready." });
+  else {
+    blocks.push({ type: "p", text: `A member reads **Ready** only when every one of these ${rdPlural(reqs.length, "required item")} is met. An expiring credential still counts and is listed as a renewal due; a missing, expired or undated one does not count.` });
+    blocks.push({ type: "list", ordered: false, items: reqs.map((r) => `${r.label} (${(RD_GROUPS.find((g) => g.test(r.kind))?.label || "Item").replace(/s$/, "").toLowerCase()})`) });
+  }
+  blocks.push({ type: "h2", text: "Summary" });
+  blocks.push({ type: "p", text: `**Members counted:** ${Number(rd.counted) || 0} — active and probationary members (inactive, separated and Project Admin accounts are not counted).` });
+  if (pk?.standard_set) blocks.push({ type: "p", text: `**Ready:** ${Number(rd.ready) || 0} · **Not ready:** ${Number(rd.not_ready) || 0}` });
+  blocks.push({ type: "h2", text: "Member readiness" });
+  blocks.push(members.length ? {
+    type: "table", head: ["Member", "Status", "Readiness", "Met", "Outstanding", "Renewals due"],
+    rows: members.map((m) => ({ cells: [m.name || "", m.status || "", rdVerdict(m).short,
+      m.state === "not_set" ? "—" : `${Number(m.satisfied) || 0}/${Number(m.required) || 0}`,
+      (m.outstanding || []).join("; ") || "—",
+      (m.renewals_due || []).map((r) => `${r.label} (by ${expDate(r.expires_on)})`).join("; ") || "—"] })),
+  } : { type: "p", text: "No active or probationary members." });
+  blocks.push({ type: "h2", text: "Activity — last 12 months" });
+  blocks.push(members.length ? {
+    type: "table", head: ["Member", "Station hours", "Trainings", "Drives"],
+    rows: members.map((m) => ({ cells: [m.name || "", probNum(m.activity?.station_hours), String(Number(m.activity?.trainings) || 0), String(Number(m.activity?.drives) || 0)] })),
+  } : { type: "p", text: "No members to show." });
+  blocks.push({ type: "p", text: "Information only — activity does not change readiness. Station hours are closed station shifts as logged (auto-closed shifts excluded), not ISO-credited hours. Trainings are training nights attended; drives are supervised drives logged." });
+  const quals = Array.isArray(pk?.qualifications) ? pk.qualifications : [];
+  blocks.push({ type: "h2", text: "Qualifications" });
+  blocks.push(quals.length ? { type: "table", head: ["Qualification", "Qualified", "In progress", "Not started"], rows: quals.map((q) => ({ cells: [q.name || "", String(q.qualified ?? 0), String(q.in_progress ?? 0), String(q.not_started ?? 0)] })) }
+    : { type: "p", text: "No qualifications set up." });
+  blocks.push({ type: "h2", text: "Expirations" });
+  blocks.push({ type: "table", head: ["Expired", "No date", `Expiring (within ${EXPIRING_MONTHS} months)`, "Current"], rows: [{ cells: [String(exp.expired ?? 0), String(exp.no_date ?? 0), String(exp.expiring ?? 0), String(exp.current ?? 0)] }] });
+  blocks.push({ type: "p", text: "Certs, credentials, assigned and pool gear, and apparatus tests across the department." });
+  const acks = Array.isArray(pk?.acknowledgments) ? pk.acknowledgments : [];
+  blocks.push({ type: "h2", text: "Acknowledgments" });
+  blocks.push(acks.length ? { type: "table", head: ["Document", "Version", "Signed & current", "Outstanding"], rows: acks.map((a) => ({ cells: [a.title || "", `v${a.version ?? ""}`, a.audience ? `${a.current ?? 0} of ${a.audience}` : "Not applicable", String(a.audience ? (a.outstanding ?? 0) : 0)] })) }
+    : { type: "p", text: "No documents require a signature." });
+  blocks.push({ type: "p", text: "Expiry dates and pass/fail status only — no license numbers, scans, or medical records." });
+  return blocks;
+}
+// Sort for the department list: not ready first, then ready with renewals, then ready; names within.
+const RD_ORDER = { not_ready: 0, ready_due: 1, ready: 2, not_set: 3 };
+const rdOrderKey = (m) => (m.state === "ready" && (m.renewals_due || []).length ? "ready_due" : m.state);
+function rdSortMembers(list) {
+  return [...(list || [])].sort((a, b) => ((RD_ORDER[rdOrderKey(a)] ?? 4) - (RD_ORDER[rdOrderKey(b)] ?? 4)) || String(a.name || "").localeCompare(String(b.name || "")));
+}
+/* DA / PA: the department's readiness standard. Tick what every counted member must have. Each tick is one
+   set_readiness_requirement() call; the database refuses anyone else, and its message is shown. Stale rows keep the
+   database's label — "(inactive)" / "(no longer requires a signature)" / "(removed)" — so they can be unticked. */
+function RdSetup({ notify, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [reqs, setReqs] = useState(null);
+  const [types, setTypes] = useState(null);
+  const [docs, setDocs] = useState(null);
+  const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    supabase.rpc("dept_readiness_requirements").then(({ data, error }) => { if (!alive) return; if (error || !Array.isArray(data)) { setErr(true); return; } setErr(false); setReqs(data); });
+    supabase.from("qualification_types").select("id, name, active, sort_order").order("sort_order").order("name").then(({ data, error }) => { if (alive && !error && Array.isArray(data)) setTypes(data); });
+    supabase.from("document_series").select("series_id, title, requires_ack, current_version").order("title").then(({ data, error }) => { if (alive && !error && Array.isArray(data)) setDocs(data); });
+    return () => { alive = false; };
+  }, [open, tick]);
+  useReconnect(() => { if (err) setTick((t) => t + 1); });
+  const rowOf = (kind, ref) => (reqs || []).find((r) => r.kind === kind && (r.ref_id || null) === (ref || null));
+  // candidates: live items, plus any configured-and-required item that has since gone stale (its DB label says why)
+  const opts = [
+    { group: "Credentials", items: [["credential_license", null, "Driver's license"], ["credential_med_card", null, "Med card"], ["credential_fit_test", null, "Fit test"]] },
+    { group: "Qualifications", items: [
+      ...(types || []).filter((t) => t.active).map((t) => ["qualification_type", t.id, t.name]),
+      ...(reqs || []).filter((r) => r.kind === "qualification_type" && r.required && !(types || []).some((t) => t.active && t.id === r.ref_id)).map((r) => ["qualification_type", r.ref_id, r.label]),
+    ] },
+    { group: "Documents (Read & Sign)", items: [
+      ...(docs || []).filter((d) => d.requires_ack && d.current_version > 0).map((d) => ["document", d.series_id, d.title || "Untitled document"]),
+      ...(reqs || []).filter((r) => r.kind === "document" && r.required && !(docs || []).some((d) => d.requires_ack && d.current_version > 0 && d.series_id === r.ref_id)).map((r) => ["document", r.ref_id, r.label]),
+    ] },
+  ];
+  async function toggle(kind, ref, on) {
+    const k = `${kind}:${ref || ""}`;
+    setBusy(k);
+    const { error } = await supabase.rpc("set_readiness_requirement", { p_kind: kind, p_ref_id: ref || null, p_required: on });
+    setBusy(null);
+    if (error) { notify({ kind: "error", title: "Couldn't change the standard", text: error.message || "Please try again." }); return; }
+    setTick((t) => t + 1); onChanged();
+  }
+  const required = (reqs || []).filter((r) => r.required).length;
+  return (<>
+    <QualSection icon={Pencil} label="Readiness standard" color={FIRE.textSecondary} right={<button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, textTransform: "none", letterSpacing: 0 }} onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Set up"}</button>} />
+    {open && (
+      <Card padding="10px 14px" style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 8 }}>Tick what every active and probationary member must have to read <b>Ready</b>. An expiring credential still counts and shows as a renewal due. Certs show on scorecards but don't count — to require one, set it up as a qualification.</div>
+        {err && !reqs ? <div style={{ fontSize: 12.5, color: FIRE.amberText, padding: "6px 0" }}>Couldn't load the standard. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setTick((t) => t + 1)}>Retry</button></div>
+          : reqs === null ? <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>
+          : opts.map((g) => (
+            <div key={g.group} style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 2 }}>{g.group}</div>
+              {g.items.length === 0 ? <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "4px 0" }}>{g.group === "Qualifications" ? "No qualifications set up yet." : "No documents collect signatures yet."}</div>
+                : g.items.map(([kind, ref, label]) => {
+                  const r = rowOf(kind, ref);
+                  const on = !!r?.required;
+                  const k = `${kind}:${ref || ""}`;
+                  return (
+                    <label key={k} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0", cursor: busy ? "default" : "pointer" }}>
+                      <input type="checkbox" checked={on} disabled={!!busy} onChange={(e) => toggle(kind, ref, e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red }} />
+                      <span style={{ fontSize: 13, color: on ? FIRE.textPrimary : FIRE.textSecondary, overflowWrap: "anywhere" }}>{on && r?.label ? r.label : label}</span>
+                      {busy === k && <Loader2 size={13} className="spin" />}
+                    </label>
+                  );
+                })}
+            </div>
+          ))}
+        {reqs && <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 10 }}>{required ? `${rdPlural(required, "item")} required.` : "Nothing required yet — every scorecard reads \"Readiness standard not set\"."}</div>}
+      </Card>
+    )}
+  </>);
+}
+function Readiness({ S, role, meId, notify, dept }) {
+  const leader = hasAny(role, CANMANAGE_ROLES);          // dept_readiness_packet()'s / member_scorecard()'s is_canmanage() gate
+  const configurer = hasAny(role, DEPT_ADMIN_ROLES);     // set_readiness_requirement()'s is_dept_admin()
+  const [mine, setMine] = useState(null);
+  const [mineErr, setMineErr] = useState(false);
+  const [pk, setPk] = useState(null);
+  const [pkErr, setPkErr] = useState(false);
+  const [sel, setSel] = useState(null);                  // a member_id from the packet
+  const [tick, setTick] = useState(0);
+  const [printing, setPrinting] = useState(false);
+  const reload = () => setTick((t) => t + 1);
+  useEffect(() => {
+    let alive = true;
+    if (leader) supabase.rpc("dept_readiness_packet").then(({ data, error }) => { if (!alive) return; if (error || !data || !Array.isArray(data.members)) { setPkErr(true); return; } setPkErr(false); setPk(data); });
+    else if (meId) supabase.rpc("member_scorecard", { p_member_id: meId }).then(({ data, error }) => { if (!alive) return; if (error || !data || typeof data !== "object") { setMineErr(true); return; } setMineErr(false); setMine(data); });
+    return () => { alive = false; };
+  }, [tick, leader, meId]);
+  useReconnect(() => { if (pkErr || mineErr) reload(); });
+  // window.open has to happen before any await (printHTML), so nothing is awaited ahead of printDocument.
+  async function printPacket() {
+    if (!pk) return;
+    setPrinting(true);
+    const rd = pk.readiness || {};
+    const meta = pk.standard_set ? `${Number(rd.counted) || 0} members counted · ${Number(rd.ready) || 0} ready · ${Number(rd.not_ready) || 0} not ready` : "Readiness standard not set";
+    const n = printFailureNotice(await printDocument("Readiness packet", rdPacketBlocks(pk), dept, { meta }));
+    setPrinting(false);
+    if (n) notify(n);
+  }
+  const shell = (body) => (
+    <PageShell band watermark="READY" kicker="READINESS" title={leader ? "Department readiness" : "Your readiness"}
+      sub={leader ? "Who's ready to respond, what's outstanding and what's due for renewal — against the standard your department sets." : "Whether you're ready to respond against your department's standard — and anything outstanding or due for renewal."}>
+      <NoirSkin>{body}</NoirSkin>
+    </PageShell>
+  );
+  if (!leader) {
+    return shell(<>
+      {!meId ? <Card padding={14} style={{ fontSize: 13, color: FIRE.textMuted }}>We couldn't match your login to a member record.</Card>
+        : mineErr && !mine ? <Card padding={14} style={{ fontSize: 13, color: FIRE.amberText }}>Couldn't load your scorecard. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
+        : mine === null ? <Card padding={14} style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
+        : <RdScorecard sc={mine} self />}
+      {mineErr && mine && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 10 }}>Couldn't refresh — showing what was last loaded.</div>}
+      {configurer && <RdSetup notify={notify} onChanged={reload} />}
+    </>);
+  }
+  const members = rdSortMembers(pk?.members);
+  const picked = sel ? (pk?.members || []).find((m) => m.member_id === sel) : null;
+  if (picked) {
+    return shell(<>
+      <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setSel(null)}><ChevronLeft size={14} /> All members</button>
+      <RdScorecard sc={picked} self={picked.member_id === meId} />
+    </>);
+  }
+  const rd = pk?.readiness || {};
+  return shell(<>
+    {pkErr && !pk ? <Card padding={14} style={{ fontSize: 13, color: FIRE.amberText }}>Couldn't load readiness. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
+      : pk === null ? <Card padding={14} style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
+      : (<>
+        {!pk.standard_set && (
+          <Card padding={14} style={{ fontSize: 12.5, color: FIRE.textSecondary, marginBottom: 14, lineHeight: 1.5 }}>
+            <b style={{ color: FIRE.textPrimary }}>Readiness standard not set.</b> Nobody is scored ready or not ready until the department chooses what counts.{configurer ? " Set it up below." : " A Department Admin sets it."}
+          </Card>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(110px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
+          {(pk.standard_set ? [["Ready", rd.ready, "good"], ["Not ready", rd.not_ready, "bad"], ["Counted", rd.counted, null]] : [["Counted", rd.counted, null]]).map(([l, n, t]) => (
+            <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "12px 14px", border: `1px solid ${t && Number(n) ? `rgba(${RD_TONE[t].rgb},.35)` : FIRE.line2Noir}` }}>
+              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: t && Number(n) ? RD_TONE[t].color : FIRE.textPrimary, ...FS.num }}>{Number(n) || 0}</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5 }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <button onClick={printPacket} disabled={printing} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.textPrimary, background: "none", border: `1px dashed ${FIRE.line2Noir}`, borderRadius: 11, padding: 12, marginBottom: 6, cursor: printing ? "default" : "pointer" }}>
+          {printing ? <Loader2 size={16} className="spin" /> : <Printer size={16} />} Print readiness packet
+        </button>
+        <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", marginBottom: 18 }}>For an ISO review or audit: the standard, every counted member's verdict, activity, and the qualification, expiration and acknowledgment rollups.</div>
+        <QualSection icon={Users} label={`Members · ${members.length}`} color={FIRE.textSecondary} />
+        <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "-4px 2px 9px" }}>Active and probationary members — inactive, separated and Project Admin accounts aren't counted.</div>
+        {members.length === 0 ? <Card padding={14} style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>No active or probationary members.</Card>
+          : <div style={rdListCard}>{members.map((m, i) => {
+            const v = rdVerdict(m);
+            const first = (m.items || []).find((it) => !it.satisfied);
+            const detail = m.state === "not_ready" ? `${m.status} · ${Number(m.satisfied) || 0}/${Number(m.required) || 0} met · ${first ? first.label : ""}${(m.outstanding || []).length > 1 ? ` +${m.outstanding.length - 1}` : ""}`
+              : m.state === "ready" && (m.renewals_due || []).length ? `${m.status} · ${rdPlural(m.renewals_due.length, "renewal")} due` : m.status;
+            return (
+              <button key={m.member_id} onClick={() => setSel(m.member_id)} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+                <RdRow title={m.name} detail={detail} pill={<RdPill label={v.short} tone={v.tone} />} last={i === members.length - 1} />
+              </button>
+            );
+          })}</div>}
+        {pkErr && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 10 }}>Couldn't refresh — showing what was last loaded.</div>}
+      </>)}
+    {configurer && <RdSetup notify={notify} onChanged={reload} />}
+    <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", margin: "14px 0 4px" }}>Expiry dates and pass/fail status only — no license numbers, scans, or medical records.</div>
+  </>);
 }
 /* ---------------- Qualifications (Phase 3.1 #3) — who can do what ----------------
    DB layer: sql/qualifications_2026-10-18.sql (qualification_types · member_qualifications; drives = supervised_sessions rows with
