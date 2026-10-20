@@ -1,5 +1,6 @@
 -- =====================================================================
--- ONBOARDING ITEM CONFIG (per-item document check · approver · assignment) — DB slice. DRAFT — UNREVIEWED, NOT APPLIED.
+-- ONBOARDING ITEM CONFIG (per-item document check · approver · assignment) — DB slice. Review PASS 2026-10-19 (fb9d9c9) —
+-- cleared to apply; NOT yet applied. Record: claude/B4C_Onboarding_ItemConfig_DB_ReviewRecord.md.
 -- Order: claude/B4C_Onboarding_ItemConfig_DB_BuildOrder.md. Step 0 + 0b ran on live 2026-10-19 (the md5s pinned below).
 -- Additive on the LIVE onboarding / probation module: an unconfigured item behaves exactly as today.
 --
