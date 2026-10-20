@@ -30,7 +30,7 @@ import { FIRE } from "./theme.js";
    in a private window the worst case is a plain reload to the dashboard, never a crash.
 
    WEB ONLY. On native, /version.json is read from the SAME local bundle as BUILD_ID, so it always matches — and
-   native web-layer updates are Capgo's job (src/liveUpdate.js, autoUpdate "atBackground"). Everything here is inert
+   B4C ships no OTA service — a native phone runs the web layer built into its store install. Everything here is inert
    on native by construction, and startUpdateWatch() returns before wiring anything. */
 
 export const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";

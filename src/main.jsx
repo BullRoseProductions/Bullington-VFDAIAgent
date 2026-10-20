@@ -42,7 +42,7 @@ capturePendingScan(typeof window !== "undefined" ? window.location.search : "");
  * Replaces the old stale-bundle guard that lived here (cold-start reload + an "Update now" bar). Same detector —
  * BUILD_ID vs a no-store /version.json — now with a periodic check, a reload that keeps the person's place, a
  * swap at the next navigation, and hard blocks while anything is unsaved or in flight. See src/appUpdate.js.
- * Inert on native (Capgo owns native web-layer updates — src/liveUpdate.js). */
+ * Inert on native: B4C ships no OTA service — a phone runs the web layer built into its store install. */
 startUpdateWatch();
 
 // Proactively re-auth a resumed phone BEFORE the user acts, so a stale access token never reaches
@@ -70,11 +70,10 @@ function Root() {
      would flash the whole app at somebody who is about to be told to set a password. */
   const [pwOk, setPwOk] = useState(null);
 
-  /* OTA HEALTH SIGNAL + breadcrumbs. Mounted-and-rendered is the claim being made:
-     React came up, supabaseClient initialised without throwing, and this effect ran.
-     A bundle that white-screens never gets here, so Capgo rolls that phone back on its
-     own. Deliberately NOT at module scope, where "it parsed" would be all we proved.
-     No-ops on web. See src/liveUpdate.js for the three rollback layers. */
+  /* OTA HEALTH SIGNAL + breadcrumbs — INERT. B4C ships no OTA service, so both calls are no-op stubs on every
+     platform (src/liveUpdate.js). Kept here so the hook point exists if one is ever adopted: mounted-and-rendered is
+     the claim it would make — React came up, supabaseClient initialised without throwing, and this effect ran.
+     Deliberately NOT at module scope, where "it parsed" would be all we proved. */
   useEffect(() => {
     markBundleHealthy();
     let detach = () => {};
