@@ -1,0 +1,66 @@
+# PGlite dry run — sql/rls_admin_gate_fix_DRAFT.sql + sql/rls_admin_gate_fix_RETEST.sql (2026-10-20)
+# Harness: docs/review/rls_admin_gate_fix_dryrun_harness.mjs. Mock = the live shape from Step 0 / 0c / A: my_department_id(),
+# is_dept_admin() (department-scoped), is_department_admin() (not), is_leader() bodies as read on live; the four target policies
+# with their exact Step 0c expressions; unrelated policies for the snapshot. Alpha + Bravo each have a DA, a plain member and
+# a Project Admin (Pat, PA on both rows); Ada (DA of Alpha) / Bob (DA of Bravo) are the 'DA of another department'.
+# First block = the RETEST against the PRE-FIX policies (the regression-catch: X1 shows the multi-dept admin writes 1/1/1/1;
+# the X2/X3 0s there are downstream — Ada already deleted the fixture announcement).
+
+PRE-FIX (live policies as they are today):
+FAIL  S0 still role-anywhere: announcements.d,announcements.w,departments.w,duty_log.w; scoped: 0/4
+— Alpha
+   FAIL  X1 active t old t new f ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
+   FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
+   FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
+   PASS  P1 1 Project Admin(s) with a row here still update the department
+— Bravo
+   FAIL  X1 active t old t new f ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
+   FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
+   FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
+   PASS  P1 1 Project Admin(s) with a row here still update the department
+— Charlie (empty)
+   SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA none, member none, other-dept DA ada@a)
+---- 2 passed, 7 failed, 1 skipped ----
+(this exception IS the rollback — nothing was changed)
+
+state: [{"fixed":4,"role_anywhere_left":0,"total_policies":9,"locked_token_fns":0}] · policies before 9
+re-run -> Precondition failed: "author or dept admin update announcements" on announcements is already fixed — already applied. Nothing changed.
+AFTER THE FIX:
+PASS  S0 all 4 policies use the department-scoped is_dept_admin(); none uses is_department_admin()
+— Alpha
+   PASS  X1 DA-elsewhere / plain member here: the pre-fix gate would have let them in; now announcements U/D, departments U, duty_log U all refused (0 rows)
+   PASS  X2 the real DA: announcements U + D, departments U, duty_log U all allowed; another department's row still refused
+   PASS  X3 the author edits their own announcement; a plain member can't touch departments or duty_log
+   PASS  P1 1 Project Admin(s) with a row here still update the department
+— Bravo
+   PASS  X1 DA-elsewhere / plain member here: the pre-fix gate would have let them in; now announcements U/D, departments U, duty_log U all refused (0 rows)
+   PASS  X2 the real DA: announcements U + D, departments U, duty_log U all allowed; another department's row still refused
+   PASS  X3 the author edits their own announcement; a plain member can't touch departments or duty_log
+   PASS  P1 1 Project Admin(s) with a row here still update the department
+— Charlie (empty)
+   SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA none, member none, other-dept DA ada@a)
+---- 9 passed, 0 failed, 1 skipped ----
+(this exception IS the rollback — nothing was changed)
+
+mutations:
+(a) is_dept_admin() made global (the stale schema.sql body) — the swap would not close the gap -> migration Precondition failed: is_dept_admin() is not the department-scoped body this fix relies on. Nothing changed.
+(a2) same, with the body pin removed — the RETEST must still catch it ->    FAIL  X1 active t old t new t ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
+      |    FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
+      |    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
+      |    FAIL  X1 active t old t new t ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
+      |    FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
+      |    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
+      | ---- 3 passed, 6 failed, 1 skipped ----
+(b) the department predicate dropped on departments -> migration Post-condition failed: "DA can update own department" on departments reads USING is_department_admin()
+      | CHECK is_department_admin() (expected the department-scoped gate).
+(b2) same, post-condition aligned — the RETEST must still catch it -> FAIL  S0 still role-anywhere: departments.w; scoped: 3/4
+      |    FAIL  X1 active t old t new f ann-upd 0 dept-upd 1 dlog-upd 0 ann-del 0
+      |    FAIL  X1 active t old t new f ann-upd 0 dept-upd 1 dlog-upd 0 ann-del 0
+      | ---- 6 passed, 3 failed, 1 skipped ----
+(c) another policy changed in the same block -> migration Post-condition failed: another policy changed.
+(d) duty_log left on the role-anywhere gate (one swap missed) -> migration Post-condition failed: "dept admins edit duty_log" on duty_log reads USING (is_department_admin() AND (department_id = my_department_id()))
+      | CHECK (is_department_admin() AND (department_id = my_department_id())) (expected the department-scoped gate).
+(e) a Project Admin with a plain-member row (the PA-branch case) -> migration Precondition failed: a Project Admin has a department row without PA access — the plain swap on departments would cut their reach there. Apply the PA-branch variant instead. Nothing changed.
+(f) the author branch dropped from announcements UPDATE ->    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
+      |    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
+      | ---- 7 passed, 2 failed, 1 skipped ----
