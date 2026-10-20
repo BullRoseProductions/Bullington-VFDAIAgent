@@ -3,7 +3,10 @@
 -- RAN on live 2026-10-19 (first run): 15 passed, 1 failed, 2 skipped — the one FAIL was this script, not the migration:
 -- North Hood's chosen Officer signed the "Board Member" tier item ("| OK") — consistent with them also holding Board
 -- access (tier = access includes the role). Fixed: prefer an Officer without Board access; if the only Officer also holds
--- Board, expect them to MEET that tier. Re-run pending. NOTHING CHANGES: each department's
+-- Board, expect them to MEET that tier.
+-- RE-RUN on live 2026-10-19 (fixed script): 16 passed, 0 failed, 2 skipped — S0 + IH / Lipan / North Hood all 5/5 (C1 R1 Q1
+-- G1 H1; North Hood now picks an Officer without Board access, refused the Board tier); Demo + Granbury skip (no plain
+-- members). NOTHING CHANGES: each department's
 -- checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE checklist items it creates
 -- itself. The final RAISE is the report. The "ERROR" IS the report.
 --   S0 (once) grants: anon can't run the four RPCs, members can; the internals aren't callable; a client can't write ANY
