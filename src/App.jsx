@@ -6033,7 +6033,7 @@ function RichOutput({ S, text, dark }) {
   const para  = dark ? { ...S.richP, color: FIRE.textSecondary } : S.richP;
   const list  = dark ? { ...S.richList, color: FIRE.textSecondary } : S.richList;
   return (
-    <div style={wrap}>
+    <div style={{ ...wrap, maxWidth: 820, marginLeft: "auto", marginRight: "auto" }}>   {/* reading measure for long-form drafts (the docx-viewer's 820); the shell stays 1600 */}
       {sections.map((sec, i) => (
         <div key={i} style={card}>
           {sec.title && <div style={title}>{sec.title}{dark && <span aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: 20, height: 2, borderRadius: 2, background: FIRE.redBright }} />}</div>}
