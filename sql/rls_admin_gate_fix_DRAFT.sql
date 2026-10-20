@@ -1,5 +1,6 @@
 -- =====================================================================
--- RLS ADMIN-GATE FIX (punch-list P1 #3a) — DRAFT — UNREVIEWED, NOT APPLIED.
+-- RLS ADMIN-GATE FIX (punch-list P1 #3a) — Review PASS 2026-10-20 (d486d24) — cleared to apply; NOT yet applied.
+-- Record: claude/B4C_RLS_AdminGate_Fix_ReviewRecord.md.
 -- Order: claude/B4C_RLS_AdminGate_Fix_BuildOrder.md. Off the live Step 0 / 0c (ff374b7) and Steps A/B (live 2026-10-20,
 -- docs/review/rls_admin_gate_STEP_AB_OUTPUT.md): is_dept_admin() department-scoped (md5 c692e44f…); the four policy
 -- expressions exactly as pinned below; PA cross-department writes all go through pa_* RPCs (pa_create_department,
