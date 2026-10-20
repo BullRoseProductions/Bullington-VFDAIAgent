@@ -27197,7 +27197,7 @@ function baseStyles() {
       paddingLeft: "calc(clamp(18px, 4vw, 40px) + env(safe-area-inset-left))",
       paddingRight: "calc(clamp(18px, 4vw, 40px) + env(safe-area-inset-right))",
       paddingBottom: "calc(26px + env(safe-area-inset-bottom))",
-      maxWidth: 1080, width: "100%", margin: "0 auto",
+      maxWidth: 1600, width: "100%", margin: "0 auto",
     },
     pageHead: { marginBottom: 22 },
     cardEyebrow: { fontFamily: mono, fontSize: 11, letterSpacing: "1.2px", color: ENGINE, fontWeight: 600, marginBottom: 8 },
