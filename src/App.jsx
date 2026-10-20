@@ -3142,7 +3142,7 @@ export default function App() {
           {/* Signers (Board/DA/Officer) and list editors (DA/PA) get the officer screen; everyone else sees their own checklist, read-only. */}
           {screen === "onboarding" && ((canManage(role) || isDeptAdmin(role))
             ? <Onboarding S={S} members={members} setMembers={setMembers} notify={notify} role={role} dept={dept} setDept={setDept} meId={myMemberId} go={go} />
-            : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} go={go} dept={dept} />)}
+            : <MyOnboarding S={S} me={members.find((m) => m.id === myMemberId) || null} members={members} go={go} dept={dept} notify={notify} />)}
           {screen === "apparatus" && <Apparatus S={S} role={role} members={members} meId={myMemberId} notify={notify} dept={dept} />}
           {screen === "qualifications" && <Qualifications S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "expirations" && <Expirations S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
@@ -21541,8 +21541,11 @@ function useProbItemConfig(enabled = true) {
   const [cfg, setCfg] = useState({});
   useEffect(() => {
     if (!enabled) return;
-    supabase.from("onboarding_items").select("id, is_mentor, hours_source, ack_series_id").then(({ data, error }) => {
-      if (!error && Array.isArray(data)) setCfg(Object.fromEntries(data.map((r) => [r.id, r])));   // a failed read just drops the unit
+    supabase.from("onboarding_items").select("id, kind, is_mentor, hours_source, ack_series_id, requires_doc, approver_kind, approver_role, approver_member_id").then(async ({ data, error }) => {
+      if (error || !Array.isArray(data)) return;   // a failed read just drops the unit / the approver label
+      const ids = [...new Set(data.map((r) => r.approver_member_id).filter(Boolean))];
+      const names = ids.length ? (await supabase.from("members").select("id, name").in("id", ids)).data || [] : [];
+      setCfg(Object.fromEntries(data.map((r) => [r.id, { ...r, approver_name: names.find((n) => n.id === r.approver_member_id)?.name || null }])));
     });
   }, [enabled]);
   return cfg;
@@ -21557,6 +21560,9 @@ function probItemView(it, cfg, self) {
     case "done_unrecorded": return { who: "officer", tone: "done", text: "Done — sign-off not recorded" };
     case "mentor_assigned": return { who: "officer", tone: "done", text: "Mentor assigned" };
     case "open": return { who: "officer", tone: "todo", text: cfg?.is_mentor ? "No mentor assigned yet" : "Open — an officer signs this off" };
+    case "approver_not_set": return { who: "officer", tone: "muted", text: "Approver not set" };   // never a silent pass — a DA fixes the routing
+    case "awaiting_check": return { who: "officer", tone: "warn", text: "Awaiting officer check" };
+    case "awaiting_approval": return { who: "officer", tone: "todo", text: `Awaiting approval · ${oicApproverLabel(cfg, cfg?.approver_name)}` };
     case "signed_current": return { who: "you", tone: "done", text: "Signed — current version" };
     case "needs_signature": return { who: "you", tone: "warn", text: self ? "Needs your signature" : "Needs their signature", link: true };
     case "not_required": return { who: "you", tone: "muted", text: "Not required for this role" };
@@ -21587,6 +21593,7 @@ function ProbItemRow({ it, cfg, self, go, last, action }) {
           {v.text}
           {v.link && go && <button onClick={() => go("readsign")} style={{ marginLeft: 6, background: "none", border: "none", padding: 0, color: FIRE.blueText, textDecoration: "underline", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>Open Read &amp; Sign</button>}
         </div>
+        {cfg?.requires_doc && !ok && <OicDisclaimer style={{ marginTop: 3 }} />}
       </div>
       {action}
       <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", borderRadius: 5, padding: "3px 7px", flexShrink: 0, whiteSpace: "nowrap", color: who.color, background: who.bg, border: `1px solid ${who.bd}` }}>{who.label}</span>
@@ -21867,6 +21874,140 @@ function ProbationBoard({ onPick, refreshKey, onRows }) {
   </>);
 }
 // Small tags on an item: in the cleared-to-run gate, a probation task, and how it's satisfied when not a manual sign-off.
+/* ---------------- Onboarding item config — who signs an item off, and the in-person document check ----------------
+   DB layer: sql/onboarding_item_config_2026-10-19.sql (applied, RETEST 16/0/2). Writes ONLY through the four RPCs:
+   set_onboarding_item_config (DA/PA — the approver + document columns are RPC-only; never a direct onboarding_items
+   write) · mark_onboarding_ready (the member, own item, no member argument) · sign_off_onboarding_item (the approver /
+   the tier / a DA; never self) · reads onboarding_signoff_queue. Manual, non-mentor items only — the database refuses
+   the rest, so no control is offered on them. A document is CHECKED IN PERSON, NEVER STORED: there is no file input,
+   attach or camera anywhere here, and the disclaimer is scoped to these items (the cert flow does store proof, so no
+   app-wide claim). Unconfigured items look and behave exactly as before. */
+const OIC_TIERS = ["Officer", "Department Admin", "Board Member"];
+const OIC_DISCLAIMER = "B4C doesn't store this document — an officer checks it in person and records the sign-off.";
+const oicEligible = (it) => !!it && (it.kind || "manual") === "manual" && !it.is_mentor;
+const oicConfigured = (it) => !!it && (!!it.requires_doc || it.approver_kind === "person" || !!it.approver_role);
+// Who signs it, in words: a named member, a command tier, or (unset) today's rule.
+function oicApproverLabel(it, name) {
+  if (it?.approver_kind === "person") return name || "the set approver";
+  if (it?.approver_role) return `any ${it.approver_role}`;
+  return "any officer or leadership";
+}
+// Can the viewer sign this item off? Mirrors onboarding_caller_can_sign (the database decides regardless): the named
+// person, a holder of the tier, a Department Admin always; an unconfigured item is the existing canSign rule.
+function oicCanSign(it, role, meId) {
+  if (isDeptAdmin(role)) return true;
+  if (it?.approver_kind === "person") return !!meId && String(it.approver_member_id) === String(meId);
+  if (it?.approver_role) return hasAny(role, [it.approver_role]);
+  return canManage(role);
+}
+const OicDisclaimer = ({ style }) => <div style={{ fontSize: 10.5, color: FIRE.textMuted, lineHeight: 1.45, ...style }}>{OIC_DISCLAIMER}</div>;
+/* THE SIGN-OFF CONTROL — the queue and the member's record share it. A document item asks for the in-person check
+   first (sends p_doc_checked = true only once it is ticked); nothing is kept. onSign(docChecked) -> Promise<bool>. */
+function OicSignOff({ requiresDoc, onSign, label = "Sign off" }) {
+  const [open, setOpen] = useState(false);
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const btn = { flexShrink: 0, fontSize: 11, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: FIRE.redText, background: "rgba(200,50,58,.12)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 7, padding: "6px 12px" };
+  async function go(doc) { setBusy(true); const ok = await onSign(doc); setBusy(false); if (ok) { setOpen(false); setChecked(false); } }
+  if (!requiresDoc) return <button style={btn} disabled={busy} onClick={() => go(false)}>{busy ? "Signing…" : label}</button>;
+  if (!open) return <button style={btn} onClick={() => setOpen(true)}>{label}</button>;
+  return (
+    <div style={{ flexBasis: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(204,158,82,.06)", border: "1px solid rgba(204,158,82,.35)" }}>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12.5, color: FIRE.textPrimary, cursor: "pointer", lineHeight: 1.4 }}>
+        <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} style={{ marginTop: 2, accentColor: FIRE.red }} />
+        I checked the required document in person
+      </label>
+      <OicDisclaimer style={{ margin: "6px 0 10px 24px" }} />
+      <div style={{ display: "flex", gap: 8, marginLeft: 24, flexWrap: "wrap" }}>
+        <button style={{ ...FS.btnPrimary, opacity: checked ? 1 : 0.5 }} disabled={!checked || busy} onClick={() => go(true)}>{busy ? "Signing…" : "Confirm sign-off"}</button>
+        <button style={FS.btn} disabled={busy} onClick={() => { setOpen(false); setChecked(false); }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+// Sign one item off through the RPC; the database's own refusal is shown, never swallowed.
+async function oicSign(memberId, itemId, docChecked, notify) {
+  const { error } = await supabase.rpc("sign_off_onboarding_item", { p_member_id: memberId, p_item_id: itemId, p_doc_checked: !!docChecked });
+  if (error) { notify({ kind: "error", title: "Couldn't sign it off", text: error.message || "Please try again." }); return false; }
+  notify({ kind: "success", text: "Signed off." });
+  return true;
+}
+/* DA / PA config, in Edit checklist, for a manual non-mentor item: the document check + who signs it off (one picker
+   that resolves to a command tier OR a named member — the RPC refuses both at once). Saved via the RPC only. */
+function OicItemConfig({ it, members, busy, onSave }) {
+  const active = (members || []).filter((m) => (m.status === "Active" || m.status === "Probationary") && isAssignable(m))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const value = it.approver_kind === "person" ? `person:${it.approver_member_id}` : it.approver_role ? `tier:${it.approver_role}` : "default";
+  const cur = it.approver_kind === "person" ? (members || []).find((m) => String(m.id) === String(it.approver_member_id)) : null;
+  const stale = it.approver_kind === "person" && !active.some((m) => String(m.id) === String(it.approver_member_id));
+  function save(nextValue, nextDoc) {
+    const [k, ref] = String(nextValue).split(/:(.*)/s);
+    onSave({ requires_doc: nextDoc, approver_kind: k === "person" ? "person" : "tier", approver_role: k === "tier" ? ref : null, approver_member_id: k === "person" ? ref : null });
+  }
+  const sel = { ...FS.input, padding: "4px 8px", fontSize: 12, width: "auto", maxWidth: 240 };
+  const lab = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: FIRE.textSecondary };
+  return (
+    <div style={{ flexBasis: "100%", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", padding: "2px 0 6px 74px" }}>
+      <label style={lab}>Signs off <select style={sel} value={value} disabled={busy} onChange={(e) => save(e.target.value, !!it.requires_doc)}>
+        <option value="default">Any officer / leadership (default)</option>
+        <optgroup label="A command tier">{OIC_TIERS.map((t) => <option key={t} value={`tier:${t}`}>Any {t}</option>)}</optgroup>
+        <optgroup label="A specific person">
+          {active.map((m) => <option key={m.id} value={`person:${m.id}`}>{m.name}</option>)}
+          {stale && <option value={value}>{cur?.name || "Former member"} (not active — pick someone else)</option>}
+        </optgroup>
+      </select></label>
+      <label style={lab}><input type="checkbox" checked={!!it.requires_doc} disabled={busy} onChange={(e) => save(value, e.target.checked)} /> Requires a document check</label>
+      {it.requires_doc && <OicDisclaimer style={{ flexBasis: "100%" }} />}
+    </div>
+  );
+}
+// The routing line on an item row: "Signs off: D. Kerr · Needs document checked in person."
+function oicRoutingLine(it, members) {
+  if (!oicConfigured(it)) return null;
+  const who = it.approver_kind === "person" || it.approver_role
+    ? `Signs off: ${oicApproverLabel(it, (members || []).find((m) => String(m.id) === String(it.approver_member_id))?.name)}` : null;
+  return [who, it.requires_doc ? "Needs document checked in person." : null].filter(Boolean).join(" · ");
+}
+/* AWAITING SIGN-OFF — onboarding_signoff_queue(): items members marked ready. Leadership sees the department's; a person
+   or tier approver sees theirs (the database scopes it). The control renders only where can_sign is true. Hidden when
+   there is nothing to show. */
+function OnbSignoffQueue({ notify, onChanged, refreshKey, enabled = true }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(false);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    supabase.rpc("onboarding_signoff_queue").then(({ data, error }) => {
+      if (!alive) return;
+      if (error || !Array.isArray(data)) { setErr(true); return; }   // a failed read keeps the last list
+      setErr(false); setRows(data);
+    });
+    return () => { alive = false; };
+  }, [tick, refreshKey, enabled]);
+  useReconnect(() => { if (err) setTick((t) => t + 1); });
+  if (!enabled || (!rows && !err) || (rows && rows.length === 0)) return null;
+  return (
+    <Card padding="12px 16px" style={{ marginBottom: 12 }}>
+      <CardHead icon={ClipboardCheck} title="Awaiting sign-off" right={rows ? <span style={{ color: FIRE.amberText, ...FS.num }}>{rows.length}</span> : null} />
+      {err && !rows ? <div style={{ fontSize: 12.5, color: FIRE.amberText }}>Couldn't load the sign-off list. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setTick((t) => t + 1)}>Retry</button></div>
+        : rows.map((r, i) => (
+          <div key={`${r.member_id}-${r.item_id}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i === rows.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{r.member_name} · {r.label}</div>
+              <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>
+                {[`Signs off: ${oicApproverLabel(r, r.approver_name)}`, r.requires_doc ? "Needs document checked in person." : null, r.ready_at ? `Marked ready ${probDate(String(r.ready_at).slice(0, 10))}` : null].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+            {r.can_sign
+              ? <OicSignOff requiresDoc={r.requires_doc} onSign={async (doc) => { const ok = await oicSign(r.member_id, r.item_id, doc, notify); if (ok) { setTick((t) => t + 1); onChanged?.(); } return ok; }} />
+              : <span style={{ fontSize: 10.5, color: FIRE.textMuted }}>{r.approver_kind === "person" ? `Waiting on ${r.approver_name || "the set approver"}` : `Waiting on ${oicApproverLabel(r)}`}</span>}
+          </div>
+        ))}
+      {err && rows && <div style={{ fontSize: 12, color: FIRE.amberText, marginTop: 6 }}>Couldn't refresh — showing what was last loaded.</div>}
+    </Card>
+  );
+}
 function ProbItemTags({ it }) {
   const tag = (t, c, rgb) => <span key={t} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: c, background: `rgba(${rgb},.1)`, border: `1px solid rgba(${rgb},.35)`, borderRadius: 5, padding: "1px 6px", marginLeft: 6, verticalAlign: "1px" }}>{t}</span>;
   const kind = { ack: "Read & Sign", hours: "Hours", cert: "Cert" }[it.kind];
@@ -21967,10 +22108,22 @@ function OnboardingCardPath({ S, me, go, dept }) {
 }
 // The member's own path to active, read-only (my_probation_status). Officers sign on the Onboarding screen; the only
 // thing a member does here is follow the link to sign their required reading in Read & Sign.
-function MyOnboardingPath({ S, me, members, go }) {
+function MyOnboardingPath({ S, me, members, go, notify }) {
   const { st, err, reload } = useProbationStatus(null, !!me?.id);
   const cfg = useProbItemConfig(!!me?.id);
   const items = Array.isArray(st?.items) ? st.items : null;
+  const [readyBusy, setReadyBusy] = useState(null);
+  // "Mark ready for sign-off" — the member's OWN open manual item; it never completes it (mark_onboarding_ready)
+  async function markReady(itemId) {
+    setReadyBusy(itemId);
+    const { error } = await supabase.rpc("mark_onboarding_ready", { p_item_id: itemId });
+    setReadyBusy(null);
+    if (error) { notify?.({ kind: "error", title: "Couldn't mark it ready", text: error.message || "Please try again." }); return; }
+    notify?.({ kind: "success", text: "Marked ready — the approver signs it off." });
+    reload();
+  }
+  const readyAction = (it) => (it.kind === "manual" && oicEligible(cfg[it.item_id]) && it.state === "open"   // waits for cfg: a mentor item is never offered
+    ? <button style={{ ...FS.btn, padding: "4px 10px", fontSize: 11, flexShrink: 0 }} disabled={readyBusy === it.item_id} onClick={() => markReady(it.item_id)}>{readyBusy === it.item_id ? "Marking…" : "Mark ready for sign-off"}</button> : null);
   return (
     <PageShell band watermark="INTAKE" kicker={me?.status === "Probationary" ? "PROBATION" : "YOUR ONBOARDING"} title="Your path to active" sub="Your new-member checklist, the items that clear you to run calls, and your probation reviews. Officers sign each step.">
       <NoirSkin>
@@ -21983,7 +22136,8 @@ function MyOnboardingPath({ S, me, members, go }) {
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Your department hasn't set up an onboarding checklist yet.</Card>
       ) : (<>
         {err && <div style={{ marginBottom: 10, fontSize: 12.5, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={reload}>Retry</button></div>}
-        <ProbationPath st={st} cfg={cfg} self go={go} />
+        <OnbSignoffQueue notify={notify || (() => {})} enabled={!!me?.id} />
+        <ProbationPath st={st} cfg={cfg} self go={go} itemAction={readyAction} />
       </>)}
       </div>
       </NoirSkin>
@@ -22047,7 +22201,7 @@ function OnboardingCardPlain({ S, me, go, dept }) {
   );
 }
 // The member's own checklist, read-only. Officers sign items on the Onboarding screen; nothing here writes.
-function MyOnboardingPlain({ S, me, members }) {
+function MyOnboardingPlain({ S, me, members, notify }) {
   const { items, prog, err, reload } = useMyOnboarding(me?.id);
   const mentorName = me?.mentorId ? (members || []).find((m) => m.id === me.mentorId)?.name : null;
   const done = (items || []).filter((it) => onboardingDone(it, me, prog)).length;
@@ -22063,6 +22217,7 @@ function MyOnboardingPlain({ S, me, members }) {
       ) : total === 0 ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Your department hasn't set up an onboarding checklist yet.</Card>
       ) : (<>
+        <OnbSignoffQueue notify={notify || (() => {})} enabled={!!me?.id} />
         <Card padding="16px 18px" style={{ marginBottom: 14 }}>
           {/* Featured progress (the onboarding mock's head card): big Oswald %, the count, then the bar. */}
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
@@ -22159,7 +22314,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
     .then(({ data, error }) => { if (error) { setLoadErr(true); return; } setDeptId(data || null); });
   useEffect(() => { loadDeptId(); }, []);
   async function loadItems() {   // RLS scopes to my_department_id(); re-fetched after every edit
-    const { data, error } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order, clears_to_run, phase, kind, ack_series_id, hours_target, hours_source, cert_name").order("sort_order", { ascending: true });
+    const { data, error } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order, clears_to_run, phase, kind, ack_series_id, hours_target, hours_source, cert_name, requires_doc, approver_kind, approver_role, approver_member_id").order("sort_order", { ascending: true });
     if (error || !data) { setLoadErr(true); return; }   // a failed READ is not "no checklist"
     setLoadErr(false); setItems(data);
   }
@@ -22258,6 +22413,21 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
     setBusy(false);
     if (error) { notify({ kind: "error", title: "Couldn't save that setting", text: "Please try again.", details: error.message }); return; }
     await loadItems(); refreshPath();
+  }
+  // The approver + document check go through set_onboarding_item_config ONLY — those columns are RPC-only.
+  async function setApproverConfig(it, c) {
+    setBusy(true);
+    const { error } = await supabase.rpc("set_onboarding_item_config", { p_item_id: it.id, p_requires_doc: !!c.requires_doc, p_approver_kind: c.approver_kind, p_approver_role: c.approver_role || null, p_approver_member_id: c.approver_member_id || null });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't save who signs this off", text: error.message || "Please try again." }); return; }
+    await loadItems(); refreshPath(); setQueueTick((t) => t + 1);
+  }
+  const [queueTick, setQueueTick] = useState(0);
+  // A configured item is signed through sign_off_onboarding_item (set_onboarding_item won't tick it); toggle() is unchanged.
+  async function signConfigured(it, docChecked) {
+    const ok = await oicSign(selId, it.id, docChecked, notify);
+    if (ok) { setProgTick((t) => t + 1); refreshPath(); setQueueTick((t) => t + 1); }
+    return ok;
   }
   async function assignMentor(mentorId) {   // writes members.mentor_id — SAME path/RLS as the edit form (single-sourced)
     if (!person?.id) return;
@@ -22373,6 +22543,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
           <button style={probOn ? FS.btn : FS.btnPrimary} disabled={togBusy} onClick={() => setProbation(!probOn)}>{togBusy ? "Saving…" : probOn ? "Turn off" : "Turn on"}</button>
         </Card>
       )}
+      {!editMode && <OnbSignoffQueue notify={notify} refreshKey={queueTick} enabled={!!meId} onChanged={() => { setProgTick((t) => t + 1); refreshPath(); }} />}
       {/* PROBATION BOARD — ready for the vote + every probationary member's gate (dept_probation_board) */}
       {!editMode && probOn && canSign && <ProbationBoard onPick={(id) => setSelId(id)} refreshKey={boardTick} onRows={setBoardRows} />}
       {!editMode && probOn && !canSign && <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 12px" }}>Probation progress, reviews and supervised time are visible to the Board, Department Admins and Officers. You can set up the checklist and the gate here.</div>}
@@ -22458,6 +22629,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
                         ? <button style={{ ...FS.btn, padding: "5px 9px", opacity: 0.45, cursor: "not-allowed" }} disabled title="Required — reflects the assigned mentor">Remove</button>
                         : canDeleteShared ? <button style={{ ...FS.btn, padding: "5px 9px", color: FIRE.deleteRed }} onClick={() => removeItem(it)} disabled={busy}>Remove</button> : null}
                       {probOn && !editing && <ProbItemConfig it={it} docs={rsDocs} busy={busy} onSave={(patch) => setItemConfig(it, patch)} />}
+                      {!editing && oicEligible(it) && <OicItemConfig it={it} members={members} busy={busy} onSave={(c) => setApproverConfig(it, c)} />}
                     </>)}
                   </div>
                 );
@@ -22502,7 +22674,11 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
                   const mentor = !!it.is_mentor;
                   const auto = probOn && !!it.kind && it.kind !== "manual";   // ack / hours / cert: computed, never ticked (on only)
                   const done = doneOf(it);
+                  const configured = !mentor && !auto && oicConfigured(it);
                   const signable = !mentor && !auto && canSign && !progErr && !isSelf;
+                  const signableCfg = configured && !progErr && !isSelf && oicCanSign(it, role, meId);
+                  const pendState = !auto && !mentor && probOn && ["approver_not_set", "awaiting_check", "awaiting_approval"].includes(pstById[it.id]?.state) ? pstById[it.id].state : null;
+                  const pendText = pendState ? probItemView(pstById[it.id], { ...it, approver_name: (members || []).find((m) => String(m.id) === String(it.approver_member_id))?.name }, false).text : null;
                   const signed = mentor ? null : auto ? (pstById[it.id] ? probItemView(pstById[it.id], it, false).text : "Checking…") : onboardingSignedLine(checks[it.id], members);
                   return (
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 2px", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
@@ -22519,9 +22695,10 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
                               {(members || []).filter((m) => m.id !== person?.id && m.status === "Active" && isAssignable(m)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                             </select>
                           ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{person?.mentorId ? <>Mentor <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{(members || []).find((m) => m.id === person.mentorId)?.name || "Assigned"}</b></> : "No mentor yet"}</div>
-                        ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{signed || (auto ? "" : "Not yet signed off")}</div>}
+                        ) : <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2 }}>{signed || pendText || (auto ? "" : "Not yet signed off")}{!done && configured ? <span> · {oicRoutingLine(it, members)}</span> : null}</div>}
                       </div>
-                      {!done && signable && <button onClick={() => toggle(it.id)} style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: FIRE.redText, background: "rgba(200,50,58,.12)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 7, padding: "6px 12px" }}>Sign off</button>}
+                      {!done && configured && signableCfg && <OicSignOff requiresDoc={!!it.requires_doc} onSign={(doc) => signConfigured(it, doc)} />}
+                      {!done && !configured && signable && <button onClick={() => toggle(it.id)} style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: FIRE.redText, background: "rgba(200,50,58,.12)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 7, padding: "6px 12px" }}>Sign off</button>}
                     </div>
                   );
                 })}

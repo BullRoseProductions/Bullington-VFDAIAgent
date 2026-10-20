@@ -1,0 +1,138 @@
+# PGlite dry run — sql/onboarding_item_config_DRAFT.sql + sql/onboarding_item_config_RETEST.sql (2026-10-19)
+# Harness: docs/review/onboarding_item_config_dryrun_harness.mjs (prob.mjs mock + the probation / toggle migrations + the LIVE
+# set_onboarding_item and probation_item_states text from Step 0 / 0b, md5-checked; live function text in
+# docs/review/onboarding_item_config_live_fns.sql). Mock departments: Indian Harbor (DA + Officer), Lipan (no Officer), North Hood.
+# Each mutation is applied to the migration on a fresh database; the line shows how it was caught.
+
+# Re-run after the RETEST fix (Officer who also holds Board): base + DUAL=1 (an Officer with {Officer,Board Member}) both 16/0/0.
+
+live md5s reproduced in PGlite: set_onboarding_item 99e6c694… · probation_item_states 0e91cf1d…
+state: [{"cols":8,"fns":6,"all_definer":true,"anon_exec":false,"internal_exec":false,"soi_block_md5":"43179b88c2683b93d0d227044be7df9f","signoff_block_md5":"43179b88c2683b93d0d227044be7df9f","progress_client_write":false,"item_config_client_write":false,"item_label_client_write":true,"configured_items":0,"total_policies":17,"buckets":"station-documents"}] · policies before 17
+re-run -> Precondition failed: onboarding item config already exists — already applied. Nothing changed.
+PASS  S0 grants right; internals not callable; progress + config columns RPC-only; mark-ready has no member argument; no stored-file column
+— Indian Harbor Volunteer Fire Department
+   PASS  C1 member + Officer refused; DA sets tier + person/document; 5 bad configs refused; table refuses a person with no member; client can't write config; B pinged once per item (a re-save adds none)
+   PASS  R1 A marks 3 ready -> awaiting check / approval, none complete; idempotent; mentor item refused; B pinged for P, not once B muted tasks
+   PASS  Q1 Officer sees A's 3; B sees only the two items they sign; A sees none of their own
+   PASS  G1 self refused (the cadet, and the approver on their own item); no check -> refused, check -> signed by B with who + when; B refused the tier item; Officer refused the person item and the Board tier item, signs Officer tier + unconfigured; re-sign refused; old path refuses configured, ticks unconfigured, unticks configured; DA override; no direct progress writes (DA, cadet)
+   PASS  H1 an inactive person approver -> approver_not_set, not satisfied
+— Lipan
+   PASS  C1 member refused; DA sets tier + person/document; 5 bad configs refused; table refuses a person with no member; client can't write config; B pinged once per item (a re-save adds none)
+   PASS  R1 A marks 3 ready -> awaiting check / approval (Officer tier: approver_not_set — no Officer here), none complete; idempotent; mentor item refused; B pinged for P, not once B muted tasks
+   PASS  Q1 DA sees A's 3; B sees only the two items they sign; A sees none of their own
+   PASS  G1 self refused (the cadet, and the approver on their own item); no check -> refused, check -> signed by B with who + when; B refused the tier item; old path refuses configured, ticks unconfigured, unticks configured; DA override; no direct progress writes (DA, cadet)
+   PASS  H1 an inactive person approver -> approver_not_set, not satisfied
+— North Hood
+   PASS  C1 member + Officer refused; DA sets tier + person/document; 5 bad configs refused; table refuses a person with no member; client can't write config; B pinged once per item (a re-save adds none)
+   PASS  R1 A marks 3 ready -> awaiting check / approval, none complete; idempotent; mentor item refused; B pinged for P, not once B muted tasks
+   PASS  Q1 Officer sees A's 3; B sees only the two items they sign; A sees none of their own
+   PASS  G1 self refused (the cadet, and the approver on their own item); no check -> refused, check -> signed by B with who + when; B refused the tier item; Officer refused the person item and the Board tier item, signs Officer tier + unconfigured; re-sign refused; old path refuses configured, ticks unconfigured, unticks configured; DA override; no direct progress writes (DA, cadet)
+   PASS  H1 an inactive person approver -> approver_not_set, not satisfied
+---- 16 passed, 0 failed, 0 skipped ----
+(this exception IS the rollback — nothing was changed)
+probation RETEST after this migration: ---- 56 passed, 0 failed, 5 skipped ----
+(a) cadet signs their own item (self-sign block removed from sign-off) ->    FAIL  G1 self "Only someone with Officer access (or a Department Admin) can sign this item off." approver-own "OK" nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "Only the approver set for this item (or a Department Admin) can sign it off.
+      | Only someone with Board Member access (or a Department Admin) can sign this item off." resign "This item is already signed off." old "This item has a set approver — sign it off from the sign-off list."
+      |    FAIL  G1 self "Only someone with Officer access (or a Department Admin) can sign this item off." approver-own "OK" nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "n/a" resign "n/a" old "This item has a set approver — sign it off from the sign-off list."
+      |    FAIL  G1 self "Only someone with Officer access (or a Department Admin) can sign this item off." approver-own "OK" nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "Only the approver set for this item (or a Department Admin) can sign it off.
+      | Only someone with Board Member access (or a Department Admin) can sign this item off." resign "This item is already signed off." old "This item has a set approver — sign it off from the sign-off list."
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(b) officer signs a person item they aren't assigned (person gate off) ->    FAIL  Q1 leader 3/3 B "" A-sees-none t
+      |    FAIL  run aborted: Only the approver set for this item (or a Department Admin) can sign it off.
+      |    FAIL  Q1 leader 3/3 B "" A-sees-none t
+      |    FAIL  run aborted: Only the approver set for this item (or a Department Admin) can sign it off.
+      |    FAIL  Q1 leader 3/3 B "" A-sees-none t
+      |    FAIL  run aborted: Only the approver set for this item (or a Department Admin) can sign it off.
+      | ---- 7 passed, 6 failed, 0 skipped ----
+(c) document item signed with p_doc_checked = false ->    FAIL  run aborted: This item is already signed off.
+      |    FAIL  run aborted: This item is already signed off.
+      |    FAIL  run aborted: This item is already signed off.
+      | ---- 10 passed, 3 failed, 0 skipped ----
+(d) config by a non-DA ->    FAIL  C1 member "OK" officer "OK" refused 5/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 2
+      |    FAIL  C1 member "OK" officer "n/a" refused 5/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 2
+      |    FAIL  C1 member "OK" officer "OK" refused 5/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 2
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(e) a person approver from another department ->    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 4/5 direct "permission denied for table onboarding_items" shape "OK" pings 2
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=approver_not_set/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  run aborted: Only the approver set for this item (or a Department Admin) can sign it off.
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "n/a" refused 4/5 direct "permission denied for table onboarding_items" shape "OK" pings 2
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=approver_not_set/false RETEST unconfigured=approver_not_set/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 4/5 direct "permission denied for table onboarding_items" shape "OK" pings 2
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=approver_not_set/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  run aborted: Only the approver set for this item (or a Department Admin) can sign it off.
+      | ---- 6 passed, 8 failed, 0 skipped ----
+(f) person with a NULL member / tier with a member (shape CHECK dropped) ->    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 5/5 direct "permission denied for table onboarding_items" shape "OK" pings 2
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=approver_not_set/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  run aborted: Only the approver set for this item (or a Department Admin) can sign it off.
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "n/a" refused 5/5 direct "permission denied for table onboarding_items" shape "OK" pings 2
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=approver_not_set/false RETEST unconfigured=approver_not_set/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 5/5 direct "permission denied for table onboarding_items" shape "OK" pings 2
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=approver_not_set/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  run aborted: Only the approver set for this item (or a Department Admin) can sign it off.
+      | ---- 6 passed, 8 failed, 0 skipped ----
+(g) a stored file: a proof_path column added -> migration Post-condition failed: an onboarding table has a stored-file column — documents are checked, never stored.
+(g2) a stored file: a bucket created -> migration Post-condition failed: the storage buckets changed.
+(h) old path still ticks a configured item done (R1 guard removed) ->    FAIL  G1 self "You can't sign off your own onboarding — a mentor or officer does." approver-own "You can't sign off your own onboarding — a mentor or officer does." nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "Only the approver set for this item (or a Department Admin) can sign it off.
+      | Only someone with Board Member access (or a Department Admin) can sign this item off." resign "This item is already signed off." old "OK"
+      |    FAIL  G1 self "You can't sign off your own onboarding — a mentor or officer does." approver-own "You can't sign off your own onboarding — a mentor or officer does." nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "n/a" resign "n/a" old "OK"
+      |    FAIL  G1 self "You can't sign off your own onboarding — a mentor or officer does." approver-own "You can't sign off your own onboarding — a mentor or officer does." nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "Only the approver set for this item (or a Department Admin) can sign it off.
+      | Only someone with Board Member access (or a Department Admin) can sign this item off." resign "This item is already signed off." old "OK"
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(i) the old self-sign block reworded -> migration Post-condition failed: the self-sign block is not byte-identical to Step 0 (md5 43179b88c2683b93d0d227044be7df9f).
+(j) client keeps INSERT / UPDATE on progress (R2 revoke dropped) -> migration Post-condition failed: a client can write onboarding_progress.id.
+(k) config columns left client-writable -> migration Post-condition failed: a client can write onboarding_items.requires_doc.
+(l2) mark-ready overwrites an earlier mark (not idempotent) ->    FAIL  R1 idem f states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=awaiting_approval/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  R1 idem f states "RETEST medical statement=awaiting_check/false RETEST tier item=approver_not_set/false RETEST unconfigured=awaiting_approval/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  R1 idem f states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=awaiting_approval/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(l) mark-ready completes the item ->    FAIL  R1 idem t states "RETEST medical statement=done_unrecorded/true RETEST tier item=done_unrecorded/true RETEST unconfigured=done_unrecorded/true" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  Q1 leader 0/3 B "" A-sees-none t
+      |    FAIL  R1 idem t states "RETEST medical statement=done_unrecorded/true RETEST tier item=done_unrecorded/true RETEST unconfigured=done_unrecorded/true" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  Q1 leader 0/3 B "" A-sees-none t
+      |    FAIL  R1 idem t states "RETEST medical statement=done_unrecorded/true RETEST tier item=done_unrecorded/true RETEST unconfigured=done_unrecorded/true" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  Q1 leader 0/3 B "" A-sees-none t
+      | ---- 10 passed, 6 failed, 0 skipped ----
+(m) mark-ready on any member (a member argument) -> migration Post-condition failed: a gate, the document check, the mute or the own-item-only shape is missing.
+(n) an inactive person approver reads open (approver_not_set dropped) ->    FAIL  H1 state open satisfied f
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=awaiting_approval/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 1 (muted t)
+      |    FAIL  H1 state open satisfied f
+      |    FAIL  H1 state open satisfied f
+      | ---- 12 passed, 4 failed, 0 skipped ----
+(o) tier gate ignores the tier (any canmanage) ->    FAIL  G1 self "You can't sign off your own onboarding — a mentor or officer does." approver-own "You can't sign off your own onboarding — a mentor or officer does." nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "Only the approver set for this item (or a Department Admin) can sign it off.
+      | OK" resign "This item is already signed off." old "This item has a set approver — sign it off from the sign-off list."
+      |    FAIL  G1 self "You can't sign off your own onboarding — a mentor or officer does." approver-own "You can't sign off your own onboarding — a mentor or officer does." nocheck "This item needs its document checked in person — confirm the check to sign it off." P t/t/t tierB "Only someone with Officer access (or a Department Admin) can sign this item off.
+      | permission denied for table onboarding_progress
+      | permission denied for table onboarding_progress" offP "Only the approver set for this item (or a Department Admin) can sign it off.
+      | OK" resign "This item is already signed off." old "This item has a set approver — sign it off from the sign-off list."
+      | ---- 14 passed, 2 failed, 0 skipped ----
+(p) ping ignores the mute ->    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=awaiting_approval/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 2 (muted t)
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=approver_not_set/false RETEST unconfigured=awaiting_approval/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 2 (muted t)
+      |    FAIL  R1 idem t states "RETEST medical statement=awaiting_check/false RETEST tier item=awaiting_approval/false RETEST unconfigured=awaiting_approval/false" mentor "This item completes on its own — there's nothing to mark ready." ready-pings 2 (muted t)
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(q) re-save re-pings (IS DISTINCT FROM guard dropped) ->    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 5/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 3
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "n/a" refused 5/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 3
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 5/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 3
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(r) queue shows a plain member every item ->    FAIL  Q1 leader 3/3 B "RETEST DA override:true,RETEST medical statement:true,RETEST tier item:false,RETEST unconfigured:false" A-sees-none t
+      |    FAIL  Q1 leader 3/3 B "RETEST DA override:true,RETEST medical statement:true,RETEST tier item:false,RETEST unconfigured:false" A-sees-none t
+      |    FAIL  Q1 leader 3/3 B "RETEST DA override:true,RETEST medical statement:true,RETEST tier item:false,RETEST unconfigured:false" A-sees-none t
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(s) config accepts an hours item (non-manual) ->    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 4/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 2
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "n/a" refused 4/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 2
+      |    FAIL  C1 member "Only a Department Admin can set who signs off an item." officer "Only a Department Admin can set who signs off an item." refused 4/5 direct "permission denied for table onboarding_items" shape "new row for relation "onboarding_items" violates check constraint "onboarding_items_approver_shape_chk"" pings 2
+      | ---- 13 passed, 3 failed, 0 skipped ----
+(t) the locked verification token added to a function -> migration Post-condition failed: public.sign_off_onboarding_item(uuid,uuid,boolean) references the locked verification column.
