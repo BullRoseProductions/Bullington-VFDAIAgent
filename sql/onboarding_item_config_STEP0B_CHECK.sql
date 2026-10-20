@@ -1,5 +1,20 @@
 -- =====================================================================
 -- ONBOARDING ITEM CONFIG — Step 0b (follow-up to Step 0). READ-ONLY, one result set.
+-- RAN on live 2026-10-19. Findings:
+--   probation_item_states(uuid,uuid): DEFINER, md5 0e91cf1d69f03a7b1dcb9234b7284357 (= Step 0), RETURNS TABLE(item_id,
+--     label, category, phase, kind, clears_to_run, sort_order, satisfied, state, signed_by_name, signed_at, have, target);
+--     manual item state = signed (done + checked_by) / done_unrecorded / open; mentor = mentor_assigned / open.
+--     Only caller: probation_status(uuid,uuid) (DEFINER, md5 cc0b7a8282832355ee79722d76b48858, members exec false).
+--   notifications: NO type CHECK (free text; in use: task_assigned, task_due_today, cert_expiring, event_1h/24h, maint_*,
+--     duty_summary, gear_retire, shift_self_review); de-dupe = UNIQUE (member_id, type, subject_ref) NULLS NOT DISTINCT;
+--     severity CHECK in (info, warning, critical); department_id + member_id NOT NULL.
+--   is_muted(uuid,text): DEFINER, members exec false; families live = certs, gear, maint, events, tasks, shifts
+--     (sql/notification_prefs.sql is stale — no 'shifts'). 'tasks' is valid.
+--   onboarding_items CHECKs: kind in (manual, ack, hours, cert); phase in (onboarding, probation); mentor => manual;
+--     hours / source / cert_name bounds. onboarding_progress: UNIQUE (member_id, item_id) (the upsert key); FKs
+--     checked_by -> members ON DELETE SET NULL, item_id / member_id / department_id CASCADE.
+--   Column grants on onboarding_progress: authenticated INSERT / UPDATE on EVERY column (inherited from the table
+--     grant); anon SELECT / REFERENCES. Nothing column-restricted today.
 --   1 probation_item_states — the "path read" the order says to reuse: full live definition + md5 (the draft
 --     changes it, so its precondition pins this md5), and every function that calls it
 --   2 notifications — columns, CHECK / unique constraints and indexes (the approver ping writes here, like the
