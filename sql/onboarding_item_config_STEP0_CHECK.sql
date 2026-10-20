@@ -1,5 +1,28 @@
 -- =====================================================================
 -- ONBOARDING ITEM CONFIG — Step 0. READ-ONLY, one result set (SELECTs only; nothing is written).
+-- RAN on live 2026-10-19. Findings:
+--   onboarding_items: ack_series_id, category, cert_name, clears_to_run, created_at, department_id NOT NULL, hours_source,
+--     hours_target, id, is_mentor, kind (= 'manual'), label, phase (= 'onboarding'), sort_order. NO proof/path/file/
+--     upload/url column on either table. No requires_doc / approver_* names in use -> the new columns are additive.
+--   onboarding_progress: checked_at, checked_by, created_at, department_id NOT NULL, done, id, item_id, member_id.
+--     checked_by / checked_at ARE the approved-by / approved-at (set_onboarding_item stamps them) -> no approved_* columns.
+--   set_onboarding_item(uuid,uuid,boolean): ONE overload, DEFINER, gate is_canmanage(), returns onboarding_progress,
+--     members exec true / anon false, function md5 99e6c6944216fe3811c6bbc365958e75;
+--     SELF-SIGN BLOCK md5 43179b88c2683b93d0d227044be7df9f =
+--       if p_member_id = v_me then / raise exception 'You can''t sign off your own onboarding — a mentor or officer does.'; / end if;
+--   Other onboarding fns: probation_item_states(uuid,uuid) only (DEFINER, read-only, members exec false, md5 0e91cf1d69f03a7b1dcb9234b7284357).
+--   action_items: trg_action_item_assigned AFTER INSERT OR UPDATE OF assigned_to WHEN assigned_to IS NOT NULL ->
+--     notify_action_item_assigned() (DEFINER, members exec false, md5 55b3058c7977d0e1ce643c77cb4ac5eb): skips unchanged
+--     owner / no dept / not open / self (my_member_id()) / is_muted(.., 'tasks'); inserts notifications type
+--     'task_assigned', subject_ref = item id, ON CONFLICT (member_id, type, subject_ref) DO NOTHING; never raises.
+--   RLS ON all three. onboarding_progress: DA-only INSERT/UPDATE policies (is_dept_admin + dept) — direct DA writes are
+--     live; authenticated holds SELECT INSERT UPDATE DELETE. anon holds broad TABLE grants on all three (RLS has no anon
+--     policy, so nothing is exposed) — an RLS/grant-normalization item, not this slice.
+--   Helpers all department-scoped. Tiers as stored (members.access): Board Member 15, Department Admin 18, Officer 21,
+--     Member 110, Project Admin 2. members.role is a free-text title (Chief, FTO, ...) — not a tier.
+--   No verifi* column on onboarding_items / onboarding_progress / action_items / members (the locked column is elsewhere).
+--   Storage: ONE bucket, station-documents (private). Onboarding rows: IH 42 items / 93 progress, Lipan 14 / 0,
+--     North Hood 15 / 28, Demo + Granbury 0 / 0. total_policies 169.
 --   1 onboarding_items / onboarding_progress columns (type, null, default) + any proof / path / storage-ish column
 --   2 set_onboarding_item: every overload, security, gate, md5 of the full definition, and the SELF-SIGN BLOCK text
 --     (the draft must keep it byte-identical — this is the baseline it's compared against)
