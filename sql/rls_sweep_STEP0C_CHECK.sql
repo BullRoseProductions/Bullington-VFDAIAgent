@@ -1,5 +1,18 @@
 -- =====================================================================
--- RLS SWEEP — STEP 0c (follow-up to Step 0). READ-ONLY, one result set. Answers what Step 0 lists only by absence:
+-- RLS SWEEP — STEP 0c (follow-up to Step 0). READ-ONLY, one result set. 
+-- RAN on live 2026-10-20. Findings (raw; the reviewer characterizes):
+--   duties: UPDATE and DELETE are (department_id = my_department_id() AND is_canmanage_ops()) on USING and CHECK —
+--     GATED. The stale dump's dept-only "members update duties" policy is not live. SELECT is dept-only, roles {public}.
+--   member_active_department / _station: own-row INSERT / UPDATE by email, no target check — BUT both readers re-check:
+--     my_department_id() only honours a saved department the caller is an active member of; my_active_station_id() only
+--     a saved station in the current department. The RPCs (set_active_department / _station) hold the same boundary.
+--   aftercall_run_items INSERT: any member, into any run of their department (dept via the run; not run-owner).
+--   ROLE-ANYWHERE gate inside a row-scoped write (is_department_admin() is NOT department-scoped):
+--     announcements UPDATE + DELETE · departments UPDATE ("DA can update own department") · duty_log UPDATE.
+--     Reachable only by someone who is DA / PA in one department and a member of another, acting in the other.
+--     ai_outputs DELETE uses an inline Project Admin check (PA is a cross-department role by design).
+--   Gate bodies: is_leader() department-scoped; is_department_admin(), is_leadership(), is_project_admin() NOT.
+-- Answers what Step 0 lists only by absence:
 --   1 every policy on the leads (duties, announcements, aftercall_run_items, member_active_department,
 --     member_active_station) — full USING / WITH CHECK. duties did NOT come back as a set-1 suspect, so its live UPDATE
 --     policy carries a role or self token — this shows which, and 3b showed EVERY duties column client-updatable
