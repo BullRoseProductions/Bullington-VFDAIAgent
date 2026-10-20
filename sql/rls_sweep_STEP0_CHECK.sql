@@ -1,5 +1,19 @@
 -- =====================================================================
 -- RLS SWEEP — STEP 0 (read-only live audit). Run in the Supabase SQL editor, No limit.
+-- RAN on live 2026-10-20. Findings (raw; the reviewer characterizes):
+--   set 1 (no role / self gate): aftercall_run_items INSERT (dept via the run); member_active_department INSERT+UPDATE
+--     and member_active_station INSERT+UPDATE (own row by email, no department / station check). duties is NOT a
+--     suspect: its live UPDATE policy carries a role or self token (text not printed — Step 0c reads it).
+--   set 2 (is_leader without my_department_id): ZERO rows.
+--   set 3: most RLS tables keep the Supabase-default full client grants; RPC-only as designed: apparatus_tests,
+--     document_*, equipment_issues, gear_items, member_credentials / probation / qualifications / separation,
+--     probation_milestones, qualification_types, readiness_requirements, session_registrations, supervised_sessions;
+--     onboarding_items column-narrowed; onboarding_progress no INSERT / UPDATE (DELETE grant, no DELETE policy).
+--   3b: duties — EVERY column client-updatable (no column backstop); member_active_department / _station all columns.
+--   set 4: 21 DELETE policies, all row-scoped to my_department_id() except member_devices (own row) and member_private
+--     / members / onboarding_items (dept-scoped). Role-anywhere gate inside a row-scoped DELETE: announcements
+--     (is_department_admin()). PA-only hard deletes: ai_outputs, documents.
+--   set 5: total_policies 169 · verified_token_fns 17.
 -- Purpose: find every remaining write policy in the apparatus class (a member can write where only
 -- leaders should) and the cross-dept class (a role-anywhere write with no department predicate), plus
 -- the full DELETE surface for the delete-lock extension. NOTHING is changed — all SELECTs on catalogs.
