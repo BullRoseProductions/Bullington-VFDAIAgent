@@ -44,7 +44,7 @@ PASS  S0 all 4 policies use the department-scoped is_dept_admin(); none uses is_
 
 mutations:
 (a) is_dept_admin() made global (the stale schema.sql body) — the swap would not close the gap -> migration Precondition failed: is_dept_admin() is not the department-scoped body this fix relies on. Nothing changed.
-(a2) same, with the body pin removed — the RETEST must still catch it ->    FAIL  X1 active t old t new t ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
+(a2) same, with both pins removed — the RETEST must still catch it ->    FAIL  X1 active t old t new t ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
       |    FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
       |    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
       |    FAIL  X1 active t old t new t ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1

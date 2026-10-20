@@ -1,5 +1,7 @@
 -- =====================================================================
 -- RLS ADMIN-GATE FIX — Steps A + B (claude/B4C_RLS_AdminGate_Fix_BuildOrder.md). READ-ONLY, one result set.
+-- RAN on live 2026-10-20 — full output: docs/review/rls_admin_gate_STEP_AB_OUTPUT.md. is_dept_admin() department-scoped
+-- (md5 c692e44f…); PA cross-dept writes = pa_* RPCs; both PAs hold PA access on their only row -> plain swap; blast radius 0.
 --   A1 the live gate functions in full (is_dept_admin, is_department_admin, is_project_admin, my_department_id) + md5,
 --      and a parsed verdict: department-scoped? exactly {Department Admin, Project Admin}?
 --   A2 the three policies' exact live expressions (the draft pins these as preconditions)

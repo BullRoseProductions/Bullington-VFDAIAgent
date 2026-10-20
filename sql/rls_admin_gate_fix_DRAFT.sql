@@ -1,6 +1,11 @@
 -- =====================================================================
 -- RLS ADMIN-GATE FIX (punch-list P1 #3a) — DRAFT — UNREVIEWED, NOT APPLIED.
--- Order: claude/B4C_RLS_AdminGate_Fix_BuildOrder.md. Off the live Step 0 / 0c (ff374b7) and Steps A/B.
+-- Order: claude/B4C_RLS_AdminGate_Fix_BuildOrder.md. Off the live Step 0 / 0c (ff374b7) and Steps A/B (live 2026-10-20,
+-- docs/review/rls_admin_gate_STEP_AB_OUTPUT.md): is_dept_admin() department-scoped (md5 c692e44f…); the four policy
+-- expressions exactly as pinned below; PA cross-department writes all go through pa_* RPCs (pa_create_department,
+-- pa_set_disabled_modules, pa_set_geofence_enabled); both Project Admins hold PA access on their only department row
+-- -> the PLAIN swap on departments; blast radius today 0 (no one is an admin in one department and a plain member of
+-- another) — the gap is latent, closed before anyone can use it.
 --
 -- THE GAP: four write policies scope the ROW to the caller's current department but take the ADMIN ROLE from
 -- is_department_admin(), which is true for a DA / PA of ANY department. A DA of dept A who is a plain member of dept B
@@ -22,7 +27,8 @@
 -- =====================================================================
 DO $migrate$
 DECLARE
-  -- the live is_dept_admin() body (Step 0, 2026-10-19), whitespace-normalised
+  -- the live is_dept_admin() body (Step 0 2026-10-19; Step A 2026-10-20, md5 c692e44f…), whitespace-normalised — the
+  -- md5 pin below catches ANY drift; this text pin says which part matters (members.department_id = my_department_id())
   DA_BODY constant text := 'select exists ( select 1 from public.members where lower(members.email) = lower(auth.email()) and members.status in (''Active'',''Probationary'') and members.department_id = public.my_department_id() and members.access && array[''Project Admin'',''Department Admin'']::text[] );';
   -- the four policies: table, name, cmd, USING before, CHECK before (NULL = none), USING after, CHECK after
   T text[][] := array[
@@ -50,6 +56,9 @@ BEGIN
   -- ---------------------------------------------------------------- preconditions
   IF btrim(regexp_replace(substring(pg_get_functiondef('public.is_dept_admin()'::regprocedure) from 'AS \$[a-z]*\$(.*)\$[a-z]*\$'), '\s+', ' ', 'g')) <> DA_BODY THEN
     RAISE EXCEPTION 'Precondition failed: is_dept_admin() is not the department-scoped body this fix relies on. Nothing changed.';
+  END IF;
+  IF md5(pg_get_functiondef('public.is_dept_admin()'::regprocedure)) <> 'c692e44f62923d2bf4c1a39a21a87bf7' THEN
+    RAISE EXCEPTION 'Precondition failed: is_dept_admin() is not the Step A version (md5 c692e44f…). Nothing changed.';
   END IF;
   IF to_regprocedure('public.is_department_admin()') IS NULL OR to_regprocedure('public.my_department_id()') IS NULL OR to_regprocedure('public.my_member_id()') IS NULL THEN
     RAISE EXCEPTION 'Precondition failed: a helper is missing. Nothing changed.';
