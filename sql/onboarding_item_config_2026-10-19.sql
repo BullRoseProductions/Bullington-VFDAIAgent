@@ -1,6 +1,8 @@
 -- =====================================================================
 -- ONBOARDING ITEM CONFIG (per-item document check · approver · assignment) — DB slice. Review PASS 2026-10-19 (fb9d9c9) —
--- cleared to apply; NOT yet applied. Record: claude/B4C_Onboarding_ItemConfig_DB_ReviewRecord.md.
+-- APPLIED on live 2026-10-19 — state check clean: cols 8 · fns 6 · all DEFINER · anon / internal exec false · both self-sign
+-- blocks 43179b88… · progress_client_write false · item_config_client_write false · item_label_client_write true ·
+-- configured_items 0 · total_policies 169 · buckets station-documents. Record: claude/B4C_Onboarding_ItemConfig_DB_ReviewRecord.md.
 -- Order: claude/B4C_Onboarding_ItemConfig_DB_BuildOrder.md. Step 0 + 0b ran on live 2026-10-19 (the md5s pinned below).
 -- Additive on the LIVE onboarding / probation module: an unconfigured item behaves exactly as today.
 --

@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for onboarding_item_config (DRAFT — run AFTER the migration, separately). NOTHING CHANGES: each department's
+-- RETEST for onboarding_item_config_2026-10-19.sql (applied 2026-10-19) — run AFTER the migration, separately. NOTHING CHANGES: each department's
 -- checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE checklist items it creates
 -- itself. The final RAISE is the report. The "ERROR" IS the report.
 --   S0 (once) grants: anon can't run the four RPCs, members can; the internals aren't callable; a client can't write ANY

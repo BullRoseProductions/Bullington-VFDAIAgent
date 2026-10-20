@@ -7,7 +7,7 @@ const head = src.slice(0, src.indexOf("let d = await db0();")).replaceAll("new U
 const { db0, show, brief } = new Function("PGlite", "readFileSync", head.replace(/^import .*$/gm, "") + "\nreturn { db0, show, brief };")(PGlite, readFileSync);
 const prob = readFileSync(R + "probation_2026-10-18.sql", "utf8"), tog = readFileSync(R + "probation_toggle_2026-10-18.sql", "utf8");
 const probRet = readFileSync(R + "probation_RETEST.sql", "utf8");
-const mig = readFileSync(R + "onboarding_item_config_DRAFT.sql", "utf8"), ret = readFileSync(R + "onboarding_item_config_RETEST.sql", "utf8");
+const mig = readFileSync(R + "onboarding_item_config_2026-10-19.sql", "utf8"), ret = readFileSync(R + "onboarding_item_config_RETEST.sql", "utf8");
 const liveSoi = readFileSync(J + "live_soi.sql", "utf8"), livePis = readFileSync(J + "live_pis.sql", "utf8");
 // live shape the draft relies on: the live set_onboarding_item + probation_item_states TEXT (md5-pinned), notifications
 // with its de-dupe index, is_muted (live families), action_items + its assignment trigger, storage.buckets, the
