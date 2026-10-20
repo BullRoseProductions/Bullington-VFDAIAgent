@@ -33,6 +33,7 @@ CREATE POLICY "dept admins insert onboarding_items" ON onboarding_items FOR INSE
 CREATE POLICY "dept admins delete onboarding_items" ON onboarding_items FOR DELETE TO authenticated USING (is_dept_admin() AND department_id = my_department_id());
 CREATE POLICY "dept admins update onboarding_progress" ON onboarding_progress FOR UPDATE TO authenticated USING (is_dept_admin() AND department_id = my_department_id()) WITH CHECK (is_dept_admin() AND department_id = my_department_id());
 INSERT INTO members (department_id,email,name,access,status) VALUES ('00000000-0000-0000-0000-00000000000c','med@c','C Medic','{Member}','Active');
+${process.env.DUAL ? "UPDATE members SET access = '{Officer,Board Member}' WHERE email = 'off@c';" : ""}
 `;
 async function base() {
   const d = await db0(); await d.exec(prob); await d.exec(tog); await d.exec(extra);

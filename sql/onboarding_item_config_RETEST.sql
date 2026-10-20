@@ -1,5 +1,9 @@
 -- =====================================================================
--- RETEST for onboarding_item_config_2026-10-19.sql (applied 2026-10-19) — run AFTER the migration, separately. NOTHING CHANGES: each department's
+-- RETEST for onboarding_item_config_2026-10-19.sql (applied 2026-10-19) — run AFTER the migration, separately.
+-- RAN on live 2026-10-19 (first run): 15 passed, 1 failed, 2 skipped — the one FAIL was this script, not the migration:
+-- North Hood's chosen Officer signed the "Board Member" tier item ("| OK") — consistent with them also holding Board
+-- access (tier = access includes the role). Fixed: prefer an Officer without Board access; if the only Officer also holds
+-- Board, expect them to MEET that tier. Re-run pending. NOTHING CHANGES: each department's
 -- checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURE checklist items it creates
 -- itself. The final RAISE is the report. The "ERROR" IS the report.
 --   S0 (once) grants: anon can't run the four RPCs, members can; the internals aren't callable; a client can't write ANY
@@ -27,7 +31,7 @@ DO $retest$
 DECLARE
   rec record; v_err text; v_e2 text; v_e3 text; v_e4 text; v_n int; v_ok boolean; v_t text; v_ts timestamptz; v_row record;
   v_da text; v_off text; v_a text; v_b text; v_x text; v_a_id uuid; v_b_id uuid; v_off_id uuid; v_x_id uuid;
-  i_t uuid; i_t2 uuid; i_p uuid; i_u uuid; i_u2 uuid; i_p2 uuid; i_m uuid; i_h uuid; v_e5 text; v_mute boolean;
+  i_t uuid; i_t2 uuid; i_p uuid; i_u uuid; i_u2 uuid; i_p2 uuid; i_m uuid; i_h uuid; v_e5 text; v_mute boolean; v_off_board boolean;
   rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
 BEGIN
   -- S0
@@ -58,7 +62,9 @@ BEGIN
        AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
     SELECT lower(m.email), m.id INTO v_off, v_off_id FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Officer']::text[]
        AND NOT m.access && array['Department Admin','Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
-       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
+       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1
+     ORDER BY (m.access && array['Board Member']::text[]), m.id LIMIT 1;   -- prefer an Officer who isn't also Board
+    v_off_board := v_off IS NOT NULL AND EXISTS (SELECT 1 FROM public.members WHERE id = v_off_id AND access && array['Board Member']::text[]);
     SELECT lower(m.email), m.id INTO v_a, v_a_id FROM public.members m WHERE m.department_id = rec.dept_id
        AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
        AND m.status IN ('Active', 'Probationary') AND NOT EXISTS (SELECT 1 FROM public.member_separation s WHERE s.member_id = m.id)
@@ -205,14 +211,16 @@ BEGIN
          AND v_e2 LIKE 'This item needs its document checked in person%'
          AND v_row.done AND v_row.checked_by = v_b_id AND v_row.doc_checked_by = v_b_id AND v_row.doc_checked_at IS NOT NULL
          AND v_e3 LIKE 'Only someone with Officer access (or a Department Admin) can sign this item off. | %permission denied% | %permission denied%' AND v_ok
-         AND (v_e4 = 'n/a' OR v_e4 = 'Only the approver set for this item (or a Department Admin) can sign it off. | Only someone with Board Member access (or a Department Admin) can sign this item off.')
+         -- the Board tier: refused for an Officer without Board access; an Officer who also holds Board meets it (tier = access)
+         AND (v_e4 = 'n/a' OR v_e4 = 'Only the approver set for this item (or a Department Admin) can sign it off. | '
+                                   || CASE WHEN v_off_board THEN 'OK' ELSE 'Only someone with Board Member access (or a Department Admin) can sign this item off.' END)
          AND (v_t = 'n/a' OR v_t = 'This item is already signed off.')
          AND v_x = 'This item has a set approver — sign it off from the sign-off list.'
          AND EXISTS (SELECT 1 FROM public.onboarding_progress WHERE member_id = v_a_id AND item_id = i_u2 AND done AND checked_by IS NOT NULL)
          AND (v_off IS NULL OR (SELECT count(*) FROM public.onboarding_progress WHERE member_id = v_a_id AND item_id IN (i_t, i_u) AND done AND checked_by = v_off_id) = 2)
          AND NOT EXISTS (SELECT 1 FROM public.onboarding_progress WHERE member_id = v_a_id AND item_id IN (i_t, i_u, i_u2, i_p2) AND doc_checked_at IS NOT NULL) THEN
         v_pass := v_pass + 1; rpt := rpt || format('   PASS  G1 self refused (the cadet, and the approver on their own item); no check -> refused, check -> signed by B with who + when; B refused the tier item%s; old path refuses configured, ticks unconfigured, unticks configured; DA override; no direct progress writes (DA, cadet)%s',
-          CASE WHEN v_off IS NULL THEN '' ELSE '; Officer refused the person item and the Board tier item, signs Officer tier + unconfigured; re-sign refused' END, chr(10));
+          CASE WHEN v_off IS NULL THEN '' WHEN v_off_board THEN '; Officer refused the person item, signs the Board tier item (they hold Board access) + Officer tier + unconfigured; re-sign refused' ELSE '; Officer refused the person item and the Board tier item, signs Officer tier + unconfigured; re-sign refused' END, chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  G1 self "%s" approver-own "' || coalesce(v_e5, '') || '" nocheck "%s" P %s/%s/%s tierB "%s" offP "%s" resign "%s" old "%s"%s', v_err, v_e2, v_row.done, v_row.checked_by = v_b_id, v_row.doc_checked_by = v_b_id, v_e3, v_e4, v_t, v_x, chr(10)); END IF;
 
       -- H1 honest: the person approver goes Inactive -> approver_not_set on an open item

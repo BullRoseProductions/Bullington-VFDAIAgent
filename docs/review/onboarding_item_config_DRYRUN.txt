@@ -4,6 +4,8 @@
 # docs/review/onboarding_item_config_live_fns.sql). Mock departments: Indian Harbor (DA + Officer), Lipan (no Officer), North Hood.
 # Each mutation is applied to the migration on a fresh database; the line shows how it was caught.
 
+# Re-run after the RETEST fix (Officer who also holds Board): base + DUAL=1 (an Officer with {Officer,Board Member}) both 16/0/0.
+
 live md5s reproduced in PGlite: set_onboarding_item 99e6c694… · probation_item_states 0e91cf1d…
 state: [{"cols":8,"fns":6,"all_definer":true,"anon_exec":false,"internal_exec":false,"soi_block_md5":"43179b88c2683b93d0d227044be7df9f","signoff_block_md5":"43179b88c2683b93d0d227044be7df9f","progress_client_write":false,"item_config_client_write":false,"item_label_client_write":true,"configured_items":0,"total_policies":17,"buckets":"station-documents"}] · policies before 17
 re-run -> Precondition failed: onboarding item config already exists — already applied. Nothing changed.
