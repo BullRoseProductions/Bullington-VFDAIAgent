@@ -1,5 +1,5 @@
 -- =====================================================================
--- RETEST for rls_admin_gate_fix (DRAFT — run AFTER the migration, separately). NOTHING CHANGES: each department's
+-- RETEST for rls_admin_gate_fix_2026-10-20.sql (applied 2026-10-20) — run AFTER the migration, separately. NOTHING CHANGES: each department's
 -- checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURES it creates itself — a
 -- multi-department admin (a real DA of ANOTHER department, given a plain-member row here and this department as their
 -- active one), a fixture announcement (authored by a plain member here) and a fixture duty_log row. The final RAISE is

@@ -1,7 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { readFileSync } from "fs";
 const R = "/Users/ashleabullington/projects/Bullington-VFDAIAgent/sql/";
-const mig = readFileSync(R + "rls_admin_gate_fix_DRAFT.sql", "utf8"), ret = readFileSync(R + "rls_admin_gate_fix_RETEST.sql", "utf8");
+const mig = readFileSync(R + "rls_admin_gate_fix_2026-10-20.sql", "utf8"), ret = readFileSync(R + "rls_admin_gate_fix_RETEST.sql", "utf8");
 const A = "00000000-0000-0000-0000-00000000000a", B = "00000000-0000-0000-0000-00000000000b", C = "00000000-0000-0000-0000-00000000000c";
 // The live shape (Step 0 / 0c / A): my_department_id / is_dept_admin / is_department_admin / is_leader bodies as read on
 // live; the four target policies with their exact Step 0c expressions; a few unrelated policies (the snapshot).

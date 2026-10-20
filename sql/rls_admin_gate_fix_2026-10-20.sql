@@ -1,5 +1,6 @@
 -- =====================================================================
--- RLS ADMIN-GATE FIX (punch-list P1 #3a) — Review PASS 2026-10-20 (d486d24) — cleared to apply; NOT yet applied.
+-- RLS ADMIN-GATE FIX (punch-list P1 #3a) — Review PASS 2026-10-20 (d486d24).
+-- APPLIED on live 2026-10-20 — state check clean: fixed 4 · role_anywhere_left 0 · total_policies 169 · locked_token_fns 17.
 -- Record: claude/B4C_RLS_AdminGate_Fix_ReviewRecord.md.
 -- Order: claude/B4C_RLS_AdminGate_Fix_BuildOrder.md. Off the live Step 0 / 0c (ff374b7) and Steps A/B (live 2026-10-20,
 -- docs/review/rls_admin_gate_STEP_AB_OUTPUT.md): is_dept_admin() department-scoped (md5 c692e44f…); the four policy
