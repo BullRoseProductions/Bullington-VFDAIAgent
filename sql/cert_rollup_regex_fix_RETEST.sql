@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for cert_rollup_regex_fix (G2; DRAFT, not applied) — run AFTER the migration, separately.
+-- RETEST for cert_rollup_regex_fix (G2; applied 2026-10-21) — run AFTER the migration, separately.
+-- RAN on live 2026-10-21: 11 passed, 0 failed, 0 skipped — S0; M1 + L1 in all five departments. Indian Harbor L1 read
+-- expiring 9 · expired 22 = 21 '0000-00' placeholders + the 1 fixture (G1 not yet applied — G1 takes it to 1).
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on
 -- FIXTURES it creates itself — a fixture member (a fresh email, Active, plain Member) with four certs: one current
 -- (expiry month +8), one expiring (+1), one expired (−2), one blank. Months are computed from now() exactly as the
