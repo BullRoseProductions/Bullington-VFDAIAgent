@@ -1,5 +1,5 @@
 -- =====================================================================
--- CERT DISPLAY FIX G1 — null Indian Harbor's '0000-00' placeholder dates — DRAFT, NOT REVIEWED, NOT APPLIED.
+-- CERT DISPLAY FIX G1 — null Indian Harbor's '0000-00' placeholder dates — Review PASS 2026-10-21 (b1e5136). Not yet applied.
 -- Order: claude/B4C_CertDisplayFixes_BuildOrder.md. Off Step 0b (2026-10-21, docs/review/cert_catalog_STEP0B_OUTPUT.md).
 --
 -- THE BUG: 21 Indian Harbor certs carry exp = '0000-00' (an import placeholder for "no date"). It passes the lax

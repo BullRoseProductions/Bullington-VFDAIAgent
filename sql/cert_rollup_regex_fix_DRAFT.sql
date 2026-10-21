@@ -1,5 +1,5 @@
 -- =====================================================================
--- CERT DISPLAY FIX G2 — my_department_rollup() cert-count regex — DRAFT, NOT REVIEWED, NOT APPLIED.
+-- CERT DISPLAY FIX G2 — my_department_rollup() cert-count regex — Review PASS 2026-10-21 (28e4b09). Not yet applied.
 -- Order: claude/B4C_CertDisplayFixes_BuildOrder.md. Off Step 0b (2026-10-21, docs/review/cert_catalog_STEP0B_OUTPUT.md).
 --
 -- THE BUG: live my_department_rollup() (md5 058316de…) carries '^\\d{4}-\\d{2}$' — TWO backslashes — in all five
