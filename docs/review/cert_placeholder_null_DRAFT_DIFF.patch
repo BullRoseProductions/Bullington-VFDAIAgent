@@ -1,0 +1,20 @@
+# G1 — data fix: 21 Indian Harbor certs exp '0000-00' -> NULL. No schema / function / policy change.
+# Full script: sql/cert_placeholder_null_DRAFT.sql
+
+# ===== PGlite dry run (mock: 21 IH '0000-00' + IH dated/blank + Demo's 6 ISO dates) =====
+# ===== G1 '0000-00' -> null =====
+# state: {"placeholders_left":0,"nulled":21,"department":"Indian Harbor Volunteer Fire Department","other_malformed":6,"ids":"21 ids"}
+# Demo untouched: {"n":6} · IH blank now: 23
+# re-run -> Precondition failed: no cert carries '0000-00' — already applied. Nothing changed.
+# 
+# G1 mutations:
+#   (a) a 22nd '0000-00' row exists
+#      REFUSED: Precondition failed: 22 certs carry '0000-00' (Step 0b counted 21). Nothing changed.
+#   (b) one of the 21 is in another department
+#      REFUSED: Precondition failed: the '0000-00' certs are not all Indian Harbor (2 department(s), first B4C Demo Department). Nothing changed.
+#   (c) the UPDATE widened to all malformed rows (Demo's 6 too)
+#      REFUSED: Post-condition failed: the update touched 27 rows, not 21.
+#   (d) the UPDATE also touches name
+#      REFUSED: Post-condition failed: a column other than exp changed on the 21 rows.
+#   (e) a Demo malformed row already gone
+#      REFUSED: Precondition failed: expected Demo's 6 other malformed certs, found 5. Nothing changed.
