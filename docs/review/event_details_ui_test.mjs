@@ -207,6 +207,10 @@ const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 const addedHex = (strip(ev).match(/#[0-9A-Fa-f]{3,8}\b/g) || []);
 ok("no hex literal in the new calendar (brand tokens only)", addedHex.length === 0, JSON.stringify(addedHex));
 ok("no locked token in the new calendar", !ev.toLowerCase().includes("verifie" + "d"));
+// the refused-save toast must paint ABOVE the open detail (Notification is zIndex 60 and renders earlier in the DOM)
+const toastZ = Number((src.slice(src.indexOf("function Notification("), src.indexOf("function Notification(") + 2000).match(/zIndex: (\d+)/) || [])[1]);
+const modalZ = Number((ev.match(/position: "fixed", inset: 0[^}]*zIndex: (\d+)/) || [])[1]);
+ok("detail modal sits under the toast (z-index)", toastZ > 0 && modalZ > 0 && modalZ < toastZ, `toast ${toastZ} · modal ${modalZ}`);
 await win.happyDOM?.abort?.();
 // happy-dom + the app leave timers alive; the verdict is in process.exitCode.
 process.exit(process.exitCode || 0);

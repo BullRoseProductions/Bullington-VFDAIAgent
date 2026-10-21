@@ -7866,8 +7866,10 @@ function EventsCalendar({ S, role, notify }) {
         const it = open, k = EVENT_KINDS[it.kind];
         const dateStr = new Date(it.y, it.m, it.d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
         const fr = it.fundraiserId ? frName.get(it.fundraiserId) : null;
+        /* zIndex 55, one under the toast (Notification, 60). At an EQUAL z-index the later DOM node paints on top, and
+           this modal renders after the toast — so a refused-save error would land behind the backdrop it's about. */
         return (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={closeDetail}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 55, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={closeDetail}>
             <div style={{ ...FS.card, width: edit ? "min(640px, 100%)" : "min(460px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ width: 10, height: 10, borderRadius: 999, background: chipColor(it), flexShrink: 0 }} />
