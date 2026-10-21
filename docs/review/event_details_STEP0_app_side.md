@@ -107,3 +107,17 @@ sub-decision stands.
   the hub also holds Donations. Worth deciding which surface is renamed.
 - Both calendars' `canEdit` is `CANMANAGE_OPS_ROLES` (DA / Officer — Board excluded); delete additionally needs
   canDeleteShared (DA / PA). The DB side (RLS / grants, item 1) decides whether Board/PA can write directly regardless.
+
+## Reviewer rulings (relayed 2026-10-21) — binding for the migration + UI build
+- **Rename:** the calendar on the **Fundraisers** page becomes "Fundraising & Community Events". The **Funding hub keeps
+  its name** (it holds Donations) — nav label "Funding" (~1783) unchanged.
+- **Tap behaviour:** no more tap-to-delete. Tapping an event opens a **detail view for everyone**; **Edit + Delete live
+  inside the detail, DA / PA only**. The "(tap to remove)" tooltip hint goes.
+- **notes:** already on both tables — the migration adds **no** notes column; the UI starts writing + showing it.
+- **end_time:** add `end_time` (nullable `time`) on both, even though training has none (a 6–9 PM range reads better).
+- **location:** new nullable `text` on both (training's GPS point is not reused).
+- **Editing:** in scope, in the new detail view.
+- **Other writers stay date-only:** FundraiserHQ's AI-plan date import (~8605) and Key dates (~8634) keep inserting
+  `{ department_id, title, date, color, fundraiser_id }` — the new fields stay optional / null there.
+Next: Ashlea runs `sql/event_details_STEP0_CHECK.sql` → reviewer writes the DB migration build order → CC drafts it for
+review before apply. No migration drafted, no UI touched yet.
