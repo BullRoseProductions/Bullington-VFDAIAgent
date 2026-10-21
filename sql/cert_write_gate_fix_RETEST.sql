@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for cert_write_gate_fix (DRAFT, not applied) — run AFTER the migration, separately.
+-- RETEST for cert_write_gate_fix (applied 2026-10-21) — run AFTER the migration, separately.
+-- RAN on live 2026-10-21: 13 passed, 0 failed, 2 skipped — S0; Indian Harbor + Lipan + North Hood X1 X1b X3 X2;
+-- Demo + Granbury skip all (no plain member there).
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on a
 -- FIXTURE cert it creates itself (for a plain member of the department). The final RAISE is the report — the "ERROR"
 -- IS the report. Each RPC call is caught in its own sub-block (its error text recorded); the cert's state is then read
