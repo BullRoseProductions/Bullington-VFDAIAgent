@@ -1,5 +1,7 @@
 -- =====================================================================
--- RETEST for event_details_cols (DRAFT, not applied) — run AFTER the migration, separately.
+-- RETEST for event_details_cols (applied 2026-10-21) — run AFTER the migration, separately.
+-- RAN on live 2026-10-21: 12 passed, 0 failed, 4 skipped — S0; L-DA in all five departments; L-OF + M1 in Indian Harbor,
+-- Lipan, North Hood; Demo + Granbury skip L-OF and M1 (no Officer-only / plain member there).
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on
 -- FIXTURE events it creates itself (one date-only funding_event and one date-only recruitment_event, inserted as the
 -- owner — "an existing event"). The final RAISE is the report — the "ERROR" IS the report. Reads-back are done as the
