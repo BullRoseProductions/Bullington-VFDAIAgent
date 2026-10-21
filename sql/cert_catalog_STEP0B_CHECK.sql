@@ -5,6 +5,12 @@
 --   7 the readiness_requirements_uq index: indexdef + valid / ready flags (or a 'missing' row)
 --   8 the malformed certs.exp values — DISTINCT raw strings with a count, by department; no names, no member ids.
 --     "Malformed" = non-blank and not '^\d{4}-(0[1-9]|1[0-2])$' (the Step 0 rule: expect 21 Indian Harbor + 6 Demo rows)
+--
+-- RAN ON LIVE 2026-10-21 — full output + findings: docs/review/cert_catalog_STEP0B_OUTPUT.md (all 7 md5s reproduced byte-exact)
+--   G1 Indian Harbor's 21 malformed = '0000-00', which the lax regex reads as EXPIRED (certStatus, dept_cert_readiness, radar)
+--   G2 my_department_rollup()'s cert regex has a doubled backslash -> its 5 cert counts are always 0
+--   G3 readiness_window has no never-expires path · G4 probation cert items match by name, blank exp = missing
+--   readiness_requirements_uq live, NULLS NOT DISTINCT · Demo's 6 malformed are YYYY-MM-DD
 -- =====================================================================
 SELECT 1 AS ord, 'full def' AS what, p.oid::regprocedure::text AS name,
        'md5 ' || md5(pg_get_functiondef(p.oid)) || E'\n' || pg_get_functiondef(p.oid) AS detail
