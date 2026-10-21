@@ -1,5 +1,7 @@
 -- =====================================================================
--- EVENT DETAILS — DB (three nullable columns on two tables) — Review PASS 2026-10-21 (5504b18). Not yet applied.
+-- EVENT DETAILS — DB (three nullable columns on two tables) — Review PASS 2026-10-21 (5504b18).
+-- APPLIED on live 2026-10-21 — state check clean: funding_new_cols 3 · recruitment_new_cols 3 · nullable_new_cols 6 · event_policies 8 ·
+-- rollup_md5_ok true · total_policies 169 · locked_token_fns 17.
 -- Order: claude/B4C_EventDetails_DB_BuildOrder.md. Off the live Step 0 (2026-10-21, docs/review/event_details_STEP0_OUTPUT.md
 -- + docs/review/event_details_STEP0_app_side.md).
 --
