@@ -1,5 +1,5 @@
 -- =====================================================================
--- CERT WRITE-GATE FIX (cert catalog Step 0, F1) — DRAFT, NOT REVIEWED, NOT APPLIED.
+-- CERT WRITE-GATE FIX (cert catalog Step 0, F1) — Review PASS 2026-10-21 (c6931d1). Not yet applied.
 -- Order: claude/B4C_CertWriteGate_Fix_BuildOrder.md. Off the live Step 0 (2026-10-21, docs/review/cert_catalog_STEP0_OUTPUT.md).
 --
 -- THE GAP: update_cert(uuid,text,text) and delete_cert(uuid) are SECURITY DEFINER, gate on is_department_admin() — the
