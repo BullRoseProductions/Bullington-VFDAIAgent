@@ -10,6 +10,13 @@
 --   5 no catalog yet — any table or column whose name looks like a cert catalog / required-cert list
 --   7 per department: cert rows, distinct names, blank exp, malformed exp, well-formed 'YYYY-MM'
 --   + is_dept_admin() md5 (the catalog writes gate on it; expect c692e44f62923d2bf4c1a39a21a87bf7)
+--
+-- RAN ON LIVE 2026-10-21 — full output + findings: docs/review/cert_catalog_STEP0_OUTPUT.md
+--   F1 update_cert / delete_cert gate on is_department_admin() (unscoped) with NO department check — latent cross-dept write
+--   F2 three YYYY-MM rules (update_cert + dept_cert_readiness lax \d{2}; expiration_rows strict 01-12); approve copies exp unchecked
+--   F3 dashboard <=3 months / all rows vs expiration_rows <=30 days / active roster only
+--   F4 Indian Harbor 169 certs, 120 distinct names, 112 blank, 21 malformed, 36 YYYY-MM; Demo 6 all malformed; others 0
+--   no catalog yet · no triggers · certs SELECT-only RLS · is_dept_admin() md5 unchanged
 -- =====================================================================
 SELECT 1 AS ord, 'col' AS what, table_name || '.' || column_name AS name,
        data_type || CASE WHEN is_nullable = 'NO' THEN ' NOT NULL' ELSE '' END || coalesce(' = ' || column_default, '') AS detail
