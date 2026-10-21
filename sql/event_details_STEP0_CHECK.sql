@@ -7,6 +7,11 @@
 --   3 training_sessions: every column whose name or type looks like a time (the app's time convention)
 --   4 every public function that reads or writes either table (definer?, writes?, md5) — an edit path or another reader
 --   5 row counts per department (blast radius; how many existing events would show "all-day")
+--
+-- RAN ON LIVE 2026-10-21 — output + findings: docs/review/event_details_STEP0_OUTPUT.md
+--   no column ACLs (new columns client-writable, RLS is the gate) · UPDATE policies exist (DA/Officer via is_canmanage_ops)
+--   E1 UI delete gate (DA/PA) vs DB (DA/Officer): a PA's delete/edit would silently hit 0 rows · training has location_label
+--   only my_department_rollup() reads them (date, title) · 7 events in all
 -- =====================================================================
 SELECT 1 AS ord, 'col' AS what, table_name || '.' || column_name AS name,
        data_type || CASE WHEN is_nullable = 'NO' THEN ' NOT NULL' ELSE '' END || coalesce(' = ' || column_default, '') AS detail
