@@ -1,0 +1,535 @@
+# Event details UI slice — combined 'Fundraising & Community Events' calendar (DRAFT for review, theme only, not promoted).
+# Test: HAPPY_DOM_DIR=<dir with happy-dom> node docs/review/event_details_ui_test.mjs  ->  33 passed, 0 failed (output below).
+# FLAG for the reviewer: Delete is DA-only in practice (CANMANAGE_OPS_ROLES AND useCanDeleteShared) — confirmDestructive()'s typed-phrase gate refuses Officers; Edit is DA + Officer as ordered.
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 07270b8..9004ece 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -6172,8 +6172,13 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
+         { h: "Open house", p: "Your highest-converting event — tour, demo, food, and fast follow-up." },
+       ]} />}
+ 
+-      <SectionLabel style={{ marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECRUITMENT CALENDAR</SectionLabel>
+-      <RecruitmentCalendar S={S} role={role} notify={notify} />
++      {/* The recruitment events calendar moved: community / outreach events now live with fundraisers on ONE calendar
++          (EventsCalendar, Funding → Fundraisers → Fundraising & Community Events). Same recruitment_events rows; one
++          place to add and see them, so there's no second copy that can drift. The planner above writes no events. */}
++      <div style={{ ...FS.cardNoir, padding: "11px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 9, fontSize: 13, color: FIRE.textSecondary }}>
++        <Calendar size={15} color={FIRE.catGreen} style={{ flexShrink: 0 }} />
++        <span>Community events — open houses, booths, school visits — are now on the <b style={{ color: FIRE.textPrimary }}>Fundraising &amp; Community Events</b> calendar, under Funding → Fundraisers.</span>
++      </div>
+ 
+       <GraphicStudio S={S} brand={brand} />
+ 
+@@ -7621,107 +7626,91 @@ function ContentCalendar({ S, role, notify }) {
+     </div>
+   );
+ }
+-function RecruitmentCalendar({ S, role, notify }) {
+-  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+-
+-  const today = new Date();
+-  const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+-  const [items, setItems] = useState([]);
+-  const loadItems = () => {
+-    supabase.from("recruitment_events")
+-      .select("id, date, title, color, notes")
+-      .then(({ data, error }) => {
+-        if (error || !data) {   // a failed READ is not "zero events" — keep last-known, log, offer retry (never blank on error)
+-          console.error("[loadItems] recruitment_events read failed — keeping last-known events:", error);
+-          notify({ kind: "error", title: "Couldn't load recruitment events", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: error?.message, action: { label: "Retry", onClick: loadItems } });
+-          return;
+-        }
+-        setItems(
+-          data.filter((r) => r.date).map((r) => {
+-            const [yy, mm, dd] = r.date.split("-").map(Number);
+-            return { id: r.id, y: yy, m: (mm || 1) - 1, d: dd, title: r.title, c: r.color, notes: r.notes || "" };
+-          })
+-        );
+-      });
+-  };
+-  useEffect(() => { loadItems(); }, []);
+-  const [show, setShow] = useState(false);
+-  const [fd, setFd] = useState(today.getDate());
+-  const [evTitle, setEvTitle] = useState("");
+-  const [color, setColor] = useState(CATEGORY_COLORS[0]);
+-
+-  const dim = new Date(cur.y, cur.m + 1, 0).getDate();
+-  const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
+-  const canEdit = hasAny(role, CANMANAGE_OPS_ROLES);
+-
+-  async function addEvent() {
+-    const t = evTitle.trim();
+-    if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
+-    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+-    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+-    const { error } = await supabase.from("recruitment_events").insert({
+-      department_id: deptId,
+-      title: t,
+-      date: toISO(new Date(cur.y, cur.m, Number(fd))),
+-      color,
+-    });
+-    if (error) { notify({ kind: "error", title: "Couldn't add the event", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }   // keep form open on error
+-    setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); loadItems();
+-  }
+-  async function removeEvent(id, title) {
+-    if (!(await confirmDestructive({ noun: "recruitment event", name: title }))) return;
+-    const { error } = await supabase.from("recruitment_events").delete().eq("id", id);
+-    if (error) { notify({ kind: "error", title: "Couldn't remove the event", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+-    loadItems();
+-  }
+-
+-  return (
+-    <div>
+-      {show && canEdit && (
+-        <div style={{ ...S.opCard, ...FS.cardNoir, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
+-            <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Open house at Station 20" /></label>
+-          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+-            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+-          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
+-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+-              {CATEGORY_COLORS.map((col) => (
+-                <button key={col} title={col} onClick={() => setColor(col)}
+-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
+-              ))}
+-            </div>
+-          </div>
+-          <button style={FS.btnPrimary} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+-          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
+-        </div>
+-      )}
+-
+-      <MonthCalendar
+-        cur={cur} setCur={setCur} dark tiles card
+-        items={monthItems}
+-        renderChip={(it) => ({ color: it.c, label: it.title, title: (canEdit && canDeleteShared) ? `${it.title} (tap to remove)` : it.title, onClick: (canEdit && canDeleteShared) ? () => removeEvent(it.id, it.title) : undefined })}
+-        todayColor={FIRE.catGreen}
+-        monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+-        headerExtra={canEdit ? (
+-          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setShow(true); }}><Plus size={14} /> Add an event</button>
+-        ) : null}
+-      />
+-      <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
+-        {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
++/* FUNDRAISING & COMMUNITY EVENTS — ONE CALENDAR OVER TWO TABLES.
++
++   Fundraisers (funding_events) and community / outreach events (recruitment_events) used to have a calendar each,
++   on two pages. This is the one place to add and see both. NOTHING MERGES IN THE DB: the two tables stay separate,
++   this view reads both and tags every item with its kind, and the add form routes the insert by the kind toggle.
++   Every other reader of the two tables (dashboard tiles, the Station calendar, each fundraiser's Key dates,
++   my_department_rollup) still reads its own table directly — this union is local to this view on purpose.
++
++   DETAILS. start_time / end_time (time, nullable), location_label (text) and notes (text) are all optional: no time
++   reads "All day", exactly as every event did before they existed. The AI-plan import and Key dates in FundraiserHQ
++   still write date-only rows, and those show here as all-day.
++
++   WHO CAN DO WHAT — the client half of the live policies (department_id = my_department_id() AND is_canmanage_ops()).
++     Open an event's detail .......... everyone who can see the page
++     Add / Edit ....................... CANMANAGE_OPS_ROLES (Department Admin, Officer) — the is_canmanage_ops() twin.
++                                        NOT isDeptAdmin: a Project Admin who is neither would see controls the DB refuses.
++     Delete ........................... CANMANAGE_OPS_ROLES AND useCanDeleteShared(). confirmDestructive() refuses anyone
++                                        who isn't a Department Admin / Project Admin (the typed-phrase guard), and the DB
++                                        refuses a Project Admin who isn't DA / Officer — so in practice: Department Admin.
++   EVERY EDIT AND DELETE READS BACK ITS ROW COUNT. PostgREST answers a write that RLS filtered to zero rows with no
++   error; checking `error` alone made a refused delete look like it worked. `.select("id")` on the mutation returns
++   the rows it touched, and zero is reported as a failure. */
++const EVENT_KINDS = {
++  fundraiser: { table: "funding_events", label: "Fundraiser", noun: "fundraising event", accent: FIRE.catAmber },
++  community: { table: "recruitment_events", label: "Community event", noun: "community event", accent: FIRE.catGreen },
++};
++const evHHMM = (t) => (t ? String(t).slice(0, 5) : "");   // "18:00:00" -> "18:00" for <input type="time">
++function eventTimeRange(start, end) {
++  if (start && end) return `${fmtTime(start)} – ${fmtTime(end)}`;
++  if (start) return fmtTime(start);
++  if (end) return `Ends ${fmtTime(end)}`;
++  return "All day";
++}
++// Both set → the end can't come before the start. Either alone, or neither, is fine.
++const eventTimesInvalid = (start, end) => !!(start && end && evHHMM(end) < evHHMM(start));
++function EventFields({ S, f, set, frs, frColorMap, withDay, dim }) {
++  const lbl = (t, sub) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}{sub && <span style={{ color: FIRE.textMuted, fontWeight: 400 }}> — {sub}</span>}</span>;
++  return (<>
++    <label style={{ ...S.field, flex: 1, minWidth: 180 }}>{lbl("Title")}
++      <input style={FS.input} value={f.title} onChange={(e) => set({ title: e.target.value })} placeholder={f.kind === "fundraiser" ? "e.g. Pancake breakfast at Station 20" : "e.g. Open house at Station 20"} /></label>
++    {withDay ? (
++      <label style={{ ...S.field, minWidth: 90 }}>{lbl("Day")}
++        <select style={FS.input} value={f.day} onChange={(e) => set({ day: e.target.value })}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
++    ) : (
++      <label style={{ ...S.field, minWidth: 150 }}>{lbl("Date")}
++        <input type="date" style={FS.input} value={f.date} onChange={(e) => set({ date: e.target.value })} /></label>
++    )}
++    <label style={{ ...S.field, minWidth: 120 }}>{lbl("Start time", "optional")}
++      <input type="time" style={FS.input} value={f.start} onChange={(e) => set({ start: e.target.value })} /></label>
++    <label style={{ ...S.field, minWidth: 120 }}>{lbl("End time", "optional")}
++      <input type="time" style={FS.input} value={f.end} onChange={(e) => set({ end: e.target.value })} /></label>
++    <label style={{ ...S.field, flex: 1, minWidth: 180 }}>{lbl("Location", "optional")}
++      <input style={FS.input} value={f.loc} onChange={(e) => set({ loc: e.target.value })} placeholder="e.g. Station 20 bay" /></label>
++    {f.kind === "fundraiser" && (
++      /* Picking a fundraiser NUDGES the colour to the fundraiser's so its dates read as a set. Only a nudge: the
++         swatches stay live, and choosing None deliberately does NOT put the colour back. */
++      <label style={{ ...S.field, minWidth: 175 }}>{lbl("Part of a fundraiser")}
++        <select style={FS.input} value={f.fr} onChange={(e) => { const c = frColorMap.get(e.target.value); set(c ? { fr: e.target.value, color: c } : { fr: e.target.value }); }}>
++          <option value="">None</option>
++          {frs.map((fr) => <option key={fr.id} value={fr.id}>{fr.name}</option>)}
++        </select></label>
++    )}
++    <div style={{ ...S.field, minWidth: 150 }}>{lbl("Color")}
++      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
++        {CATEGORY_COLORS.map((col) => (
++          <button key={col} type="button" title={col} onClick={() => set({ color: col })}
++            style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: f.color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
++        ))}
+       </div>
+     </div>
+-  );
++    <label style={{ ...S.field, flexBasis: "100%" }}>{lbl("Notes", "optional")}
++      <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={f.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Anything people should know — what to bring, who's running it, parking…" /></label>
++  </>);
+ }
+-function FundingCalendar({ S, role, notify }) {
+-  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
++function EventsCalendar({ S, role, notify }) {
++  const canDeleteShared = useCanDeleteShared();   // the typed-phrase delete guard's gate — see src/ConfirmDestructive.jsx
++  const canWrite = hasAny(role, CANMANAGE_OPS_ROLES);   // add + edit: DA / Officer — the is_canmanage_ops() twin
++  const canDelete = canWrite && canDeleteShared;          // both gates — in practice a Department Admin
+ 
+   const today = new Date();
+   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
+   const [items, setItems] = useState([]);
+-  /* Non-archived fundraisers, for the picker and for turning a tag back into a name. Archived ones
+-     are left out on purpose: you should not be able to file a NEW date under something already put
+-     away. An existing date whose fundraiser was since archived simply loses its tooltip suffix
+-     rather than breaking — the Map lookup is guarded below. */
++  /* Non-archived fundraisers, for the picker and for turning a tag back into a name. Archived ones are left out on
++     purpose: you should not be able to file a NEW date under something already put away. A date whose fundraiser was
++     since archived just loses its name — every lookup below is guarded. */
+   const [frs, setFrs] = useState([]);
+   const loadFundraisers = () => {
+     supabase.from("fundraisers").select("id, name, target_date, color").neq("status", "archived")
+@@ -7732,113 +7721,191 @@ function FundingCalendar({ S, role, notify }) {
+           || (a.name || "").localeCompare(b.name || "")));
+       });
+   };
++  const COLS = "id, date, title, color, notes, start_time, end_time, location_label";
+   const loadItems = () => {
+-    supabase.from("funding_events")
+-      .select("id, date, title, color, notes, fundraiser_id")
+-      .then(({ data, error }) => {
+-        if (error || !data) {   // a failed READ is not "zero events" — keep last-known, log, offer retry (never blank on error)
+-          console.error("[loadItems] funding_events read failed — keeping last-known events:", error);
+-          notify({ kind: "error", title: "Couldn't load fundraising events", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: error?.message, action: { label: "Retry", onClick: loadItems } });
+-          return;
+-        }
+-        setItems(
+-          data.filter((r) => r.date).map((r) => {
+-            const [yy, mm, dd] = r.date.split("-").map(Number);
+-            return { id: r.id, y: yy, m: (mm || 1) - 1, d: dd, title: r.title, c: r.color, notes: r.notes || "", fundraiserId: r.fundraiser_id || null };
+-          })
+-        );
++    Promise.all([
++      supabase.from("funding_events").select(`${COLS}, fundraiser_id`),
++      supabase.from("recruitment_events").select(COLS),
++    ]).then(([fu, rc]) => {
++      // A failed READ is not "zero events" — keep last-known, log, offer retry (never blank on error). Both or neither:
++      // half a calendar would read as "no community events" when it means "couldn't load them".
++      const bad = [fu, rc].find((r) => r.error || !r.data);
++      if (bad) {
++        console.error("[loadItems] events read failed — keeping last-known events:", bad.error);
++        notify({ kind: "error", title: "Couldn't load events", text: "A connection hiccup interrupted the load — your data isn't affected. Tap Retry.", details: bad.error?.message, action: { label: "Retry", onClick: loadItems } });
++        return;
++      }
++      const mapRows = (rows, kind) => rows.filter((r) => r.date).map((r) => {
++        const [yy, mm, dd] = r.date.split("-").map(Number);
++        return { kind, key: `${kind}-${r.id}`, id: r.id, y: yy, m: (mm || 1) - 1, d: dd, date: r.date, title: r.title, c: r.color,
++                 notes: r.notes || "", location: r.location_label || "", startTime: r.start_time || null, endTime: r.end_time || null,
++                 fundraiserId: r.fundraiser_id || null };
+       });
++      setItems([...mapRows(fu.data, "fundraiser"), ...mapRows(rc.data, "community")]);
++    });
+   };
+-  useEffect(() => { loadItems(); loadFundraisers(); }, []);
+-  const [show, setShow] = useState(false);
+-  const [fd, setFd] = useState(today.getDate());
+-  const [evTitle, setEvTitle] = useState("");
+-  const [color, setColor] = useState(CATEGORY_COLORS[0]);
+-  const [evFr, setEvFr] = useState("");                       // "" = not part of a fundraiser
++  useEffect(() => { loadItems(); loadFundraisers(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
++
+   const frName = new Map(frs.map((f) => [f.id, f.name]));
+-  /* Resolved LIVE from the fundraiser, not from the event's stored colour. Recolouring a fundraiser
+-     then repaints all of its dates at once, with no migration of the funding_events rows behind it —
+-     the stored colour on a tagged event is a cache, and this is the source of truth. */
++  /* Resolved LIVE from the fundraiser, not from the event's stored colour: recolouring a fundraiser repaints all of its
++     dates at once. The stored colour on a tagged event is a cache; `|| it.c` covers a since-archived fundraiser. */
+   const frColorMap = new Map(frs.map((f) => [f.id, frColor(f)]));
++  const chipColor = (it) => (it.fundraiserId ? (frColorMap.get(it.fundraiserId) || it.c) : it.c);
+ 
+   const dim = new Date(cur.y, cur.m + 1, 0).getDate();
+-  const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m);
+-  const canEdit = hasAny(role, CANMANAGE_OPS_ROLES);
+-
++  // Within a day: by start time, unset (all-day) first — the app's convention (sessSort).
++  const monthItems = items.filter((it) => it.y === cur.y && it.m === cur.m)
++    .sort((a, b) => (a.d - b.d) || String(a.startTime || "").localeCompare(String(b.startTime || "")));
++
++  // ---- add
++  const blank = (day) => ({ kind: "fundraiser", title: "", day, start: "", end: "", loc: "", notes: "", color: CATEGORY_COLORS[0], fr: "" });
++  const [adding, setAdding] = useState(null);   // null = form closed
++  const [addBusy, setAddBusy] = useState(false);
+   async function addEvent() {
+-    const t = evTitle.trim();
++    const f = adding; const t = f.title.trim();
+     if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
++    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The end time is before the start time." }); return; }
++    setAddBusy(true);
+     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+-    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+-    const { error } = await supabase.from("funding_events").insert({
+-      department_id: deptId,
+-      title: t,
+-      date: toISO(new Date(cur.y, cur.m, Number(fd))),
+-      color,
+-      fundraiser_id: evFr || null,
+-    });
++    if (deptErr || !deptId) { setAddBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
++    const row = { department_id: deptId, title: t, date: toISO(new Date(cur.y, cur.m, Number(f.day))), color: f.color,
++                  start_time: f.start || null, end_time: f.end || null, location_label: f.loc.trim() || null, notes: f.notes.trim() || null,
++                  ...(f.kind === "fundraiser" ? { fundraiser_id: f.fr || null } : {}) };
++    const { error } = await supabase.from(EVENT_KINDS[f.kind].table).insert(row);
++    setAddBusy(false);
+     if (error) { notify({ kind: "error", title: "Couldn't add the event", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }   // keep form open on error
+-    setShow(false); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); loadItems();
++    setAdding(null); loadItems();
+   }
+-  async function removeEvent(id, title) {
+-    if (!(await confirmDestructive({ noun: "funding event", name: title }))) return;
+-    const { error } = await supabase.from("funding_events").delete().eq("id", id);
++
++  // ---- detail / edit / delete
++  const [openKey, setOpenKey] = useState(null);
++  const open = openKey ? items.find((it) => it.key === openKey) || null : null;
++  const [edit, setEdit] = useState(null);   // null = viewing; else the edit buffer
++  const [busy, setBusy] = useState(false);
++  const closeDetail = () => { if (busy) return; setOpenKey(null); setEdit(null); };
++  const startEdit = (it) => setEdit({ kind: it.kind, title: it.title, date: it.date, start: evHHMM(it.startTime), end: evHHMM(it.endTime), loc: it.location, notes: it.notes, color: it.c, fr: it.fundraiserId || "" });
++  async function saveEdit() {
++    const it = open, f = edit; const t = f.title.trim();
++    if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
++    if (!f.date) { notify({ kind: "error", title: "Pick a date", text: "An event needs a day." }); return; }
++    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The end time is before the start time." }); return; }
++    setBusy(true);
++    const patch = { title: t, date: f.date, color: f.color, start_time: f.start || null, end_time: f.end || null,
++                    location_label: f.loc.trim() || null, notes: f.notes.trim() || null,
++                    ...(it.kind === "fundraiser" ? { fundraiser_id: f.fr || null } : {}) };
++    const { data, error } = await supabase.from(EVENT_KINDS[it.kind].table).update(patch).eq("id", it.id).select("id");
++    setBusy(false);
++    if (error) { notify({ kind: "error", title: "Couldn't save the event", text: "Something went wrong saving your changes. Please try again.", details: error.message }); return; }
++    if (!data || data.length === 0) {   // RLS filtered it to zero rows — a refusal, not a success
++      notify({ kind: "error", title: "Couldn't save the event", text: "Nothing was changed — you may not have permission to edit this department's events." }); return;
++    }
++    notify({ kind: "success", text: "Event updated." });
++    setEdit(null); loadItems();
++  }
++  async function removeEvent() {
++    const it = open;
++    if (!(await confirmDestructive({ noun: EVENT_KINDS[it.kind].noun, name: it.title,
++      impact: it.kind === "fundraiser" && it.fundraiserId ? "It is also one of its fundraiser's key dates, so it disappears there too." : undefined }))) return;
++    setBusy(true);
++    const { data, error } = await supabase.from(EVENT_KINDS[it.kind].table).delete().eq("id", it.id).select("id");
++    setBusy(false);
+     if (error) { notify({ kind: "error", title: "Couldn't remove the event", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+-    loadItems();
++    if (!data || data.length === 0) {   // RLS filtered it to zero rows — a refusal, not a success
++      notify({ kind: "error", title: "Couldn't remove the event", text: "Nothing was removed — you may not have permission to delete this department's events." }); return;
++    }
++    setOpenKey(null); setEdit(null); loadItems();
+   }
+ 
++  const kindToggle = (value, onPick) => (
++    <div style={{ display: "inline-flex", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, overflow: "hidden", alignSelf: "flex-start" }}>
++      {Object.entries(EVENT_KINDS).map(([k, v], i) => (
++        <button key={k} type="button" onClick={() => onPick(k)}
++          style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: value === k ? `${v.accent}33` : FIRE.card2Noir, color: value === k ? FIRE.textPrimary : FIRE.navLabel, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
++          <span style={{ width: 7, height: 7, borderRadius: 999, background: v.accent }} />{v.label}
++        </button>
++      ))}
++    </div>
++  );
++
+   return (
+     <div>
+-      {show && canEdit && (
++      {adding && canWrite && (
+         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+-          <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Title</span>
+-            <input style={FS.input} value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. Pancake breakfast at Station 20" /></label>
+-          <label style={{ ...S.field, minWidth: 90 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Day</span>
+-            <select style={FS.input} value={fd} onChange={(e) => setFd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>
+-          {/* Picking a fundraiser NUDGES the colour to the funding gold so a fundraiser's dates read
+-              as a set on a busy month. Only a nudge: the swatches below stay live, so a department
+-              that colour-codes by something else can override it. Choosing None deliberately does
+-              NOT put the colour back — by that point it may be a choice, not a leftover default. */}
+-          <label style={{ ...S.field, minWidth: 175 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Part of a fundraiser</span>
+-            <select style={FS.input} value={evFr} onChange={(e) => { setEvFr(e.target.value); const c = frColorMap.get(e.target.value); if (c) setColor(c); }}>
+-              <option value="">None</option>
+-              {frs.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+-            </select></label>
+-          <div style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Color</span>
+-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+-              {CATEGORY_COLORS.map((col) => (
+-                <button key={col} title={col} onClick={() => setColor(col)}
+-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: color === col ? `3px solid ${FIRE.textPrimary}` : `2px solid ${FIRE.card}`, boxShadow: `0 0 0 1px ${FIRE.line2Noir}` }} />
+-              ))}
+-            </div>
+-          </div>
+-          <button style={FS.btnPrimary} onClick={addEvent}><Plus size={15} /> Add to {CAL_MONTHS[cur.m]}</button>
+-          <button style={FS.btn} onClick={() => setShow(false)}>Cancel</button>
++          <div style={{ flexBasis: "100%" }}>{kindToggle(adding.kind, (k) => setAdding((p) => ({ ...p, kind: k, fr: k === "fundraiser" ? p.fr : "" })))}</div>
++          <EventFields S={S} f={adding} set={(patch) => setAdding((p) => ({ ...p, ...patch }))} frs={frs} frColorMap={frColorMap} withDay dim={dim} />
++          <button style={{ ...FS.btnPrimary, opacity: addBusy ? 0.7 : 1 }} onClick={addEvent} disabled={addBusy}>{addBusy ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Add to {CAL_MONTHS[cur.m]}</button>
++          <button style={FS.btn} onClick={() => setAdding(null)} disabled={addBusy}>Cancel</button>
+         </div>
+       )}
+ 
+       <MonthCalendar
+         cur={cur} setCur={setCur} dark tiles card
+         items={monthItems}
+-        /* The fundraiser goes in the TOOLTIP, never the label: a month cell is a few characters
+-           wide, and appending an event name would push the thing you are actually looking for out
+-           of sight. Guarded on frName having it — an archived fundraiser is absent from that Map,
+-           and a tooltip reading "— undefined" is worse than no suffix at all. */
+-        /* A tagged event takes its fundraiser's colour; an untagged one keeps its own. The
+-           `|| it.c` matters for a date whose fundraiser was since archived — it is absent from the
+-           map, so it falls back to what it was stored with rather than rendering colourless. */
+-        renderChip={(it) => ({ color: it.fundraiserId ? (frColorMap.get(it.fundraiserId) || it.c) : it.c, label: it.title,
+-          title: `${it.title}${it.fundraiserId && frName.get(it.fundraiserId) ? ` — ${frName.get(it.fundraiserId)}` : ""}${canEdit ? " (tap to remove)" : ""}`,
+-          onClick: (canEdit && canDeleteShared) ? () => removeEvent(it.id, it.title) : undefined })}
+-        todayColor="#9A6B12"
++        /* The fundraiser and location go in the TOOLTIP, never the label: a month cell is a few characters wide. The
++           start time leads the label, as on the Station calendar. Every chip opens the detail — nothing is one tap
++           from being deleted any more. */
++        renderChip={(it) => ({ color: chipColor(it), label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.title,
++          title: `${EVENT_KINDS[it.kind].label} · ${it.title}${it.fundraiserId && frName.get(it.fundraiserId) ? ` — ${frName.get(it.fundraiserId)}` : ""}${it.location ? ` · ${it.location}` : ""} · tap for details`,
++          onClick: () => { setEdit(null); setOpenKey(it.key); } })}
++        todayColor={FIRE.catAmber}
+         monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
+-        headerExtra={canEdit ? (
+-          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => { setFd(Math.min(today.getDate(), dim)); setEvTitle(""); setColor(CATEGORY_COLORS[0]); setEvFr(""); setShow(true); }}><Plus size={14} /> Add an event</button>
++        headerExtra={canWrite ? (
++          <button style={{ border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: FIRE.btnText, display: "inline-flex", alignItems: "center", marginLeft: "auto", fontSize: 12.5, fontWeight: 600, gap: 5 }} onClick={() => setAdding(blank(Math.min(today.getDate(), dim)))}><Plus size={14} /> Add an event</button>
+         ) : null}
++        footer={(
++          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
++            {Object.values(EVENT_KINDS).map((v) => <span key={v.table} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: FIRE.textSecondary }}><i style={{ width: 8, height: 8, borderRadius: 2, background: v.accent, display: "inline-block" }} />{v.label}s</span>)}
++          </div>
++        )}
+       />
+       <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>
+-        {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]}{canEdit ? " · tap an event to remove it" : ""}.
++        {monthItems.length} event{monthItems.length === 1 ? "" : "s"} in {CAL_MONTHS[cur.m]} · tap an event for details.
+       </div>
++
++      {open && (() => {
++        const it = open, k = EVENT_KINDS[it.kind];
++        const dateStr = new Date(it.y, it.m, it.d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
++        const fr = it.fundraiserId ? frName.get(it.fundraiserId) : null;
++        return (
++          <div style={{ position: "fixed", inset: 0, background: "rgba(8,10,16,.72)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }} onClick={closeDetail}>
++            <div style={{ ...FS.card, width: edit ? "min(640px, 100%)" : "min(460px, 100%)", padding: 0, overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
++              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
++                <span style={{ width: 10, height: 10, borderRadius: 999, background: chipColor(it), flexShrink: 0 }} />
++                <div style={{ flex: 1, minWidth: 0 }}>
++                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: k.accent, textTransform: "uppercase" }}>{k.label}{edit ? " · editing" : ""}</div>
++                  <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{it.title}</div>
++                </div>
++                <button style={{ ...FS.btn, padding: "6px 8px" }} onClick={closeDetail} aria-label="Close"><X size={16} color={FIRE.textSecondary} /></button>
++              </div>
++              {edit ? (
++                <div style={{ padding: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
++                  <EventFields S={S} f={edit} set={(patch) => setEdit((p) => ({ ...p, ...patch }))} frs={frs} frColorMap={frColorMap} />
++                  <div style={{ flexBasis: "100%", display: "flex", gap: 8, marginTop: 4 }}>
++                    <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={saveEdit} disabled={busy}>{busy ? <Loader2 size={15} className="spin" /> : <Pencil size={15} />} Save changes</button>
++                    <button style={FS.btn} onClick={() => setEdit(null)} disabled={busy}>Cancel</button>
++                  </div>
++                </div>
++              ) : (
++                <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
++                  <div style={{ fontSize: 13.5, color: FIRE.textPrimary }}><Calendar size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} color={FIRE.textMuted} />{dateStr}</div>
++                  <div style={{ fontSize: 13.5, color: FIRE.textPrimary }}><Clock size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} color={FIRE.textMuted} />{eventTimeRange(it.startTime, it.endTime)}</div>
++                  {it.location && <div style={{ fontSize: 13.5, color: FIRE.textPrimary, overflowWrap: "anywhere" }}><MapPin size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} color={FIRE.textMuted} />{it.location}</div>}
++                  {fr && <div style={{ fontSize: 13, color: FIRE.textSecondary }}><PartyPopper size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} color={FIRE.textMuted} />Part of {fr}</div>}
++                  {it.notes
++                    ? <div style={{ fontSize: 13.5, color: FIRE.textSecondary, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 9, marginTop: 2 }}>{it.notes}</div>
++                    : null}
++                  {(canWrite || canDelete) && (
++                    <div style={{ display: "flex", gap: 8, marginTop: 6, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
++                      {canWrite && <button style={FS.btn} onClick={() => startEdit(it)} disabled={busy}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>}
++                      {canDelete && <button style={{ ...FS.btn, marginLeft: "auto" }} onClick={removeEvent} disabled={busy}>{busy ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} color={FIRE.btnIcon} />} Delete</button>}
++                    </div>
++                  )}
++                </div>
++              )}
++            </div>
++          </div>
++        );
++      })()}
+     </div>
+   );
+ }
+@@ -9424,7 +9491,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+      not exist when it last loaded. */
+   const [focusFr, setFocusFr] = useState(null); const [frReload, setFrReload] = useState(0);
+   const [creatingFr, setCreatingFr] = useState(false); const [frName, setFrName] = useState("");
+-  // Remounts FundingCalendar so events created elsewhere on this page show without a navigation.
++  // Remounts EventsCalendar so events created elsewhere on this page show without a navigation.
+   // Bumped by the HQ now (via onWorkAdded) rather than by the planner, which no longer writes events.
+   const [fundingReloadKey, setFundingReloadKey] = useState(0);
+   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+@@ -9703,8 +9770,8 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+         </div>
+       </>)}
+ 
+-      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDING CALENDAR</div>
+-      <FundingCalendar key={fundingReloadKey} S={S} role={role} notify={notify} />
++      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISING &amp; COMMUNITY EVENTS</div>
++      <EventsCalendar key={fundingReloadKey} S={S} role={role} notify={notify} />
+ 
+       <div style={{ ...NOIR_LABEL, marginBottom: 8, display: "flex", alignItems: "center" }}>
+         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
+
+# ===== UI test output =====
+# PASS loads both tables (+ fundraisers), with the new columns ["fundraisers:id, name, target_date, color","funding_events:id, date, title, color, notes, start_time, end_time, location_label, fundraiser_id","recruitment_events:id, date, title, color, notes, start_time, end_time, location_label"]
+# PASS chips from BOTH tables, tagged by kind 
+# PASS the chip leads with the start time; an all-day one doesn't 
+# PASS a member sees no Add button and no tap-to-delete wording 
+# PASS detail: kind, title, time range, location, fundraiser, notes 
+# PASS detail: a member gets no Edit / Delete 
+# PASS detail: a time-less event reads All day, no location line 
+# PASS detail: community event, start only 
+# PASS tapping never wrote anything 
+# PASS gate — Department Admin: add true · edit true · delete true 
+# PASS gate — Officer: add true · edit true · delete false 
+# PASS gate — Project Admin (no DA / Officer): add false · edit false · delete false 
+# PASS gate — Board Member: add false · edit false · delete false 
+# PASS add form: Fundraiser is the default and shows 'Part of a fundraiser' 
+# PASS add form: Community event hides 'Part of a fundraiser' 
+# PASS end before start is refused, nothing inserted 
+# PASS community add -> recruitment_events with the new fields, no fundraiser_id {"department_id":"dept-1","title":"Booth at the market","date":"2026-10-20","color":"#C8323A","start_time":"10:00","end_time":"13:00","location_label":"Farmers market","notes":"Bring the sign-up sheet"}
+# PASS quick fundraiser add -> funding_events, fundraiser_id set, new fields null {"department_id":"dept-1","title":"Raffle","date":"2026-10-21","color":"#CC9E52","start_time":null,"end_time":null,"location_label":null,"notes":null,"fundraiser_id":"fr1"}
+# PASS edit -> recruitment_events by id, with .select() to read back rows {"title":"Open house","date":"2026-10-15","color":"#2FA869","start_time":"09:30","end_time":"12:00","location_label":"Fire hall","notes":null}
+# PASS edit: 0 rows back = an error, no success, still editing 
+# PASS edit: 1 row back = success 
+# PASS delete -> by id with .select(); 0 rows = an error, detail stays open 
+# PASS delete: 1 row back = closes, no error 
+# PASS the old two calendars are gone; one EventsCalendar mounted on Fundraisers 
+# PASS Recruitment page: no calendar mounted; planner, ideas, Graphic Studio, saved drafts kept 
+# PASS no tap-to-delete wording left anywhere in the new calendar 
+# PASS EventsCalendar gates writes on CANMANAGE_OPS_ROLES, delete also on useCanDeleteShared; never isDeptAdmin 
+# PASS unchanged vs origin/main: OfficerDashboard 
+# PASS unchanged vs origin/main: MemberDashboard 
+# PASS unchanged vs origin/main: DashboardCalendar 
+# PASS unchanged vs origin/main: FundraiserHQ 
+# PASS no hex literal in the new calendar (brand tokens only) []
+# PASS no locked token in the new calendar 
