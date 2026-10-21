@@ -1,5 +1,5 @@
 -- =====================================================================
--- EVENT DETAILS — DB (three nullable columns on two tables) — DRAFT, NOT REVIEWED, NOT APPLIED.
+-- EVENT DETAILS — DB (three nullable columns on two tables) — Review PASS 2026-10-21 (5504b18). Not yet applied.
 -- Order: claude/B4C_EventDetails_DB_BuildOrder.md. Off the live Step 0 (2026-10-21, docs/review/event_details_STEP0_OUTPUT.md
 -- + docs/review/event_details_STEP0_app_side.md).
 --
