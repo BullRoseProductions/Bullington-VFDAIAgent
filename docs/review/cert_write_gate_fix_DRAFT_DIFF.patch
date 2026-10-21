@@ -1,0 +1,101 @@
+# cert write-gate fix — live body (Step 0, md5 5cd098a1… / 8d0a006c…) -> re-gated body (md5 08ec5f34… / 5d769334…)
+# The migration's post-condition enforces that these are the ONLY differences.
+--- update_cert LIVE
++++ update_cert FIXED
+@@ -5,7 +5,7 @@
+  SET search_path TO 'public'
+ AS $function$
+ begin
+-  if not public.is_department_admin() then
++  if not public.is_dept_admin() then
+     raise exception 'Not authorized to edit certifications';
+   end if;
+ 
+@@ -21,7 +21,7 @@
+   update public.certs
+   set name = btrim(new_name),
+       exp  = case when new_exp is null or btrim(new_exp) = '' then null else new_exp end
+-  where id = cert_id;
++  where id = cert_id and department_id = public.my_department_id();
+ 
+   if not found then
+     raise exception 'Certification not found';
+--- delete_cert LIVE
++++ delete_cert FIXED
+@@ -5,11 +5,11 @@
+  SET search_path TO 'public'
+ AS $function$
+ begin
+-  if not public.is_department_admin() then
++  if not public.is_dept_admin() then
+     raise exception 'Not authorized to delete certifications';
+   end if;
+ 
+-  delete from public.certs where id = cert_id;
++  delete from public.certs where id = cert_id and department_id = public.my_department_id();
+ 
+   if not found then
+     raise exception 'Certification not found';
+
+# ===== PGlite dry run (live bodies rebuilt byte-exact: md5 5cd098a1 / 8d0a006c / 99570e17 / c692e44f all matched) =====
+# new md5s: update_cert 08ec5f34bf3d897d95bdbeda5ec52ae7 · delete_cert 5d7693342ca274ea693ec283ac079ca7
+# PRE-FIX (live bodies as they are today):
+# FAIL  S0 only 0/2 functions re-gated and department-scoped
+# — Alpha
+#    FAIL  X1 pre-fix gate t · update: ok · delete: ok · still there f · name  · exp 
+#    FAIL  X1b pre-fix gate t · update: Certification not found · delete: Certification not found · still there f · name 
+#    FAIL  X3 update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there f · name 
+#    FAIL  X2 update: Certification not found (name , exp ) · delete: Certification not found · still there f
+# — Bravo
+#    FAIL  X1 pre-fix gate t · update: ok · delete: ok · still there f · name  · exp 
+#    FAIL  X1b pre-fix gate t · update: Certification not found · delete: Certification not found · still there f · name 
+#    FAIL  X3 update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there f · name 
+#    FAIL  X2 update: Certification not found (name , exp ) · delete: Certification not found · still there f
+# — Charlie (empty)
+#    SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA none, member none, other-dept DA ada@a)
+# ---- 0 passed, 9 failed, 1 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# state: [{"regated":2,"role_anywhere_left":0,"dept_scoped":2,"total_policies":11,"locked_token_fns":1}]
+# re-run -> Precondition failed: update_cert and delete_cert are already re-gated — already applied. Nothing changed.
+# grants kept: [{"proname":"delete_cert","proacl":"{postgres=X/postgres,authenticated=X/postgres}"},{"proname":"update_cert","proacl":"{postgres=X/postgres,authenticated=X/postgres}"}]
+# AFTER THE FIX:
+# PASS  S0 update_cert + delete_cert use is_dept_admin(), not is_department_admin(), and scope to my_department_id()
+# — Alpha
+#    PASS  X1 DA of another department: the pre-fix gate would have let them in; now update + delete both "Certification not found", cert unchanged
+#    PASS  X1b DA elsewhere / plain member here (this department active): the pre-fix gate would have let them in; now both refused on authority, cert unchanged
+#    PASS  X3 plain member: update + delete both refused on authority, cert unchanged
+#    PASS  X2 the real DA: update_cert renamed (trimmed) + re-dated it; delete_cert removed it
+# — Bravo
+#    PASS  X1 DA of another department: the pre-fix gate would have let them in; now update + delete both "Certification not found", cert unchanged
+#    PASS  X1b DA elsewhere / plain member here (this department active): the pre-fix gate would have let them in; now both refused on authority, cert unchanged
+#    PASS  X3 plain member: update + delete both refused on authority, cert unchanged
+#    PASS  X2 the real DA: update_cert renamed (trimmed) + re-dated it; delete_cert removed it
+# — Charlie (empty)
+#    SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA none, member none, other-dept DA bob@b)
+# ---- 9 passed, 0 failed, 1 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# mutations:
+#   (a) update_cert gate left on is_department_admin()
+#      REFUSED: Post-condition failed: update_cert differs from the live body by more than the gate and the department scope.
+#   (a2) same, all post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 only 1/2 functions re-gated and department-scoped |    FAIL  X1b pre-fix gate t · update: ok · delete: Not authorized to delete certifications · still there t · name RETEST X1b renamed |    FAIL  X3 update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there t · name RETEST X1b renamed |    FAIL  X1b pre-fix gate t · update: ok · delete: Not authorized to delete certifications · still there t · name RETEST X1b renamed |    FAIL  X3 update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there t · name RETEST X1b renamed | ---- 4 passed, 5 failed, 1 skipped ----
+#   (b) department scope dropped from delete_cert
+#      REFUSED: Post-condition failed: delete_cert differs from the live body by more than the gate and the department scope.
+#   (b2) same, all post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 only 1/2 functions re-gated and department-scoped |    FAIL  X1 pre-fix gate t · update: Certification not found · delete: ok · still there f · name  · exp  |    FAIL  X1b pre-fix gate t · update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there f · name  |    FAIL  X3 update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there f · name  |    FAIL  X2 update: Certification not found (name , exp ) · delete: Certification not found · still there f |    FAIL  X1 pre-fix gate t · update: Certification not found · delete: ok · still there f · name  · exp  |    FAIL  X1b pre-fix gate t · update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there f · name  |    FAIL  X3 update: Not authorized to edit certifications · delete: Not authorized to delete certifications · still there f · name  |    FAIL  X2 update: Certification not found (name , exp ) · delete: Certification not found · still there f | ---- 0 passed, 9 failed, 1 skipped ----
+#   (c) another function's body changed in the block
+#      REFUSED: Post-condition failed: another public function changed.
+#   (c2) a policy changed in the block
+#      REFUSED: Post-condition failed: a policy changed.
+#   (d) the exp validation altered (regex tightened to 01-12)
+#      REFUSED: Post-condition failed: update_cert differs from the live body by more than the gate and the department scope.
+#   (d2) the name validation altered (btrim dropped)
+#      REFUSED: Post-condition failed: update_cert differs from the live body by more than the gate and the department scope.
+#   (e) the EXECUTE grant widened in the block
+#      REFUSED: Post-condition failed: owner, SECURITY DEFINER, search_path or EXECUTE grants changed on a re-gated function.
+#   (f) live update_cert drifted since Step 0
+#      REFUSED: Precondition failed: update_cert is not the Step 0 version (md5 3bff66ecd38fa5622228002f191a3a9d , expected 5cd098a1…). Nothing changed.
+#   (g) is_dept_admin() made role-anywhere
+#      REFUSED: Precondition failed: is_dept_admin() is not the department-scoped Step A version (md5 c692e44f…). Nothing changed.

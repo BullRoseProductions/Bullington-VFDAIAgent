@@ -1,0 +1,345 @@
+# Event details DB — DRAFT migration + RETEST (new files) and the PGlite dry run.
+# The change itself is the two ALTER TABLE statements (6 nullable columns); everything else is guard rails.
+
+diff --git a/sql/event_details_cols_DRAFT.sql b/sql/event_details_cols_DRAFT.sql
+new file mode 100644
+index 0000000..42b750c
+--- /dev/null
++++ b/sql/event_details_cols_DRAFT.sql
+@@ -0,0 +1,152 @@
++-- =====================================================================
++-- EVENT DETAILS — DB (three nullable columns on two tables) — DRAFT, NOT REVIEWED, NOT APPLIED.
++-- Order: claude/B4C_EventDetails_DB_BuildOrder.md. Off the live Step 0 (2026-10-21, docs/review/event_details_STEP0_OUTPUT.md
++-- + docs/review/event_details_STEP0_app_side.md).
++--
++-- THE CHANGE — purely additive, both funding_events and recruitment_events, all nullable, no default:
++--   start_time time   (matches training_sessions.start_time)
++--   end_time   time   (new — training has none)
++--   location_label text (matches training_sessions.location_label; reviewer ruling E3)
++-- NOT added: notes (exists on both). NO GRANT (Step 0 E2: no column ACLs; table grants full — RLS is the gate). NO policy
++-- change (E4: the four department-scoped policies per table already cover INSERT / UPDATE / DELETE via is_canmanage_ops()).
++-- Every existing event (7) reads all-day / no location afterward. No table merge — the combined calendar is UI-only.
++--
++-- Single all-or-nothing DO block; refuses a second apply (the three columns must be absent on both) and refuses on
++-- drift (the eight policies pinned verbatim; notes present; RLS on). Post-conditions: exactly the three columns added
++-- per table with the right types, nullable, no default; every other column, constraint, index and trigger unchanged;
++-- every policy byte-identical and the count unchanged; table + column ACLs unchanged and the new columns writable by
++-- authenticated; my_department_rollup() (the one reader) unchanged at md5 7b12e359…; the locked-token function count
++-- unchanged. The locked verification column is never touched. State check at the end.
++-- =====================================================================
++DO $migrate$
++DECLARE
++  TBLS constant text[] := array['funding_events', 'recruitment_events'];
++  NEWCOLS constant text[] := array['start_time', 'end_time', 'location_label'];
++  ROLLUP_MD5 constant text := '7b12e359bf7af9343565435658253a23';
++  -- the eight policies, verbatim as Step 0 read them: name | cmd | roles | USING | CHECK  (one block per table, %s = table)
++  POL_SHAPE constant text :=
++       'leaders delete %1$s|DELETE|{authenticated}|((department_id = my_department_id()) AND is_canmanage_ops())|' || E'\n'
++    || 'leaders update %1$s|UPDATE|{authenticated}|((department_id = my_department_id()) AND is_canmanage_ops())|((department_id = my_department_id()) AND is_canmanage_ops())' || E'\n'
++    || 'leaders write %1$s|INSERT|{authenticated}||((department_id = my_department_id()) AND is_canmanage_ops())' || E'\n'
++    || 'members read %1$s|SELECT|{authenticated}|(department_id = my_department_id())|';
++  t text; v_n int; v_got text;
++  v_cols_before text; v_cols_after text; v_obj_before text; v_obj_after text; v_acl_before text; v_acl_after text;
++  v_pol_before text; v_pol_after text; v_total_before int; v_tok_before int; v_fns_before text; v_fns_after text;
++BEGIN
++  -- ---------------------------------------------------------------- preconditions
++  FOREACH t IN ARRAY TBLS LOOP
++    IF to_regclass('public.' || t) IS NULL THEN RAISE EXCEPTION 'Precondition failed: public.% is missing. Nothing changed.', t; END IF;
++    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = ('public.' || t)::regclass) THEN
++      RAISE EXCEPTION 'Precondition failed: RLS is off on %. Nothing changed.', t;
++    END IF;
++    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t AND column_name = 'notes' AND data_type = 'text') THEN
++      RAISE EXCEPTION 'Precondition failed: %.notes (text) is missing — Step 0 found it on both tables. Nothing changed.', t;
++    END IF;
++    SELECT count(*) INTO v_n FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t AND column_name = ANY (NEWCOLS);
++    IF v_n = 3 THEN RAISE EXCEPTION 'Precondition failed: % already has start_time / end_time / location_label — already applied. Nothing changed.', t; END IF;
++    IF v_n <> 0 THEN RAISE EXCEPTION 'Precondition failed: % has % of the three new columns — a partial earlier change. Nothing changed.', t, v_n; END IF;
++    SELECT string_agg(policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY policyname)
++      INTO v_got FROM pg_policies WHERE schemaname = 'public' AND tablename = t;
++    IF v_got IS DISTINCT FROM format(POL_SHAPE, t) THEN
++      RAISE EXCEPTION E'Precondition failed: the % policies are not the four Step 0 read. Found:\n%\nNothing changed.', t, v_got;
++    END IF;
++  END LOOP;
++  IF md5(pg_get_functiondef('public.my_department_rollup()'::regprocedure)) <> ROLLUP_MD5 THEN
++    RAISE EXCEPTION 'Precondition failed: my_department_rollup() is not the G2-fixed version (md5 7b12e359…). Nothing changed.';
++  END IF;
++
++  -- snapshots: columns, constraints / indexes / triggers, ACLs (table + column), every policy, every function
++  SELECT string_agg(c.relname || '.' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull::text || '|'
++                    || coalesce(pg_get_expr(d.adbin, d.adrelid), ''), E'\n' ORDER BY c.relname, a.attnum)
++    INTO v_cols_before FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
++   WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (TBLS) AND a.attnum > 0 AND NOT a.attisdropped;
++  SELECT string_agg(x, E'\n' ORDER BY x) INTO v_obj_before FROM (
++    SELECT 'con|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid) AS x FROM pg_constraint WHERE conrelid IN ('public.funding_events'::regclass, 'public.recruitment_events'::regclass)
++    UNION ALL SELECT 'idx|' || indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = ANY (TBLS)
++    UNION ALL SELECT 'trg|' || tgname || '|' || pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN ('public.funding_events'::regclass, 'public.recruitment_events'::regclass)) s;
++  SELECT string_agg(c.relname || '|' || coalesce(c.relacl::text, '') || '|' || c.relrowsecurity::text || '|' || c.relforcerowsecurity::text || '|'
++                    || coalesce((SELECT string_agg(a.attname || '=' || a.attacl::text, ',' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attacl IS NOT NULL), ''), E'\n' ORDER BY c.relname)
++    INTO v_acl_before FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (TBLS);
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_before FROM pg_policies WHERE schemaname = 'public';
++  SELECT count(*) INTO v_total_before FROM pg_policies WHERE schemaname = 'public';
++  SELECT count(*) INTO v_tok_before FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0;
++  SELECT string_agg(p.oid::regprocedure::text || '|' || md5(pg_get_functiondef(p.oid)), E'\n' ORDER BY p.oid::regprocedure::text)
++    INTO v_fns_before FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p');
++
++  -- ---------------------------------------------------------------- the change
++  ALTER TABLE public.funding_events
++    ADD COLUMN start_time time,
++    ADD COLUMN end_time time,
++    ADD COLUMN location_label text;
++  ALTER TABLE public.recruitment_events
++    ADD COLUMN start_time time,
++    ADD COLUMN end_time time,
++    ADD COLUMN location_label text;
++
++  -- ---------------------------------------------------------------- post-conditions
++  -- (1) exactly the old columns + the three new ones, in that order, with the right types, nullable, no default
++  SELECT string_agg(c.relname || '.' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull::text || '|'
++                    || coalesce(pg_get_expr(d.adbin, d.adrelid), ''), E'\n' ORDER BY c.relname, a.attnum)
++    INTO v_cols_after FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
++   WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (TBLS) AND a.attnum > 0 AND NOT a.attisdropped;
++  IF v_cols_after IS DISTINCT FROM (
++       SELECT string_agg(blk, E'\n' ORDER BY tb) FROM (
++         SELECT tb, (SELECT string_agg(l, E'\n') FROM unnest(string_to_array(v_cols_before, E'\n')) l WHERE l LIKE tb || '.%')
++                    || E'\n' || tb || '.start_time|time without time zone|false|'
++                    || E'\n' || tb || '.end_time|time without time zone|false|'
++                    || E'\n' || tb || '.location_label|text|false|' AS blk
++           FROM unnest(TBLS) tb) s) THEN
++    RAISE EXCEPTION E'Post-condition failed: the columns are not exactly the old set + start_time time, end_time time, location_label text (nullable, no default). Got:\n%', v_cols_after;
++  END IF;
++  -- (2) constraints / indexes / triggers, ACLs + RLS, policies, functions: all unchanged
++  SELECT string_agg(x, E'\n' ORDER BY x) INTO v_obj_after FROM (
++    SELECT 'con|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid) AS x FROM pg_constraint WHERE conrelid IN ('public.funding_events'::regclass, 'public.recruitment_events'::regclass)
++    UNION ALL SELECT 'idx|' || indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = ANY (TBLS)
++    UNION ALL SELECT 'trg|' || tgname || '|' || pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN ('public.funding_events'::regclass, 'public.recruitment_events'::regclass)) s;
++  IF v_obj_after IS DISTINCT FROM v_obj_before THEN RAISE EXCEPTION 'Post-condition failed: a constraint, index or trigger on the two tables changed.'; END IF;
++  SELECT string_agg(c.relname || '|' || coalesce(c.relacl::text, '') || '|' || c.relrowsecurity::text || '|' || c.relforcerowsecurity::text || '|'
++                    || coalesce((SELECT string_agg(a.attname || '=' || a.attacl::text, ',' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attacl IS NOT NULL), ''), E'\n' ORDER BY c.relname)
++    INTO v_acl_after FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY (TBLS);
++  IF v_acl_after IS DISTINCT FROM v_acl_before THEN RAISE EXCEPTION 'Post-condition failed: a table or column ACL, or RLS, changed on the two tables.'; END IF;
++  IF EXISTS (SELECT 1 FROM unnest(TBLS) tb CROSS JOIN unnest(NEWCOLS) col
++              WHERE NOT (has_column_privilege('authenticated', 'public.' || tb, col, 'INSERT') AND has_column_privilege('authenticated', 'public.' || tb, col, 'UPDATE')
++                         AND has_column_privilege('authenticated', 'public.' || tb, col, 'SELECT'))) THEN
++    RAISE EXCEPTION 'Post-condition failed: a new column is not selectable / insertable / updatable by authenticated.';
++  END IF;
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_after FROM pg_policies WHERE schemaname = 'public';
++  IF v_pol_after IS DISTINCT FROM v_pol_before THEN RAISE EXCEPTION 'Post-condition failed: a policy changed.'; END IF;
++  IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') <> v_total_before THEN RAISE EXCEPTION 'Post-condition failed: the policy count changed.'; END IF;
++  SELECT string_agg(p.oid::regprocedure::text || '|' || md5(pg_get_functiondef(p.oid)), E'\n' ORDER BY p.oid::regprocedure::text)
++    INTO v_fns_after FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p');
++  IF v_fns_after IS DISTINCT FROM v_fns_before THEN RAISE EXCEPTION 'Post-condition failed: a public function changed.'; END IF;
++  IF md5(pg_get_functiondef('public.my_department_rollup()'::regprocedure)) <> ROLLUP_MD5 THEN
++    RAISE EXCEPTION 'Post-condition failed: my_department_rollup() changed.';
++  END IF;
++  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) <> v_tok_before THEN
++    RAISE EXCEPTION 'Post-condition failed: the locked verification token count changed.';
++  END IF;
++  -- (3) every existing event reads all-day / no location
++  IF EXISTS (SELECT 1 FROM public.funding_events WHERE start_time IS NOT NULL OR end_time IS NOT NULL OR location_label IS NOT NULL)
++     OR EXISTS (SELECT 1 FROM public.recruitment_events WHERE start_time IS NOT NULL OR end_time IS NOT NULL OR location_label IS NOT NULL) THEN
++    RAISE EXCEPTION 'Post-condition failed: an existing event has a non-null new field.';
++  END IF;
++END
++$migrate$;
++
++NOTIFY pgrst, 'reload schema';
++
++-- state check (expect: funding_new_cols 3 · recruitment_new_cols 3 · nullable_new_cols 6 · event_policies 8 · rollup_md5_ok true ·
++--              total_policies 169 · locked_token_fns 17)
++SELECT
++  (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'funding_events'
++      AND column_name IN ('start_time', 'end_time', 'location_label')) AS funding_new_cols,
++  (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'recruitment_events'
++      AND column_name IN ('start_time', 'end_time', 'location_label')) AS recruitment_new_cols,
++  (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN ('funding_events', 'recruitment_events')
++      AND column_name IN ('start_time', 'end_time', 'location_label') AND is_nullable = 'YES') AS nullable_new_cols,
++  (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('funding_events', 'recruitment_events')) AS event_policies,
++  md5(pg_get_functiondef('public.my_department_rollup()'::regprocedure)) = '7b12e359bf7af9343565435658253a23' AS rollup_md5_ok,
++  (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') AS total_policies,
++  (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) AS locked_token_fns;
+diff --git a/sql/event_details_cols_RETEST.sql b/sql/event_details_cols_RETEST.sql
+new file mode 100644
+index 0000000..8255f33
+--- /dev/null
++++ b/sql/event_details_cols_RETEST.sql
+@@ -0,0 +1,113 @@
++-- =====================================================================
++-- RETEST for event_details_cols (DRAFT, not applied) — run AFTER the migration, separately.
++-- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on
++-- FIXTURE events it creates itself (one date-only funding_event and one date-only recruitment_event, inserted as the
++-- owner — "an existing event"). The final RAISE is the report — the "ERROR" IS the report. Reads-back are done as the
++-- owner. A refused INSERT raises (RLS WITH CHECK); a refused UPDATE is 0 rows (measured by ROW_COUNT).
++--   S0 (once) both tables carry start_time time, end_time time, location_label text, all nullable; 8 policies
++-- Per department, for each leader kind present — L-DA (a Department Admin) and L-OF (an Officer who is not a DA / PA),
++-- unique emails:
++--   INSERT a fundraiser event and a community event WITH start_time / end_time / location_label → 1 row each, persisted
++--   UPDATE the two fixture (date-only) events to set a time range + location → 1 row each, persisted
++--   M1 a plain member: the same INSERTs refused (row-level security), the same UPDATEs 0 rows, fixtures unchanged
++-- =====================================================================
++DO $retest$
++DECLARE
++  rec record; ldr record; v_n int; v_ok boolean;
++  v_mem text; v_f uuid; v_r uuid; v_fi uuid; v_ri uuid; u1 int; u2 int; e1 text; e2 text;
++  rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
++BEGIN
++  -- S0
++  SELECT count(*) INTO v_n FROM information_schema.columns
++   WHERE table_schema = 'public' AND table_name IN ('funding_events', 'recruitment_events') AND is_nullable = 'YES'
++     AND ((column_name IN ('start_time', 'end_time') AND data_type = 'time without time zone') OR (column_name = 'location_label' AND data_type = 'text'));
++  SELECT count(*) = 8 INTO v_ok FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('funding_events', 'recruitment_events');
++  IF v_n = 6 AND v_ok THEN v_pass := v_pass + 1; rpt := rpt || format('PASS  S0 both tables carry start_time / end_time (time) + location_label (text), nullable; 8 policies unchanged in count%s', chr(10));
++  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  S0 new columns %s/6 · 8 policies %s%s', v_n, v_ok, chr(10)); END IF;
++
++  FOR rec IN SELECT d.id AS dept_id, d.name AS dept FROM public.departments d ORDER BY d.name LOOP
++    rpt := rpt || format('— %s%s', rec.dept, chr(10));
++    BEGIN
++      -- fixtures (owner): the "existing" date-only events
++      INSERT INTO public.funding_events (department_id, title, date) VALUES (rec.dept_id, 'RETEST existing fundraiser', current_date + 30) RETURNING id INTO v_f;
++      INSERT INTO public.recruitment_events (department_id, title, date) VALUES (rec.dept_id, 'RETEST existing community', current_date + 30) RETURNING id INTO v_r;
++
++      v_n := 0;
++      FOR ldr IN
++        SELECT 'L-DA' AS k, (SELECT lower(m.email) FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Department Admin']::text[]
++                  AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1
++                  ORDER BY m.id LIMIT 1) AS email
++        UNION ALL
++        SELECT 'L-OF', (SELECT lower(m.email) FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Officer']::text[]
++                  AND NOT m.access && array['Department Admin', 'Project Admin']::text[]
++                  AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1
++                  ORDER BY m.id LIMIT 1)
++      LOOP
++        IF ldr.email IS NULL THEN
++          v_skip := v_skip + 1; rpt := rpt || format('   SKIP  %s none here (unique email)%s', ldr.k, chr(10)); CONTINUE;
++        END IF;
++        v_n := v_n + 1; e1 := 'ok'; e2 := 'ok'; v_fi := NULL; v_ri := NULL;
++        PERFORM set_config('request.jwt.claims', json_build_object('email', ldr.email, 'role', 'authenticated')::text, true);
++        PERFORM set_config('role', 'authenticated', true);
++        BEGIN
++          INSERT INTO public.funding_events (department_id, title, date, start_time, end_time, location_label)
++            VALUES (public.my_department_id(), 'RETEST ' || ldr.k || ' fundraiser', current_date + 31, '18:00', '21:00', 'Station 20 bay') RETURNING id INTO v_fi;
++        EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++        BEGIN
++          INSERT INTO public.recruitment_events (department_id, title, date, start_time, end_time, location_label)
++            VALUES (public.my_department_id(), 'RETEST ' || ldr.k || ' community', current_date + 32, '09:30', '12:00', 'Farmers market') RETURNING id INTO v_ri;
++        EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++        UPDATE public.funding_events SET start_time = '17:00', end_time = '20:00', location_label = 'Fire hall' WHERE id = v_f; GET DIAGNOSTICS u1 = ROW_COUNT;
++        UPDATE public.recruitment_events SET start_time = '10:00', end_time = '14:00', location_label = 'High school gym' WHERE id = v_r; GET DIAGNOSTICS u2 = ROW_COUNT;
++        PERFORM set_config('role', 'postgres', true);
++        IF e1 = 'ok' AND e2 = 'ok' AND u1 = 1 AND u2 = 1
++           AND EXISTS (SELECT 1 FROM public.funding_events WHERE id = v_fi AND department_id = rec.dept_id AND start_time = '18:00' AND end_time = '21:00' AND location_label = 'Station 20 bay')
++           AND EXISTS (SELECT 1 FROM public.recruitment_events WHERE id = v_ri AND department_id = rec.dept_id AND start_time = '09:30' AND end_time = '12:00' AND location_label = 'Farmers market')
++           AND EXISTS (SELECT 1 FROM public.funding_events WHERE id = v_f AND start_time = '17:00' AND end_time = '20:00' AND location_label = 'Fire hall')
++           AND EXISTS (SELECT 1 FROM public.recruitment_events WHERE id = v_r AND start_time = '10:00' AND end_time = '14:00' AND location_label = 'High school gym') THEN
++          v_pass := v_pass + 1; rpt := rpt || format('   PASS  %s inserts a fundraiser + a community event with time range + location, and updates the two existing ones — all persisted%s', ldr.k, chr(10));
++        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  %s insert funding: %s · insert community: %s · update funding %s · update community %s%s', ldr.k, e1, e2, u1, u2, chr(10)); END IF;
++        -- put the fixtures back to date-only for the next leader / the member check
++        UPDATE public.funding_events SET start_time = NULL, end_time = NULL, location_label = NULL WHERE id = v_f;
++        UPDATE public.recruitment_events SET start_time = NULL, end_time = NULL, location_label = NULL WHERE id = v_r;
++      END LOOP;
++
++      -- M1 a plain member
++      v_mem := NULL;
++      SELECT lower(m.email) INTO v_mem FROM public.members m WHERE m.department_id = rec.dept_id
++         AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
++         AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++      IF v_mem IS NULL THEN
++        v_skip := v_skip + 1; rpt := rpt || format('   SKIP  M1 no plain member here (unique email)%s', chr(10));
++      ELSE
++        e1 := 'ok'; e2 := 'ok';
++        PERFORM set_config('request.jwt.claims', json_build_object('email', v_mem, 'role', 'authenticated')::text, true);
++        PERFORM set_config('role', 'authenticated', true);
++        BEGIN
++          INSERT INTO public.funding_events (department_id, title, date, start_time, end_time, location_label)
++            VALUES (public.my_department_id(), 'RETEST member fundraiser', current_date + 31, '18:00', '21:00', 'X');
++        EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++        BEGIN
++          INSERT INTO public.recruitment_events (department_id, title, date, start_time, end_time, location_label)
++            VALUES (public.my_department_id(), 'RETEST member community', current_date + 32, '09:30', '12:00', 'X');
++        EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++        UPDATE public.funding_events SET start_time = '17:00', location_label = 'X' WHERE id = v_f; GET DIAGNOSTICS u1 = ROW_COUNT;
++        UPDATE public.recruitment_events SET start_time = '10:00', location_label = 'X' WHERE id = v_r; GET DIAGNOSTICS u2 = ROW_COUNT;
++        PERFORM set_config('role', 'postgres', true);
++        IF e1 ILIKE '%row-level security%' AND e2 ILIKE '%row-level security%' AND u1 = 0 AND u2 = 0
++           AND EXISTS (SELECT 1 FROM public.funding_events WHERE id = v_f AND start_time IS NULL AND location_label IS NULL)
++           AND EXISTS (SELECT 1 FROM public.recruitment_events WHERE id = v_r AND start_time IS NULL AND location_label IS NULL)
++           AND NOT EXISTS (SELECT 1 FROM public.funding_events WHERE title = 'RETEST member fundraiser')
++           AND NOT EXISTS (SELECT 1 FROM public.recruitment_events WHERE title = 'RETEST member community') THEN
++          v_pass := v_pass + 1; rpt := rpt || format('   PASS  M1 plain member: both INSERTs refused by row-level security; both UPDATEs 0 rows; fixtures unchanged%s', chr(10));
++        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  M1 insert funding: %s · insert community: %s · update funding %s · update community %s%s', e1, e2, u1, u2, chr(10)); END IF;
++      END IF;
++      RAISE EXCEPTION 'SENTINEL';
++    EXCEPTION WHEN OTHERS THEN
++      IF SQLERRM <> 'SENTINEL' THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  run aborted: %s%s', SQLERRM, chr(10)); END IF;
++    END;
++  END LOOP;
++
++  RAISE EXCEPTION E'%\n---- % passed, % failed, % skipped ----\n(this exception IS the rollback — nothing was changed)', rpt, v_pass, v_fail, v_skip;
++END
++$retest$;
+
+# ===== PGlite dry run (mock: live column/default/constraint/index/policy shape from Step 0; my_department_rollup() rebuilt at md5 7b12e359) =====
+# rollup md5 in mock: 7b12e359bf7af9343565435658253a23
+# PRE-MIGRATION RETEST:
+# FAIL  S0 new columns 0/6 · 8 policies t
+# — Granbury Fire Station
+#    FAIL  run aborted: column "start_time" of relation "funding_events" does not exist
+# — Indian Harbor Volunteer Fire Department
+#    FAIL  run aborted: column "start_time" of relation "funding_events" does not exist
+# — North Hood County Volunteer Fire Department
+#    FAIL  run aborted: column "start_time" of relation "funding_events" does not exist
+# ---- 0 passed, 4 failed, 0 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# state: [{"funding_new_cols":3,"recruitment_new_cols":3,"nullable_new_cols":6,"event_policies":8,"rollup_md5_ok":true,"total_policies":8,"locked_token_fns":1}]
+# existing rows: [{"title":"Open house","start_time":null,"end_time":null,"location_label":null},{"title":"Pancake breakfast","start_time":null,"end_time":null,"location_label":null},{"title":"Raffle","start_time":null,"end_time":null,"location_label":null}]
+# re-run -> Precondition failed: funding_events already has start_time / end_time / location_label — already applied. Nothing changed.
+# AFTER THE MIGRATION:
+# PASS  S0 both tables carry start_time / end_time (time) + location_label (text), nullable; 8 policies unchanged in count
+# — Granbury Fire Station
+#    PASS  L-DA inserts a fundraiser + a community event with time range + location, and updates the two existing ones — all persisted
+#    SKIP  L-OF none here (unique email)
+#    SKIP  M1 no plain member here (unique email)
+# — Indian Harbor Volunteer Fire Department
+#    PASS  L-DA inserts a fundraiser + a community event with time range + location, and updates the two existing ones — all persisted
+#    PASS  L-OF inserts a fundraiser + a community event with time range + location, and updates the two existing ones — all persisted
+#    PASS  M1 plain member: both INSERTs refused by row-level security; both UPDATEs 0 rows; fixtures unchanged
+# — North Hood County Volunteer Fire Department
+#    PASS  L-DA inserts a fundraiser + a community event with time range + location, and updates the two existing ones — all persisted
+#    SKIP  L-OF none here (unique email)
+#    PASS  M1 plain member: both INSERTs refused by row-level security; both UPDATEs 0 rows; fixtures unchanged
+# ---- 7 passed, 0 failed, 3 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# mutations:
+#   (a) columns added to only one table
+#      REFUSED: Post-condition failed: the columns are not exactly the old set + start_time time, end_time time, location_label text (nullable, no default). Got:
+#   (a2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 new columns 3/6 · 8 policies t |    FAIL  run aborted: column "start_time" of relation "recruitment_events" does not exist |    FAIL  run aborted: column "start_time" of relation "recruitment_events" does not exist |    FAIL  run aborted: column "start_time" of relation "recruitment_events" does not exist | ---- 0 passed, 4 failed, 0 skipped ----
+#   (b) wrong type: end_time as text
+#      REFUSED: Post-condition failed: the columns are not exactly the old set + start_time time, end_time time, location_label text (nullable, no default). Got:
+#   (b2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 new columns 5/6 · 8 policies t | ---- 6 passed, 1 failed, 3 skipped ----
+#   (c) a NOT NULL slipped in (start_time time NOT NULL DEFAULT '00:00')
+#      REFUSED: Post-condition failed: the columns are not exactly the old set + start_time time, end_time time, location_label text (nullable, no default). Got:
+#   (c2) a default slipped in (location_label DEFAULT 'TBD')
+#      REFUSED: Post-condition failed: the columns are not exactly the old set + start_time time, end_time time, location_label text (nullable, no default). Got:
+#   (d) a policy changed in the block
+#      REFUSED: Post-condition failed: a policy changed.
+#   (e) my_department_rollup() altered in the block
+#      REFUSED: Post-condition failed: a public function changed.
+#   (f) the new columns locked down (table UPDATE revoked, re-granted on the old columns only)
+#      REFUSED: Post-condition failed: a table or column ACL, or RLS, changed on the two tables.
+#   (f2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST:    FAIL  run aborted: permission denied for table funding_events |    FAIL  run aborted: permission denied for table funding_events |    FAIL  run aborted: permission denied for table funding_events | ---- 1 passed, 3 failed, 0 skipped ----
+#   (g) an index added in the block
+#      REFUSED: Post-condition failed: a constraint, index or trigger on the two tables changed.
+#   (h) live policy drift before apply (INSERT gate loosened)
+#      REFUSED: Precondition failed: the funding_events policies are not the four Step 0 read. Found:
+#   (i) a partial earlier change (location_label already on recruitment_events)
+#      REFUSED: Precondition failed: recruitment_events has 1 of the three new columns — a partial earlier change. Nothing changed.
+#   (j) notes missing on funding_events
+#      REFUSED: Precondition failed: funding_events.notes (text) is missing — Step 0 found it on both tables. Nothing changed.
+#   (k) rollup not the G2-fixed version
+#      REFUSED: Precondition failed: my_department_rollup() is not the G2-fixed version (md5 7b12e359…). Nothing changed.

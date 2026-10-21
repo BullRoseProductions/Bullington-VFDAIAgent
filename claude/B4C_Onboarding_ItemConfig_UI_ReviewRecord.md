@@ -1,0 +1,26 @@
+# B4C — Review Record: Onboarding Item Config — UI slice
+
+**Verdict: PASS — safe to promote (after Ashlea's preview acceptance).** Reviewed by Claude (gate reviewer) 2026-10-20. UI commit `58dbce9`, `docs/review/onboarding_item_config_ui_DIFF.patch` (App.jsx +195/−9, plus a 90-line test). DB layer live (`fb9d9c9`, RETEST 16/0/2). Not promoted; Notify held back. Build order: [[B4C_Onboarding_ItemConfig_UI_BuildOrder]]. DB review: [[B4C_Onboarding_ItemConfig_DB_ReviewRecord]].
+
+**How I reviewed it:** read the full diff line by line, and independently verified the one seam the test doesn't cover — that `ProbationPath` threads `itemAction` to each `ProbItemRow`'s `action` (it does, line 21707), so the cadet's "Mark ready" button actually renders.
+
+## Verified against the build order
+- **Config writes go through the RPC only.** `setApproverConfig` calls `supabase.rpc("set_onboarding_item_config", …)` — never a direct `onboarding_items` update of the approver columns (which are RPC-only now). The two `onboarding_items` touches in the diff are `.select()` reads (loadItems + useProbItemConfig), extended to pull the new columns. `set_onboarding_item` / `toggle()` are untouched.
+- **No upload control anywhere.** The only new input is a **checkbox** ("I checked the required document in person"). No `type="file"`, attach, or camera. The test renders the actual config panel, member row, and sign-off control to markup and asserts no file input; a source-grep assertion backs it. Confirmed independently by grep on the added lines.
+- **Scoped disclaimer, not app-wide.** `OIC_DISCLAIMER` = "B4C doesn't store this document — an officer checks it in person and records the sign-off," shown only on doc items (config panel, member row, sign-off panel). The test asserts no app-wide "never store" claim appears.
+- **Honest state labels** driven off the path read's `state`: `approver_not_set` → "Approver not set" (muted), `awaiting_check` → "Awaiting officer check" (warn), `awaiting_approval` → "Awaiting approval · {person | tier}". Nothing reads done/ready unless it is.
+- **Cadet mark-ready:** `markReady` → `rpc("mark_onboarding_ready", { p_item_id })` — no member arg, own item; offered only on the member's own open manual items; it doesn't complete the item; a doc item shows the disclaimer. Rendered via the verified `itemAction` thread.
+- **Sign-off control + queue:** `OnbSignoffQueue` reads `onboarding_signoff_queue()`; the sign-off control renders only where `can_sign` is true, else "Waiting on {approver}"; empty queue hides the card. Signing → `sign_off_onboarding_item`; a doc item requires the checkbox before sending `p_doc_checked=true`. Shown on the officer screen and on a plain member's own page when they're someone's approver (the RPC scopes it server-side, so a non-approver sees nothing).
+- **Approver gating mirrors the DB** (`oicCanSign`: named person, tier by `access`, DA override; unconfigured = `canManage`) — display-only; the DB stays authoritative. Configured items route to the new sign-off; unconfigured items keep `toggle()`; never-self holds (`!isSelf` + the DB block).
+- **An inactive person approver is shown honestly** ("(not active — pick someone else)"), never silently swapped; the person list excludes Inactive and Project Admins.
+
+## Housekeeping
+- `verified` referenced nowhere new (0 added — grep + CC's audit). No new brand hex — the translucent fills reuse the existing palette's RGB (same as the current Sign-off button) and otherwise FIRE.*/FS.* tokens. eslint 0, build clean (CC). Gate audit 1515 → 1539 from the new code only.
+- The **test bundles the real `src/App.jsx`** with esbuild and exercises the actual components/functions (not a reimplementation): 22/22, 9/9 mutations caught (a file input, the doc tick not required, an app-wide storage claim, among them).
+
+## Minor notes (none gate-blocking)
+1. **Stale-approver + doc-toggle friction:** if a person approver has gone inactive and the DA toggles the document checkbox, the save re-sends the stale (inactive) approver and the DB refuses with its honest error — the DA must re-point the approver first. Rare, self-explanatory, not a hole. Optional: when stale, send the doc change with a tier fallback.
+2. **Mark-ready isn't offered while an item reads `approver_not_set`** (only on `open`) — acceptable: fix the routing first.
+
+## Promote (after this PASS)
+Ashlea's preview acceptance (real login): as a DA, configure an item with a person approver + a document check; as that cadet, mark it ready; as the approver, sign it with the in-person-check tick; confirm an unconfigured item is untouched and an unresolvable approver reads "Approver not set." Those are real writes on live data — undo after. Then it rides a **normal small web release, Notify Crew held back**; the served check must confirm the four RPC names (`set_onboarding_item_config`, `mark_onboarding_ready`, `sign_off_onboarding_item`, `onboarding_signoff_queue`) + the new strings ("Mark ready for sign-off", "I checked the required document in person", "B4C doesn't store this document", "Approver not set", "Awaiting officer check"), **no file-upload control** in the onboarding UI, and `POST /api/notify-session` still **404**. Then I flip the truth doc to mark it customer-live (web).

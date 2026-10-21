@@ -1,0 +1,80 @@
+# G2 — my_department_rollup(): live (md5 058316de…) -> fixed (md5 7b12e359…). Built by replace() on the live definition;
+# the post-condition enforces these five lines are the ONLY differences.
+--- my_department_rollup LIVE
++++ my_department_rollup FIXED
+@@ -59,10 +59,10 @@
+       (select count(*) from documents dc where dc.department_id = d.id
+                                           and dc.deleted_at is null and dc.archived_at is null
+                                           and (dc.content_text is null or btrim(dc.content_text) = '')) as documents_no_text_count,
+-      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\\d{4}-\\d{2}$'
++      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\d{4}-\d{2}$'
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+              - (extract(year from now())::int*12 + extract(month from now())::int) between 0 and 3) as expiring_certs_count,
+-      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\\d{4}-\\d{2}$'
++      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\d{4}-\d{2}$'
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+              - (extract(year from now())::int*12 + extract(month from now())::int) < 0) as expired_certs_count,
+       (select count(*) from duties du where du.department_id = d.id
+@@ -102,15 +102,15 @@
+       -- above, filtered to this member. The three buckets are disjoint, so a
+       -- cert is current, expiring, or expired, never two of them.
+       (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid
+-           and c.exp ~ '^\\d{4}-\\d{2}$'
++           and c.exp ~ '^\d{4}-\d{2}$'
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+              - (extract(year from now())::int*12 + extract(month from now())::int) > 3)::int as my_certs_current,
+       (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid
+-           and c.exp ~ '^\\d{4}-\\d{2}$'
++           and c.exp ~ '^\d{4}-\d{2}$'
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+              - (extract(year from now())::int*12 + extract(month from now())::int) between 0 and 3)::int as my_certs_expiring,
+       (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid
+-           and c.exp ~ '^\\d{4}-\\d{2}$'
++           and c.exp ~ '^\d{4}-\d{2}$'
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+              - (extract(year from now())::int*12 + extract(month from now())::int) < 0)::int as my_certs_expired,
+ 
+
+# ===== PGlite dry run (live body rebuilt byte-exact: md5 058316de matched) =====
+# ===== G2 my_department_rollup regex =====
+# PRE-FIX (live body as it is today):
+# FAIL  S0 single-backslash 0/5 · none doubled f
+# — B4C Demo Department
+#    FAIL  M1 current 0 · expiring 0 · expired 0 · can_manage f · dept expiring  · dept expired 
+#    FAIL  L1 can_manage t · expiring 0 (expected 1) · expired 0 (expected 1)
+# — Indian Harbor Volunteer Fire Department
+#    FAIL  M1 current 0 · expiring 0 · expired 0 · can_manage f · dept expiring  · dept expired 
+#    FAIL  L1 can_manage t · expiring 0 (expected 1) · expired 0 (expected 22)
+# ---- 0 passed, 5 failed, 0 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# state: [{"rollup_md5_ok":true,"doubled_left":0,"single_backslash":5,"total_policies":2,"locked_token_fns":1}]
+# re-run -> Precondition failed: my_department_rollup() already carries the single-backslash regex — already applied. Nothing changed.
+# grants kept: [{"proacl":"{postgres=X/postgres,authenticated=X/postgres}","prosecdef":true}]
+# AFTER THE FIX:
+# PASS  S0 all 5 cert regexes in my_department_rollup() are single-backslash; none doubled
+# — B4C Demo Department
+#    PASS  M1 member card counts current 1 · expiring 1 · expired 1 (blank uncounted); leadership counts still NULL
+#    PASS  L1 Department Admin: expiring 1 · expired 1 = the department's dated certs counted directly
+# — Indian Harbor Volunteer Fire Department
+#    PASS  M1 member card counts current 1 · expiring 1 · expired 1 (blank uncounted); leadership counts still NULL
+#    PASS  L1 Department Admin: expiring 1 · expired 22 = the department's dated certs counted directly
+# ---- 5 passed, 0 failed, 0 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# G2 mutations:
+#   (a) only the first regex fixed (4 left doubled)
+#      REFUSED: Post-condition failed: my_department_rollup() differs from the live body by more than the five regex literals.
+#   (b) something else in the body changed too (expiring window 0..3 -> 0..4)
+#      REFUSED: Post-condition failed: my_department_rollup() differs from the live body by more than the five regex literals.
+#   (b2) same, all post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST:    FAIL  M1 current 1 · expiring 0 · expired 1 · can_manage f · dept expiring  · dept expired  |    FAIL  M1 current 1 · expiring 0 · expired 1 · can_manage f · dept expiring  · dept expired  | ---- 3 passed, 2 failed, 0 skipped ----
+#   (c) the fix not applied at all, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 single-backslash 0/5 · none doubled f |    FAIL  M1 current 0 · expiring 0 · expired 0 · can_manage f · dept expiring  · dept expired  |    FAIL  L1 can_manage t · expiring 0 (expected 1) · expired 0 (expected 1) |    FAIL  M1 current 0 · expiring 0 · expired 0 · can_manage f · dept expiring  · dept expired  |    FAIL  L1 can_manage t · expiring 0 (expected 1) · expired 0 (expected 22) | ---- 0 passed, 5 failed, 0 skipped ----
+#   (d) another function changed in the block
+#      REFUSED: Post-condition failed: another public function changed.
+#   (e) the EXECUTE grant widened in the block
+#      REFUSED: Post-condition failed: owner, SECURITY DEFINER, volatility, search_path, EXECUTE grants or the return shape changed.
+#   (f) live rollup drifted since Step 0b
+#      REFUSED: Precondition failed: my_department_rollup() is not the Step 0b version (md5 8ea16272b8aff587c61bd67a4d8ce0c0, expected 058316de…). Nothing changed.
+# 

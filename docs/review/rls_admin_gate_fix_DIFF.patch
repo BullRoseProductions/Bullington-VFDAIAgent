@@ -1,0 +1,526 @@
+diff --git a/docs/review/rls_admin_gate_fix_DRYRUN.txt b/docs/review/rls_admin_gate_fix_DRYRUN.txt
+new file mode 100644
+index 0000000..0d45d60
+--- /dev/null
++++ b/docs/review/rls_admin_gate_fix_DRYRUN.txt
+@@ -0,0 +1,66 @@
++# PGlite dry run — sql/rls_admin_gate_fix_DRAFT.sql + sql/rls_admin_gate_fix_RETEST.sql (2026-10-20)
++# Harness: docs/review/rls_admin_gate_fix_dryrun_harness.mjs. Mock = the live shape from Step 0 / 0c / A: my_department_id(),
++# is_dept_admin() (department-scoped), is_department_admin() (not), is_leader() bodies as read on live; the four target policies
++# with their exact Step 0c expressions; unrelated policies for the snapshot. Alpha + Bravo each have a DA, a plain member and
++# a Project Admin (Pat, PA on both rows); Ada (DA of Alpha) / Bob (DA of Bravo) are the 'DA of another department'.
++# First block = the RETEST against the PRE-FIX policies (the regression-catch: X1 shows the multi-dept admin writes 1/1/1/1;
++# the X2/X3 0s there are downstream — Ada already deleted the fixture announcement).
++
++PRE-FIX (live policies as they are today):
++FAIL  S0 still role-anywhere: announcements.d,announcements.w,departments.w,duty_log.w; scoped: 0/4
++— Alpha
++   FAIL  X1 active t old t new f ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
++   FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
++   FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
++   PASS  P1 1 Project Admin(s) with a row here still update the department
++— Bravo
++   FAIL  X1 active t old t new f ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
++   FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
++   FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
++   PASS  P1 1 Project Admin(s) with a row here still update the department
++— Charlie (empty)
++   SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA none, member none, other-dept DA ada@a)
++---- 2 passed, 7 failed, 1 skipped ----
++(this exception IS the rollback — nothing was changed)
++
++state: [{"fixed":4,"role_anywhere_left":0,"total_policies":9,"locked_token_fns":0}] · policies before 9
++re-run -> Precondition failed: "author or dept admin update announcements" on announcements is already fixed — already applied. Nothing changed.
++AFTER THE FIX:
++PASS  S0 all 4 policies use the department-scoped is_dept_admin(); none uses is_department_admin()
++— Alpha
++   PASS  X1 DA-elsewhere / plain member here: the pre-fix gate would have let them in; now announcements U/D, departments U, duty_log U all refused (0 rows)
++   PASS  X2 the real DA: announcements U + D, departments U, duty_log U all allowed; another department's row still refused
++   PASS  X3 the author edits their own announcement; a plain member can't touch departments or duty_log
++   PASS  P1 1 Project Admin(s) with a row here still update the department
++— Bravo
++   PASS  X1 DA-elsewhere / plain member here: the pre-fix gate would have let them in; now announcements U/D, departments U, duty_log U all refused (0 rows)
++   PASS  X2 the real DA: announcements U + D, departments U, duty_log U all allowed; another department's row still refused
++   PASS  X3 the author edits their own announcement; a plain member can't touch departments or duty_log
++   PASS  P1 1 Project Admin(s) with a row here still update the department
++— Charlie (empty)
++   SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA none, member none, other-dept DA ada@a)
++---- 9 passed, 0 failed, 1 skipped ----
++(this exception IS the rollback — nothing was changed)
++
++mutations:
++(a) is_dept_admin() made global (the stale schema.sql body) — the swap would not close the gap -> migration Precondition failed: is_dept_admin() is not the department-scoped body this fix relies on. Nothing changed.
++(a2) same, with both pins removed — the RETEST must still catch it ->    FAIL  X1 active t old t new t ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
++      |    FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
++      |    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
++      |    FAIL  X1 active t old t new t ann-upd 1 dept-upd 1 dlog-upd 1 ann-del 1
++      |    FAIL  X2 real DA ann-upd 0 dept-upd 1 dlog-upd 1 ann-del 0 other-dept-upd 0
++      |    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
++      | ---- 3 passed, 6 failed, 1 skipped ----
++(b) the department predicate dropped on departments -> migration Post-condition failed: "DA can update own department" on departments reads USING is_department_admin()
++      | CHECK is_department_admin() (expected the department-scoped gate).
++(b2) same, post-condition aligned — the RETEST must still catch it -> FAIL  S0 still role-anywhere: departments.w; scoped: 3/4
++      |    FAIL  X1 active t old t new f ann-upd 0 dept-upd 1 dlog-upd 0 ann-del 0
++      |    FAIL  X1 active t old t new f ann-upd 0 dept-upd 1 dlog-upd 0 ann-del 0
++      | ---- 6 passed, 3 failed, 1 skipped ----
++(c) another policy changed in the same block -> migration Post-condition failed: another policy changed.
++(d) duty_log left on the role-anywhere gate (one swap missed) -> migration Post-condition failed: "dept admins edit duty_log" on duty_log reads USING (is_department_admin() AND (department_id = my_department_id()))
++      | CHECK (is_department_admin() AND (department_id = my_department_id())) (expected the department-scoped gate).
++(e) a Project Admin with a plain-member row (the PA-branch case) -> migration Precondition failed: a Project Admin has a department row without PA access — the plain swap on departments would cut their reach there. Apply the PA-branch variant instead. Nothing changed.
++(f) the author branch dropped from announcements UPDATE ->    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
++      |    FAIL  X3 author ann-upd 0 dept-upd 0 dlog-upd 0
++      | ---- 7 passed, 2 failed, 1 skipped ----
+diff --git a/docs/review/rls_admin_gate_fix_dryrun_harness.mjs b/docs/review/rls_admin_gate_fix_dryrun_harness.mjs
+new file mode 100644
+index 0000000..fb40675
+--- /dev/null
++++ b/docs/review/rls_admin_gate_fix_dryrun_harness.mjs
+@@ -0,0 +1,92 @@
++import { PGlite } from "@electric-sql/pglite";
++import { readFileSync } from "fs";
++const R = "/Users/ashleabullington/projects/Bullington-VFDAIAgent/sql/";
++const mig = readFileSync(R + "rls_admin_gate_fix_DRAFT.sql", "utf8"), ret = readFileSync(R + "rls_admin_gate_fix_RETEST.sql", "utf8");
++const A = "00000000-0000-0000-0000-00000000000a", B = "00000000-0000-0000-0000-00000000000b", C = "00000000-0000-0000-0000-00000000000c";
++// The live shape (Step 0 / 0c / A): my_department_id / is_dept_admin / is_department_admin / is_leader bodies as read on
++// live; the four target policies with their exact Step 0c expressions; a few unrelated policies (the snapshot).
++const mock = `
++CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE SCHEMA auth;
++CREATE FUNCTION auth.email() RETURNS text LANGUAGE sql STABLE AS $$ select (nullif(current_setting('request.jwt.claims', true), '')::json)->>'email' $$;
++GRANT USAGE ON SCHEMA auth, public TO anon, authenticated;
++ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
++CREATE TABLE departments (id uuid PRIMARY KEY, name text);
++CREATE TABLE members (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), department_id uuid, email text, name text, access text[], status text DEFAULT 'Active');
++CREATE TABLE member_active_department (email text PRIMARY KEY, department_id uuid, updated_at timestamptz DEFAULT now());
++CREATE TABLE announcements (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), department_id uuid NOT NULL, author_id uuid, title text, body text NOT NULL, audience text NOT NULL DEFAULT 'everyone', created_at timestamptz NOT NULL DEFAULT now());
++CREATE TABLE duty_log (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), department_id uuid NOT NULL, duty_name text, created_at timestamptz NOT NULL DEFAULT now());
++CREATE FUNCTION public.my_department_id() RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
++  select coalesce(
++    ( select mad.department_id from public.member_active_department mad where mad.email = lower(auth.email())
++        and exists ( select 1 from public.members m where lower(m.email) = lower(auth.email()) and m.status in ('Active','Probationary') and m.department_id = mad.department_id ) ),
++    ( select m.department_id from public.members m where lower(m.email) = lower(auth.email()) and m.status in ('Active','Probationary') order by m.department_id limit 1 ) );
++$$;
++CREATE FUNCTION public.my_member_id() RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
++  select id from public.members where lower(email) = lower(auth.email()) and status in ('Active','Probationary') and department_id = public.my_department_id() limit 1;
++$$;
++CREATE FUNCTION public.is_dept_admin() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
++  select exists (
++    select 1 from public.members
++    where lower(members.email) = lower(auth.email())
++      and members.status in ('Active','Probationary')
++      and members.department_id = public.my_department_id()
++      and members.access && array['Project Admin','Department Admin']::text[]
++  );
++$$;
++CREATE FUNCTION public.is_department_admin() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
++  select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.access && array['Department Admin','Project Admin']::text[] );
++$$;
++CREATE FUNCTION public.is_leader() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
++  select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.department_id = public.my_department_id() and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[] );
++$$;
++CREATE FUNCTION public.is_announcer() RETURNS boolean LANGUAGE sql STABLE AS $$ select true $$;
++ALTER TABLE departments ENABLE ROW LEVEL SECURITY; ALTER TABLE announcements ENABLE ROW LEVEL SECURITY; ALTER TABLE duty_log ENABLE ROW LEVEL SECURITY; ALTER TABLE members ENABLE ROW LEVEL SECURITY;
++CREATE POLICY "read members" ON members FOR SELECT TO authenticated USING (department_id = my_department_id());
++CREATE POLICY "members read own department" ON departments FOR SELECT TO authenticated USING (id = my_department_id());
++CREATE POLICY "DA can update own department" ON departments FOR UPDATE TO authenticated USING ((id = my_department_id()) AND is_department_admin()) WITH CHECK ((id = my_department_id()) AND is_department_admin());
++CREATE POLICY "read announcements" ON announcements FOR SELECT TO authenticated USING (department_id = my_department_id());
++CREATE POLICY "announcers post" ON announcements FOR INSERT TO authenticated WITH CHECK ((department_id = my_department_id()) AND (author_id = my_member_id()) AND is_announcer());
++CREATE POLICY "author or dept admin update announcements" ON announcements FOR UPDATE TO authenticated
++  USING ((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()))
++  WITH CHECK ((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()));
++CREATE POLICY "author or dept admin delete announcements" ON announcements FOR DELETE TO authenticated
++  USING ((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()));
++CREATE POLICY "read duty_log" ON duty_log FOR SELECT TO authenticated USING (department_id = my_department_id());
++CREATE POLICY "dept admins edit duty_log" ON duty_log FOR UPDATE TO authenticated
++  USING (is_department_admin() AND (department_id = my_department_id())) WITH CHECK (is_department_admin() AND (department_id = my_department_id()));
++INSERT INTO departments VALUES ('${A}','Alpha'),('${B}','Bravo'),('${C}','Charlie (empty)');
++INSERT INTO members (department_id,email,name,access,status) VALUES
++ ('${A}','ada@a','Ada DA-of-A','{Department Admin}','Active'),('${A}','off@a','A Officer','{Officer}','Active'),('${A}','m1@a','A Member','{Member}','Active'),
++ ('${B}','bob@b','Bob DA-of-B','{Department Admin}','Active'),('${B}','cal@b','Cal member','{Member}','Active'),('${B}','pa@x','Pat PA','{Project Admin}','Active'),
++ ('${A}','pa@x','Pat PA','{Project Admin}','Active');
++`;
++const show = (e) => e.message.split("\n").filter((l) => /PASS|FAIL|SKIP|passed|—/.test(l)).join("\n");
++const brief = (e) => e.message.split("\n").filter((l) => /FAIL|passed/.test(l)).join(" | ");
++const LIVE_GATES = "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO \'public\'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in (\'Active\',\'Probationary\')\n      and members.department_id = public.my_department_id()\n      and members.access && array[\'Project Admin\',\'Department Admin\']::text[]\n  );\n$function$\n;\nCREATE OR REPLACE FUNCTION public.is_department_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO \'public\'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in (\'Active\',\'Probationary\')\n      and members.access && array[\'Department Admin\',\'Project Admin\']::text[]\n  );\n$function$\n;\n";
++async function base(extra = "") { const d = new PGlite(); await d.exec(mock); await d.exec(LIVE_GATES); if (extra) await d.exec(extra); return d; }
++// 0. the REGRESSION-CATCH: the RETEST on the PRE-FIX policies — the multi-dept admin gets through
++{ const d = await base(); try { await d.exec(ret); } catch (e) { console.log("PRE-FIX (live policies as they are today):\n" + show(e)); } }
++// 1. the fix
++const d = await base();
++const pre = (await d.query("select count(*)::int n from pg_policies where schemaname='public'")).rows[0].n;
++console.log("\nstate:", JSON.stringify((await d.exec(mig)).at(-1).rows), "· policies before", pre);
++try { await d.exec(mig); } catch (e) { console.log("re-run ->", e.message.split("\n")[0]); }
++try { await d.exec(ret); } catch (e) { console.log("AFTER THE FIX:\n" + show(e)); }
++// 2. mutations
++const sub = (a, b, s = mig) => { if (!s.includes(a)) throw new Error("anchor missing: " + a.slice(0, 80)); return s.replace(a, () => b); };
++console.log("\nmutations:");
++for (const [l, m, extra] of [
++  ["(a) is_dept_admin() made global (the stale schema.sql body) — the swap would not close the gap", mig, "CREATE OR REPLACE FUNCTION public.is_dept_admin() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$ select exists (select 1 from public.members where lower(members.email) = lower(auth.email()) and members.access && array['Project Admin','Department Admin']::text[]) $$;"],
++  ["(a2) same, with both pins removed — the RETEST must still catch it", sub("  IF btrim(regexp_replace(substring(pg_get_functiondef('public.is_dept_admin()'::regprocedure)", "  IF false AND btrim(regexp_replace(substring(pg_get_functiondef('public.is_dept_admin()'::regprocedure)").replace("  IF md5(pg_get_functiondef('public.is_dept_admin()'::regprocedure)) <> 'c692e44f62923d2bf4c1a39a21a87bf7' THEN", "  IF false THEN"), "CREATE OR REPLACE FUNCTION public.is_dept_admin() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$ select exists (select 1 from public.members where lower(members.email) = lower(auth.email()) and members.access && array['Project Admin','Department Admin']::text[]) $$;"],
++  ["(b) the department predicate dropped on departments", sub("  ALTER POLICY \"DA can update own department\" ON public.departments\n    USING ((id = public.my_department_id()) AND public.is_dept_admin())\n    WITH CHECK ((id = public.my_department_id()) AND public.is_dept_admin());", "  ALTER POLICY \"DA can update own department\" ON public.departments\n    USING (public.is_department_admin())\n    WITH CHECK (public.is_department_admin());")],
++  ["(b2) same, post-condition aligned — the RETEST must still catch it", sub("  ALTER POLICY \"DA can update own department\" ON public.departments\n    USING ((id = public.my_department_id()) AND public.is_dept_admin())\n    WITH CHECK ((id = public.my_department_id()) AND public.is_dept_admin());", "  ALTER POLICY \"DA can update own department\" ON public.departments\n    USING (public.is_department_admin())\n    WITH CHECK (public.is_department_admin());").replaceAll("'((id = my_department_id()) AND is_dept_admin())'", "'is_department_admin()'").replace("    IF position('is_department_admin' in coalesce(v_q, '') || coalesce(v_c, '')) > 0 THEN", "    IF false THEN")],
++  ["(c) another policy changed in the same block", sub("  -- ---------------------------------------------------------------- post-conditions\n", "  ALTER POLICY \"read duty_log\" ON public.duty_log USING (true);\n  -- ---------------------------------------------------------------- post-conditions\n")],
++  ["(d) duty_log left on the role-anywhere gate (one swap missed)", sub("  ALTER POLICY \"dept admins edit duty_log\" ON public.duty_log\n    USING (public.is_dept_admin() AND (department_id = public.my_department_id()))\n    WITH CHECK (public.is_dept_admin() AND (department_id = public.my_department_id()));\n", "")],
++  ["(e) a Project Admin with a plain-member row (the PA-branch case)", mig, "INSERT INTO members (department_id,email,name,access,status) VALUES ('" + C + "','pa@x','Pat PA','{Member}','Active');"],
++  ["(f) the author branch dropped from announcements UPDATE", sub("  ALTER POLICY \"author or dept admin update announcements\" ON public.announcements\n    USING ((department_id = public.my_department_id()) AND ((author_id = public.my_member_id()) OR public.is_dept_admin()))\n    WITH CHECK ((department_id = public.my_department_id()) AND ((author_id = public.my_member_id()) OR public.is_dept_admin()));",
++     "  ALTER POLICY \"author or dept admin update announcements\" ON public.announcements\n    USING ((department_id = public.my_department_id()) AND public.is_dept_admin())\n    WITH CHECK ((department_id = public.my_department_id()) AND public.is_dept_admin());").replaceAll("'((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_dept_admin()))',\n          '((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_dept_admin()))'],", "'((department_id = my_department_id()) AND is_dept_admin())',\n          '((department_id = my_department_id()) AND is_dept_admin())'],")],
++]) {
++  const x = await base(extra);
++  try { await x.exec(m); try { await x.exec(ret); console.log(l, "-> NOT CAUGHT"); } catch (e) { console.log(l, "->", brief(e) || e.message.split("\n")[0]); } }
++  catch (e) { console.log(l, "-> migration", e.message.split("\n")[0]); }
++}
+diff --git a/sql/rls_admin_gate_fix_DRAFT.sql b/sql/rls_admin_gate_fix_DRAFT.sql
+new file mode 100644
+index 0000000..5382fb8
+--- /dev/null
++++ b/sql/rls_admin_gate_fix_DRAFT.sql
+@@ -0,0 +1,140 @@
++-- =====================================================================
++-- RLS ADMIN-GATE FIX (punch-list P1 #3a) — DRAFT — UNREVIEWED, NOT APPLIED.
++-- Order: claude/B4C_RLS_AdminGate_Fix_BuildOrder.md. Off the live Step 0 / 0c (ff374b7) and Steps A/B (live 2026-10-20,
++-- docs/review/rls_admin_gate_STEP_AB_OUTPUT.md): is_dept_admin() department-scoped (md5 c692e44f…); the four policy
++-- expressions exactly as pinned below; PA cross-department writes all go through pa_* RPCs (pa_create_department,
++-- pa_set_disabled_modules, pa_set_geofence_enabled); both Project Admins hold PA access on their only department row
++-- -> the PLAIN swap on departments; blast radius today 0 (no one is an admin in one department and a plain member of
++-- another) — the gap is latent, closed before anyone can use it.
++--
++-- THE GAP: four write policies scope the ROW to the caller's current department but take the ADMIN ROLE from
++-- is_department_admin(), which is true for a DA / PA of ANY department. A DA of dept A who is a plain member of dept B
++-- can, with B active, write B's announcements (UPDATE / DELETE), B's departments row (UPDATE) and B's duty_log (UPDATE).
++--
++-- THE FIX: in each of the four, the is_department_admin() token becomes is_dept_admin() — department-scoped on live
++-- (its body filters members.department_id = my_department_id(), roles exactly {Project Admin, Department Admin};
++-- re-pinned below, so this refuses if that ever drifts). Everything else in each policy — the department predicate,
++-- the announcements author branch, the policy name, command and roles — is unchanged (ALTER POLICY keeps the roles).
++--
++-- departments: the PLAIN SWAP (no PA branch) — it changes no Project Admin's behaviour ONLY IF every PA holds PA
++-- access on each of their department rows (Step B2). That rule is a hard precondition here: if any PA has a row
++-- without PA access, this refuses and the PA branch ((id = my_department_id() AND is_dept_admin()) OR
++-- is_project_admin()) is the one to apply instead. PA cross-department settings already go through pa_* RPCs.
++--
++-- Single all-or-nothing DO block; refuses a second apply (the old expressions must be present exactly). Every other
++-- policy byte-identical; total_policies 169 and the locked-token function count 17 unchanged; RLS + client grants on
++-- the three tables unchanged. The locked verification column is never touched. State check at the end.
++-- =====================================================================
++DO $migrate$
++DECLARE
++  -- the live is_dept_admin() body (Step 0 2026-10-19; Step A 2026-10-20, md5 c692e44f…), whitespace-normalised — the
++  -- md5 pin below catches ANY drift; this text pin says which part matters (members.department_id = my_department_id())
++  DA_BODY constant text := 'select exists ( select 1 from public.members where lower(members.email) = lower(auth.email()) and members.status in (''Active'',''Probationary'') and members.department_id = public.my_department_id() and members.access && array[''Project Admin'',''Department Admin'']::text[] );';
++  -- the four policies: table, name, cmd, USING before, CHECK before (NULL = none), USING after, CHECK after
++  T text[][] := array[
++    array['announcements', 'author or dept admin update announcements', 'w',
++          '((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()))',
++          '((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()))',
++          '((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_dept_admin()))',
++          '((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_dept_admin()))'],
++    array['announcements', 'author or dept admin delete announcements', 'd',
++          '((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()))', NULL,
++          '((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_dept_admin()))', NULL],
++    array['departments', 'DA can update own department', 'w',
++          '((id = my_department_id()) AND is_department_admin())',
++          '((id = my_department_id()) AND is_department_admin())',
++          '((id = my_department_id()) AND is_dept_admin())',
++          '((id = my_department_id()) AND is_dept_admin())'],
++    array['duty_log', 'dept admins edit duty_log', 'w',
++          '(is_department_admin() AND (department_id = my_department_id()))',
++          '(is_department_admin() AND (department_id = my_department_id()))',
++          '(is_dept_admin() AND (department_id = my_department_id()))',
++          '(is_dept_admin() AND (department_id = my_department_id()))']];
++  i int; v_q text; v_c text; v_pol_before text; v_pol_after text; v_total_before int; v_tok_before int;
++  v_grants_before text; v_grants_after text;
++BEGIN
++  -- ---------------------------------------------------------------- preconditions
++  IF btrim(regexp_replace(substring(pg_get_functiondef('public.is_dept_admin()'::regprocedure) from 'AS \$[a-z]*\$(.*)\$[a-z]*\$'), '\s+', ' ', 'g')) <> DA_BODY THEN
++    RAISE EXCEPTION 'Precondition failed: is_dept_admin() is not the department-scoped body this fix relies on. Nothing changed.';
++  END IF;
++  IF md5(pg_get_functiondef('public.is_dept_admin()'::regprocedure)) <> 'c692e44f62923d2bf4c1a39a21a87bf7' THEN
++    RAISE EXCEPTION 'Precondition failed: is_dept_admin() is not the Step A version (md5 c692e44f…). Nothing changed.';
++  END IF;
++  IF to_regprocedure('public.is_department_admin()') IS NULL OR to_regprocedure('public.my_department_id()') IS NULL OR to_regprocedure('public.my_member_id()') IS NULL THEN
++    RAISE EXCEPTION 'Precondition failed: a helper is missing. Nothing changed.';
++  END IF;
++  FOR i IN 1 .. array_length(T, 1) LOOP
++    SELECT pg_get_expr(p.polqual, p.polrelid), pg_get_expr(p.polwithcheck, p.polrelid) INTO v_q, v_c
++      FROM pg_policy p WHERE p.polrelid = ('public.' || T[i][1])::regclass AND p.polname = T[i][2] AND p.polcmd = T[i][3]::"char";
++    IF NOT FOUND THEN RAISE EXCEPTION 'Precondition failed: policy "%" on % is missing. Nothing changed.', T[i][2], T[i][1]; END IF;
++    IF v_q IS NOT DISTINCT FROM T[i][6] AND v_c IS NOT DISTINCT FROM T[i][7] THEN
++      RAISE EXCEPTION 'Precondition failed: "%" on % is already fixed — already applied. Nothing changed.', T[i][2], T[i][1];
++    END IF;
++    IF v_q IS DISTINCT FROM T[i][4] OR v_c IS DISTINCT FROM T[i][5] THEN
++      RAISE EXCEPTION 'Precondition failed: "%" on % is not the Step 0c expression (found USING % | CHECK %). Nothing changed.', T[i][2], T[i][1], v_q, v_c;
++    END IF;
++  END LOOP;
++  -- departments takes the plain swap only if no Project Admin is a plain member anywhere (Step B2's rule)
++  IF EXISTS (SELECT 1 FROM public.members m
++              WHERE lower(m.email) IN (SELECT lower(x.email) FROM public.members x WHERE x.email IS NOT NULL AND x.access && array['Project Admin']::text[])
++                AND NOT coalesce(m.access && array['Project Admin']::text[], false)) THEN
++    RAISE EXCEPTION 'Precondition failed: a Project Admin has a department row without PA access — the plain swap on departments would cut their reach there. Apply the PA-branch variant instead. Nothing changed.';
++  END IF;
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_before FROM pg_policies
++   WHERE schemaname = 'public' AND NOT (tablename, policyname) IN (SELECT T[k][1], T[k][2] FROM generate_subscripts(T, 1) k);
++  SELECT count(*) INTO v_total_before FROM pg_policies WHERE schemaname = 'public';
++  SELECT count(*) INTO v_tok_before FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0;
++  SELECT string_agg(tb || ':' || has_table_privilege('authenticated', 'public.' || tb, 'INSERT')::text || has_table_privilege('authenticated', 'public.' || tb, 'UPDATE')::text
++                    || has_table_privilege('authenticated', 'public.' || tb, 'DELETE')::text || (SELECT relrowsecurity::text FROM pg_class WHERE oid = ('public.' || tb)::regclass), ',' ORDER BY tb)
++    INTO v_grants_before FROM unnest(array['announcements', 'departments', 'duty_log']) tb;
++
++  -- ---------------------------------------------------------------- the change (role half only)
++  ALTER POLICY "author or dept admin update announcements" ON public.announcements
++    USING ((department_id = public.my_department_id()) AND ((author_id = public.my_member_id()) OR public.is_dept_admin()))
++    WITH CHECK ((department_id = public.my_department_id()) AND ((author_id = public.my_member_id()) OR public.is_dept_admin()));
++  ALTER POLICY "author or dept admin delete announcements" ON public.announcements
++    USING ((department_id = public.my_department_id()) AND ((author_id = public.my_member_id()) OR public.is_dept_admin()));
++  ALTER POLICY "DA can update own department" ON public.departments
++    USING ((id = public.my_department_id()) AND public.is_dept_admin())
++    WITH CHECK ((id = public.my_department_id()) AND public.is_dept_admin());
++  ALTER POLICY "dept admins edit duty_log" ON public.duty_log
++    USING (public.is_dept_admin() AND (department_id = public.my_department_id()))
++    WITH CHECK (public.is_dept_admin() AND (department_id = public.my_department_id()));
++
++  -- ---------------------------------------------------------------- post-conditions
++  FOR i IN 1 .. array_length(T, 1) LOOP
++    SELECT pg_get_expr(p.polqual, p.polrelid), pg_get_expr(p.polwithcheck, p.polrelid) INTO v_q, v_c
++      FROM pg_policy p WHERE p.polrelid = ('public.' || T[i][1])::regclass AND p.polname = T[i][2] AND p.polcmd = T[i][3]::"char";
++    IF v_q IS DISTINCT FROM T[i][6] OR v_c IS DISTINCT FROM T[i][7] THEN
++      RAISE EXCEPTION 'Post-condition failed: "%" on % reads USING % | CHECK % (expected the department-scoped gate).', T[i][2], T[i][1], v_q, v_c;
++    END IF;
++    IF position('is_department_admin' in coalesce(v_q, '') || coalesce(v_c, '')) > 0 THEN
++      RAISE EXCEPTION 'Post-condition failed: "%" still uses the role-anywhere gate.', T[i][2];
++    END IF;
++  END LOOP;
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_after FROM pg_policies
++   WHERE schemaname = 'public' AND NOT (tablename, policyname) IN (SELECT T[k][1], T[k][2] FROM generate_subscripts(T, 1) k);
++  IF v_pol_after IS DISTINCT FROM v_pol_before THEN RAISE EXCEPTION 'Post-condition failed: another policy changed.'; END IF;
++  IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') <> v_total_before THEN RAISE EXCEPTION 'Post-condition failed: the policy count changed.'; END IF;
++  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) <> v_tok_before THEN
++    RAISE EXCEPTION 'Post-condition failed: the locked verification token count changed.';
++  END IF;
++  SELECT string_agg(tb || ':' || has_table_privilege('authenticated', 'public.' || tb, 'INSERT')::text || has_table_privilege('authenticated', 'public.' || tb, 'UPDATE')::text
++                    || has_table_privilege('authenticated', 'public.' || tb, 'DELETE')::text || (SELECT relrowsecurity::text FROM pg_class WHERE oid = ('public.' || tb)::regclass), ',' ORDER BY tb)
++    INTO v_grants_after FROM unnest(array['announcements', 'departments', 'duty_log']) tb;
++  IF v_grants_after IS DISTINCT FROM v_grants_before THEN RAISE EXCEPTION 'Post-condition failed: RLS or a client grant changed on the three tables.'; END IF;
++END
++$migrate$;
++
++NOTIFY pgrst, 'reload schema';
++
++-- state check (expect: fixed 4 · role_anywhere_left 0 · total_policies 169 · locked-token fns 17)
++SELECT
++  (SELECT count(*) FROM pg_policy p WHERE p.polrelid IN ('public.announcements'::regclass, 'public.departments'::regclass, 'public.duty_log'::regclass)
++     AND p.polcmd IN ('w', 'd') AND coalesce(pg_get_expr(p.polqual, p.polrelid), '') ~ 'is_dept_admin\(\)') AS fixed,
++  (SELECT count(*) FROM pg_policy p WHERE p.polrelid IN ('public.announcements'::regclass, 'public.departments'::regclass, 'public.duty_log'::regclass)
++     AND p.polcmd IN ('w', 'd') AND (coalesce(pg_get_expr(p.polqual, p.polrelid), '') || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '')) ~ 'is_department_admin') AS role_anywhere_left,
++  (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') AS total_policies,
++  (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) AS locked_token_fns;
+diff --git a/sql/rls_admin_gate_fix_RETEST.sql b/sql/rls_admin_gate_fix_RETEST.sql
+new file mode 100644
+index 0000000..4a0be9f
+--- /dev/null
++++ b/sql/rls_admin_gate_fix_RETEST.sql
+@@ -0,0 +1,119 @@
++-- =====================================================================
++-- RETEST for rls_admin_gate_fix (DRAFT — run AFTER the migration, separately). NOTHING CHANGES: each department's
++-- checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on FIXTURES it creates itself — a
++-- multi-department admin (a real DA of ANOTHER department, given a plain-member row here and this department as their
++-- active one), a fixture announcement (authored by a plain member here) and a fixture duty_log row. The final RAISE is
++-- the report. The "ERROR" IS the report. Writes are measured by ROW_COUNT (RLS filters a refused UPDATE / DELETE to
++-- 0 rows rather than raising).
++--   S0 (once) the four policies read the department-scoped gate; none still uses is_department_admin()
++-- Per department B (needs a real DA of B, a plain member of B and a DA of another department, all unique emails):
++--   X1 the multi-dept admin (DA elsewhere, plain member here, B active): the PRE-FIX predicate would have let them in
++--      (is_department_admin() true, department matches) — the regression-catch — and now every write is refused:
++--      announcements UPDATE 0 · announcements DELETE 0 · departments UPDATE 0 · duty_log UPDATE 0
++--   X2 the real DA of B: announcements UPDATE 1 · departments UPDATE 1 · duty_log UPDATE 1 · announcements DELETE 1;
++--      and another department's departments row 0 (cross-department stays shut)
++--   X3 the plain member who authored the announcement: edits their own (1); departments 0; duty_log 0
++--   P1 each Project Admin with a row in B (B active): departments UPDATE 1 (the plain swap kept their reach)
++-- =====================================================================
++DO $retest$
++DECLARE
++  rec record; pa record; v_ok boolean; v_t text; v_n int; v_old boolean; v_new boolean; v_md uuid; v_mm uuid;
++  v_bob text; v_cal text; v_cal_id uuid; v_ada text; v_ada_home uuid; v_ann uuid; v_dl uuid;
++  u1 int; u2 int; u3 int; u4 int; b1 int; b2 int; b3 int; b4 int; b5 int; c1 int; c2 int; c3 int;
++  rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
++BEGIN
++  -- S0
++  SELECT string_agg(c.relname || '.' || p.polcmd::text, ',' ORDER BY c.relname, p.polcmd) INTO v_t
++    FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
++   WHERE c.relname IN ('announcements', 'departments', 'duty_log') AND c.relnamespace = 'public'::regnamespace AND p.polcmd IN ('w', 'd')
++     AND (coalesce(pg_get_expr(p.polqual, p.polrelid), '') || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '')) ~ 'is_department_admin';
++  SELECT count(*) INTO v_n FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
++   WHERE c.relname IN ('announcements', 'departments', 'duty_log') AND c.relnamespace = 'public'::regnamespace AND p.polcmd IN ('w', 'd')
++     AND coalesce(pg_get_expr(p.polqual, p.polrelid), '') ~ 'is_dept_admin\(\)';
++  IF v_t IS NULL AND v_n = 4 THEN v_pass := v_pass + 1; rpt := rpt || format('PASS  S0 all 4 policies use the department-scoped is_dept_admin(); none uses is_department_admin()%s', chr(10));
++  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  S0 still role-anywhere: %s; scoped: %s/4%s', coalesce(v_t, 'none'), v_n, chr(10)); END IF;
++
++  FOR rec IN SELECT d.id AS dept_id, d.name AS dept FROM public.departments d ORDER BY d.name LOOP
++    rpt := rpt || format('— %s%s', rec.dept, chr(10));
++    v_bob := NULL; v_cal := NULL; v_cal_id := NULL; v_ada := NULL; v_ada_home := NULL;
++    SELECT lower(m.email) INTO v_bob FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Department Admin']::text[]
++       AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.id INTO v_cal, v_cal_id FROM public.members m WHERE m.department_id = rec.dept_id
++       AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
++       AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.department_id INTO v_ada, v_ada_home FROM public.members m WHERE m.department_id <> rec.dept_id
++       AND m.access && array['Department Admin']::text[] AND NOT m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    IF v_bob IS NULL OR v_cal IS NULL OR v_ada IS NULL THEN
++      v_skip := v_skip + 1; rpt := rpt || format('   SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA %s, member %s, other-dept DA %s)%s',
++        coalesce(v_bob, 'none'), coalesce(v_cal, 'none'), coalesce(v_ada, 'none'), chr(10));
++      CONTINUE;
++    END IF;
++    BEGIN
++      -- fixtures (owner): Ada gets a plain-member row here and this department as her active one
++      INSERT INTO public.members (department_id, email, name, access, status) VALUES (rec.dept_id, v_ada, 'RETEST multi-dept admin', array['Member']::text[], 'Active');
++      INSERT INTO public.member_active_department (email, department_id) VALUES (v_ada, rec.dept_id)
++        ON CONFLICT (email) DO UPDATE SET department_id = excluded.department_id;
++      INSERT INTO public.announcements (department_id, author_id, title, body, audience) VALUES (rec.dept_id, v_cal_id, 'RETEST', 'admin-gate fixture', 'everyone') RETURNING id INTO v_ann;
++      INSERT INTO public.duty_log (department_id, duty_name) VALUES (rec.dept_id, 'RETEST admin-gate fixture') RETURNING id INTO v_dl;
++
++      -- X1 the multi-dept admin, with this department active
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_ada, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      v_md := public.my_department_id(); v_mm := public.my_member_id();
++      v_old := (v_md = rec.dept_id) AND public.is_department_admin();   -- the PRE-FIX role half + department half
++      v_new := (v_md = rec.dept_id) AND public.is_dept_admin();         -- the fixed one
++      UPDATE public.announcements SET body = body WHERE id = v_ann; GET DIAGNOSTICS u1 = ROW_COUNT;
++      UPDATE public.departments SET name = name WHERE id = rec.dept_id; GET DIAGNOSTICS u2 = ROW_COUNT;
++      UPDATE public.duty_log SET duty_name = duty_name WHERE id = v_dl; GET DIAGNOSTICS u3 = ROW_COUNT;
++      DELETE FROM public.announcements WHERE id = v_ann; GET DIAGNOSTICS u4 = ROW_COUNT;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_md = rec.dept_id AND v_old AND NOT v_new AND u1 = 0 AND u2 = 0 AND u3 = 0 AND u4 = 0 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  X1 DA-elsewhere / plain member here: the pre-fix gate would have let them in; now announcements U/D, departments U, duty_log U all refused (0 rows)%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  X1 active %s old %s new %s ann-upd %s dept-upd %s dlog-upd %s ann-del %s%s', v_md = rec.dept_id, v_old, v_new, u1, u2, u3, u4, chr(10)); END IF;
++
++      -- X3 the plain member who wrote the announcement
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_cal, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      UPDATE public.announcements SET body = body WHERE id = v_ann; GET DIAGNOSTICS c1 = ROW_COUNT;
++      UPDATE public.departments SET name = name WHERE id = rec.dept_id; GET DIAGNOSTICS c2 = ROW_COUNT;
++      UPDATE public.duty_log SET duty_name = duty_name WHERE id = v_dl; GET DIAGNOSTICS c3 = ROW_COUNT;
++      -- X2 the real DA of this department (delete last)
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_bob, 'role', 'authenticated')::text, true);
++      UPDATE public.announcements SET body = body WHERE id = v_ann; GET DIAGNOSTICS b1 = ROW_COUNT;
++      UPDATE public.departments SET name = name WHERE id = rec.dept_id; GET DIAGNOSTICS b2 = ROW_COUNT;
++      UPDATE public.duty_log SET duty_name = duty_name WHERE id = v_dl; GET DIAGNOSTICS b3 = ROW_COUNT;
++      DELETE FROM public.announcements WHERE id = v_ann; GET DIAGNOSTICS b4 = ROW_COUNT;
++      UPDATE public.departments SET name = name WHERE id = v_ada_home; GET DIAGNOSTICS b5 = ROW_COUNT;   -- another department's row
++      PERFORM set_config('role', 'postgres', true);
++      IF b1 = 1 AND b2 = 1 AND b3 = 1 AND b4 = 1 AND b5 = 0 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  X2 the real DA: announcements U + D, departments U, duty_log U all allowed; another department''s row still refused%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  X2 real DA ann-upd %s dept-upd %s dlog-upd %s ann-del %s other-dept-upd %s%s', b1, b2, b3, b4, b5, chr(10)); END IF;
++      IF c1 = 1 AND c2 = 0 AND c3 = 0 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  X3 the author edits their own announcement; a plain member can''t touch departments or duty_log%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  X3 author ann-upd %s dept-upd %s dlog-upd %s%s', c1, c2, c3, chr(10)); END IF;
++
++      -- P1 each Project Admin with a row here, this department active: the plain swap kept their reach
++      v_n := 0; v_t := '';
++      FOR pa IN SELECT lower(m.email) AS email FROM public.members m
++                 WHERE m.department_id = rec.dept_id AND m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL LOOP
++        INSERT INTO public.member_active_department (email, department_id) VALUES (pa.email, rec.dept_id)
++          ON CONFLICT (email) DO UPDATE SET department_id = excluded.department_id;
++        PERFORM set_config('request.jwt.claims', json_build_object('email', pa.email, 'role', 'authenticated')::text, true);
++        PERFORM set_config('role', 'authenticated', true);
++        UPDATE public.departments SET name = name WHERE id = rec.dept_id; GET DIAGNOSTICS u1 = ROW_COUNT;
++        PERFORM set_config('role', 'postgres', true);
++        v_n := v_n + 1; IF u1 <> 1 THEN v_t := v_t || ' refused'; END IF;
++      END LOOP;
++      IF v_n = 0 THEN v_skip := v_skip + 1; rpt := rpt || format('   SKIP  P1 no Project Admin has a row here%s', chr(10));
++      ELSIF v_t = '' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  P1 %s Project Admin(s) with a row here still update the department%s', v_n, chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  P1 a Project Admin with a row here was refused:%s%s', v_t, chr(10)); END IF;
++      RAISE EXCEPTION 'SENTINEL';
++    EXCEPTION WHEN OTHERS THEN
++      IF SQLERRM <> 'SENTINEL' THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  run aborted: %s%s', SQLERRM, chr(10)); END IF;
++    END;
++  END LOOP;
++
++  RAISE EXCEPTION E'%\n---- % passed, % failed, % skipped ----\n(this exception IS the rollback — nothing was changed)', rpt, v_pass, v_fail, v_skip;
++END
++$retest$;
+diff --git a/docs/review/rls_admin_gate_STEP_AB_OUTPUT.md b/docs/review/rls_admin_gate_STEP_AB_OUTPUT.md
+new file mode 100644
+index 0000000..14d0cf5
+--- /dev/null
++++ b/docs/review/rls_admin_gate_STEP_AB_OUTPUT.md
+@@ -0,0 +1,79 @@
++# RLS admin-gate fix — Steps A + B, live output (2026-10-20)
++
++`sql/rls_admin_gate_STEP_AB_CHECK.sql`, run read-only on live by Ashlea. Emails are short hashes; nothing else elided.
++
++## A1 — the gate functions (full live `pg_get_functiondef`)
++
++| function | md5 | security | department-scoped | roles |
++|---|---|---|---|---|
++| `is_dept_admin()` | `c692e44f62923d2bf4c1a39a21a87bf7` | DEFINER | **yes** (`members.department_id = public.my_department_id()`) | Project Admin, Department Admin |
++| `is_department_admin()` | `99570e1790f233594464da32436c8ca7` | DEFINER | **no** | Department Admin, Project Admin |
++| `is_project_admin()` | `c9ccab22952488726207085155d7fdef` | DEFINER | no (cross-department by design) | Project Admin |
++| `my_department_id()` | `87f546659c3804a943b48e419e017f18` | DEFINER | — (re-checks active membership of a saved department) | — |
++
++Both `is_dept_admin()` and `is_department_admin()` were rebuilt byte-exact from these rows (md5s reproduce).
++
++```sql
++CREATE OR REPLACE FUNCTION public.is_dept_admin()
++ RETURNS boolean
++ LANGUAGE sql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++  select exists (
++    select 1 from public.members
++    where lower(members.email) = lower(auth.email())
++      and members.status in ('Active','Probationary')
++      and members.department_id = public.my_department_id()
++      and members.access && array['Project Admin','Department Admin']::text[]
++  );
++$function$
++
++CREATE OR REPLACE FUNCTION public.is_department_admin()
++ RETURNS boolean
++ LANGUAGE sql
++ STABLE SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++  select exists (
++    select 1 from members
++    where lower(members.email) = lower(auth.email())
++      and members.status in ('Active','Probationary')
++      and members.access && array['Department Admin','Project Admin']::text[]
++  );
++$function$
++```
++
++## A2 — the four policies as they are live (the draft pins these exactly)
++
++| table · policy | cmd | USING | WITH CHECK |
++|---|---|---|---|
++| announcements · author or dept admin update announcements | UPDATE | `((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()))` | same |
++| announcements · author or dept admin delete announcements | DELETE | `((department_id = my_department_id()) AND ((author_id = my_member_id()) OR is_department_admin()))` | — |
++| departments · DA can update own department | UPDATE | `((id = my_department_id()) AND is_department_admin())` | same |
++| duty_log · dept admins edit duty_log | UPDATE | `(is_department_admin() AND (department_id = my_department_id()))` | same |
++
++## B1 — every function that writes `departments`
++
++| function | security | gate |
++|---|---|---|
++| `pa_create_department(...)` | DEFINER | `is_project_admin()` |
++| `pa_set_disabled_modules(p_department_id, p_modules)` | DEFINER | `is_project_admin()` — any department by id |
++| `pa_set_geofence_enabled(p_department_id, p_enabled)` | DEFINER | `is_project_admin()` — any department by id |
++| `set_aftercall_enabled(p_enabled)` | DEFINER | `is_dept_admin()` — caller's own department |
++| `set_probation_enabled(p_enabled)` | DEFINER | inline real-DA check — caller's own department |
++
++**→ A Project Admin's cross-department reach is the `pa_*` RPCs, not the direct policy.** The app's three direct `departments` writes (name/station/city, brand kit, week start) all target `id = my_department_id()`.
++
++## B2 — Project Admin member rows
++
++| PA | department | status | access | PA access on this row |
++|---|---|---|---|---|
++| pa 0329021c | North Hood County VFD | Active | Project Admin, Department Admin, Board Member, Officer, Member | true |
++| pa dabbc222 | Indian Harbor VFD | Active | Project Admin, Department Admin | true |
++
++**→ Every PA holds PA access on each of their department rows → the plain swap on `departments` changes no PA's behaviour.** (The draft enforces this as a precondition.)
++
++## B3 — blast radius
++
++**0** people are DA/PA in one department and a plain member in another. The gap is latent: nobody can use it today, and the fix closes it before anyone can.
