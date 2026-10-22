@@ -1,5 +1,5 @@
 -- =====================================================================
--- STANDARD CERT PRE-LOAD (DB) — DRAFT, NOT REVIEWED, NOT APPLIED.
+-- STANDARD CERT PRE-LOAD (DB) — Review PASS 2026-10-22 (d55e35d). Not yet applied.
 -- Order: claude/B4C_StandardCerts_DB_BuildOrder.md. Built on the live cert catalog (Slices A + B).
 --
 -- THE CHANGE — additive only:
