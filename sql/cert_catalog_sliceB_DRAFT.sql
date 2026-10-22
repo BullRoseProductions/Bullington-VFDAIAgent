@@ -1,5 +1,7 @@
 -- =====================================================================
--- CERT CATALOG — SLICE B (a cert type can gate readiness) — Review PASS 2026-10-21 (137c4b4). Not yet applied.
+-- CERT CATALOG — SLICE B (a cert type can gate readiness) — Review PASS 2026-10-21 (137c4b4).
+-- APPLIED on live 2026-10-21 — state check clean: kind_check_has_cert_type true · cert_type_reqs 0 · fns_ok true · total_policies 170 ·
+-- locked_token_fns 17. The dept_readiness_requirements() repo-text pin (cbda9901) held on live.
 -- Order: claude/B4C_CertCatalog_DB_BuildOrder.md (Slice B). Slice A is live (cert_types, certs.cert_type_id, no_expiry).
 --
 -- THE CHANGE — a new readiness requirement kind 'cert_type' (ref_id = a cert_types id of the department):
