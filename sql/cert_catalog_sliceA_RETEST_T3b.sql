@@ -3,6 +3,8 @@
 -- The main RETEST skipped T3b on live: onboarding_items.category is NOT NULL, so a minimal fixture item failed. This
 -- one CLONES an existing onboarding item of the department (every required column carried over), overriding only id,
 -- label, kind = 'cert', cert_name and the manual-only config, so whatever live requires is already filled in.
+-- The overrides satisfy the live CHECKs for a non-manual item: approver_kind 'tier' (NOT NULL), no approver_role /
+-- approver_member_id, requires_doc false (onboarding_items_config_manual_chk + _approver_shape_chk).
 -- NOTHING CHANGES: each department's check runs in a sub-block that ends in RAISE 'SENTINEL' (rolled back).
 -- Per department (needs a DA and a plain member, unique emails, and at least one existing onboarding item):
 --   P0 control: with the fixture cert UNTYPED and blank-exp, the cloned cert item reads NOT satisfied / 'missing'
@@ -33,7 +35,7 @@ BEGIN
         SELECT (jsonb_populate_record(NULL::public.onboarding_items,
                   to_jsonb(i) || jsonb_build_object('id', gen_random_uuid(), 'label', 'RETEST cert-catalog item', 'kind', 'cert',
                                                     'cert_name', 'RETEST cert-catalog probation', 'is_mentor', false, 'requires_doc', false,
-                                                    'approver_kind', null, 'approver_member_id', null, 'approver_role', null,
+                                                    'approver_kind', 'tier', 'approver_member_id', null, 'approver_role', null,
                                                     'hours_target', null, 'hours_source', null, 'ack_series_id', null))).*
           FROM public.onboarding_items i WHERE i.department_id = rec.dept_id ORDER BY i.id LIMIT 1
         RETURNING id INTO v_item;
