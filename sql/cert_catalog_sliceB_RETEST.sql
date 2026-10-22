@@ -3,6 +3,8 @@
 -- First live run (2026-10-21, 137c4b4): S0 + R1–R6 PASS in Indian Harbor / Lipan / North Hood; R7 aborted in all three —
 -- a RETEST bug, not the migration: the member_active_department fixture was written while still role 'authenticated'
 -- (RLS refused it). Fixed: the fixture is written as the owner, then the other-department DA's call runs as authenticated.
+-- RAN on live 2026-10-21 (ba753a7): 22 passed, 0 failed, 2 skipped — S0; Indian Harbor + Lipan + North Hood R1–R7;
+-- Demo + Granbury skip all (no plain member). Slice B fully proven on live.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on
 -- FIXTURES it creates itself: two cert types (one never-expires, one that expires) and certs for a plain member,
 -- all named 'RETEST …'. The final RAISE is the report — the "ERROR" IS the report. readiness_items / readiness_verdict
