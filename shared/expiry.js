@@ -18,16 +18,18 @@ export function monthIndex(ymd) {
 }
 
 /* One expirations row (dept_expirations / my_expirations) -> the bucket the UI shows.
- * The database's `expired` and `no_date` stand as they are (exact dates, and an undated item is a gap, never current).
+ * The database's `expired`, `no_date` and `no_expiry` stand as they are (exact dates; an undated item is a gap, never
+ * current; a cert whose catalog type never expires is satisfied with no date — cert catalog, Slice A).
  * Everything else is re-bucketed on the badge's month window: soon when the expiry month is within EXPIRING_MONTHS
  * of `todayYM` (a month index), else current. */
 export function expiryBucket(row, todayYM) {
   if (!row) return "no_date";
-  if (row.bucket === "expired" || row.bucket === "no_date") return row.bucket;
+  if (row.bucket === "expired" || row.bucket === "no_date" || row.bucket === "no_expiry") return row.bucket;
   const mi = monthIndex(row.expires_on);
   if (!Number.isFinite(mi)) return "no_date";
   return mi - todayYM <= EXPIRING_MONTHS ? "soon" : "current";
 }
 
-// The rank the dashboard sorts by — expired, then no date, then expiring soon, then current (the DB's order).
-export const BUCKET_RANK = { expired: 0, no_date: 1, soon: 2, current: 3 };
+// The rank the dashboard sorts by — expired, then no date, then expiring soon, then current (the DB's order); a cert that
+// never expires sorts last — it needs no attention. Only a satisfied state is added; the 3-month window is unchanged.
+export const BUCKET_RANK = { expired: 0, no_date: 1, soon: 2, current: 3, no_expiry: 4 };

@@ -1,0 +1,617 @@
+# CERT CATALOG UI SLICE 1 — diff for gate review (theme only, NOT promoted). Build order: claude/B4C_CertCatalog_UI_Slice1_BuildOrder.md
+# Test: HAPPY_DOM_DIR=<dir with happy-dom> node docs/review/cert_catalog_ui_slice1_test.mjs  ->  33 passed, 0 failed (output at the end).
+# Regression: expirations 8/0 · scorecard 23/0 · onboarding config 22/0 · event details 34/0 · eslint . clean · vite build ok.
+# Files: src/App.jsx + shared/expiry.js only. No DB migration. update_cert / delete_cert calls byte-identical. Locked-token count unchanged.
+#
+# HOW neverExpires IS THREADED THROUGH THE certStatus CALL SITES
+#   Source of the flag: each cert row now carries certTypeId (both cert selects add cert_type_id); enrichCerts(certs, typeMap)
+#   adds neverExpires / typeName / typeCategory from the dept_cert_types() catalog (loaded in the SAME Promise.all as the
+#   roster; a failed catalog read keeps the last-known catalog). A catalog change re-enriches members in place (one
+#   useEffect on the map), and an assign patches + re-enriches the one row — so every cert object in `members` (and the
+#   self-merge row) already has c.neverExpires by the time any badge renders. Untyped / deleted-type certs enrich to false.
+#   Signature: certStatus(exp, neverExpires = false) — the new branch is the FIRST line: neverExpires -> NO EXPIRY, rank 2.
+#   All 13 call sites hold the cert object, so each passes c.neverExpires (mechanical, nothing else on the line moved):
+#     PersonalView open-loops (rank <= 1)          · PersonalView all certs (me.certs)       · dashboard flagged (rank < 2)
+#     certCoverage (r === 1 || r === 2, undated r=3) · RosterMembers compliance (rank === 2) · MemberDetail cert list
+#     RosterCerts rows (also carries neverExpires for its phrase) · RosterCerts compliantN (1||2, !0) · byCert exp/old
+#     report ranks (cm certs) · Chief's report flaggedCerts (rank < 2) · business-meeting certRows · DA-dashboard expdC (=== 0)
+#   Because NO EXPIRY is rank 2 (= CURRENT), every one of those predicates gives the same answer it gives a current cert —
+#   no comparison, filter or count was edited; only the label ("NO EXPIRY") / colour (CURRENT's #2E7D52) differ.
+#   expPhrase(exp, neverExpires) got the same optional arg ("Doesn't expire") at the 6 places that show a typed cert's line;
+#   the 3 left bare are rank-1/flagged-only lists (a never-expires cert can't appear there) and the pending-submission queue
+#   (submissions have no type yet).
+#   The test proves it: certCoverage + the compliance predicate return identical results for {exp:null, neverExpires:true}
+#   and a current cert; an untyped blank cert still counts undated.
+#
+# DEVIATIONS / NOTES
+#   - The mock's "renews every N yrs" line has no backing column (cert_types has no interval) — the list shows the
+#     linked-cert count + Expires / Doesn't expire instead.
+#   - Cert Types lives on Roster -> Certifications as a collapsible "Cert types · Manage" card, gated isDeptAdmin (DA / PA);
+#     Delete additionally needs useCanDeleteShared (the typed-phrase gate, DA / PA — same set).
+#   - The assign picker is gated isDeptAdmin(role) (mirrors assign_cert_type), placed beside View proof / Edit / Remove.
+#   - rdItemDetail's "This qualification is inactive" (readiness-requirement path) is untouched — Slice 2.
+
+diff --git a/shared/expiry.js b/shared/expiry.js
+index a6d407e..615e02c 100644
+--- a/shared/expiry.js
++++ b/shared/expiry.js
+@@ -18,16 +18,18 @@ export function monthIndex(ymd) {
+ }
+ 
+ /* One expirations row (dept_expirations / my_expirations) -> the bucket the UI shows.
+- * The database's `expired` and `no_date` stand as they are (exact dates, and an undated item is a gap, never current).
++ * The database's `expired`, `no_date` and `no_expiry` stand as they are (exact dates; an undated item is a gap, never
++ * current; a cert whose catalog type never expires is satisfied with no date — cert catalog, Slice A).
+  * Everything else is re-bucketed on the badge's month window: soon when the expiry month is within EXPIRING_MONTHS
+  * of `todayYM` (a month index), else current. */
+ export function expiryBucket(row, todayYM) {
+   if (!row) return "no_date";
+-  if (row.bucket === "expired" || row.bucket === "no_date") return row.bucket;
++  if (row.bucket === "expired" || row.bucket === "no_date" || row.bucket === "no_expiry") return row.bucket;
+   const mi = monthIndex(row.expires_on);
+   if (!Number.isFinite(mi)) return "no_date";
+   return mi - todayYM <= EXPIRING_MONTHS ? "soon" : "current";
+ }
+ 
+-// The rank the dashboard sorts by — expired, then no date, then expiring soon, then current (the DB's order).
+-export const BUCKET_RANK = { expired: 0, no_date: 1, soon: 2, current: 3 };
++// The rank the dashboard sorts by — expired, then no date, then expiring soon, then current (the DB's order); a cert that
++// never expires sorts last — it needs no attention. Only a satisfied state is added; the 3-month window is unchanged.
++export const BUCKET_RANK = { expired: 0, no_date: 1, soon: 2, current: 3, no_expiry: 4 };
+diff --git a/src/App.jsx b/src/App.jsx
+index 20ab7b8..c90a92c 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -2381,6 +2381,19 @@ export default function App() {
+   const [requests, setRequests] = useState([]);
+   const [feedback, setFeedback] = useState([]);
+   const [members, setMembers] = useState(MEMBERS);
++  // cert catalog — see CertTypesCtx. The ref is what the loaders enrich with (they run outside React's render).
++  const [certTypes, setCertTypes] = useState([]);
++  const certTypeMapRef = useRef(new Map());
++  const certTypeMap = useMemo(() => new Map(certTypes.map((t) => [t.id, t])), [certTypes]);
++  certTypeMapRef.current = certTypeMap;
++  // a catalog change (load, add, edit, delete) re-enriches every cert row in place — the badges flip without a reload
++  useEffect(() => { setMembers((cur) => cur.map((m) => ({ ...m, certs: enrichCerts(m.certs, certTypeMap) }))); }, [certTypeMap]);
++  // A failed READ keeps the last-known catalog (never blank on error) and says so to the caller.
++  const reloadCertTypes = async () => {
++    const { data, error } = await supabase.rpc("dept_cert_types");
++    if (!error && Array.isArray(data)) setCertTypes(data);
++    return { error };
++  };
+   const [toast, setToast] = useState(null);
+   const [rosterErr, setRosterErr] = useState(false);
+   // Returns its promise so useAutoRefresh can stamp its throttle only once the read has actually
+@@ -2388,9 +2401,13 @@ export default function App() {
+   const loadMembers = () => {
+     return Promise.all([
+       supabase.from("members_view").select("*"),
+-      supabase.from("certs").select("id, member_id, name, exp, proof_path"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
++      supabase.from("certs").select("id, member_id, name, exp, proof_path, cert_type_id"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
+       supabase.from("celebrations").select("member_id, joined_date"),   // full join date (dept-scoped, all-members-readable) → joinCutoff
+-    ]).then(([membersRes, certsRes, celebRes]) => {
++      supabase.rpc("dept_cert_types"),   // the cert catalog — enriches each cert's type (never-expires) below
++    ]).then(([membersRes, certsRes, celebRes, typesRes]) => {
++      // a failed catalog read keeps the last-known catalog (certTypeMapRef) — never strips a cert's "doesn't expire"
++      let typeMap = certTypeMapRef.current;
++      if (!typesRes.error && Array.isArray(typesRes.data)) { typeMap = new Map(typesRes.data.map((t) => [t.id, t])); setCertTypes(typesRes.data); }
+       // A failed read here leaves joinedOn null, which falls back to the year in `joined` (or no cutoff) —
+       // never a wrong exclusion.
+       const joinById = new Map((!celebRes.error && celebRes.data ? celebRes.data : []).filter((c) => c.joined_date).map((c) => [c.member_id, c.joined_date]));
+@@ -2399,7 +2416,7 @@ export default function App() {
+       if (!certsRes.error && certsRes.data) {
+         for (const c of certsRes.data) {
+           if (!certsByMember.has(c.member_id)) certsByMember.set(c.member_id, []);
+-          certsByMember.get(c.member_id).push({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null });
++          certsByMember.get(c.member_id).push({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null, certTypeId: c.cert_type_id || null });
+         }
+       }
+       const { data, error } = membersRes;
+@@ -2418,7 +2435,7 @@ export default function App() {
+             joinedOn: joinById.get(m.id) || null,
+             participation: m.participation,
+             mentorId: m.mentor_id,
+-            certs: certsByMember.get(m.id) || [],
++            certs: enrichCerts(certsByMember.get(m.id) || [], typeMap),
+             notes: [],
+           }))
+         );
+@@ -2475,13 +2492,13 @@ export default function App() {
+     let cancelled = false;
+     Promise.all([
+       supabase.from("members").select("*").eq("id", myMemberId).single(),
+-      supabase.from("certs").select("id, member_id, name, exp, proof_path").eq("member_id", myMemberId),
++      supabase.from("certs").select("id, member_id, name, exp, proof_path, cert_type_id").eq("member_id", myMemberId),
+       supabase.from("celebrations").select("joined_date").eq("member_id", myMemberId).maybeSingle(),
+     ]).then(([selfRes, certsRes, celebRes]) => {
+       if (cancelled) return;
+       const s = selfRes.data;
+       if (selfRes.error || !s) return;
+-      const certs = (certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null }));
++      const certs = enrichCerts((certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null, certTypeId: c.cert_type_id || null })), certTypeMapRef.current);
+       const selfRow = {
+         id: s.id, department_id: s.department_id, name: s.name, role: s.role, access: s.access,
+         status: s.status, phone: s.phone, email: s.email, joined: s.joined, joinedOn: celebRes.data?.joined_date || null,
+@@ -3039,6 +3056,7 @@ export default function App() {
+   const packet = library.find((p) => p.id === packetId);
+ 
+   return (
++    <CertTypesCtx.Provider value={{ types: certTypes, typeMap: certTypeMap, reload: reloadCertTypes }}>
+     <div style={S.app}>
+       <Fonts />
+       {toast && <Notification S={S} kind={toast.kind} title={toast.title} text={toast.text} details={toast.details} action={toast.action} onClose={() => setToast(null)} />}
+@@ -3171,6 +3189,7 @@ export default function App() {
+         </main>
+       </div>
+     </div>
++    </CertTypesCtx.Provider>
+   );
+ }
+ 
+@@ -3267,7 +3286,7 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
+   // rank 0 = EXPIRED, 1 = EXPIRING (<=3mo). rank 2 CURRENT and rank 3 NO DATE are both fine — a cert
+   // with no expiry date is not an open loop, it just has nothing to count down.
+   const certs = (me?.certs || [])
+-    .map((c) => ({ ...c, st: certStatus(c.exp) }))
++    .map((c) => ({ ...c, st: certStatus(c.exp, c.neverExpires) }))
+     .filter((c) => c.st.rank <= 1)
+     .sort((a, b) => a.st.rank - b.st.rank);
+   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+@@ -3287,7 +3306,7 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
+             <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
+             <div style={{ flex: 1, minWidth: 0 }}>
+               <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
+-              <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
++              <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp, c.neverExpires)}</div>
+             </div>
+             <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+           </div>
+@@ -3327,7 +3346,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
+   const noir = React.useContext(NoirCtx), face = useCardFace();   // Noir (DA dashboard): card face + CardHead
+   const { openProof, proofMount } = useProofViewer(notify);   // "View proof" on the member's own approved certs
+   const { openSessionPlans, mounts } = usePlanViewer(S, notify, dept);
+-  const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank) : [];
++  const certsAll = me ? me.certs.map((c) => ({ ...c, st: certStatus(c.exp, c.neverExpires) })).sort((a, b) => a.st.rank - b.st.rank) : [];
+   const certsCurrent = certsAll.filter((c) => c.st.rank === 2).length, certsTotal = certsAll.length;
+   const expiringSoon = certsAll.filter((c) => c.st.rank === 1).length, expired = certsAll.filter((c) => c.st.rank === 0).length;
+   const certAlert = expired > 0 ? { color: FIRE.redText, text: `${expired} expired` } : expiringSoon > 0 ? { color: FIRE.amberText, text: `${expiringSoon} expiring soon` } : { color: FIRE.greenText, text: "All current" };
+@@ -3420,7 +3439,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
+                 <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
+                 <div style={{ flex: 1, minWidth: 0 }}>
+                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
+-                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp)}</div>
++                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp, c.neverExpires)}</div>
+                 </div>
+                 <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
+                 {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
+@@ -4050,7 +4069,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
+   const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
+   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));   // most overdue first
+   const flagged = [];
+-  cm.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
++  cm.forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp, c.neverExpires); if (st.rank < 2) flagged.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp, c.neverExpires), rank: st.rank }); }));
+   flagged.sort((a, b) => a.rank - b.rank);   // expired (0) before expiring (1)
+   const expd = flagged.filter((f) => f.rank === 0).length, expg = flagged.filter((f) => f.rank === 1).length;
+   const insights = computeInsights({ sessions, members, openItems, openFailures, todayISO });
+@@ -10982,9 +11001,25 @@ const MEMBERS = [
+ ];
+ // current year-month index (1-indexed month, matches "YYYY-MM" cert expiry) — real "today"; replaces the old hardcoded June-2026 baseline
+ function nowYM() { const d = new Date(); return d.getFullYear() * 12 + (d.getMonth() + 1); }
+-function certStatus(exp) {
++/* CERT CATALOG (UI Slice 1) — the department's cert types (dept_cert_types(): id, name, never_expires, category,
++   cert_count), loaded once with the roster and shared through CertTypesCtx so the Cert Types screen, the member file's
++   type picker and every badge read ONE source. Each cert row carries its raw certTypeId; enrichCerts() adds the type's
++   neverExpires / typeName / typeCategory. A cert with no type — or whose type was since deleted (the FK clears the
++   link, and a stale id simply isn't in the map) — enriches to neverExpires false and no type: exactly today's cert. */
++const CertTypesCtx = React.createContext({ types: [], typeMap: new Map(), reload: async () => {} });
++function enrichCerts(certs, typeMap) {
++  return (certs || []).map((c) => {
++    const t = c.certTypeId ? typeMap.get(c.certTypeId) : null;
++    return { ...c, neverExpires: !!t?.never_expires, typeName: t?.name || null, typeCategory: t?.category || null };
++  });
++}
++function certStatus(exp, neverExpires = false) {
+   // Cert-status rule is ALSO replicated in SQL dept_cert_readiness() — keep in lockstep (≤3mo = EXPIRING). The window
+   // is EXPIRING_MONTHS from shared/expiry.js — the Expirations dashboard + reminders use the same one.
++  // A cert whose catalog type never expires reads NO EXPIRY at rank 2 — the SAME rank as CURRENT, on purpose: every
++  // coverage / compliance / report test keyed on rank (=== 2, 1 || 2, < 2, === 0) counts it exactly like a current cert,
++  // so none of that math changes; only the label and colour differ. The type wins over any old exp (as expiration_rows).
++  if (neverExpires) return { label: "NO EXPIRY", color: "#2E7D52", rank: 2 };
+   if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };
+   const [y, m] = exp.split("-").map(Number);
+   const diff = (y * 12 + m) - nowYM();
+@@ -11039,7 +11074,7 @@ function certCoverage(members, { includeProbationary = false } = {}) {
+     let hasLive = false, allLive = true;
+     const certs = m.certs || [];
+     for (const c of certs) {
+-      const r = certStatus(c.exp).rank;
++      const r = certStatus(c.exp, c.neverExpires).rank;
+       if (r === 3) undatedCerts++;                 // counted, never silently dropped
+       if (r === 1 || r === 2) hasLive = true;      // EXPIRING or CURRENT
+       else allLive = false;                        // EXPIRED or NO DATE
+@@ -11060,7 +11095,7 @@ function certCoverage(members, { includeProbationary = false } = {}) {
+ }
+ 
+ // FIRE cert-status colors for crisp dark badges — additive sibling to certStatus's light `color`; does NOT mutate it.
+-const CERT_FIRE = { EXPIRED: FIRE.redText, EXPIRING: FIRE.amberText, CURRENT: FIRE.green, "NO DATE": FIRE.textMuted };
++const CERT_FIRE = { EXPIRED: FIRE.redText, EXPIRING: FIRE.amberText, CURRENT: FIRE.green, "NO EXPIRY": FIRE.green, "NO DATE": FIRE.textMuted };
+ // Gear service life: retirement = manufacture_date + service_life_years. Same vocabulary, ranks, colors,
+ // and 3-month window as certStatus so one badge language reads across the app — but deliberately its OWN
+ // date math. A cert's `exp` is a YYYY-MM string; manufacture_date is a real date, and collapsing the two
+@@ -11090,7 +11125,8 @@ const CLASSES = [
+   { name: "Hazmat Ops", date: "Sep 9", covers: ["Hazmat Ops"] },
+   { name: "Fire Instructor I", date: "Oct 4", covers: ["Fire Instructor I"] },
+ ];
+-function expPhrase(exp) {
++function expPhrase(exp, neverExpires = false) {
++  if (neverExpires) return "Doesn't expire";   // its catalog type never expires — not a missing date
+   if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return "No expiration date";
+   const [y, m] = exp.split("-").map(Number);
+   const d = (y * 12 + m) - nowYM();
+@@ -11355,7 +11391,7 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
+         </div>
+       )}
+       {tab === "members" && <RosterMembers S={S} role={role} members={rosterList} setMembers={setMembers} onOpen={leader ? setSel : null} notify={notify} dept={dept} sessions={sessions} bandEl={bandEl} />}
+-      {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} />}
++      {tab === "certs" && leader && <RosterCerts S={S} members={rosterList} role={role} notify={notify} />}
+       {tab === "attendance" && leader && <RosterAttendance S={S} members={rosterList} sessions={sessions} plan={plan} />}
+       {tab === "pending" && hasAny(role, DEPT_ADMIN_ROLES) && <RosterPending S={S} members={rosterList} notify={notify} />}
+       </NoirSkin>
+@@ -11383,7 +11419,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
+   const [sortBy, setSortBy] = useState("roster");      // roster (today's order) | name | compliance | status
+   // CERT COMPLIANCE — the share of a member's certs on file that are current (certStatus rank 2; undated never counts
+   // current). No certs on file → null ("—"), never 0%. Display only, from the certs already on each roster row.
+-  const compliance = (m) => { const cs = m.certs || []; return cs.length ? Math.round((cs.filter((c) => certStatus(c.exp).rank === 2).length / cs.length) * 100) : null; };
++  const compliance = (m) => { const cs = m.certs || []; return cs.length ? Math.round((cs.filter((c) => certStatus(c.exp, c.neverExpires).rank === 2).length / cs.length) * 100) : null; };
+   const rated = rosterAll.map(compliance).filter((v) => v != null);
+   const avgCompliance = rated.length ? Math.round(rated.reduce((t, v) => t + v, 0) / rated.length) : null;
+   const nActive = rosterAll.filter((m) => m.status === "Active").length, nProb = rosterAll.filter((m) => m.status === "Probationary").length;
+@@ -11620,7 +11656,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+   const [saving, setSaving] = useState(false);
+   const [showAllHist, setShowAllHist] = useState(false);   // TRAINING HISTORY: 4 most recent; "Show all N" expands
+   const [showAllCerts, setShowAllCerts] = useState(false);   // CERTIFICATIONS: capped list, "Show all N" expands
+-  const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp) })).sort((a, b) => a.st.rank - b.st.rank);
++  const certs = (member.certs || []).map((c) => ({ ...c, st: certStatus(c.exp, c.neverExpires) })).sort((a, b) => a.st.rank - b.st.rank);
+   // Live 90-day participation — same deptAttendance calc as the roster + Reports; NOT the stale stored field.
+   const part90 = deptAttendance(members, sessions, null, rolling90()).rows.find((r) => r.id === member.id)?.pct ?? null;
+   useEffect(() => {                              // load DA/PA-only data; Board/TO skip (RLS would return nothing anyway)
+@@ -11795,11 +11831,12 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+                 <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
+                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
+               </>) : (<>
+-                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5, display: "flex", alignItems: "center", gap: 9 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} /><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span></div>
++                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5, display: "flex", alignItems: "center", gap: 9 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} /><span style={{ minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span>{c.typeName && <span style={{ display: "block", fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>Type: <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{c.typeName}</b>{c.neverExpires ? " · doesn't expire" : ""}</span>}</span></div>
+                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", flexShrink: 0, maxWidth: "100%" }}>
+-                  <span style={{ fontSize: 10.5, color: c.st.rank === 2 ? FIRE.textMuted : CERT_FIRE[c.st.label], fontWeight: c.st.rank === 2 ? 400 : 600, marginRight: 4 }}>{expPhrase(c.exp)}</span>
++                  <span style={{ fontSize: 10.5, color: c.st.rank === 2 ? FIRE.textMuted : CERT_FIRE[c.st.label], fontWeight: c.st.rank === 2 ? 400 : 600, marginRight: 4 }}>{expPhrase(c.exp, c.neverExpires)}</span>
+                   {/* only when a proof is on file — a leader-entered cert legitimately has none */}
+                   {c.proofPath && <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => openProof(c.proofPath)}><FileText size={13} color={FIRE.btnIcon} /> View proof</button>}
++                  {isDeptAdmin(role) && <CertTypePicker cert={c} member={member} onUpdate={onUpdate} notify={notify} />}
+                   {assign && (<>
+                     <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={() => startEdit(c)}>Edit</button>
+                     <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, color: FIRE.deleteRed }} disabled={busyId === c.id} onClick={() => removeCert(c)}>Remove</button>
+@@ -12135,10 +12172,157 @@ function useProofViewer(notify) {
+   const proofMount = proof ? <DocViewer url={proof.url} name={proof.name} onClose={() => setProof(null)} /> : null;
+   return { openProof, proofMount };
+ }
+-function RosterCerts({ S, members }) {
++/* CERT TYPES — the department's catalog (cert catalog UI Slice 1). Define each certification once, mark the ones that
++   don't expire, then attach it to a member's cert (MemberDetail) so it reads the same everywhere. Reads
++   dept_cert_types(); writes ONLY through set_cert_type / delete_cert_type — every one is is_dept_admin()-gated
++   server-side, and this screen + its controls are gated on the client twin, isDeptAdmin (Department Admin / Project
++   Admin). The RPCs RAISE on a refusal (a clash, a cross-department id), so every error is shown — never a silent
++   success. Deleting a type keeps every cert that used it; the FK just clears their link. */
++const CERT_CATS = [["certification", "Certifications"], ["continuing_education", "Continuing education"]];
++function CertTypeForm({ S, initial, busy, err, onSave, onCancel }) {
++  const [name, setName] = useState(initial?.name || "");
++  const [category, setCategory] = useState(initial?.category || "certification");
++  const [expires, setExpires] = useState(initial ? !initial.never_expires : true);
++  useEditorOpen(true);   // a half-typed type: a roster refresh must not drop it
++  const lbl = (t) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}</span>;
++  return (
++    <div style={{ ...FS.cardNoir, padding: "13px 14px", marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
++      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13.5, color: FIRE.textPrimary }}>{initial ? "Edit cert type" : "Add a cert type"}</div>
++      <label style={S.field}>{lbl("Name")}
++        <input style={FS.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Firefighter II" /></label>
++      <div style={S.field}>{lbl("Category")}
++        <div style={{ display: "inline-flex", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, overflow: "hidden", alignSelf: "flex-start" }}>
++          {CERT_CATS.map(([k, l], i) => (
++            <button key={k} type="button" onClick={() => setCategory(k)}
++              style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: category === k ? FIRE.red : FIRE.card2Noir, color: category === k ? FIRE.textPrimary : FIRE.navLabel, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{l === "Certifications" ? "Certification" : l}</button>
++          ))}
++        </div>
++      </div>
++      <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
++        <input type="checkbox" checked={expires} onChange={(e) => setExpires(e.target.checked)} style={{ marginTop: 3 }} />
++        <span>
++          <span style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>This certification expires</span>
++          <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>On = members enter a renewal date. Off = once earned, it's held for life (no "No date" nagging).</span>
++        </span>
++      </label>
++      {err && <div role="alert" style={{ fontSize: 12.5, color: FIRE.redText }}>{err}</div>}
++      <div style={{ display: "flex", gap: 8 }}>
++        <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={() => onSave({ name, category, neverExpires: !expires })}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Save cert type</button>
++        <button style={FS.btn} disabled={busy} onClick={onCancel}>Cancel</button>
++      </div>
++    </div>
++  );
++}
++function CertTypesPanel({ S, role, notify }) {
++  const { types, reload } = React.useContext(CertTypesCtx);
++  const canManageTypes = isDeptAdmin(role);              // set_cert_type / delete_cert_type: is_dept_admin() (DA / PA)
++  const canDeleteShared = useCanDeleteShared();          // the typed-phrase delete gate (DA / PA — the same set)
++  const [open, setOpen] = useState(false);
++  const [editing, setEditing] = useState(null);          // null = no form; "new" = add; else the type row being edited
++  const [busy, setBusy] = useState(false);
++  const [err, setErr] = useState("");
++  if (!canManageTypes) return null;
++  const startEdit = (t) => { setErr(""); setEditing(t); };
++  async function save({ name, category, neverExpires }) {
++    if (!name.trim()) { setErr("A cert type needs a name."); return; }
++    setBusy(true); setErr("");
++    const { error } = await supabase.rpc("set_cert_type", { p_id: editing === "new" ? null : editing.id, p_name: name.trim(), p_never_expires: neverExpires, p_category: category });
++    if (error) { setBusy(false); setErr(error.message || "Couldn't save that cert type."); return; }   // e.g. "Your department already has a cert type named …"
++    const r = await reload();
++    setBusy(false);
++    if (r.error) notify({ kind: "error", title: "Saved — but couldn't refresh the list", text: "Reload to see the change.", details: r.error.message });
++    else notify({ kind: "success", text: editing === "new" ? "Cert type added." : "Cert type updated." });
++    setEditing(null);
++  }
++  async function remove(t) {
++    if (!(await confirmDestructive({ noun: "cert type", name: t.name,
++      impact: t.cert_count ? `${t.cert_count} cert${t.cert_count === 1 ? " uses" : "s use"} it — those certs are kept and simply unlinked (they read like any untyped cert again).` : "No certs use it." }))) return;
++    setBusy(true);
++    const { error } = await supabase.rpc("delete_cert_type", { p_id: t.id });
++    if (error) { setBusy(false); notify({ kind: "error", title: "Couldn't delete the cert type", text: error.message || "Please try again." }); return; }
++    const r = await reload();
++    setBusy(false);
++    if (r.error) notify({ kind: "error", title: "Deleted — but couldn't refresh the list", text: "Reload to see the change.", details: r.error.message });
++    else notify({ kind: "success", text: "Cert type deleted. Certs that used it are kept, unlinked." });
++    if (editing && editing !== "new" && editing.id === t.id) setEditing(null);
++  }
++  return (
++    <Card padding="14px 16px" style={{ marginBottom: 12 }}>
++      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
++        <CardHead icon={Award} title="Cert types" style={{ marginBottom: 0, width: "auto" }} />
++        <span style={{ fontSize: 12, color: FIRE.textMuted }}>{types.length ? `${types.length} in your catalog` : "No types yet"}</span>
++        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
++          {open && <button style={FS.btn} onClick={() => startEdit("new")} disabled={busy}><Plus size={14} color={FIRE.btnIcon} /> Add cert type</button>}
++          <button style={FS.btn} onClick={() => { setOpen((v) => !v); setEditing(null); }}>{open ? "Hide" : "Manage"} <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "none" }} /></button>
++        </div>
++      </div>
++      {open && (<>
++        <div style={{ fontSize: 12, color: FIRE.textSecondary, margin: "8px 0 4px", lineHeight: 1.45 }}>Define each certification once — mark the ones that don't expire — then attach it to a member's cert (on their file) so it reads the same everywhere.</div>
++        {editing === "new" && <CertTypeForm S={S} busy={busy} err={err} onSave={save} onCancel={() => setEditing(null)} />}
++        {types.length === 0 && editing !== "new" && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No cert types yet — add your first one.</div>}
++        {CERT_CATS.map(([cat, catLabel]) => {
++          const list = types.filter((t) => t.category === cat);
++          if (!list.length) return null;
++          return (
++            <div key={cat} style={{ marginTop: 12 }}>
++              <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".09em", textTransform: "uppercase", color: FIRE.textSecondary, marginBottom: 6 }}>
++                {catLabel}<span style={{ color: FIRE.textMuted, ...FS.num }}>{list.length}</span><span style={{ flex: 1, height: 1, background: FIRE.lineNoir }} />
++              </div>
++              {list.map((t) => (
++                <div key={t.id}>
++                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, flexWrap: "wrap" }}>
++                    <div style={{ flex: "1 1 180px", minWidth: 0 }}>
++                      <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{t.name}</div>
++                      <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, ...FS.num }}>{t.cert_count ? `${t.cert_count} member cert${t.cert_count === 1 ? "" : "s"} linked` : "Not linked to any cert yet"}</div>
++                    </div>
++                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: t.never_expires ? FIRE.greenText : FIRE.textSecondary }}>
++                      {t.never_expires ? <><CheckCircle2 size={13} /> Doesn't expire</> : <><Clock size={13} /> Expires</>}
++                    </span>
++                    <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 12 }} onClick={() => startEdit(t)} disabled={busy}><Pencil size={13} color={FIRE.btnIcon} /> Edit</button>
++                    {canDeleteShared && <button style={{ ...FS.btn, padding: "5px 9px", fontSize: 12, color: FIRE.deleteRed }} onClick={() => remove(t)} disabled={busy}><Trash2 size={13} /> Delete</button>}
++                  </div>
++                  {editing && editing !== "new" && editing.id === t.id && <CertTypeForm key={t.id} S={S} initial={t} busy={busy} err={err} onSave={save} onCancel={() => setEditing(null)} />}
++                </div>
++              ))}
++            </div>
++          );
++        })}
++      </>)}
++    </Card>
++  );
++}
++/* ASSIGN A CERT TYPE — on a member's cert row (MemberDetail). assign_cert_type is is_dept_admin()-gated and checks that
++   the cert AND the type are in the caller's department; NULL un-assigns. The parent passes the gate (isDeptAdmin). */
++function CertTypePicker({ cert, member, onUpdate, notify }) {
++  const { types, typeMap, reload } = React.useContext(CertTypesCtx);
++  const [busy, setBusy] = useState(false);
++  async function pick(value) {
++    const next = value || null;
++    if ((cert.certTypeId || null) === next) return;
++    setBusy(true);
++    const { error } = await supabase.rpc("assign_cert_type", { p_cert_id: cert.id, p_cert_type_id: next });
++    setBusy(false);
++    if (error) { notify({ kind: "error", title: "Couldn't assign the cert type", text: error.message || "Please try again." }); return; }
++    // flip the badge now: patch this cert's link and re-enrich; then refresh the catalog quietly (its "N linked" counts)
++    onUpdate({ ...member, certs: enrichCerts((member.certs || []).map((c) => (c.id === cert.id ? { ...c, certTypeId: next } : c)), typeMap) });
++    reload();
++  }
++  const label = cert.typeName ? "Change type" : "Assign a cert type";
++  return (
++    <select aria-label={label} value={cert.typeName ? cert.certTypeId : ""} disabled={busy} onChange={(e) => pick(e.target.value)}
++      style={{ ...FS.input, width: "auto", maxWidth: 200, padding: "5px 8px", fontSize: 12 }}>
++      <option value="">{cert.typeName ? "— None —" : "Assign a cert type…"}</option>
++      {CERT_CATS.map(([cat, catLabel]) => {
++        const list = types.filter((t) => t.category === cat);
++        return list.length ? <optgroup key={cat} label={catLabel}>{list.map((t) => <option key={t.id} value={t.id}>{t.name}{t.never_expires ? " · doesn't expire" : ""}</option>)}</optgroup> : null;
++      })}
++    </select>
++  );
++}
++function RosterCerts({ S, members, role, notify }) {
+   const { openProof, proofMount } = useProofViewer();
+   const rows = [];
+-  members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, proofPath: c.proofPath || null, st: certStatus(c.exp) })));
++  members.forEach((m) => m.certs.forEach((c) => rows.push({ member: m.name, cert: c.name, exp: c.exp, neverExpires: !!c.neverExpires, proofPath: c.proofPath || null, st: certStatus(c.exp, c.neverExpires) })));
+   /* NOT COVERED — the members this screen could not previously show at all.
+      rows is built by walking each member's certs, so a member with NO certs produces no rows and
+      was invisible here. That is the same blind spot the records-based percentage had, one level
+@@ -12188,7 +12372,7 @@ function RosterCerts({ S, members }) {
+   const withCertsM = inScope.filter((m) => (m.certs || []).length > 0);
+   // COMPLIANT: at least one DATED cert that is current or expiring AND nothing expired. Undated-only members are
+   // not counted compliant (they surface on the data-quality line); everyone with certs on file is the denominator.
+-  const compliantN = withCertsM.filter((m) => { const ranks = (m.certs || []).map((c) => certStatus(c.exp).rank); return ranks.some((r) => r === 1 || r === 2) && !ranks.includes(0); }).length;
++  const compliantN = withCertsM.filter((m) => { const ranks = (m.certs || []).map((c) => certStatus(c.exp, c.neverExpires).rank); return ranks.some((r) => r === 1 || r === 2) && !ranks.includes(0); }).length;
+   const compliancePct = withCertsM.length ? Math.round((compliantN / withCertsM.length) * 100) : null;
+   const NO_DATE = 3;   // certStatus rank for an undated cert — the data-quality filter
+   const ringTone = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.green : p >= 70 ? FIRE.amberText : FIRE.redText);
+@@ -12213,7 +12397,7 @@ function RosterCerts({ S, members }) {
+   members.forEach((m) => (m.certs || []).forEach((c) => {
+     const k = String(c.name || "").trim().toLowerCase(); if (!k) return;
+     if (!byCert.has(k)) byCert.set(k, { name: String(c.name).trim(), holders: new Set(), exp: 0, old: 0 });
+-    const g = byCert.get(k); g.holders.add(m.id); const r = certStatus(c.exp).rank; if (r === 1) g.exp++; if (r === 0) g.old++;
++    const g = byCert.get(k); g.holders.add(m.id); const r = certStatus(c.exp, c.neverExpires).rank; if (r === 1) g.exp++; if (r === 0) g.old++;
+   }));
+   const certGroups = [...byCert.values()].sort((a, b) => b.holders.size - a.holders.size || a.name.localeCompare(b.name));
+   const [showAllGroups, setShowAllGroups] = useState(false);
+@@ -12239,6 +12423,8 @@ function RosterCerts({ S, members }) {
+   const listTitle = statusFilter === 0 ? "Expired" : statusFilter === 1 ? "Expiring · 90 days" : statusFilter === 2 ? "Current" : statusFilter === NO_DATE ? "Missing an expiry date" : "All certifications";
+   return (
+     <div>
++      {/* CERT TYPES — the department's catalog (DA / PA only; renders nothing for anyone else) */}
++      <CertTypesPanel S={S} role={role} notify={notify} />
+       {/* OVERVIEW — coverage and compliance rings */}
+       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginBottom: 12 }}>
+         <Card padding="16px 20px" style={{ display: "flex", alignItems: "center", gap: 18 }}>
+@@ -12356,7 +12542,7 @@ function RosterCerts({ S, members }) {
+                 <div style={{ fontSize: 12.5, color: FIRE.textSecondary }}>{r.cert}</div>
+                 {cl && <div style={{ fontSize: 11.5, color: FIRE.greenText, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarCheck size={12} /> Next: {cl.name} · {cl.date}</div>}
+               </div>
+-              <div style={{ width: 90, flexShrink: 0, fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(r.exp)}</div>
++              <div style={{ width: 90, flexShrink: 0, fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(r.exp, r.neverExpires)}</div>
+               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", flexShrink: 0, maxWidth: "100%" }}>
+                 {(() => { const col = r.st.label === "CURRENT" ? FIRE.greenText : CERT_FIRE[r.st.label]; return <span style={{ width: 78, textAlign: "center", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "3px 9px", color: col, background: `${col}1A`, border: `1px solid ${col}66` }}>{r.st.label.toLowerCase()}</span>; })()}
+                 {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
+@@ -12720,7 +12906,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only; members stays full for names/identity
+   const active = cm.filter((m) => m.status === "Active").length;
+   const prob = cm.filter((m) => m.status === "Probationary").length;
+-  const certs = []; cm.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp).rank)));
++  const certs = []; cm.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp, c.neverExpires).rank)));
+   const cur = certs.filter((r) => r === 2).length, expg = certs.filter((r) => r === 1).length, expd = certs.filter((r) => r === 0).length;
+   // ROSTER COVERAGE (share of active + probationary members holding a non-expired cert), not records currency.
+   // cur/expg/expd stay — the report still states the record counts, which is a different and
+@@ -12787,8 +12973,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+   // Flagged certs by member name — hoisted out of buildReportData so the screen, PDF, and narrative share ONE source (no drift).
+   const flaggedCerts = [];
+   cm.forEach((m) => m.certs.forEach((c) => {
+-    const st = certStatus(c.exp);
+-    if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp), status: st.rank === 0 ? "Lapsed" : "Expiring" });
++    const st = certStatus(c.exp, c.neverExpires);
++    if (st.rank < 2) flaggedCerts.push({ member: m.name, cert: c.name, exp: expPhrase(c.exp, c.neverExpires), status: st.rank === 0 ? "Lapsed" : "Expiring" });
+   }));
+   // Live dept context — the same real sources the agenda builder gathers (dept-scoped by RLS).
+   const [duties, setDuties] = useState([]);
+@@ -19662,7 +19848,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
+   }, []);
+   // Cert compliance computed HERE in the host from members — SAME certStatus math as the Chief's Report & Roster, so the agenda's numbers match (no drift).
+   const certRows = [];
+-  (members || []).forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp); certRows.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp), rank: st.rank }); }));
++  (members || []).forEach((m) => (m.certs || []).forEach((c) => { const st = certStatus(c.exp, c.neverExpires); certRows.push({ member: m.name, cert: c.name, phrase: expPhrase(c.exp, c.neverExpires), rank: st.rank }); }));
+   const certContext = { expired: certRows.filter((r) => r.rank === 0), expiring: certRows.filter((r) => r.rank === 1) };
+   const [title, setTitle] = useState("Monthly Business Meeting");
+   const [date, setDate] = useState("");
+@@ -20611,6 +20797,8 @@ const EXP_SECTION = {
+   no_date: { label: "No date · fix the record", color: FIRE.amberText, rgb: "204,158,82", Icon: AlertTriangle },
+   soon: { label: `Expiring soon · within ${EXPIRING_MONTHS} months`, color: FIRE.amberText, rgb: "204,158,82", Icon: Clock },
+   current: { label: "Current", color: FIRE.greenText, rgb: "47,168,105", Icon: CheckCircle2 },
++  // a cert whose catalog type never expires (expiration_rows bucket 'no_expiry') — satisfied, never an attention item
++  no_expiry: { label: "No expiry", color: FIRE.greenText, rgb: "47,168,105", Icon: CheckCircle2 },
+ };
+ const EXP_GUARD = "Class and dates only — never a license or card number.";
+ const expDate = (ymd) => (ymd ? new Date(`${String(ymd).slice(0, 10)}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "");
+@@ -20624,8 +20812,8 @@ function expRank(rows) {
+ function ExpRow({ r, last }) {
+   const sec = EXP_SECTION[r.ui];
+   const d = r.days_until;
+-  const big = r.ui === "no_date" ? "No date" : r.ui === "current" ? expDate(r.expires_on).replace(/, \d{4}$/, "") : `${d < 0 ? "−" : ""}${Math.abs(d)} d`;
+-  const small = r.ui === "no_date" ? "add an expiry" : r.ui === "current" ? `${d} days` : expDate(r.expires_on).replace(/, \d{4}$/, "");
++  const big = r.ui === "no_expiry" ? "No expiry" : r.ui === "no_date" ? "No date" : r.ui === "current" ? expDate(r.expires_on).replace(/, \d{4}$/, "") : `${d < 0 ? "−" : ""}${Math.abs(d)} d`;
++  const small = r.ui === "no_expiry" ? "doesn't expire" : r.ui === "no_date" ? "add an expiry" : r.ui === "current" ? `${d} days` : expDate(r.expires_on).replace(/, \d{4}$/, "");
+   return (
+     <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", borderBottom: last ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+       <span style={{ width: 32, height: 32, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, color: FIRE.textSecondary, background: "linear-gradient(160deg, #1c2430, #11151b)", border: `1px solid ${FIRE.line2Noir}` }}>{r.scope === "apparatus" ? <Truck size={15} /> : expInitials(r.subject)}</span>
+@@ -20644,7 +20832,7 @@ function ExpRow({ r, last }) {
+   );
+ }
+ function ExpSections({ ranked }) {
+-  return ["expired", "no_date", "soon", "current"].map((b) => {
++  return ["expired", "no_date", "soon", "current", "no_expiry"].map((b) => {
+     const list = ranked.filter((r) => r.ui === b);
+     if (!list.length) return null;
+     const sec = EXP_SECTION[b];
+@@ -20855,7 +21043,7 @@ function MyExpirationsCard() {
+   const { rows } = useMyExpirations(true);
+   const ranked = expRank(rows);
+   if (!ranked.length) return null;
+-  const attention = ranked.filter((r) => r.ui !== "current").length;
++  const attention = ranked.filter((r) => r.ui !== "current" && r.ui !== "no_expiry").length;   // a never-expires cert needs nothing
+   return (
+     <Card padding="14px 16px" style={{ marginBottom: 14 }}>
+       <CardHead icon={Clock} title="Your upcoming expirations" right={attention ? <span style={{ color: FIRE.amberText, ...FS.num }}>{attention} need attention</span> : <span style={{ color: FIRE.greenText }}>All current</span>} />
+@@ -20905,7 +21093,7 @@ const RD_TONE = {
+   muted: { color: FIRE.textMuted, rgb: null },
+ };
+ // cert rows carry readiness_window()'s bucket (expired / no_date / soon / current)
+-const RD_CERT = { expired: ["Expired", "bad"], no_date: ["No date", "warn"], soon: ["Expiring", "warn"], current: ["Current", "good"] };
++const RD_CERT = { expired: ["Expired", "bad"], no_date: ["No date", "warn"], soon: ["Expiring", "warn"], current: ["Current", "good"], no_expiry: ["Doesn't expire", "good"] };
+ const rdPlural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+ /* The verdict as words. Pure — the screen, the department list and the packet all read it, so "Ready, renewals due"
+    is spelled once. An unrecognised state is never shown as ready. */
+@@ -21007,7 +21195,7 @@ function RdScorecard({ sc, self }) {
+     <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "-4px 2px 9px" }}>Shown so they're visible — certs don't count toward the readiness verdict.</div>
+     {certs.length === 0
+       ? <Card padding={14} style={{ fontSize: 12.5, color: FIRE.textMuted, marginBottom: 18 }}>No certs on file.</Card>
+-      : <div style={rdListCard}>{certs.map((c, i) => { const [l, t] = RD_CERT[c.status] || ["No date", "warn"]; return <RdRow key={`${c.label}-${i}`} title={c.label} detail={c.expires_on ? `${c.status === "expired" ? "Expired" : "Expires"} ${expDate(c.expires_on)}` : "No expiry date on file"} pill={<RdPill label={l} tone={t} />} last={i === certs.length - 1} />; })}</div>}
++      : <div style={rdListCard}>{certs.map((c, i) => { const [l, t] = RD_CERT[c.status] || ["No date", "warn"]; return <RdRow key={`${c.label}-${i}`} title={c.label} detail={c.status === "no_expiry" ? "Never expires" : c.expires_on ? `${c.status === "expired" ? "Expired" : "Expires"} ${expDate(c.expires_on)}` : "No expiry date on file"} pill={<RdPill label={l} tone={t} />} last={i === certs.length - 1} />; })}</div>}
+ 
+     <QualSection icon={Activity} label="Activity · last 12 months" color={FIRE.textSecondary} />
+     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 6 }}>
+@@ -27052,7 +27240,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
+   const nActive = cm.filter((m) => m.status === "Active").length, nProb = cm.filter((m) => m.status === "Probationary").length;
+   const nInactive = cm.filter((m) => m.status === "Inactive").length, nOther = total - nActive - nProb - nInactive;
+   // ROSTER COVERAGE, not records — see certCoverage. expdC is "any expired cert exists", a different question.
+-  let expdC = 0; cm.forEach((m) => (m.certs || []).forEach((c) => { if (certStatus(c.exp).rank === 0) expdC++; }));
++  let expdC = 0; cm.forEach((m) => (m.certs || []).forEach((c) => { if (certStatus(c.exp, c.neverExpires).rank === 0) expdC++; }));
+   const cov = certCoverage(members, { includeProbationary: true });
+   const drillsHeld = doneThisYear.length;
+   const dutyList = duties || [];
+
+# ===== UI test output =====
+# PASS certStatus(…, true) = NO EXPIRY, rank 2, CURRENT's colour 
+# PASS the type wins over an old exp (as expiration_rows does) 
+# PASS untyped unchanged: blank NO DATE 3, old EXPIRED 0, soon EXPIRING 1, later CURRENT 2 
+# PASS CERT_FIRE has NO EXPIRY = CURRENT's token 
+# PASS expPhrase: never-expires reads "Doesn't expire"; untyped blank unchanged 
+# PASS certCoverage: never-expires == current (covered, pct), not undated {"ne":[1,50,0],"cur":[1,50]}
+# PASS certCoverage: an untyped blank cert still counts undated, not covered 
+# PASS compliance test: never-expires counts compliant like current 
+# PASS expiryBucket passes no_expiry through (never re-bucketed to no_date) 
+# PASS expiryBucket unchanged for the rest 
+# PASS BUCKET_RANK: no_expiry ranks last (after current) 
+# PASS reminder sender only selects expired / soon with a date — no_expiry can't be sent 
+# PASS Expirations: a no_expiry section that reads satisfied (green, not an alert) 
+# PASS enrichCerts: typed never-expires / typed expiring / untyped / stale (deleted) type 
+# PASS panel gate — Department Admin: shown 
+# PASS panel gate — Project Admin: shown 
+# PASS panel gate — Officer: hidden 
+# PASS panel gate — Board Member: hidden 
+# PASS list grouped by category, with counts and the expires flag 
+# PASS add -> set_cert_type(null, trimmed name, never_expires true, continuing_education); reloads; success {"p_id":null,"p_name":"Hazmat Ops","p_never_expires":true,"p_category":"continuing_education"}
+# PASS edit -> set_cert_type(t2, …, never_expires false, certification); a raised clash is SHOWN inline, no success 
+# PASS delete -> confirmDestructive (says certs are kept, unlinked) -> delete_cert_type(t1) 
+# PASS a raised delete error is shown (no silent success) 
+# PASS Delete hidden when the typed-delete gate is off 
+# PASS picker: grouped options + an un-assign option 
+# PASS assign -> assign_cert_type(c1, t3); the row re-enriches -> NO EXPIRY at once; catalog refreshed 
+# PASS a raised assign error is shown and nothing changes 
+# PASS un-assign -> assign_cert_type(c1, null); the row reads like an untyped cert again 
+# PASS every certStatus(…) call passes neverExpires 14 calls · bare: []
+# PASS update_cert / delete_cert calls byte-identical to origin/main 
+# PASS no hex literal in the new components 
+# PASS locked-token count in App.jsx unchanged vs origin/main 132 vs 132
+# PASS no readiness-requirement cert_type UI in this slice (Slice 2) 0 vs 0
