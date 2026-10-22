@@ -17,7 +17,7 @@
 #     report ranks (cm certs) · Chief's report flaggedCerts (rank < 2) · business-meeting certRows · DA-dashboard expdC (=== 0)
 #   Because NO EXPIRY is rank 2 (= CURRENT), every one of those predicates gives the same answer it gives a current cert —
 #   no comparison, filter or count was edited; only the label ("NO EXPIRY") / colour (CURRENT's #2E7D52) differ.
-#   expPhrase(exp, neverExpires) got the same optional arg ("Doesn't expire") at the 6 places that show a typed cert's line;
+#   expPhrase(exp, neverExpires) got the same optional arg ("Doesn't expire") at the 7 places that show a cert's line;
 #   the 3 left bare are rank-1/flagged-only lists (a never-expires cert can't appear there) and the pending-submission queue
 #   (submissions have no type yet).
 #   The test proves it: certCoverage + the compliance predicate return identical results for {exp:null, neverExpires:true}
