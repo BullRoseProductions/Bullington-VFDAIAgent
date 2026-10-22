@@ -1,5 +1,5 @@
 -- =====================================================================
--- CERT CATALOG — SLICE A (catalog foundation + "doesn't expire") — DRAFT, NOT REVIEWED, NOT APPLIED.
+-- CERT CATALOG — SLICE A (catalog foundation + "doesn't expire") — Review PASS 2026-10-21 (738b711). Not yet applied.
 -- Order: claude/B4C_CertCatalog_DB_BuildOrder.md (Slice A + the Oct 21 amendment: a category column, no seed list).
 -- Off the live Step 0 / 0b (docs/review/cert_catalog_STEP0_OUTPUT.md, ..._STEP0B_OUTPUT.md); F1 / G1 / G2 live.
 --

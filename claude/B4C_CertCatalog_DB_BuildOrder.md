@@ -53,3 +53,4 @@ Manage cert types (DA/PA: name + "doesn't expire"), assign a type on a member's 
 - **`cert_types.category`** — `text NOT NULL DEFAULT 'certification'`, CHECK `category IN ('certification', 'continuing_education')`, so the UI can group the two buckets. `set_cert_type` takes it (optional, defaults to `certification`); `dept_cert_types()` returns it.
 - **No seed list in Slice A.** The standard-cert list (SFFMA / TCFP / EMS) is a later follow-on — Slice A creates the table empty; departments add their own types.
 - Everything else above stands as written.
+- **Carry to the catalog UI slice (reviewer, Oct 21):** it must update `shared/expiry.js` (`expiryBucket` + `BUCKET_RANK`) and `certStatus()` to handle `no_expiry` — otherwise an assigned never-expires cert still shows "No date" on the roster and the Expirations dashboard.
