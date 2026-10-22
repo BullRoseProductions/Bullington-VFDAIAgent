@@ -1,5 +1,8 @@
 -- =====================================================================
--- RETEST for cert_catalog_sliceA (DRAFT, not applied) — run AFTER the migration, separately.
+-- RETEST for cert_catalog_sliceA (applied 2026-10-21) — run AFTER the migration, separately.
+-- RAN on live 2026-10-21: 22 passed, 0 failed, 5 skipped — S0; Indian Harbor + Lipan + North Hood T1 T2 T2b T3 T4 T5 T6;
+-- Demo + Granbury skip all (no plain member); T3b skipped in all three (onboarding_items.category is NOT NULL on live —
+-- the minimal fixture item couldn't be inserted), so probation_item_states' no_expiry branch is proven in the dry run only.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on
 -- FIXTURES it creates itself: two certs for a plain member of the department (one blank exp, one long-expired
 -- '2020-01'), each named 'RETEST cert-catalog …'. The final RAISE is the report — the "ERROR" IS the report.
