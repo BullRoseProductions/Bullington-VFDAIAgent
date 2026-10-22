@@ -1,5 +1,7 @@
 -- =====================================================================
 -- RETEST addendum for cert_catalog_sliceA — T3b only (probation_item_states honours never_expires). Run separately.
+-- RAN on live 2026-10-21 (70b961e): 3 passed, 0 failed, 2 skipped — Indian Harbor, Lipan, North Hood P0/P1; Demo + Granbury
+-- skip (no plain member). First run (88b951a) aborted on approver_kind NOT NULL — fixed in 70b961e, nothing changed.
 -- The main RETEST skipped T3b on live: onboarding_items.category is NOT NULL, so a minimal fixture item failed. This
 -- one CLONES an existing onboarding item of the department (every required column carried over), overriding only id,
 -- label, kind = 'cert', cert_name and the manual-only config, so whatever live requires is already filled in.
