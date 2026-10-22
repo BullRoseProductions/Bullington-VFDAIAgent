@@ -1,5 +1,8 @@
 -- =====================================================================
--- RETEST for cert_catalog_sliceB (DRAFT, not applied) — run AFTER the migration, separately.
+-- RETEST for cert_catalog_sliceB (applied 2026-10-21) — run AFTER the migration, separately.
+-- First live run (2026-10-21, 137c4b4): S0 + R1–R6 PASS in Indian Harbor / Lipan / North Hood; R7 aborted in all three —
+-- a RETEST bug, not the migration: the member_active_department fixture was written while still role 'authenticated'
+-- (RLS refused it). Fixed: the fixture is written as the owner, then the other-department DA's call runs as authenticated.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on
 -- FIXTURES it creates itself: two cert types (one never-expires, one that expires) and certs for a plain member,
 -- all named 'RETEST …'. The final RAISE is the report — the "ERROR" IS the report. readiness_items / readiness_verdict
@@ -128,8 +131,10 @@ BEGIN
       PERFORM set_config('role', 'authenticated', true);
       e1 := 'ok';
       BEGIN PERFORM public.set_readiness_requirement('cert_type', v_te, false); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
+      PERFORM set_config('role', 'postgres', true);   -- the fixture write is the owner's, never the member's (RLS on member_active_department)
       INSERT INTO public.member_active_department (email, department_id) VALUES (v_ada, v_ada_home) ON CONFLICT (email) DO UPDATE SET department_id = excluded.department_id;
       PERFORM set_config('request.jwt.claims', json_build_object('email', v_ada, 'role', 'authenticated')::text, true);
+      PERFORM set_config('role', 'authenticated', true);
       e2 := 'ok';
       BEGIN PERFORM public.set_readiness_requirement('cert_type', v_te, true); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
       PERFORM set_config('role', 'postgres', true);
