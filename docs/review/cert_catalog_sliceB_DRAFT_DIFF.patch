@@ -1,5 +1,5 @@
 # CERT CATALOG SLICE B — DRAFT (not reviewed, not applied). The three function edits as before/after diffs of the live definitions
-# (set_readiness_requirement + readiness_items from the md5-verified Step 0 pull; dept_readiness_requirements from the repo text,
+# (set_readiness_requirement + readiness_items from the md5-checked Step 0 pull; dept_readiness_requirements from the repo text,
 # md5 cbda9901 — not pulled live; the precondition pins it), then the two new files, then the PGlite dry run.
 --- set_readiness_requirement LIVE
 +++ set_readiness_requirement SLICE B
