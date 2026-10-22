@@ -1,0 +1,739 @@
+# CERT CATALOG SLICE A — DRAFT (not reviewed, not applied). The four reader edits as before/after diffs of the live definitions
+# (byte-exact rebuilds, md5s matched), then the two new files, then the PGlite dry run.
+--- expiration_rows LIVE
++++ expiration_rows SLICE A
+@@ -40,13 +40,19 @@
+       from public.apparatus_tests t join public.apparatus a on a.id = t.apparatus_id and a.department_id = p_dept and a.deleted_at is null
+      where t.department_id = p_dept and p_member is null
+   )
+-  select r.scope, r.source, r.item_id, r.member_id, r.apparatus_id, r.subject, r.kind, r.label, r.cls, r.expires_on,
+-         case when r.expires_on is null then null else (r.expires_on - td.d) end,
+-         case when r.expires_on is null then 'no_date'
++  -- cert catalog: a cert whose type never expires reads 'no_expiry' — no date, satisfied, ranked with current;
++  -- never a no_date gap and never expired (whatever its old exp says)
++  select r.scope, r.source, r.item_id, r.member_id, r.apparatus_id, r.subject, r.kind, r.label, r.cls,
++         case when nx.flag then null else r.expires_on end,
++         case when nx.flag or r.expires_on is null then null else (r.expires_on - td.d) end,
++         case when nx.flag then 'no_expiry'
++              when r.expires_on is null then 'no_date'
+               when r.expires_on < td.d then 'expired'
+               when r.expires_on - td.d <= 30 then 'soon'
+               else 'current' end
+     from raw r cross join td
+-   order by case when r.expires_on is null then 1 when r.expires_on < td.d then 0 when r.expires_on - td.d <= 30 then 2 else 3 end,
+-            r.expires_on nulls last, r.subject, r.label;
++    cross join lateral (select r.source = 'cert' and exists (select 1 from public.certs c join public.cert_types t on t.id = c.cert_type_id
++                                                              where c.id = r.item_id and t.department_id = p_dept and t.never_expires) as flag) nx
++   order by case when nx.flag then 3 when r.expires_on is null then 1 when r.expires_on < td.d then 0 when r.expires_on - td.d <= 30 then 2 else 3 end,
++            case when nx.flag then null else r.expires_on end nulls last, r.subject, r.label;
+ $function$
+--- readiness_window LIVE
++++ readiness_window SLICE A
+@@ -8,7 +8,7 @@
+ -- within EXPIRING_MONTHS (3) of this month (America/Chicago) = 'soon', else 'current'. Keep in lockstep with
+ -- shared/expiry.js + certStatus() (the RETEST checks every month -2..+8).
+   select case
+-    when p_bucket in ('expired', 'no_date') then p_bucket
++    when p_bucket in ('expired', 'no_date', 'no_expiry') then p_bucket
+     when p_expires is null then 'no_date'
+     when (extract(year from p_expires)::int * 12 + extract(month from p_expires)::int)
+          - (extract(year from (now() at time zone 'America/Chicago'))::int * 12 + extract(month from (now() at time zone 'America/Chicago'))::int) <= 3
+--- dept_cert_readiness LIVE
++++ dept_cert_readiness SLICE A
+@@ -1,5 +1,5 @@
+ CREATE OR REPLACE FUNCTION public.dept_cert_readiness()
+- RETURNS TABLE(current integer, expiring integer, expired integer, no_date integer, total_dated integer, pct integer)
++ RETURNS TABLE(current integer, expiring integer, expired integer, no_date integer, no_expiry integer, total_dated integer, pct integer)
+  LANGUAGE sql
+  STABLE SECURITY DEFINER
+  SET search_path TO 'public'
+@@ -11,12 +11,14 @@
+   bucketed as (
+     select
+       case
++        when coalesce(t.never_expires, false) then 'no_expiry'   -- cert catalog: satisfied, never a "needs a date" gap
+         when c.exp is null or c.exp !~ '^\d{4}-\d{2}$' then 'no_date'
+         when (split_part(c.exp,'-',1)::int * 12 + split_part(c.exp,'-',2)::int) <  n.now_ym then 'expired'
+         when (split_part(c.exp,'-',1)::int * 12 + split_part(c.exp,'-',2)::int) - n.now_ym <= 3 then 'expiring'
+         else 'current'
+       end as bucket
+     from public.certs c
++    left join public.cert_types t on t.id = c.cert_type_id and t.department_id = c.department_id
+     cross join n
+     where c.department_id = public.my_department_id()
+   )
+@@ -25,10 +27,11 @@
+     count(*) filter (where bucket = 'expiring')::int                        as expiring,
+     count(*) filter (where bucket = 'expired')::int                         as expired,
+     count(*) filter (where bucket = 'no_date')::int                         as no_date,
++    count(*) filter (where bucket = 'no_expiry')::int                       as no_expiry,
+     count(*) filter (where bucket in ('current','expiring','expired'))::int as total_dated,
+     round(
+-      100.0 * count(*) filter (where bucket = 'current')
+-      / nullif(count(*) filter (where bucket in ('current','expiring','expired')), 0)
++      100.0 * count(*) filter (where bucket in ('current','no_expiry'))
++      / nullif(count(*) filter (where bucket in ('current','expiring','expired','no_expiry')), 0)
+     )::int                                                                  as pct
+   from bucketed;
+ $function$
+--- probation_item_states LIVE
++++ probation_item_states SLICE A
+@@ -58,10 +58,12 @@
+                               end as have
+                         where i.kind = 'hours') hr on true
+     left join lateral (select exists (select 1 from public.certs c
++                                        left join public.cert_types t on t.id = c.cert_type_id and t.department_id = p_dept
+                                         where c.member_id = p_member and lower(btrim(c.name)) = lower(btrim(i.cert_name))
+-                                          and c.exp ~ '^\d{4}-(0[1-9]|1[0-2])$'
+-                                          and split_part(c.exp, '-', 1)::int * 12 + split_part(c.exp, '-', 2)::int
+-                                              >= extract(year from td.d)::int * 12 + extract(month from td.d)::int) as current
++                                          and (coalesce(t.never_expires, false)   -- cert catalog: a never-expires type is current
++                                               or (c.exp ~ '^\d{4}-(0[1-9]|1[0-2])$'
++                                                   and split_part(c.exp, '-', 1)::int * 12 + split_part(c.exp, '-', 2)::int
++                                                       >= extract(year from td.d)::int * 12 + extract(month from td.d)::int))) as current
+                         where i.kind = 'cert') ct on true
+     left join lateral (select case when i.approver_kind = 'person' then exists (select 1 from public.members am
+                                         where am.id = i.approver_member_id and am.department_id = p_dept and am.status in ('Active', 'Probationary'))
+
+diff --git a/sql/cert_catalog_sliceA_DRAFT.sql b/sql/cert_catalog_sliceA_DRAFT.sql
+new file mode 100644
+index 0000000..0d7cf34
+--- /dev/null
++++ b/sql/cert_catalog_sliceA_DRAFT.sql
+@@ -0,0 +1,373 @@
++-- =====================================================================
++-- CERT CATALOG — SLICE A (catalog foundation + "doesn't expire") — DRAFT, NOT REVIEWED, NOT APPLIED.
++-- Order: claude/B4C_CertCatalog_DB_BuildOrder.md (Slice A + the Oct 21 amendment: a category column, no seed list).
++-- Off the live Step 0 / 0b (docs/review/cert_catalog_STEP0_OUTPUT.md, ..._STEP0B_OUTPUT.md); F1 / G1 / G2 live.
++--
++-- A1 cert_types — per-department catalog: name, never_expires, category ('certification' | 'continuing_education',
++--    default 'certification'), created/updated at+by. RLS on; ONE policy (SELECT, {authenticated}, own department);
++--    no write policy — writes are RPC-only. Unique per department on lower(btrim(name)). Created EMPTY (no seed list).
++-- A2 certs.cert_type_id uuid → cert_types(id) ON DELETE SET NULL, nullable. Every existing cert stays NULL = today.
++-- A3 RPCs (SECURITY DEFINER, search_path public, EXECUTE authenticated only):
++--      set_cert_type(p_id, p_name, p_never_expires, p_category DEFAULT 'certification') — is_dept_admin(), own dept
++--      delete_cert_type(p_id) — is_dept_admin(), own dept; certs keep their row, the FK clears their link
++--      dept_cert_types() — the caller's department catalog (+ how many certs use each type)
++--      assign_cert_type(p_cert_id, p_cert_type_id) — is_dept_admin(); the cert AND the type must be in the caller's
++--        department; NULL un-assigns. update_cert (F1, md5 08ec5f34…) is NOT touched.
++-- A4 "doesn't expire" lands in exactly four readers, each a minimal edit to its live definition (pinned md5):
++--      expiration_rows   — a cert whose type never_expires: bucket 'no_expiry', expires_on / days_until NULL, ranked
++--                          with current. Untyped / expiring-type certs: unchanged.
++--      readiness_window  — passes 'no_expiry' through (like expired / no_date), never collapsing it to no_date.
++--      dept_cert_readiness — a distinct no_expiry count, counted as satisfied in pct; NOT in no_date. Adding a column
++--                          changes the return shape, so this one is DROP + CREATE: the EXECUTE grants are captured
++--                          first and restored exactly (proven below) — a bare re-create would re-open anon / PUBLIC.
++--      probation_item_states — a kind='cert' item is current if the matched cert's type never_expires.
++--    my_department_rollup / pa_department_radar count dated certs only (an undated never-expires cert is uncounted,
++--    never "expired") and my_expirations / dept_expirations delegate to expiration_rows: unchanged.
++--
++-- Single all-or-nothing DO block. Refuses on drift (every touched function's live md5 pinned; is_dept_admin c692e44f…)
++-- and refuses a second apply (no catalog table / column / RPC may exist yet). Post-conditions: the table, its RLS,
++-- policy, constraints and unique index; the FK column; each reader = its live body with exactly the listed edits
++-- (and its reviewed md5); grants on dept_cert_readiness identical to before; every OTHER function and policy
++-- byte-identical; total_policies +1; the locked-token function count unchanged. The locked verification column is
++-- never touched. State check at the end.
++-- =====================================================================
++DO $migrate$
++DECLARE
++  -- live md5s (Step 0 / 0b, 2026-10-21) and the reviewed md5s after this slice
++  OLD constant jsonb := '{"expiration_rows(uuid,uuid)":"3223629e82c12eeec2cbd34daebf8085","readiness_window(text,date)":"35a62755ffc68b4db8b05dbe26d3b37b",
++                          "dept_cert_readiness()":"808e173f70446e20e15626cd9bb282dd","probation_item_states(uuid,uuid)":"bbe66fcac2ddd9931e12d9226d1ed800"}';
++  NEW constant jsonb := '{"expiration_rows(uuid,uuid)":"27645093a86b7a67dfb04a21d0fca536","readiness_window(text,date)":"f3d7788e1ee66a039d46b7e960d1a480",
++                          "dept_cert_readiness()":"d0d54de6a9533e6faa9d0c065c5439df","probation_item_states(uuid,uuid)":"c663eb8a6d16905ab7a45b763130388f"}';
++  NEW_RPCS constant text[] := array['set_cert_type', 'delete_cert_type', 'dept_cert_types', 'assign_cert_type'];
++  e record; f text; n int; v_def text; v_src text;
++  v_defs jsonb := '{}'; v_srcs jsonb := '{}'; v_exp_src jsonb := '{}';
++  v_dcr_acl text; v_dcr_meta text; g record;
++  v_fns_before text; v_fns_after text; v_pol_before text; v_pol_after text; v_total_before int; v_tok_before int;
++BEGIN
++  -- ---------------------------------------------------------------- preconditions
++  IF to_regclass('public.cert_types') IS NOT NULL THEN RAISE EXCEPTION 'Precondition failed: public.cert_types already exists — already applied. Nothing changed.'; END IF;
++  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'certs' AND column_name = 'cert_type_id') THEN
++    RAISE EXCEPTION 'Precondition failed: certs.cert_type_id already exists. Nothing changed.';
++  END IF;
++  IF EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = ANY (NEW_RPCS)) THEN
++    RAISE EXCEPTION 'Precondition failed: a cert-type RPC already exists. Nothing changed.';
++  END IF;
++  IF md5(pg_get_functiondef('public.is_dept_admin()'::regprocedure)) <> 'c692e44f62923d2bf4c1a39a21a87bf7' THEN
++    RAISE EXCEPTION 'Precondition failed: is_dept_admin() is not the department-scoped Step A version (md5 c692e44f…). Nothing changed.';
++  END IF;
++  IF md5(pg_get_functiondef('public.update_cert(uuid,text,text)'::regprocedure)) <> '08ec5f34bf3d897d95bdbeda5ec52ae7' THEN
++    RAISE EXCEPTION 'Precondition failed: update_cert is not the F1 version (md5 08ec5f34…). Nothing changed.';
++  END IF;
++  FOR f IN SELECT jsonb_object_keys(OLD) LOOP
++    IF to_regprocedure('public.' || f) IS NULL THEN RAISE EXCEPTION 'Precondition failed: public.% is missing. Nothing changed.', f; END IF;
++    IF md5(pg_get_functiondef(('public.' || f)::regprocedure)) <> OLD ->> f THEN
++      RAISE EXCEPTION 'Precondition failed: public.% is not the Step 0 version (md5 %, expected %). Nothing changed.', f, md5(pg_get_functiondef(('public.' || f)::regprocedure)), OLD ->> f;
++    END IF;
++  END LOOP;
++
++  -- ---------------------------------------------------------------- the edits to the four readers (fn, old fragment, new fragment)
++  CREATE TEMP TABLE _sliceA_edits (ord int, fn text, old_frag text, new_frag text, in_body boolean) ON COMMIT DROP;
++  INSERT INTO _sliceA_edits VALUES
++  -- expiration_rows: the final select — a never-expires cert reads 'no_expiry' with no date, ranked with current
++  (1, 'expiration_rows(uuid,uuid)', $o$  select r.scope, r.source, r.item_id, r.member_id, r.apparatus_id, r.subject, r.kind, r.label, r.cls, r.expires_on,
++         case when r.expires_on is null then null else (r.expires_on - td.d) end,
++         case when r.expires_on is null then 'no_date'
++              when r.expires_on < td.d then 'expired'
++              when r.expires_on - td.d <= 30 then 'soon'
++              else 'current' end
++    from raw r cross join td
++   order by case when r.expires_on is null then 1 when r.expires_on < td.d then 0 when r.expires_on - td.d <= 30 then 2 else 3 end,
++            r.expires_on nulls last, r.subject, r.label;$o$,
++   $n$  -- cert catalog: a cert whose type never expires reads 'no_expiry' — no date, satisfied, ranked with current;
++  -- never a no_date gap and never expired (whatever its old exp says)
++  select r.scope, r.source, r.item_id, r.member_id, r.apparatus_id, r.subject, r.kind, r.label, r.cls,
++         case when nx.flag then null else r.expires_on end,
++         case when nx.flag or r.expires_on is null then null else (r.expires_on - td.d) end,
++         case when nx.flag then 'no_expiry'
++              when r.expires_on is null then 'no_date'
++              when r.expires_on < td.d then 'expired'
++              when r.expires_on - td.d <= 30 then 'soon'
++              else 'current' end
++    from raw r cross join td
++    cross join lateral (select r.source = 'cert' and exists (select 1 from public.certs c join public.cert_types t on t.id = c.cert_type_id
++                                                              where c.id = r.item_id and t.department_id = p_dept and t.never_expires) as flag) nx
++   order by case when nx.flag then 3 when r.expires_on is null then 1 when r.expires_on < td.d then 0 when r.expires_on - td.d <= 30 then 2 else 3 end,
++            case when nx.flag then null else r.expires_on end nulls last, r.subject, r.label;$n$, true),
++  -- readiness_window: no_expiry stands, like expired / no_date
++  (2, 'readiness_window(text,date)', $o$    when p_bucket in ('expired', 'no_date') then p_bucket$o$,
++                                     $n$    when p_bucket in ('expired', 'no_date', 'no_expiry') then p_bucket$n$, true),
++  -- dept_cert_readiness: the return shape gains no_expiry (header — not in prosrc), then four body edits
++  (3, 'dept_cert_readiness()', $o$ RETURNS TABLE(current integer, expiring integer, expired integer, no_date integer, total_dated integer, pct integer)$o$,
++                               $n$ RETURNS TABLE(current integer, expiring integer, expired integer, no_date integer, no_expiry integer, total_dated integer, pct integer)$n$, false),
++  (4, 'dept_cert_readiness()', $o$      case
++        when c.exp is null or c.exp !~ '^\d{4}-\d{2}$' then 'no_date'$o$,
++                               $n$      case
++        when coalesce(t.never_expires, false) then 'no_expiry'   -- cert catalog: satisfied, never a "needs a date" gap
++        when c.exp is null or c.exp !~ '^\d{4}-\d{2}$' then 'no_date'$n$, true),
++  (5, 'dept_cert_readiness()', $o$    from public.certs c
++    cross join n$o$,
++                               $n$    from public.certs c
++    left join public.cert_types t on t.id = c.cert_type_id and t.department_id = c.department_id
++    cross join n$n$, true),
++  (6, 'dept_cert_readiness()', $o$    count(*) filter (where bucket = 'no_date')::int                         as no_date,$o$,
++                               $n$    count(*) filter (where bucket = 'no_date')::int                         as no_date,
++    count(*) filter (where bucket = 'no_expiry')::int                       as no_expiry,$n$, true),
++  (7, 'dept_cert_readiness()', $o$      100.0 * count(*) filter (where bucket = 'current')
++      / nullif(count(*) filter (where bucket in ('current','expiring','expired')), 0)$o$,
++                               $n$      100.0 * count(*) filter (where bucket in ('current','no_expiry'))
++      / nullif(count(*) filter (where bucket in ('current','expiring','expired','no_expiry')), 0)$n$, true),
++  -- probation_item_states: a kind='cert' item is current if the matched cert's type never expires
++  (8, 'probation_item_states(uuid,uuid)', $o$    left join lateral (select exists (select 1 from public.certs c
++                                        where c.member_id = p_member and lower(btrim(c.name)) = lower(btrim(i.cert_name))
++                                          and c.exp ~ '^\d{4}-(0[1-9]|1[0-2])$'
++                                          and split_part(c.exp, '-', 1)::int * 12 + split_part(c.exp, '-', 2)::int
++                                              >= extract(year from td.d)::int * 12 + extract(month from td.d)::int) as current$o$,
++                                          $n$    left join lateral (select exists (select 1 from public.certs c
++                                        left join public.cert_types t on t.id = c.cert_type_id and t.department_id = p_dept
++                                        where c.member_id = p_member and lower(btrim(c.name)) = lower(btrim(i.cert_name))
++                                          and (coalesce(t.never_expires, false)   -- cert catalog: a never-expires type is current
++                                               or (c.exp ~ '^\d{4}-(0[1-9]|1[0-2])$'
++                                                   and split_part(c.exp, '-', 1)::int * 12 + split_part(c.exp, '-', 2)::int
++                                                       >= extract(year from td.d)::int * 12 + extract(month from td.d)::int))) as current$n$, true);
++
++  -- every fragment occurs exactly once where it is applied; build each new definition + its expected prosrc
++  FOR f IN SELECT DISTINCT fn FROM _sliceA_edits LOOP
++    v_def := pg_get_functiondef(('public.' || f)::regprocedure);
++    SELECT prosrc INTO v_src FROM pg_proc WHERE oid = ('public.' || f)::regprocedure;
++    v_srcs := v_srcs || jsonb_build_object(f, v_src);
++    FOR e IN SELECT * FROM _sliceA_edits WHERE fn = f ORDER BY ord LOOP
++      n := (length(v_def) - length(replace(v_def, e.old_frag, ''))) / length(e.old_frag);
++      IF n <> 1 THEN RAISE EXCEPTION 'Precondition failed: edit % (%) anchors % times in the live definition, not once. Nothing changed.', e.ord, f, n; END IF;
++      IF e.in_body AND (length(v_src) - length(replace(v_src, e.old_frag, ''))) / length(e.old_frag) <> 1 THEN
++        RAISE EXCEPTION 'Precondition failed: edit % (%) is not in the function body exactly once. Nothing changed.', e.ord, f;
++      END IF;
++      v_def := replace(v_def, e.old_frag, e.new_frag);
++      IF e.in_body THEN v_src := replace(v_src, e.old_frag, e.new_frag); END IF;
++    END LOOP;
++    v_defs := v_defs || jsonb_build_object(f, v_def);
++    v_exp_src := v_exp_src || jsonb_build_object(f, v_src);
++  END LOOP;
++
++  -- snapshots: every function except the four readers (the four new RPCs don't exist yet), every policy, counts
++  SELECT string_agg(p.oid::regprocedure::text || '|' || md5(pg_get_functiondef(p.oid)), E'\n' ORDER BY p.oid::regprocedure::text)
++    INTO v_fns_before FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p')
++     AND p.oid NOT IN (SELECT DISTINCT ('public.' || fn)::regprocedure::oid FROM _sliceA_edits);
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_before FROM pg_policies WHERE schemaname = 'public';
++  SELECT count(*) INTO v_total_before FROM pg_policies WHERE schemaname = 'public';
++  SELECT count(*) INTO v_tok_before FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0;
++  -- dept_cert_readiness is re-created: its owner / definer / config / volatility and EXECUTE grantees, to restore + prove
++  SELECT p.proowner::regrole::text || '|' || p.prosecdef::text || '|' || p.provolatile::text || '|' || coalesce(array_to_string(p.proconfig, ','), '')
++    INTO v_dcr_meta FROM pg_proc p WHERE p.oid = 'public.dept_cert_readiness()'::regprocedure;
++  SELECT string_agg(CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END || ':' || a.privilege_type, ',' ORDER BY 1)
++    INTO v_dcr_acl FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE p.oid = 'public.dept_cert_readiness()'::regprocedure;
++
++  -- ---------------------------------------------------------------- A1 cert_types
++  CREATE TABLE public.cert_types (
++    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++    department_id uuid NOT NULL REFERENCES public.departments(id) ON DELETE CASCADE,
++    name text NOT NULL CONSTRAINT cert_types_name_chk CHECK (btrim(name) <> ''),
++    never_expires boolean NOT NULL DEFAULT false,
++    category text NOT NULL DEFAULT 'certification' CONSTRAINT cert_types_category_chk CHECK (category IN ('certification', 'continuing_education')),
++    created_at timestamptz NOT NULL DEFAULT now(),
++    created_by uuid,
++    updated_at timestamptz NOT NULL DEFAULT now(),
++    updated_by uuid
++  );
++  CREATE UNIQUE INDEX cert_types_dept_name_uq ON public.cert_types (department_id, lower(btrim(name)));
++  ALTER TABLE public.cert_types ENABLE ROW LEVEL SECURITY;
++  CREATE POLICY "members read cert_types" ON public.cert_types FOR SELECT TO authenticated USING (department_id = public.my_department_id());
++
++  -- ---------------------------------------------------------------- A2 the link
++  ALTER TABLE public.certs ADD COLUMN cert_type_id uuid REFERENCES public.cert_types(id) ON DELETE SET NULL;
++
++  -- ---------------------------------------------------------------- A3 RPCs
++  CREATE FUNCTION public.set_cert_type(p_id uuid, p_name text, p_never_expires boolean, p_category text DEFAULT 'certification')
++   RETURNS public.cert_types LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
++  AS $fn$
++  -- B4C:cert catalog — a Department Admin (or PA) adds (p_id NULL) or edits a cert type in their own department.
++  declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_name text := btrim(coalesce(p_name, ''));
++          v_cat text := coalesce(nullif(btrim(p_category), ''), 'certification'); v_row public.cert_types;
++  begin
++    if v_dept is null or not coalesce(public.is_dept_admin(), false) then
++      raise exception 'Only a Department Admin can manage cert types.';
++    end if;
++    if v_name = '' then raise exception 'A cert type needs a name.'; end if;
++    if v_cat not in ('certification', 'continuing_education') then raise exception 'Unknown category — use certification or continuing_education.'; end if;
++    begin
++      if p_id is null then
++        insert into public.cert_types (department_id, name, never_expires, category, created_by, updated_by)
++        values (v_dept, v_name, coalesce(p_never_expires, false), v_cat, v_me, v_me)
++        returning * into v_row;
++      else
++        update public.cert_types
++           set name = v_name, never_expires = coalesce(p_never_expires, false), category = v_cat, updated_by = v_me, updated_at = now()
++         where id = p_id and department_id = v_dept
++        returning * into v_row;
++        if not found then raise exception 'That cert type is not in your department.'; end if;
++      end if;
++    exception when unique_violation then
++      raise exception 'Your department already has a cert type named "%".', v_name;
++    end;
++    return v_row;
++  end;
++  $fn$;
++
++  CREATE FUNCTION public.delete_cert_type(p_id uuid)
++   RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
++  AS $fn$
++  -- B4C:cert catalog — remove a type from your department's catalog. Certs that used it keep their row; the FK
++  -- (ON DELETE SET NULL) clears their cert_type_id, so they read exactly as an untyped cert does.
++  declare v_dept uuid := public.my_department_id();
++  begin
++    if v_dept is null or not coalesce(public.is_dept_admin(), false) then
++      raise exception 'Only a Department Admin can manage cert types.';
++    end if;
++    delete from public.cert_types where id = p_id and department_id = v_dept;
++    if not found then raise exception 'That cert type is not in your department.'; end if;
++  end;
++  $fn$;
++
++  CREATE FUNCTION public.dept_cert_types()
++   RETURNS TABLE(id uuid, name text, never_expires boolean, category text, cert_count integer, created_at timestamptz, updated_at timestamptz)
++   LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
++  AS $fn$
++  -- B4C:cert catalog — the caller's department catalog, for any member of it; how many certs use each type. Read-only.
++    select t.id, t.name, t.never_expires, t.category,
++           (select count(*)::int from public.certs c where c.cert_type_id = t.id and c.department_id = t.department_id),
++           t.created_at, t.updated_at
++      from public.cert_types t
++     where t.department_id = public.my_department_id()
++     order by t.category, lower(t.name);
++  $fn$;
++
++  CREATE FUNCTION public.assign_cert_type(p_cert_id uuid, p_cert_type_id uuid)
++   RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
++  AS $fn$
++  -- B4C:cert catalog — link a cert to a type (or NULL to unlink). The cert AND the type must both be in the caller's
++  -- department; a cross-department cert reads "not found", never revealing it exists elsewhere (as update_cert does).
++  declare v_dept uuid := public.my_department_id();
++  begin
++    if v_dept is null or not coalesce(public.is_dept_admin(), false) then
++      raise exception 'Only a Department Admin can assign cert types.';
++    end if;
++    if p_cert_type_id is not null and not exists (select 1 from public.cert_types where id = p_cert_type_id and department_id = v_dept) then
++      raise exception 'That cert type is not in your department.';
++    end if;
++    update public.certs set cert_type_id = p_cert_type_id where id = p_cert_id and department_id = v_dept;
++    if not found then raise exception 'Certification not found'; end if;
++  end;
++  $fn$;
++
++  REVOKE EXECUTE ON FUNCTION public.set_cert_type(uuid, text, boolean, text), public.delete_cert_type(uuid),
++                             public.dept_cert_types(), public.assign_cert_type(uuid, uuid) FROM PUBLIC, anon;
++  GRANT EXECUTE ON FUNCTION public.set_cert_type(uuid, text, boolean, text), public.delete_cert_type(uuid),
++                            public.dept_cert_types(), public.assign_cert_type(uuid, uuid) TO authenticated;
++
++  -- ---------------------------------------------------------------- A4 the four readers
++  EXECUTE v_defs ->> 'expiration_rows(uuid,uuid)';
++  EXECUTE v_defs ->> 'readiness_window(text,date)';
++  EXECUTE v_defs ->> 'probation_item_states(uuid,uuid)';
++  DROP FUNCTION public.dept_cert_readiness();
++  EXECUTE v_defs ->> 'dept_cert_readiness()';
++  -- restore dept_cert_readiness' EXECUTE grants exactly: start from nothing, re-grant each captured grantee
++  REVOKE ALL ON FUNCTION public.dept_cert_readiness() FROM PUBLIC;
++  FOR g IN SELECT DISTINCT a.grantee FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
++            WHERE p.oid = 'public.dept_cert_readiness()'::regprocedure AND a.grantee <> p.proowner LOOP
++    EXECUTE format('REVOKE ALL ON FUNCTION public.dept_cert_readiness() FROM %s', CASE WHEN g.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(g.grantee::regrole::text) END);
++  END LOOP;
++  FOR g IN SELECT split_part(x, ':', 1) AS who FROM unnest(string_to_array(v_dcr_acl, ',')) x
++            WHERE split_part(x, ':', 2) = 'EXECUTE' AND split_part(x, ':', 1) <> (SELECT proowner::regrole::text FROM pg_proc WHERE oid = 'public.dept_cert_readiness()'::regprocedure) LOOP
++    EXECUTE format('GRANT EXECUTE ON FUNCTION public.dept_cert_readiness() TO %s', CASE WHEN g.who = 'PUBLIC' THEN 'PUBLIC' ELSE quote_ident(g.who) END);
++  END LOOP;
++
++  -- ---------------------------------------------------------------- post-conditions
++  -- (1) the table, RLS, its one policy, constraints, the unique index; the FK column
++  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.cert_types'::regclass) THEN RAISE EXCEPTION 'Post-condition failed: RLS is off on cert_types.'; END IF;
++  IF (SELECT string_agg(policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n') FROM pg_policies WHERE schemaname = 'public' AND tablename = 'cert_types')
++     IS DISTINCT FROM 'members read cert_types|SELECT|{authenticated}|(department_id = my_department_id())|' THEN
++    RAISE EXCEPTION 'Post-condition failed: cert_types must have exactly one policy — the department-scoped SELECT.';
++  END IF;
++  IF (SELECT string_agg(a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull::text, ',' ORDER BY a.attnum)
++        FROM pg_attribute a WHERE a.attrelid = 'public.cert_types'::regclass AND a.attnum > 0 AND NOT a.attisdropped)
++     IS DISTINCT FROM 'id:uuid:true,department_id:uuid:true,name:text:true,never_expires:boolean:true,category:text:true,created_at:timestamp with time zone:true,created_by:uuid:false,updated_at:timestamp with time zone:true,updated_by:uuid:false' THEN
++    RAISE EXCEPTION 'Post-condition failed: cert_types columns are not as designed.';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'cert_types_dept_name_uq'
++                  AND indexdef = 'CREATE UNIQUE INDEX cert_types_dept_name_uq ON public.cert_types USING btree (department_id, lower(btrim(name)))') THEN
++    RAISE EXCEPTION 'Post-condition failed: the per-department unique name index is missing or different.';
++  END IF;
++  IF (SELECT string_agg(pg_get_constraintdef(oid), ' | ' ORDER BY conname) FROM pg_constraint WHERE conrelid = 'public.cert_types'::regclass AND contype = 'c')
++     IS DISTINCT FROM 'CHECK ((category = ANY (ARRAY[''certification''::text, ''continuing_education''::text]))) | CHECK ((btrim(name) <> ''''::text))' THEN
++    RAISE EXCEPTION 'Post-condition failed: the category / name CHECKs are not as designed.';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.cert_types'::regclass AND contype = 'f'
++                  AND pg_get_constraintdef(oid) = 'FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE')
++     OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.certs'::regclass AND contype = 'f'
++                     AND pg_get_constraintdef(oid) = 'FOREIGN KEY (cert_type_id) REFERENCES cert_types(id) ON DELETE SET NULL') THEN
++    RAISE EXCEPTION 'Post-condition failed: a foreign key is missing or different.';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'certs' AND column_name = 'cert_type_id' AND data_type = 'uuid' AND is_nullable = 'YES' AND column_default IS NULL)
++     OR EXISTS (SELECT 1 FROM public.certs WHERE cert_type_id IS NOT NULL)
++     OR EXISTS (SELECT 1 FROM public.cert_types) THEN
++    RAISE EXCEPTION 'Post-condition failed: certs.cert_type_id is not a nullable, default-less uuid with every row NULL, or cert_types is not empty.';
++  END IF;
++  -- (2) each reader = its live body with exactly the listed edits, at its reviewed md5
++  FOR f IN SELECT jsonb_object_keys(OLD) LOOP
++    IF (SELECT prosrc FROM pg_proc WHERE oid = ('public.' || f)::regprocedure) IS DISTINCT FROM v_exp_src ->> f THEN
++      RAISE EXCEPTION 'Post-condition failed: % differs from its live body by more than the listed edits.', f;
++    END IF;
++    IF md5(pg_get_functiondef(('public.' || f)::regprocedure)) <> NEW ->> f THEN
++      RAISE EXCEPTION 'Post-condition failed: % does not match its reviewed md5.', f;
++    END IF;
++  END LOOP;
++  IF pg_get_function_result('public.dept_cert_readiness()'::regprocedure)
++     <> 'TABLE(current integer, expiring integer, expired integer, no_date integer, no_expiry integer, total_dated integer, pct integer)' THEN
++    RAISE EXCEPTION 'Post-condition failed: dept_cert_readiness return shape is not as designed.';
++  END IF;
++  -- (3) dept_cert_readiness: owner / definer / config / volatility and EXECUTE grantees identical to before the re-create
++  IF (SELECT p.proowner::regrole::text || '|' || p.prosecdef::text || '|' || p.provolatile::text || '|' || coalesce(array_to_string(p.proconfig, ','), '')
++        FROM pg_proc p WHERE p.oid = 'public.dept_cert_readiness()'::regprocedure) IS DISTINCT FROM v_dcr_meta
++     OR (SELECT string_agg(CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END || ':' || a.privilege_type, ',' ORDER BY 1)
++           FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE p.oid = 'public.dept_cert_readiness()'::regprocedure) IS DISTINCT FROM v_dcr_acl THEN
++    RAISE EXCEPTION 'Post-condition failed: dept_cert_readiness lost or gained a grant (or its owner / definer / config) in the re-create.';
++  END IF;
++  -- (4) the four new RPCs: definer, search_path pinned, EXECUTE authenticated only (never anon / PUBLIC)
++  IF (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = ANY (NEW_RPCS) AND p.prosecdef
++        AND p.proconfig = array['search_path=public'] AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
++        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
++        AND NOT EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0)) <> 4 THEN
++    RAISE EXCEPTION 'Post-condition failed: a cert-type RPC is not SECURITY DEFINER / search_path public / authenticated-only.';
++  END IF;
++  -- (5) nothing else moved
++  SELECT string_agg(p.oid::regprocedure::text || '|' || md5(pg_get_functiondef(p.oid)), E'\n' ORDER BY p.oid::regprocedure::text)
++    INTO v_fns_after FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p')
++     AND p.oid NOT IN (SELECT DISTINCT ('public.' || fn)::regprocedure::oid FROM _sliceA_edits) AND p.proname <> ALL (NEW_RPCS);
++  IF v_fns_after IS DISTINCT FROM v_fns_before THEN RAISE EXCEPTION 'Post-condition failed: another public function changed.'; END IF;
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_after FROM pg_policies WHERE schemaname = 'public' AND tablename <> 'cert_types';
++  IF v_pol_after IS DISTINCT FROM v_pol_before THEN RAISE EXCEPTION 'Post-condition failed: an existing policy changed.'; END IF;
++  IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') <> v_total_before + 1 THEN RAISE EXCEPTION 'Post-condition failed: total_policies is not +1.'; END IF;
++  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) <> v_tok_before THEN
++    RAISE EXCEPTION 'Post-condition failed: the locked verification token count changed.';
++  END IF;
++END
++$migrate$;
++
++NOTIFY pgrst, 'reload schema';
++
++-- state check (expect: cert_types_rls true · cert_types_policies 1 · cert_types_rows 0 · typed_certs 0 · rpcs 4 · readers_ok true ·
++--              dcr_anon_exec false · total_policies 170 · locked_token_fns 17)
++SELECT
++  (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.cert_types'::regclass) AS cert_types_rls,
++  (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'cert_types') AS cert_types_policies,
++  (SELECT count(*) FROM public.cert_types) AS cert_types_rows,
++  (SELECT count(*) FROM public.certs WHERE cert_type_id IS NOT NULL) AS typed_certs,
++  (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('set_cert_type', 'delete_cert_type', 'dept_cert_types', 'assign_cert_type')) AS rpcs,
++  (md5(pg_get_functiondef('public.expiration_rows(uuid,uuid)'::regprocedure)) = '27645093a86b7a67dfb04a21d0fca536'
++   AND md5(pg_get_functiondef('public.readiness_window(text,date)'::regprocedure)) = 'f3d7788e1ee66a039d46b7e960d1a480'
++   AND md5(pg_get_functiondef('public.dept_cert_readiness()'::regprocedure)) = 'd0d54de6a9533e6faa9d0c065c5439df'
++   AND md5(pg_get_functiondef('public.probation_item_states(uuid,uuid)'::regprocedure)) = 'c663eb8a6d16905ab7a45b763130388f') AS readers_ok,
++  has_function_privilege('anon', 'public.dept_cert_readiness()'::regprocedure, 'EXECUTE') AS dcr_anon_exec,
++  (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') AS total_policies,
++  (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) AS locked_token_fns;
+diff --git a/sql/cert_catalog_sliceA_RETEST.sql b/sql/cert_catalog_sliceA_RETEST.sql
+new file mode 100644
+index 0000000..0b7348e
+--- /dev/null
++++ b/sql/cert_catalog_sliceA_RETEST.sql
+@@ -0,0 +1,178 @@
++-- =====================================================================
++-- RETEST for cert_catalog_sliceA (DRAFT, not applied) — run AFTER the migration, separately.
++-- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back), on
++-- FIXTURES it creates itself: two certs for a plain member of the department (one blank exp, one long-expired
++-- '2020-01'), each named 'RETEST cert-catalog …'. The final RAISE is the report — the "ERROR" IS the report.
++-- The readers are called as the owner with the caller's JWT claims set (expiration_rows / probation_item_states are
++-- internal — members can't EXECUTE them); writes and the catalog read go through the RPCs as the role 'authenticated'.
++--   S0 (once) the table (RLS on, 1 policy, empty), the FK column, the 4 RPCs, no anon EXECUTE on any of them or on
++--      dept_cert_readiness
++-- Per department (needs a DA, a plain member and a DA of ANOTHER department, unique emails):
++--   T1 the DA: set_cert_type creates a never-expires continuing_education type; a same-name (case / spaces) second
++--      add is refused with the friendly message; a bad category is refused; an edit (p_id) persists
++--   T2 the DA: assign_cert_type links both fixture certs; dept_cert_types() lists the type with cert_count 2;
++--      T2b linking a cert to ANOTHER department's type is refused
++--   T3 readers: expiration_rows → both certs 'no_expiry' (expires_on NULL, days_until NULL), never no_date / expired;
++--      readiness_window('no_expiry', NULL) = 'no_expiry'; dept_cert_readiness() no_expiry = the department's
++--      never-expires certs counted directly, no_date excludes them; probation_item_states → a kind='cert' item naming
++--      the fixture reads satisfied / 'current' (SKIP if a fixture onboarding item can't be inserted)
++--   T4 the DA of another department: set_cert_type (edit), delete_cert_type, assign_cert_type on this department's
++--      type / cert all refused; nothing changed
++--   T5 the plain member: dept_cert_types() reads the catalog; set_cert_type / assign / delete refused on authority;
++--      a direct INSERT into cert_types refused by RLS
++--   T6 the DA: delete_cert_type → both certs survive with cert_type_id NULL and read as before (no_date / expired)
++-- =====================================================================
++DO $retest$
++DECLARE
++  rec record; r record; v_n int; v_ok boolean; v_t text;
++  v_da text; v_mem text; v_mem_id uuid; v_ada text; v_ada_home uuid; v_type uuid; v_c1 uuid; v_c2 uuid; v_item uuid;
++  e1 text; e2 text; e3 text; e4 text; v_b1 text; v_b2 text; x1 date; x2 date; v_dcr record; v_direct int;
++  rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
++BEGIN
++  -- S0
++  SELECT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.cert_types'::regclass)
++     AND (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'cert_types') = 1
++     AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'certs' AND column_name = 'cert_type_id' AND is_nullable = 'YES')
++     AND (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('set_cert_type', 'delete_cert_type', 'dept_cert_types', 'assign_cert_type')
++            AND has_function_privilege('authenticated', oid, 'EXECUTE') AND NOT has_function_privilege('anon', oid, 'EXECUTE')) = 4
++     AND NOT has_function_privilege('anon', 'public.dept_cert_readiness()'::regprocedure, 'EXECUTE')
++    INTO v_ok;
++  SELECT count(*) INTO v_n FROM public.cert_types;
++  IF v_ok AND v_n = 0 THEN v_pass := v_pass + 1; rpt := rpt || format('PASS  S0 cert_types (RLS on, 1 policy, empty) · certs.cert_type_id nullable · 4 RPCs authenticated-only · dept_cert_readiness no anon EXECUTE%s', chr(10));
++  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  S0 shape %s · cert_types rows %s%s', v_ok, v_n, chr(10)); END IF;
++
++  FOR rec IN SELECT d.id AS dept_id, d.name AS dept FROM public.departments d ORDER BY d.name LOOP
++    rpt := rpt || format('— %s%s', rec.dept, chr(10));
++    v_da := NULL; v_mem := NULL; v_mem_id := NULL; v_ada := NULL; v_ada_home := NULL;
++    SELECT lower(m.email) INTO v_da FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Department Admin']::text[]
++       AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.id INTO v_mem, v_mem_id FROM public.members m WHERE m.department_id = rec.dept_id
++       AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
++       AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.department_id INTO v_ada, v_ada_home FROM public.members m WHERE m.department_id <> rec.dept_id
++       AND m.access && array['Department Admin']::text[] AND NOT m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    IF v_da IS NULL OR v_mem IS NULL OR v_ada IS NULL THEN
++      v_skip := v_skip + 1; rpt := rpt || format('   SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA %s, member %s, other-dept DA %s)%s',
++        coalesce(v_da, 'none'), coalesce(v_mem, 'none'), coalesce(v_ada, 'none'), chr(10));
++      CONTINUE;
++    END IF;
++    BEGIN
++      -- fixtures (owner)
++      INSERT INTO public.certs (department_id, member_id, name, exp) VALUES (rec.dept_id, v_mem_id, 'RETEST cert-catalog blank', NULL) RETURNING id INTO v_c1;
++      INSERT INTO public.certs (department_id, member_id, name, exp) VALUES (rec.dept_id, v_mem_id, 'RETEST cert-catalog old', '2020-01') RETURNING id INTO v_c2;
++
++      -- T1 the DA manages the catalog
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; e2 := 'ok'; e3 := 'ok'; e4 := 'ok'; v_type := NULL;
++      BEGIN SELECT (public.set_cert_type(NULL, 'RETEST Hazmat Awareness', true, 'continuing_education')).id INTO v_type; EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      BEGIN PERFORM public.set_cert_type(NULL, '  retest hazmat AWARENESS ', false, 'certification'); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++      BEGIN PERFORM public.set_cert_type(NULL, 'RETEST other', false, 'bogus'); EXCEPTION WHEN OTHERS THEN e3 := SQLERRM; END;
++      BEGIN PERFORM public.set_cert_type(v_type, 'RETEST Hazmat Awareness (OPS)', true, 'continuing_education'); EXCEPTION WHEN OTHERS THEN e4 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      SELECT t.name, t.never_expires, t.category, t.department_id INTO r FROM public.cert_types t WHERE t.id = v_type;
++      IF e1 = 'ok' AND e4 = 'ok' AND e2 LIKE 'Your department already has a cert type named%' AND e3 LIKE 'Unknown category%'
++         AND r.name = 'RETEST Hazmat Awareness (OPS)' AND r.never_expires AND r.category = 'continuing_education' AND r.department_id = rec.dept_id THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T1 DA creates a never-expires continuing_education type; a duplicate name (case / spaces) and a bad category are refused; an edit persists%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T1 create: %s · dup: %s · bad cat: %s · edit: %s · row %s%s', e1, e2, e3, e4, row_to_json(r), chr(10)); END IF;
++
++      -- T2 assign both fixtures; the catalog read counts them
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; e2 := 'ok';
++      BEGIN PERFORM public.assign_cert_type(v_c1, v_type); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      BEGIN PERFORM public.assign_cert_type(v_c2, v_type); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++      SELECT x.cert_count INTO v_n FROM public.dept_cert_types() x WHERE x.id = v_type;
++      PERFORM set_config('role', 'postgres', true);
++      IF e1 = 'ok' AND e2 = 'ok' AND v_n = 2 AND (SELECT count(*) FROM public.certs WHERE id IN (v_c1, v_c2) AND cert_type_id = v_type) = 2 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T2 DA assigns the type to both fixture certs; dept_cert_types() shows cert_count 2%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T2 assign 1: %s · assign 2: %s · cert_count %s%s', e1, e2, v_n, chr(10)); END IF;
++
++      -- T2b the DA can't link this department's cert to ANOTHER department's type (owner-made fixture type there)
++      INSERT INTO public.cert_types (department_id, name, never_expires) VALUES (v_ada_home, 'RETEST foreign type', true) RETURNING id INTO v_t;
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok';
++      BEGIN PERFORM public.assign_cert_type(v_c1, v_t::uuid); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF e1 = 'That cert type is not in your department.' AND (SELECT cert_type_id FROM public.certs WHERE id = v_c1) = v_type THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T2b DA can''t link a cert to another department''s type ("not in your department"); the link is unchanged%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T2b foreign-type assign: %s%s', e1, chr(10)); END IF;
++
++      -- T3 the readers (as owner, DA claims set)
++      SELECT e.bucket, e.expires_on INTO v_b1, x1 FROM public.expiration_rows(rec.dept_id, v_mem_id) e WHERE e.item_id = v_c1;
++      SELECT e.bucket, e.expires_on INTO v_b2, x2 FROM public.expiration_rows(rec.dept_id, v_mem_id) e WHERE e.item_id = v_c2;
++      SELECT count(*) INTO v_n FROM public.expiration_rows(rec.dept_id, NULL) e WHERE e.item_id IN (v_c1, v_c2) AND e.bucket = 'no_expiry' AND e.days_until IS NULL;
++      SELECT * INTO v_dcr FROM public.dept_cert_readiness();
++      SELECT count(*) INTO v_direct FROM public.certs c JOIN public.cert_types t ON t.id = c.cert_type_id AND t.department_id = c.department_id
++       WHERE c.department_id = rec.dept_id AND t.never_expires;
++      IF v_b1 = 'no_expiry' AND v_b2 = 'no_expiry' AND x1 IS NULL AND x2 IS NULL AND v_n = 2 AND public.readiness_window('no_expiry', NULL) = 'no_expiry'
++         AND v_dcr.no_expiry = v_direct AND v_direct >= 2
++         AND v_dcr.no_date = (SELECT count(*) FROM public.certs c LEFT JOIN public.cert_types t ON t.id = c.cert_type_id AND t.department_id = c.department_id
++                               WHERE c.department_id = rec.dept_id AND NOT coalesce(t.never_expires, false) AND (c.exp IS NULL OR c.exp !~ '^\d{4}-\d{2}$')) THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T3 expiration_rows: both no_expiry (no date) for the member and the roster; readiness_window passes it through; dept_cert_readiness no_expiry %s = counted directly, no_date excludes them%s', v_direct, chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T3 blank %s/%s · old %s/%s · roster %s · window %s · dcr no_expiry %s vs %s · dcr no_date %s%s',
++        v_b1, x1, v_b2, x2, v_n, public.readiness_window('no_expiry', NULL), v_dcr.no_expiry, v_direct, v_dcr.no_date, chr(10)); END IF;
++      -- probation: a fixture kind='cert' item naming the blank cert
++      BEGIN
++        INSERT INTO public.onboarding_items (department_id, label, kind, cert_name) VALUES (rec.dept_id, 'RETEST cert-catalog item', 'cert', 'RETEST cert-catalog blank') RETURNING id INTO v_item;
++        SELECT p.satisfied, p.state INTO r FROM public.probation_item_states(v_mem_id, rec.dept_id) p WHERE p.item_id = v_item;
++        IF r.satisfied AND r.state = 'current' THEN
++          v_pass := v_pass + 1; rpt := rpt || format('   PASS  T3b probation_item_states: a cert item matched to a never-expires (blank-exp) cert reads satisfied / current%s', chr(10));
++        ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T3b probation satisfied %s · state %s%s', r.satisfied, r.state, chr(10)); END IF;
++      EXCEPTION WHEN OTHERS THEN
++        v_skip := v_skip + 1; rpt := rpt || format('   SKIP  T3b couldn''t insert a fixture onboarding item (%s)%s', SQLERRM, chr(10));
++      END;
++
++      -- T4 a DA of another department, their own department active
++      INSERT INTO public.member_active_department (email, department_id) VALUES (v_ada, v_ada_home)
++        ON CONFLICT (email) DO UPDATE SET department_id = excluded.department_id;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_ada, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; e2 := 'ok'; e3 := 'ok';
++      BEGIN PERFORM public.set_cert_type(v_type, 'RETEST hijack', false, 'certification'); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      BEGIN PERFORM public.assign_cert_type(v_c1, NULL); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++      BEGIN PERFORM public.delete_cert_type(v_type); EXCEPTION WHEN OTHERS THEN e3 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF e1 = 'That cert type is not in your department.' AND e2 = 'Certification not found' AND e3 = 'That cert type is not in your department.'
++         AND EXISTS (SELECT 1 FROM public.cert_types WHERE id = v_type AND name = 'RETEST Hazmat Awareness (OPS)')
++         AND (SELECT count(*) FROM public.certs WHERE id IN (v_c1, v_c2) AND cert_type_id = v_type) = 2 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T4 DA of another department: edit / assign / delete all refused ("not in your department" / "not found"); nothing changed%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T4 edit: %s · assign: %s · delete: %s%s', e1, e2, e3, chr(10)); END IF;
++
++      -- T5 the plain member
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_mem, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; e2 := 'ok'; e3 := 'ok'; e4 := 'ok';
++      SELECT count(*) INTO v_n FROM public.dept_cert_types() x WHERE x.id = v_type;
++      BEGIN PERFORM public.set_cert_type(NULL, 'RETEST member type', false, 'certification'); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      BEGIN PERFORM public.assign_cert_type(v_c1, NULL); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++      BEGIN PERFORM public.delete_cert_type(v_type); EXCEPTION WHEN OTHERS THEN e3 := SQLERRM; END;
++      BEGIN INSERT INTO public.cert_types (department_id, name) VALUES (rec.dept_id, 'RETEST direct'); EXCEPTION WHEN OTHERS THEN e4 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_n = 1 AND e1 = 'Only a Department Admin can manage cert types.' AND e2 = 'Only a Department Admin can assign cert types.'
++         AND e3 = 'Only a Department Admin can manage cert types.' AND e4 ILIKE '%row-level security%'
++         AND NOT EXISTS (SELECT 1 FROM public.cert_types WHERE name IN ('RETEST member type', 'RETEST direct')) THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T5 plain member reads the catalog; set / assign / delete refused on authority; a direct INSERT refused by RLS%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T5 reads %s · set: %s · assign: %s · delete: %s · direct: %s%s', v_n, e1, e2, e3, e4, chr(10)); END IF;
++
++      -- T6 the DA deletes the type: certs survive, unlinked, reading as before
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok';
++      BEGIN PERFORM public.delete_cert_type(v_type); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      SELECT e.bucket INTO v_b1 FROM public.expiration_rows(rec.dept_id, v_mem_id) e WHERE e.item_id = v_c1;
++      SELECT e.bucket INTO v_b2 FROM public.expiration_rows(rec.dept_id, v_mem_id) e WHERE e.item_id = v_c2;
++      IF e1 = 'ok' AND NOT EXISTS (SELECT 1 FROM public.cert_types WHERE id = v_type)
++         AND (SELECT count(*) FROM public.certs WHERE id IN (v_c1, v_c2) AND cert_type_id IS NULL) = 2 AND v_b1 = 'no_date' AND v_b2 = 'expired' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  T6 DA deletes the type: both certs survive, unlinked, and read no_date / expired again%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T6 delete: %s · blank reads %s · old reads %s%s', e1, v_b1, v_b2, chr(10)); END IF;
++      RAISE EXCEPTION 'SENTINEL';
++    EXCEPTION WHEN OTHERS THEN
++      IF SQLERRM <> 'SENTINEL' THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  run aborted: %s%s', SQLERRM, chr(10)); END IF;
++    END;
++  END LOOP;
++
++  RAISE EXCEPTION E'%\n---- % passed, % failed, % skipped ----\n(this exception IS the rollback — nothing was changed)', rpt, v_pass, v_fail, v_skip;
++END
++$retest$;
+
+# ===== PGlite dry run =====
+# live expiration_rows(uuid,uuid) 3223629e82c12eeec2cbd34daebf8085
+# live readiness_window(text,date) 35a62755ffc68b4db8b05dbe26d3b37b
+# live dept_cert_readiness() 808e173f70446e20e15626cd9bb282dd
+# live probation_item_states(uuid,uuid) bbe66fcac2ddd9931e12d9226d1ed800
+# live update_cert(uuid,text,text) 08ec5f34bf3d897d95bdbeda5ec52ae7
+# live is_dept_admin() c692e44f62923d2bf4c1a39a21a87bf7
+# 
+# PRE-MIGRATION RETEST:
+# relation "public.cert_types" does not exist
+# 
+# state: [{"cert_types_rls":true,"cert_types_policies":1,"cert_types_rows":0,"typed_certs":0,"rpcs":4,"readers_ok":true,"dcr_anon_exec":false,"total_policies":3,"locked_token_fns":1}]
+# dcr acl: {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} · new rpc acl: {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+# re-run -> Precondition failed: public.cert_types already exists — already applied. Nothing changed.
+# AFTER THE MIGRATION:
+# PASS  S0 cert_types (RLS on, 1 policy, empty) · certs.cert_type_id nullable · 4 RPCs authenticated-only · dept_cert_readiness no anon EXECUTE
+# — Granbury Fire Station
+#    SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA gil@c, member none, other-dept DA ada@a)
+# — Indian Harbor Volunteer Fire Department
+#    PASS  T1 DA creates a never-expires continuing_education type; a duplicate name (case / spaces) and a bad category are refused; an edit persists
+#    PASS  T2 DA assigns the type to both fixture certs; dept_cert_types() shows cert_count 2
+#    PASS  T2b DA can't link a cert to another department's type ("not in your department"); the link is unchanged
+#    PASS  T3 expiration_rows: both no_expiry (no date) for the member and the roster; readiness_window passes it through; dept_cert_readiness no_expiry 2 = counted directly, no_date excludes them
+#    PASS  T3b probation_item_states: a cert item matched to a never-expires (blank-exp) cert reads satisfied / current
+#    PASS  T4 DA of another department: edit / assign / delete all refused ("not in your department" / "not found"); nothing changed
+#    PASS  T5 plain member reads the catalog; set / assign / delete refused on authority; a direct INSERT refused by RLS
+#    PASS  T6 DA deletes the type: both certs survive, unlinked, and read no_date / expired again
+# — North Hood County Volunteer Fire Department
+#    PASS  T1 DA creates a never-expires continuing_education type; a duplicate name (case / spaces) and a bad category are refused; an edit persists
+#    PASS  T2 DA assigns the type to both fixture certs; dept_cert_types() shows cert_count 2
+#    PASS  T2b DA can't link a cert to another department's type ("not in your department"); the link is unchanged
+#    PASS  T3 expiration_rows: both no_expiry (no date) for the member and the roster; readiness_window passes it through; dept_cert_readiness no_expiry 2 = counted directly, no_date excludes them
+#    PASS  T3b probation_item_states: a cert item matched to a never-expires (blank-exp) cert reads satisfied / current
+#    PASS  T4 DA of another department: edit / assign / delete all refused ("not in your department" / "not found"); nothing changed
+#    PASS  T5 plain member reads the catalog; set / assign / delete refused on authority; a direct INSERT refused by RLS
+#    PASS  T6 DA deletes the type: both certs survive, unlinked, and read no_date / expired again
+# ---- 17 passed, 0 failed, 1 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# mutations:
+#   (a) never_expires not passed through readiness_window
+#      REFUSED: Post-condition failed: readiness_window(text,date) does not match its reviewed md5.
+#   (a2) same, post-conditions + md5 pin removed — the RETEST must catch it
+#      migration applied -> RETEST:    FAIL  T3 blank no_expiry/ · old no_expiry/ · roster 2 · window no_date · dcr no_expiry 2 vs 2 · dcr no_date 1 |    FAIL  T3 blank no_expiry/ · old no_expiry/ · roster 2 · window no_date · dcr no_expiry 2 vs 2 · dcr no_date 1 | ---- 15 passed, 2 failed, 1 skipped ----
+#   (b) probation reader left on the old rule (never_expires not honoured)
+#      REFUSED: Post-condition failed: probation_item_states(uuid,uuid) does not match its reviewed md5.
+#   (b2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST:    FAIL  T3b probation satisfied f · state missing |    FAIL  T3b probation satisfied f · state missing | ---- 15 passed, 2 failed, 1 skipped ----
+#   (b3) expiration_rows left on no_date for a never-expires cert, post-conditions removed
+#      migration applied -> RETEST:    FAIL  T3 blank no_date/ · old expired/ · roster 0 · window no_expiry · dcr no_expiry 2 vs 2 · dcr no_date 1 |    FAIL  T3 blank no_date/ · old expired/ · roster 0 · window no_expiry · dcr no_expiry 2 vs 2 · dcr no_date 1 | ---- 15 passed, 2 failed, 1 skipped ----
+#   (c) a collateral function change in the block (update_cert re-gated to the unscoped gate)
+#      REFUSED: Post-condition failed: another public function changed.
+#   (d) the unique name index missing
+#      REFUSED: Post-condition failed: the per-department unique name index is missing or different.
+#   (d2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST:    FAIL  T1 create: ok · dup: ok · bad cat: Unknown category — use certification or continuing_education. · edit: ok · row {"name":"RETEST Hazmat Awareness (OPS)","never_expires":true,"category":"continuing_education","department_id":"00000000-0000-0000-0000-00000000000a"} |    FAIL  T1 create: ok · dup: ok · bad cat: Unknown category — use certification or continuing_education. · edit: ok · row {"name":"RETEST Hazmat Awareness (OPS)","never_expires":true,"category":"continuing_education","department_id":"00000000-0000-0000-0000-00000000000b"} | ---- 15 passed, 2 failed, 1 skipped ----
+#   (e) dept_cert_readiness grants NOT restored after the re-create (anon re-opened)
+#      REFUSED: Post-condition failed: dept_cert_readiness lost or gained a grant (or its owner / definer / config) in the re-create.
+#   (e2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 shape f · cert_types rows 0 | ---- 16 passed, 1 failed, 1 skipped ----
+#   (f) a write policy slipped onto cert_types
+#      REFUSED: Post-condition failed: cert_types must have exactly one policy — the department-scoped SELECT.
+#   (f2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 shape f · cert_types rows 0 |    FAIL  T5 reads 1 · set: Only a Department Admin can manage cert types. · assign: Only a Department Admin can assign cert types. · delete: Only a Department Admin can manage cert types. · direct: ok |    FAIL  T5 reads 1 · set: Only a Department Admin can manage cert types. · assign: Only a Department Admin can assign cert types. · delete: Only a Department Admin can manage cert types. · direct: ok | ---- 14 passed, 3 failed, 1 skipped ----
+#   (g) an existing policy changed in the block
+#      REFUSED: Post-condition failed: an existing policy changed.
+#   (h) category CHECK dropped
+#      REFUSED: Post-condition failed: the category / name CHECKs are not as designed.
+#   (i) an RPC left executable by anon
+#      REFUSED: Post-condition failed: a cert-type RPC is not SECURITY DEFINER / search_path public / authenticated-only.
+#   (j) assign_cert_type skips the type's department check, post-conditions removed (RETEST)
+#      migration applied -> RETEST:    FAIL  T2b foreign-type assign: ok |    FAIL  T3 blank no_date/ · old no_expiry/ · roster 1 · window no_expiry · dcr no_expiry 1 vs 1 · dcr no_date 2 |    FAIL  T3b probation satisfied f · state missing |    FAIL  T4 edit: That cert type is not in your department. · assign: Certification not found · delete: That cert type is not in your department. |    FAIL  T6 delete: ok · blank reads no_date · old reads expired |    FAIL  T2b foreign-type assign: ok |    FAIL  T3 blank no_date/ · old no_expiry/ · roster 1 · window no_expiry · dcr no_expiry 1 vs 1 · dcr no_date 2 |    FAIL  T3b probation satisfied f · state missing |    FAIL  T4 edit: That cert type is not in your department. · assign: Certification not found · delete: That cert type is not in your department. |    FAIL  T6 delete: ok · blank reads no_date · old reads expired | ---- 7 passed, 10 failed, 1 skipped ----
+#   (k) live drift: probation_item_states changed since Step 0b
+#      REFUSED: Precondition failed: public.probation_item_states(uuid,uuid) is not the Step 0 version (md5 7c0d461fbc0469187c8941dfaebf0f4c, expected bbe66fcac2ddd9931e12d9226d1ed800). Nothing changed.
+#   (l) already applied (cert_types exists)
+#      REFUSED: Precondition failed: public.cert_types already exists — already applied. Nothing changed.
+#   (m) update_cert not the F1 version
+#      REFUSED: Precondition failed: update_cert is not the F1 version (md5 08ec5f34…). Nothing changed.
