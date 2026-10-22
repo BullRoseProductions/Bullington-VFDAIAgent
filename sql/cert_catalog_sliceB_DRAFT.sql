@@ -1,5 +1,5 @@
 -- =====================================================================
--- CERT CATALOG — SLICE B (a cert type can gate readiness) — DRAFT, NOT REVIEWED, NOT APPLIED.
+-- CERT CATALOG — SLICE B (a cert type can gate readiness) — Review PASS 2026-10-21 (137c4b4). Not yet applied.
 -- Order: claude/B4C_CertCatalog_DB_BuildOrder.md (Slice B). Slice A is live (cert_types, certs.cert_type_id, no_expiry).
 --
 -- THE CHANGE — a new readiness requirement kind 'cert_type' (ref_id = a cert_types id of the department):
