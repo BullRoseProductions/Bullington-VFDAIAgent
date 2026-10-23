@@ -1,5 +1,7 @@
 -- =====================================================================
 -- RETEST for standard_certs (DRAFT, not applied) — run AFTER the migration, separately.
+-- RAN on live 2026-10-23: 19 passed, 0 failed, 2 skipped — S0; Indian Harbor + Lipan + North Hood M1 A1–A5;
+-- Demo + Granbury skip all (no plain member). Standard certs DB fully proven on live.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). No
 -- fixtures needed beyond what the RPC itself writes. The final RAISE is the report — the "ERROR" IS the report.
 -- Standard rows are picked whose name the department doesn't already have (so a live catalog can't make it skip).

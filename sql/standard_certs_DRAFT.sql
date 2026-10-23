@@ -1,5 +1,7 @@
 -- =====================================================================
--- STANDARD CERT PRE-LOAD (DB) — Review PASS 2026-10-22 (d55e35d). Not yet applied.
+-- STANDARD CERT PRE-LOAD (DB) — Review PASS 2026-10-22 (d55e35d). APPLIED on live 2026-10-23 (seeded 16:51 UTC); a re-run
+-- was refused by its own guard ("already applied. Nothing changed."). Live state check matched: std_rls true · 1 policy ·
+-- 69 rows (cards 8/4 never · ems 5/0 · sffma 24/24 · tcfp 32/32) · rpc_ok + body ok · total_policies 171 · locked_token_fns 17.
 -- Order: claude/B4C_StandardCerts_DB_BuildOrder.md. Built on the live cert catalog (Slices A + B).
 --
 -- THE CHANGE — additive only:
